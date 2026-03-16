@@ -177,13 +177,41 @@ public partial class PowerPointHandler
                 .ToList();
             if (stops?.Count > 0)
             {
-                var gradStr = string.Join("-", stops);
-                var linear = gradFill.GetFirstChild<Drawing.LinearGradientFill>();
-                if (linear?.Angle?.HasValue == true)
-                    gradStr += $"-{linear.Angle.Value / 60000}";
-                node.Format["gradient"] = gradStr;
+                var pathGrad = gradFill.GetFirstChild<Drawing.PathGradientFill>();
+                if (pathGrad != null)
+                {
+                    // Radial/path gradient — decode focus point from FillToRectangle
+                    var fillRect = pathGrad.GetFirstChild<Drawing.FillToRectangle>();
+                    var focus = "center";
+                    if (fillRect != null)
+                    {
+                        var fl = fillRect.Left?.Value ?? 50000;
+                        var ft = fillRect.Top?.Value ?? 50000;
+                        focus = (fl, ft) switch
+                        {
+                            (0, 0) => "tl",
+                            ( >= 100000, 0) => "tr",
+                            (0, >= 100000) => "bl",
+                            ( >= 100000, >= 100000) => "br",
+                            _ => "center"
+                        };
+                    }
+                    node.Format["gradient"] = $"radial:{string.Join("-", stops)}-{focus}";
+                }
+                else
+                {
+                    var gradStr = string.Join("-", stops);
+                    var linear = gradFill.GetFirstChild<Drawing.LinearGradientFill>();
+                    if (linear?.Angle?.HasValue == true)
+                        gradStr += $"-{linear.Angle.Value / 60000}";
+                    node.Format["gradient"] = gradStr;
+                }
             }
         }
+
+        // Image (blip) fill on shape
+        var blipFill = shape.ShapeProperties?.GetFirstChild<Drawing.BlipFill>();
+        if (blipFill != null) node.Format["image"] = "true";
 
         // List style (from first paragraph)
         var firstParaBullet = shape.TextBody?.Elements<Drawing.Paragraph>().FirstOrDefault()?.ParagraphProperties;
@@ -230,12 +258,15 @@ public partial class PowerPointHandler
         var outline = shape.ShapeProperties?.GetFirstChild<Drawing.Outline>();
         if (outline != null)
         {
-            var lineFill = outline.GetFirstChild<Drawing.SolidFill>()?.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
+            var lineColorNode = outline.GetFirstChild<Drawing.SolidFill>()?.GetFirstChild<Drawing.RgbColorModelHex>();
+            var lineFill = lineColorNode?.Val?.Value;
             if (lineFill != null) node.Format["line"] = lineFill;
             if (outline.GetFirstChild<Drawing.NoFill>() != null) node.Format["line"] = "none";
             if (outline.Width?.HasValue == true) node.Format["lineWidth"] = FormatEmu(outline.Width.Value);
             var dash = outline.GetFirstChild<Drawing.PresetDash>();
             if (dash?.Val?.HasValue == true) node.Format["lineDash"] = dash.Val.InnerText.ToLowerInvariant();
+            var lineAlpha = lineColorNode?.GetFirstChild<Drawing.Alpha>()?.Val?.Value;
+            if (lineAlpha.HasValue) node.Format["lineOpacity"] = $"{lineAlpha.Value / 100000.0:0.##}";
         }
 
         // Effects (shadow, glow, reflection)

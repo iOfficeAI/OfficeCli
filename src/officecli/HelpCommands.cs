@@ -193,7 +193,7 @@ Run properties (/body/p[N]/r[M]):
 Paragraph properties (/body/p[N]):
   style, alignment (left|center|right|justify), firstLineIndent,
   shd, spaceBefore, spaceAfter, lineSpacing, numId, numLevel/ilvl,
-  listStyle (bullet|numbered)
+  listStyle (bullet|numbered|none), start (numbering start value)
 
 Table cell properties (/body/tbl[N]/tr[R]/tc[C]):
   text, font, size, bold, italic, color, shd, alignment,
@@ -234,7 +234,7 @@ Types and properties:
   paragraph (p)  -- parent: /body or /body/tbl[N]/tr[R]/tc[C]
     text, font, size, bold, italic, color, underline, strike, highlight,
     caps, smallCaps, style, alignment, firstLineIndent, spaceBefore,
-    spaceAfter, lineSpacing, numId, numLevel, shd, listStyle
+    spaceAfter, lineSpacing, numId, numLevel, shd, listStyle, start
 
   run (r)  -- parent: /body/p[N]
     text, font, size, bold, italic, color, underline, strike, highlight,
@@ -607,8 +607,9 @@ Format keys returned by Get:
     color                  Text color hex (from first run)
     fill                   Shape fill hex or "none"
     opacity                Fill opacity 0.0–1.0 (if Alpha set)
-    gradient               Gradient stops "C1-C2[-angle]"
-    line, lineWidth, lineDash
+    gradient               Linear "C1-C2[-angle]", radial "radial:C1-C2[-focus]" (focus: tl/tr/bl/br/center)
+    image                  Shape image fill (path to image file)
+    line, lineWidth, lineDash, lineOpacity (0.0–1.0)
     preset                 Shape geometry name
     align, valign
     lineSpacing            Multiplier (e.g. 1.5) from first paragraph
@@ -697,6 +698,7 @@ Shape properties (/slide[N]/shape[M]) -- applies to all runs:
   line       Hex RGB border color (e.g. FF0000) or "none" (alias: linecolor, line.color)
   lineWidth  Border width (EMU or cm/pt, e.g. 2pt) (alias: line.width)
   lineDash   Border dash style: solid/dot/dash/dashdot/longdash (alias: line.dash)
+  lineOpacity  Border opacity 0.0-1.0 (alias: line.opacity)
   preset     Shape geometry (e.g. roundRect, ellipse, rightArrow, diamond, star5)
   margin     Text padding inside shape (e.g. 0.5cm or left,top,right,bottom: 0.5cm,0.3cm,0.5cm,0.3cm)
   align      Text horizontal alignment: left (l), center (c), right (r), justify (j) — applies to all paragraphs
@@ -704,7 +706,8 @@ Shape properties (/slide[N]/shape[M]) -- applies to all runs:
   lineSpacing  Line spacing multiplier (e.g. 1.5 for 150%)
   spaceBefore  Space before paragraphs in points (e.g. 6)
   spaceAfter   Space after paragraphs in points (e.g. 6)
-  gradient   Gradient fill: color1-color2[-angle] (e.g. FF0000-0000FF-90 for red→blue at 90°)
+  gradient   Linear: C1-C2[-angle], Radial: radial:C1-C2[-focus] (focus: tl/tr/bl/br/center)
+  image      Shape image fill (path to image file, e.g. /tmp/bg.png)
   list       List style: bullet/numbered/alpha/roman/none or a custom character (e.g. ✓)
   rotation   Rotation angle in degrees (e.g. 45) (alias: rotate)
   opacity    Fill opacity 0.0-1.0 (e.g. 0.5 for 50%)
@@ -798,7 +801,7 @@ Types and properties:
   shape (textbox)  -- parent: /slide[N]
     text (supports \n for line breaks), name, font, size, bold, italic,
     underline, strikethrough, color, fill,
-    line (border color), lineWidth, lineDash,
+    line (border color), lineWidth, lineDash, lineOpacity,
     margin (text padding: 0.5cm or left,top,right,bottom),
     align (left/center/right/justify), valign (top/center/bottom),
     gradient (e.g. FF0000-0000FF-90), list (bullet/numbered/alpha/roman),

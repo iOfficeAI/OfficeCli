@@ -106,6 +106,17 @@ public partial class WordHandler
 
     // ==================== List / Numbering ====================
 
+    private string? GetParagraphListStyle(Paragraph para)
+    {
+        var numProps = para.ParagraphProperties?.NumberingProperties;
+        if (numProps == null) return null;
+        var numId = numProps.NumberingId?.Val?.Value;
+        if (numId == null || numId == 0) return null;
+        var ilvl = numProps.NumberingLevelReference?.Val?.Value ?? 0;
+        var numFmt = GetNumberingFormat(numId.Value, ilvl);
+        return numFmt.ToLowerInvariant() == "bullet" ? "bullet" : "ordered";
+    }
+
     private string GetListPrefix(Paragraph para)
     {
         var numProps = para.ParagraphProperties?.NumberingProperties;
@@ -154,8 +165,94 @@ public partial class WordHandler
         return numFmt.InnerText ?? "bullet";
     }
 
-    private void ApplyListStyle(Paragraph para, string listStyleValue)
+    private int? GetStartValue(int numId, int ilvl)
     {
+        var numbering = _doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering;
+        if (numbering == null) return null;
+
+        var numInstance = numbering.Elements<NumberingInstance>()
+            .FirstOrDefault(n => n.NumberID?.Value == numId);
+        if (numInstance == null) return null;
+
+        // Check level override first
+        var lvlOverride = numInstance.Elements<LevelOverride>()
+            .FirstOrDefault(o => o.LevelIndex?.Value == ilvl);
+        if (lvlOverride?.StartOverrideNumberingValue?.Val?.Value is int overrideStart)
+            return overrideStart;
+
+        var abstractNumId = numInstance.AbstractNumId?.Val?.Value;
+        if (abstractNumId == null) return null;
+
+        var abstractNum = numbering.Elements<AbstractNum>()
+            .FirstOrDefault(a => a.AbstractNumberId?.Value == abstractNumId);
+        var level = abstractNum?.Elements<Level>()
+            .FirstOrDefault(l => l.LevelIndex?.Value == ilvl);
+
+        return level?.StartNumberingValue?.Val?.Value;
+    }
+
+    /// <summary>
+    /// Removes numbering from a paragraph.
+    /// </summary>
+    private static void RemoveListStyle(Paragraph para)
+    {
+        var pProps = para.ParagraphProperties;
+        if (pProps?.NumberingProperties != null)
+        {
+            pProps.NumberingProperties.Remove();
+        }
+    }
+
+    /// <summary>
+    /// Finds an existing NumberingInstance that uses the same list type (bullet vs ordered),
+    /// scanning the last paragraph in the body to support list continuation.
+    /// </summary>
+    private int? FindContinuationNumId(bool isBullet)
+    {
+        var body = _doc.MainDocumentPart?.Document?.Body;
+        if (body == null) return null;
+
+        // Check the last paragraph in the body
+        var lastPara = body.Elements<Paragraph>().LastOrDefault();
+        if (lastPara == null) return null;
+
+        var numProps = lastPara.ParagraphProperties?.NumberingProperties;
+        var prevNumId = numProps?.NumberingId?.Val?.Value;
+        if (prevNumId == null || prevNumId == 0) return null;
+
+        var fmt = GetNumberingFormat(prevNumId.Value, 0);
+        var prevIsBullet = fmt.ToLowerInvariant() == "bullet";
+        if (prevIsBullet == isBullet)
+            return prevNumId.Value;
+
+        return null;
+    }
+
+    private void ApplyListStyle(Paragraph para, string listStyleValue, int? startValue = null)
+    {
+        // Handle "none" — remove numbering
+        if (listStyleValue.ToLowerInvariant() is "none" or "remove" or "clear")
+        {
+            RemoveListStyle(para);
+            return;
+        }
+
+        var isBullet = listStyleValue.ToLowerInvariant() is "bullet" or "unordered" or "ul";
+
+        // Try to continue from a preceding list of the same type
+        var continuationNumId = FindContinuationNumId(isBullet);
+        if (continuationNumId != null && startValue == null)
+        {
+            var pProps = para.ParagraphProperties ?? para.PrependChild(new ParagraphProperties());
+            var ilvl = para.ParagraphProperties?.NumberingProperties?.NumberingLevelReference?.Val?.Value ?? 0;
+            pProps.NumberingProperties = new NumberingProperties
+            {
+                NumberingId = new NumberingId { Val = continuationNumId.Value },
+                NumberingLevelReference = new NumberingLevelReference { Val = ilvl }
+            };
+            return;
+        }
+
         var mainPart = _doc.MainDocumentPart!;
         var numberingPart = mainPart.NumberingDefinitionsPart;
         if (numberingPart == null)
@@ -172,18 +269,16 @@ public partial class WordHandler
         var maxNumId = numbering.Elements<NumberingInstance>()
             .Select(n => n.NumberID?.Value ?? 0).DefaultIfEmpty(0).Max() + 1;
 
-        var isBullet = listStyleValue.ToLowerInvariant() is "bullet" or "unordered" or "ul";
-
-        // Create abstract numbering definition
+        // Create abstract numbering definition with 9 levels
         var abstractNum = new AbstractNum { AbstractNumberId = maxAbstractId };
         abstractNum.AppendChild(new MultiLevelType { Val = MultiLevelValues.HybridMultilevel });
 
         var bulletChars = new[] { "\u2022", "\u25E6", "\u25AA" }; // •, ◦, ▪
 
-        for (int lvl = 0; lvl < 3; lvl++)
+        for (int lvl = 0; lvl < 9; lvl++)
         {
             var level = new Level { LevelIndex = lvl };
-            level.AppendChild(new StartNumberingValue { Val = 1 });
+            level.AppendChild(new StartNumberingValue { Val = (lvl == 0 && startValue.HasValue) ? startValue.Value : 1 });
 
             if (isBullet)
             {
@@ -192,7 +287,7 @@ public partial class WordHandler
             }
             else
             {
-                var fmt = lvl switch
+                var fmt = (lvl % 3) switch
                 {
                     0 => NumberFormatValues.Decimal,
                     1 => NumberFormatValues.LowerLetter,
@@ -224,11 +319,41 @@ public partial class WordHandler
         numbering.Save();
 
         // Apply to paragraph
-        var pProps = para.ParagraphProperties ?? para.PrependChild(new ParagraphProperties());
-        pProps.NumberingProperties = new NumberingProperties
+        var pProps2 = para.ParagraphProperties ?? para.PrependChild(new ParagraphProperties());
+        pProps2.NumberingProperties = new NumberingProperties
         {
             NumberingId = new NumberingId { Val = maxNumId },
             NumberingLevelReference = new NumberingLevelReference { Val = 0 }
         };
+    }
+
+    /// <summary>
+    /// Sets the start value override for a paragraph's numbering instance.
+    /// </summary>
+    private void SetListStartValue(Paragraph para, int startValue)
+    {
+        var numProps = para.ParagraphProperties?.NumberingProperties;
+        var numId = numProps?.NumberingId?.Val?.Value;
+        if (numId == null || numId == 0) return;
+
+        var ilvl = numProps?.NumberingLevelReference?.Val?.Value ?? 0;
+        var numbering = _doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering;
+        if (numbering == null) return;
+
+        var numInstance = numbering.Elements<NumberingInstance>()
+            .FirstOrDefault(n => n.NumberID?.Value == numId);
+        if (numInstance == null) return;
+
+        // Find or create LevelOverride for this ilvl
+        var lvlOverride = numInstance.Elements<LevelOverride>()
+            .FirstOrDefault(o => o.LevelIndex?.Value == ilvl);
+        if (lvlOverride == null)
+        {
+            lvlOverride = new LevelOverride { LevelIndex = ilvl };
+            numInstance.AppendChild(lvlOverride);
+        }
+        lvlOverride.StartOverrideNumberingValue = new StartOverrideNumberingValue { Val = startValue };
+
+        numbering.Save();
     }
 }

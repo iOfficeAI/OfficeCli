@@ -102,7 +102,8 @@ public partial class WordHandler
                 if (properties.TryGetValue("liststyle", out var listStyle))
                 {
                     para.AppendChild(pProps);
-                    ApplyListStyle(para, listStyle);
+                    int? startVal = properties.TryGetValue("start", out var sv) ? int.Parse(sv) : null;
+                    ApplyListStyle(para, listStyle, startVal);
                     // pProps already appended, skip the append below
                     goto paragraphPropsApplied;
                 }

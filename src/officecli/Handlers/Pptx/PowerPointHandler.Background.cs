@@ -124,11 +124,34 @@ public partial class PowerPointHandler
                 .ToList();
             if (stops?.Count > 0)
             {
-                var gradStr = string.Join("-", stops);
-                var linear = gradFill.GetFirstChild<Drawing.LinearGradientFill>();
-                if (linear?.Angle?.HasValue == true)
-                    gradStr += $"-{linear.Angle.Value / 60000}";
-                node.Format["background"] = gradStr;
+                var pathGrad = gradFill.GetFirstChild<Drawing.PathGradientFill>();
+                if (pathGrad != null)
+                {
+                    var fillRect = pathGrad.GetFirstChild<Drawing.FillToRectangle>();
+                    var focus = "center";
+                    if (fillRect != null)
+                    {
+                        var fl = fillRect.Left?.Value ?? 50000;
+                        var ft = fillRect.Top?.Value ?? 50000;
+                        focus = (fl, ft) switch
+                        {
+                            (0, 0) => "tl",
+                            ( >= 100000, 0) => "tr",
+                            (0, >= 100000) => "bl",
+                            ( >= 100000, >= 100000) => "br",
+                            _ => "center"
+                        };
+                    }
+                    node.Format["background"] = $"radial:{string.Join("-", stops)}-{focus}";
+                }
+                else
+                {
+                    var gradStr = string.Join("-", stops);
+                    var linear = gradFill.GetFirstChild<Drawing.LinearGradientFill>();
+                    if (linear?.Angle?.HasValue == true)
+                        gradStr += $"-{linear.Angle.Value / 60000}";
+                    node.Format["background"] = gradStr;
+                }
             }
         }
         else if (blipFill != null)
@@ -144,7 +167,13 @@ public partial class PowerPointHandler
     /// </summary>
     private static bool IsGradientColorString(string value)
     {
-        var parts = value.Split('-');
+        // Handle radial:/path: prefix
+        var v = value;
+        if (v.StartsWith("radial:", StringComparison.OrdinalIgnoreCase) ||
+            v.StartsWith("path:", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var parts = v.Split('-');
         return parts.Length >= 2 && IsHexColorString(parts[0].TrimStart('#'));
     }
 
@@ -158,25 +187,57 @@ public partial class PowerPointHandler
     /// <summary>
     /// Build a GradientFill element from a color string.
     /// Shared by both shape gradient and slide background gradient.
-    /// Format: "C1-C2", "C1-C2-angle", or "C1-C2-C3[-angle]"
+    ///
+    /// Linear:  "C1-C2", "C1-C2-angle", "C1-C2-C3[-angle]"
+    /// Radial:  "radial:C1-C2", "radial:C1-C2-tl" (focus: tl/tr/bl/br/center)
+    /// Path:    "path:C1-C2", "path:C1-C2-tl"
     /// </summary>
     internal static Drawing.GradientFill BuildGradientFill(string value)
     {
-        var parts = value.Split('-');
+        // Check for radial/path prefix
+        string? gradientType = null;
+        string colorSpec = value;
+
+        if (value.StartsWith("radial:", StringComparison.OrdinalIgnoreCase))
+        {
+            gradientType = "radial";
+            colorSpec = value[7..];
+        }
+        else if (value.StartsWith("path:", StringComparison.OrdinalIgnoreCase))
+        {
+            gradientType = "path";
+            colorSpec = value[5..];
+        }
+
+        var parts = colorSpec.Split('-');
         if (parts.Length < 2)
             throw new ArgumentException(
                 "Gradient requires at least 2 colors separated by '-', e.g. FF0000-0000FF");
 
-        int angle = 5400000; // default 90° = top→bottom
         var colorParts = parts.ToList();
+        string? focusPoint = null;
+        int angle = 5400000; // default 90° = top→bottom
 
-        // Last segment is angle if it parses as a short integer (≤3 digits)
-        if (colorParts.Count >= 2 &&
-            int.TryParse(colorParts.Last(), out var angleDeg) &&
-            colorParts.Last().Length <= 3)
+        if (gradientType != null)
         {
-            angle = angleDeg * 60000;
-            colorParts.RemoveAt(colorParts.Count - 1);
+            // For radial/path: last segment may be a focus keyword (tl/tr/bl/br/center)
+            var last = colorParts.Last().ToLowerInvariant();
+            if (last is "tl" or "tr" or "bl" or "br" or "center" or "c")
+            {
+                focusPoint = last;
+                colorParts.RemoveAt(colorParts.Count - 1);
+            }
+        }
+        else
+        {
+            // For linear: last segment is angle if it's a short integer
+            if (colorParts.Count >= 2 &&
+                int.TryParse(colorParts.Last(), out var angleDeg) &&
+                colorParts.Last().Length <= 3)
+            {
+                angle = angleDeg * 60000;
+                colorParts.RemoveAt(colorParts.Count - 1);
+            }
         }
 
         var gradFill = new Drawing.GradientFill();
@@ -196,7 +257,31 @@ public partial class PowerPointHandler
         }
 
         gradFill.AppendChild(gsLst);
-        gradFill.AppendChild(new Drawing.LinearGradientFill { Angle = angle, Scaled = true });
+
+        if (gradientType is "radial" or "path")
+        {
+            // Build path gradient fill with fillToRect controlling the focal point
+            var (l, t, r, b) = (focusPoint ?? "center") switch
+            {
+                "tl" => (0, 0, 100000, 100000),       // top-left focal point
+                "tr" => (100000, 0, 0, 100000),        // top-right
+                "bl" => (0, 100000, 100000, 0),        // bottom-left
+                "br" => (100000, 100000, 0, 0),        // bottom-right
+                _ => (50000, 50000, 50000, 50000)       // center
+            };
+
+            var pathFill = new Drawing.PathGradientFill { Path = Drawing.PathShadeValues.Circle };
+            pathFill.AppendChild(new Drawing.FillToRectangle
+            {
+                Left = l, Top = t, Right = r, Bottom = b
+            });
+            gradFill.AppendChild(pathFill);
+        }
+        else
+        {
+            gradFill.AppendChild(new Drawing.LinearGradientFill { Angle = angle, Scaled = true });
+        }
+
         return gradFill;
     }
 }

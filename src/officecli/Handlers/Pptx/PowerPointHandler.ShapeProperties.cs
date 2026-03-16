@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Presentation;
 using OfficeCli.Core;
 using Drawing = DocumentFormat.OpenXml.Drawing;
@@ -18,7 +19,7 @@ public partial class PowerPointHandler
     }
 
     private static List<string> SetRunOrShapeProperties(
-        Dictionary<string, string> properties, List<Drawing.Run> runs, Shape shape)
+        Dictionary<string, string> properties, List<Drawing.Run> runs, Shape shape, OpenXmlPart? part = null)
     {
         var unsupported = new List<string>();
 
@@ -263,6 +264,25 @@ public partial class PowerPointHandler
                     break;
                 }
 
+                case "lineopacity" or "line.opacity":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    var outline = spPr.GetFirstChild<Drawing.Outline>() ?? spPr.AppendChild(new Drawing.Outline());
+                    var solidFillLn = outline.GetFirstChild<Drawing.SolidFill>();
+                    if (solidFillLn != null)
+                    {
+                        var color = solidFillLn.GetFirstChild<Drawing.RgbColorModelHex>();
+                        if (color != null)
+                        {
+                            color.RemoveAllChildren<Drawing.Alpha>();
+                            var pct = (int)(double.Parse(value) * 100000); // 0.0-1.0 → 0-100000
+                            color.AppendChild(new Drawing.Alpha { Val = pct });
+                        }
+                    }
+                    break;
+                }
+
                 case "rotation" or "rotate":
                 {
                     var spPr = shape.ShapeProperties;
@@ -283,10 +303,18 @@ public partial class PowerPointHandler
                         if (color != null)
                         {
                             color.RemoveAllChildren<Drawing.Alpha>();
-                            var pct = (int)(double.Parse(value) * 1000); // 0.0-1.0 → 0-100000
+                            var pct = (int)(double.Parse(value) * 100000); // 0.0-1.0 → 0-100000
                             color.AppendChild(new Drawing.Alpha { Val = pct });
                         }
                     }
+                    break;
+                }
+
+                case "image" or "imagefill":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null || part is not SlidePart slidePart) { unsupported.Add(key); break; }
+                    ApplyShapeImageFill(spPr, value, slidePart);
                     break;
                 }
 

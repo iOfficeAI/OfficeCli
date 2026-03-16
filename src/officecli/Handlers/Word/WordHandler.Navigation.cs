@@ -170,6 +170,24 @@ public partial class WordHandler
                     node.Format["alignment"] = pProps.Justification.Val.Value.ToString();
                 if (pProps.Indentation?.FirstLine?.Value != null)
                     node.Format["firstLineIndent"] = pProps.Indentation.FirstLine.Value;
+
+                var numProps = pProps.NumberingProperties;
+                if (numProps != null)
+                {
+                    if (numProps.NumberingId?.Val?.Value != null)
+                    {
+                        var numIdVal = numProps.NumberingId.Val.Value;
+                        node.Format["numid"] = numIdVal;
+                        var ilvlVal = numProps.NumberingLevelReference?.Val?.Value ?? 0;
+                        node.Format["numlevel"] = ilvlVal;
+                        var numFmt = GetNumberingFormat(numIdVal, ilvlVal);
+                        node.Format["numFmt"] = numFmt;
+                        node.Format["listStyle"] = numFmt.ToLowerInvariant() == "bullet" ? "bullet" : "ordered";
+                        var start = GetStartValue(numIdVal, ilvlVal);
+                        if (start != null)
+                            node.Format["start"] = start.Value;
+                    }
+                }
             }
 
             if (depth > 0)

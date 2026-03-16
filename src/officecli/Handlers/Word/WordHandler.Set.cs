@@ -265,6 +265,9 @@ public partial class WordHandler
                     case "liststyle":
                         ApplyListStyle(para, value);
                         break;
+                    case "start":
+                        SetListStartValue(para, int.Parse(value));
+                        break;
                     default:
                         if (!GenericXmlQuery.TryCreateTypedChild(pProps, key, value))
                             unsupported.Add(key);

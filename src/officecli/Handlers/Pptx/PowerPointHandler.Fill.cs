@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Presentation;
 using Drawing = DocumentFormat.OpenXml.Drawing;
 
@@ -44,8 +45,9 @@ public partial class PowerPointHandler
 
     /// <summary>
     /// Apply gradient fill to ShapeProperties.
-    /// Format: "color1-color2" for linear, "color1-color2-angle" for angled, "color1-color2-color3" for 3 stops.
-    /// e.g. "FF0000-0000FF", "FF0000-0000FF-90", "FF0000-00FF00-0000FF"
+    /// Linear:  "color1-color2[-angle]"       e.g. "FF0000-0000FF", "FF0000-0000FF-90"
+    /// Radial:  "radial:color1-color2"         e.g. "radial:4B0082-1E90FF"
+    /// Radial with focus: "radial:color1-color2-tl" (tl/tr/bl/br/center)
     /// </summary>
     private static void ApplyGradientFill(ShapeProperties spPr, string value)
     {
@@ -53,6 +55,45 @@ public partial class PowerPointHandler
         spPr.RemoveAllChildren<Drawing.NoFill>();
         spPr.RemoveAllChildren<Drawing.GradientFill>();
         InsertFillElement(spPr, BuildGradientFill(value));
+    }
+
+    /// <summary>
+    /// Apply image (blip) fill to a shape.
+    /// Format: file path to image, e.g. "/tmp/bg.png"
+    /// </summary>
+    private static void ApplyShapeImageFill(ShapeProperties spPr, string imagePath, SlidePart part)
+    {
+        if (!File.Exists(imagePath))
+            throw new ArgumentException($"Image file not found: {imagePath}");
+
+        var ext = Path.GetExtension(imagePath).ToLowerInvariant();
+        var partType = ext switch
+        {
+            ".png" => ImagePartType.Png,
+            ".jpg" or ".jpeg" => ImagePartType.Jpeg,
+            ".gif" => ImagePartType.Gif,
+            ".bmp" => ImagePartType.Bmp,
+            ".tif" or ".tiff" => ImagePartType.Tiff,
+            ".emf" => ImagePartType.Emf,
+            ".wmf" => ImagePartType.Wmf,
+            _ => throw new ArgumentException($"Unsupported image format: {ext}")
+        };
+
+        var imagePart = part.AddImagePart(partType);
+        using (var stream = File.OpenRead(imagePath))
+            imagePart.FeedData(stream);
+        var relId = part.GetIdOfPart(imagePart);
+
+        spPr.RemoveAllChildren<Drawing.SolidFill>();
+        spPr.RemoveAllChildren<Drawing.NoFill>();
+        spPr.RemoveAllChildren<Drawing.GradientFill>();
+        spPr.RemoveAllChildren<Drawing.BlipFill>();
+        spPr.RemoveAllChildren<Drawing.PatternFill>();
+
+        var blipFill = new Drawing.BlipFill();
+        blipFill.Append(new Drawing.Blip { Embed = relId });
+        blipFill.Append(new Drawing.Stretch(new Drawing.FillRectangle()));
+        InsertFillElement(spPr, blipFill);
     }
 
     /// <summary>

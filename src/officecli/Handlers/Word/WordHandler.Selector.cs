@@ -126,6 +126,11 @@ public partial class WordHandler
                 "alignment" => para.ParagraphProperties?.Justification?.Val?.HasValue == true
                     ? para.ParagraphProperties.Justification.Val.Value.ToString() : null,
                 "firstlineindent" => para.ParagraphProperties?.Indentation?.FirstLine?.Value,
+                "numid" => para.ParagraphProperties?.NumberingProperties?.NumberingId?.Val?.HasValue == true
+                    ? para.ParagraphProperties.NumberingProperties.NumberingId.Val.Value.ToString() : null,
+                "numlevel" or "ilvl" => para.ParagraphProperties?.NumberingProperties?.NumberingLevelReference?.Val?.HasValue == true
+                    ? para.ParagraphProperties.NumberingProperties.NumberingLevelReference.Val.Value.ToString() : null,
+                "liststyle" => GetParagraphListStyle(para),
                 _ => GenericXmlQuery.GetAttributeValue(para, key)
                      ?? (para.ParagraphProperties != null ? GenericXmlQuery.GetAttributeValue(para.ParagraphProperties, key) : null)
             };
