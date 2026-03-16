@@ -2,4 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/officecli/officecli.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/OfficeCli.Tests/OfficeCli.Tests.csproj" />
+  </Folder>
 </Solution>
