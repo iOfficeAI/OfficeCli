@@ -219,6 +219,7 @@ Examples:
   officecli set doc.docx '/body/tbl[1]/tr[1]/tc[1]' --prop valign=center --prop gridspan=2
   officecli set doc.docx / --prop defaultFont=Arial --prop marginTop=1440
   officecli set doc.docx '/body/p[5]/r[1]' --prop width=5cm --prop alt="Logo"
+  officecli set doc.docx '/body/p[1]/r[1]' --prop link="https://example.com"
 """;
 
     const string DocxAdd = """
@@ -248,6 +249,10 @@ Types and properties:
   equation (formula, math)  -- parent: /body/p[N] or /body
     formula (required, LaTeX subset), mode (display|inline)
     Supported: \frac{}{}, \sqrt{}, ^{}, _{}, \sum, \int, Greek letters
+
+  hyperlink (link)  -- parent: /body/p[N]
+    url (required), text (display text, defaults to url)
+    font, size (optional run formatting)
 
   comment  -- parent: /body/p[N] or /body/p[N]/r[M]
     text (required), author, initials, date (ISO format)
@@ -425,6 +430,9 @@ Alignment (prefix with alignment.):
 Number format:
   numFmt         Format string (e.g. "0%", "0.00", "#,##0")
 
+Hyperlink:
+  link           URL for the cell hyperlink. "none" to remove.
+
 Examples:
   officecli set data.xlsx '/Sheet1/A1' --prop value=100
   officecli set data.xlsx '/Sheet1/B2' --prop formula="=SUM(A1:A10)"
@@ -461,6 +469,7 @@ Examples:
   officecli add data.xlsx /Sheet1 --type row --prop cols=5
   officecli add data.xlsx /Sheet1 --type cell --prop ref=A1 --prop value=100 --prop fill=4472C4
   officecli add data.xlsx /Sheet1 --type databar --prop sqref=B2:B20 --prop color=63C384
+  officecli set data.xlsx '/Sheet1/A1' --prop link="https://example.com"
 """;
 
     const string XlsxRaw = """
@@ -505,6 +514,7 @@ PowerPoint (.pptx) Reference
 Path system (1-based):
   /                          Presentation root
   /slide[N]                  Slide N
+  /slide[N]/notes            Speaker notes for slide N
   /slide[N]/shape[M]         Shape M on slide N
   /slide[N]/picture[M]       Picture M on slide N
   /slide[N]/table[M]          Table M on slide N
@@ -568,16 +578,55 @@ PowerPoint (.pptx) — get
 Paths:
   /                                          Presentation root (lists slides)
   /slide[1]                                  Slide 1 (lists shapes, tables, placeholders)
-  /slide[1]/shape[1]                         Shape details (text, position, size, fill, preset)
-  /slide[1]/table[1]                         Table details (rows, cols, position)
+  /slide[1]/shape[1]                         Shape or text box
+  /slide[1]/table[1]                         Table
   /slide[1]/table[1]/tr[1]                   Table row
   /slide[1]/table[1]/tr[1]/tc[1]             Table cell
   /slide[1]/placeholder[1]                   Placeholder by ordinal
   /slide[1]/placeholder[title]               Placeholder by type name
+  /slide[1]/notes                            Speaker notes (text)
   /slide[1]/shape[1]/paragraph[1]            Paragraph in shape
   /slide[1]/shape[1]/paragraph[1]/run[1]     Run in paragraph
   /slide[1]/shape[1]/run[1]                  Run shortcut (flat index across paragraphs)
   /slide[1]/cSld/spTree/sp[1]/spPr           Shape properties XML element
+
+Format keys returned by Get:
+
+  Slide (/slide[N]):
+    background    Solid hex, gradient (C1-C2[-angle]), or "image"
+    transition    Transition type name (fade, wipe, push, etc.)
+    advanceTime   Auto-advance time in ms (if set)
+    advanceClick  false if click-advance is disabled
+
+  Shape/textbox (/slide[N]/shape[M]):
+    text, name, type (textbox/title)
+    x, y, width, height    Position and size (e.g. "2cm")
+    font, size, bold, italic
+    underline              Underline style (sng, dbl, heavy, dotted, dash, wavy)
+    strikethrough          Strike style (sngStrike, dblStrike)
+    color                  Text color hex (from first run)
+    fill                   Shape fill hex or "none"
+    opacity                Fill opacity 0.0–1.0 (if Alpha set)
+    gradient               Gradient stops "C1-C2[-angle]"
+    line, lineWidth, lineDash
+    preset                 Shape geometry name
+    align, valign
+    lineSpacing            Multiplier (e.g. 1.5) from first paragraph
+    spaceBefore, spaceAfter  Points from first paragraph
+    margin                 Text padding
+    rotation               Degrees
+    autoFit                normal / shape / none
+    list                   Bullet char or auto-number type
+    link                   Hyperlink URL (from first run)
+    shadow, glow           Effect color hex
+    reflection             "true" if reflection effect applied
+    animation              "effectName-class-durationMs" (e.g. "fade-entrance-500")
+
+  Table cell (/slide[N]/table[M]/tr[R]/tc[C]):
+    text, fill, font, size, bold, italic, color
+
+  Run (/slide[N]/shape[M]/…/run[K]):
+    text, font, size, bold, italic, color, link
 
 Use --depth N to explore deeper. Any XML localName works as path segment.
 
@@ -587,6 +636,7 @@ Examples:
   officecli get pres.pptx '/slide[1]/shape[1]' --depth 3 --json
   officecli get pres.pptx '/slide[1]/table[1]' --depth 2
   officecli get pres.pptx '/slide[1]/placeholder[title]'
+  officecli get pres.pptx '/slide[1]/notes'
   officecli get pres.pptx '/slide[1]/shape[1]/paragraph[1]/run[1]'
   officecli get pres.pptx '/slide[1]/cSld/spTree/sp[1]/spPr' --depth 3
 """;
@@ -602,6 +652,7 @@ Element types:
   equation (math, formula)  Mathematical equations
   table              Tables
   placeholder        Placeholder shapes (shows phType)
+  notes              Slides with speaker notes
 
 Filters:
   [font="Arial"]     Shapes with specific font
@@ -663,6 +714,9 @@ Shape properties (/slide[N]/shape[M]) -- applies to all runs:
   width      Shape width (EMU or cm/in/pt/px, e.g. 10cm)
   height     Shape height (EMU or cm/in/pt/px, e.g. 2cm)
 
+Notes properties (/slide[N]/notes):
+  text         Speaker notes text (multi-line supported with \n)
+
 Slide properties (/slide[N]):
   background   Solid color (RRGGBB), gradient (C1-C2 or C1-C2-angle or C1-C2-C3),
                image fill (image:/path/to/file.png), or "none" to remove
@@ -673,6 +727,9 @@ Slide properties (/slide[N]):
   advanceClick true/false — advance on click (default true)
 
 Shape animation (/slide[N]/shape[M]):
+  link         Hyperlink URL for the shape (applied to all runs). "none" to remove.
+               Example: "https://example.com"
+
   animation    EFFECT[-CLASS[-DURATION[-TRIGGER]]]
                EFFECT:  appear, fade, fly, zoom, wipe, bounce, float, split, wheel,
                         spin, grow, swivel, checkerboard, blinds, bars, dissolve, flash, none
@@ -720,6 +777,9 @@ Examples:
   officecli set pres.pptx '/slide[1]' --prop background=FF0000-0000FF-45
   officecli set pres.pptx '/slide[1]' --prop transition=fade --prop advanceTime=3000
   officecli set pres.pptx '/slide[1]/shape[1]' --prop animation=fly-entrance-500
+  officecli set pres.pptx '/slide[1]/notes' --prop text="Speaker notes here"
+  officecli set pres.pptx '/slide[1]/shape[1]' --prop link="https://example.com"
+  officecli set pres.pptx '/slide[1]/shape[1]/run[1]' --prop link="https://example.com"
 """;
 
     const string PptxAdd = """
@@ -731,6 +791,9 @@ Types and properties:
   slide  -- parent: /
     title (optional), text (optional),
     background (optional) — RRGGBB, gradient (C1-C2[-angle]), or image:/path/to/file.png
+
+  notes  -- parent: /slide[N]
+    text (required) — speaker notes text (multi-line with \n)
 
   shape (textbox)  -- parent: /slide[N]
     text (supports \n for line breaks), name, font, size, bold, italic,
@@ -769,6 +832,7 @@ Examples:
   officecli add pres.pptx '/slide[1]' --type equation --prop formula="\frac{-b \pm \sqrt{b^2-4ac}}{2a}"
   officecli add pres.pptx / --from '/slide[1]' --index 0
   officecli add pres.pptx '/slide[2]' --from '/slide[1]/shape[2]'
+  officecli add pres.pptx '/slide[1]' --type notes --prop text="Key talking points\nRemember to pause here"
 """;
 
     const string PptxRaw = """

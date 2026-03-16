@@ -193,6 +193,22 @@ public partial class WordHandler
             if (run.RunProperties?.Bold != null) node.Format["bold"] = true;
             if (run.RunProperties?.Italic != null) node.Format["italic"] = true;
         }
+        else if (element is Hyperlink hyperlink)
+        {
+            node.Type = "hyperlink";
+            node.Text = string.Concat(hyperlink.Descendants<Text>().Select(t => t.Text));
+            var relId = hyperlink.Id?.Value;
+            if (relId != null)
+            {
+                try
+                {
+                    var rel = _doc.MainDocumentPart?.HyperlinkRelationships
+                        .FirstOrDefault(r => r.Id == relId);
+                    if (rel != null) node.Format["link"] = rel.Uri.ToString();
+                }
+                catch { }
+            }
+        }
         else if (element is Table table)
         {
             node.Type = "table";

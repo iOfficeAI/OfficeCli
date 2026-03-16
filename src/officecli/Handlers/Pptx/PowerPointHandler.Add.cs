@@ -318,6 +318,25 @@ public partial class PowerPointHandler
                 }
 
                 shapeTree.AppendChild(newShape);
+
+                // Hyperlink on shape
+                if (properties.TryGetValue("link", out var linkVal))
+                    ApplyShapeHyperlink(slidePart, newShape, linkVal);
+
+                // lineDash, effects (shadow/glow/reflection) — delegate to SetRunOrShapeProperties
+                var effectKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    { "linedash", "line.dash", "shadow", "glow", "reflection" };
+                var effectProps = properties
+                    .Where(kv => effectKeys.Contains(kv.Key))
+                    .ToDictionary(kv => kv.Key, kv => kv.Value);
+                if (effectProps.Count > 0)
+                    SetRunOrShapeProperties(effectProps, GetAllRuns(newShape), newShape);
+
+                // Animation
+                if (properties.TryGetValue("animation", out var animVal) ||
+                    properties.TryGetValue("animate", out animVal))
+                    ApplyShapeAnimation(slidePart, newShape, animVal);
+
                 GetSlide(slidePart).Save();
                 var shapeCount = shapeTree.Elements<Shape>().Count();
                 return $"/slide[{slideIdx}]/shape[{shapeCount}]";
@@ -596,6 +615,21 @@ public partial class PowerPointHandler
 
                 var eqShapeCount = eqShapeTree.Elements<Shape>().Count();
                 return $"/slide[{eqSlideIdx}]/shape[{eqShapeCount}]";
+            }
+
+            case "notes":
+            {
+                var notesSlideMatch = Regex.Match(parentPath, @"^/slide\[(\d+)\]$");
+                if (!notesSlideMatch.Success)
+                    throw new ArgumentException("Notes must be added to a slide: /slide[N]");
+                var notesSlideIdx = int.Parse(notesSlideMatch.Groups[1].Value);
+                var notesSlideParts = GetSlideParts().ToList();
+                if (notesSlideIdx < 1 || notesSlideIdx > notesSlideParts.Count)
+                    throw new ArgumentException($"Slide {notesSlideIdx} not found");
+                var notesSlidePart = EnsureNotesSlidePart(notesSlideParts[notesSlideIdx - 1]);
+                if (properties.TryGetValue("text", out var notesText))
+                    SetNotesText(notesSlidePart, notesText);
+                return $"/slide[{notesSlideIdx}]/notes";
             }
 
             default:

@@ -89,7 +89,7 @@ public partial class ExcelHandler
             var cell = FindCell(data, cellRef);
             if (cell == null)
                 return new DocumentNode { Path = path, Type = "cell", Text = "(empty)", Preview = cellRef };
-            return CellToNode(sheetNameFromPath, cell);
+            return CellToNode(sheetNameFromPath, cell, worksheet);
         }
     }
 

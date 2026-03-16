@@ -456,6 +456,41 @@ public partial class WordHandler
                 break;
             }
 
+            case "hyperlink" or "link":
+            {
+                if (!properties.TryGetValue("url", out var hlUrl) && !properties.TryGetValue("href", out hlUrl))
+                    throw new ArgumentException("'url' property is required for hyperlink type");
+
+                if (parent is not Paragraph hlPara)
+                    throw new ArgumentException("Hyperlinks can only be added to paragraphs: /body/p[N]");
+
+                var mainDocPart = _doc.MainDocumentPart!;
+                var hlRelId = mainDocPart.AddHyperlinkRelationship(new Uri(hlUrl), isExternal: true).Id;
+
+                var hlRProps = new RunProperties();
+                hlRProps.Color = new Color { Val = "0563C1" };
+                hlRProps.Underline = new Underline { Val = UnderlineValues.Single };
+                if (properties.TryGetValue("font", out var hlFont))
+                    hlRProps.RunFonts = new RunFonts { Ascii = hlFont, HighAnsi = hlFont };
+                if (properties.TryGetValue("size", out var hlSize))
+                    hlRProps.FontSize = new FontSize { Val = (int.Parse(hlSize) * 2).ToString() };
+
+                var hlRun = new Run(hlRProps);
+                var hlText = properties.GetValueOrDefault("text", hlUrl);
+                hlRun.AppendChild(new Text(hlText) { Space = SpaceProcessingModeValues.Preserve });
+
+                var hyperlink = new Hyperlink(hlRun) { Id = hlRelId };
+                if (index.HasValue)
+                    hlPara.InsertAt(hyperlink, index.Value);
+                else
+                    hlPara.AppendChild(hyperlink);
+
+                var hlCount = hlPara.Elements<Hyperlink>().Count();
+                resultPath = $"{parentPath}/hyperlink[{hlCount}]";
+                newElement = hyperlink;
+                break;
+            }
+
             default:
             {
                 // Generic fallback: create typed element via SDK schema validation

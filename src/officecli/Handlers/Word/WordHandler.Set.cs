@@ -161,6 +161,36 @@ public partial class WordHandler
                         }
                         else unsupported.Add(key);
                         break;
+                    case "link":
+                    {
+                        var mainPart3 = _doc.MainDocumentPart!;
+                        if (string.IsNullOrEmpty(value) || value.Equals("none", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Remove hyperlink wrapper if present
+                            if (run.Parent is Hyperlink existingHlNone)
+                            {
+                                foreach (var childRun in existingHlNone.Elements<Run>().ToList())
+                                    existingHlNone.InsertBeforeSelf(childRun);
+                                existingHlNone.Remove();
+                            }
+                        }
+                        else
+                        {
+                            var newRelId = mainPart3.AddHyperlinkRelationship(new Uri(value), isExternal: true).Id;
+                            if (run.Parent is Hyperlink existingHl)
+                            {
+                                existingHl.Id = newRelId;
+                            }
+                            else
+                            {
+                                var newHl = new Hyperlink { Id = newRelId };
+                                run.InsertBeforeSelf(newHl);
+                                run.Remove();
+                                newHl.AppendChild(run);
+                            }
+                        }
+                        break;
+                    }
                     default:
                         if (!GenericXmlQuery.TryCreateTypedChild(EnsureRunProperties(run), key, value))
                             unsupported.Add(key);

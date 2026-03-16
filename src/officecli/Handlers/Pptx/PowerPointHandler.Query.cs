@@ -33,6 +33,7 @@ public partial class PowerPointHandler
                     Preview = title
                 };
                 ReadSlideBackground(GetSlide(slidePart), slideNode);
+                ReadSlideTransition(GetSlide(slidePart), slideNode);
 
                 if (depth > 0)
                 {
@@ -52,6 +53,20 @@ public partial class PowerPointHandler
             return node;
         }
 
+        // Try notes path: /slide[N]/notes
+        var notesGetMatch = Regex.Match(path, @"^/slide\[(\d+)\]/notes$");
+        if (notesGetMatch.Success)
+        {
+            var notesSlideIdx = int.Parse(notesGetMatch.Groups[1].Value);
+            var slidePartsN = GetSlideParts().ToList();
+            if (notesSlideIdx < 1 || notesSlideIdx > slidePartsN.Count)
+                throw new ArgumentException($"Slide {notesSlideIdx} not found");
+            var slidePartN = slidePartsN[notesSlideIdx - 1];
+            var notesText = slidePartN.NotesSlidePart != null
+                ? GetNotesText(slidePartN.NotesSlidePart) : "";
+            return new DocumentNode { Path = path, Type = "notes", Text = notesText };
+        }
+
         // Try paragraph/run paths: /slide[N]/shape[M]/paragraph[P] or .../run[K] or .../paragraph[P]/run[K]
         var runPathMatch = Regex.Match(path, @"^/slide\[(\d+)\]/shape\[(\d+)\]/run\[(\d+)\]$");
         if (runPathMatch.Success)
@@ -59,11 +74,11 @@ public partial class PowerPointHandler
             var sIdx = int.Parse(runPathMatch.Groups[1].Value);
             var shIdx = int.Parse(runPathMatch.Groups[2].Value);
             var rIdx = int.Parse(runPathMatch.Groups[3].Value);
-            var (_, shape) = ResolveShape(sIdx, shIdx);
+            var (runSlidePart, shape) = ResolveShape(sIdx, shIdx);
             var allRuns = GetAllRuns(shape);
             if (rIdx < 1 || rIdx > allRuns.Count)
                 throw new ArgumentException($"Run {rIdx} not found (shape has {allRuns.Count} runs)");
-            return RunToNode(allRuns[rIdx - 1], path);
+            return RunToNode(allRuns[rIdx - 1], path, runSlidePart);
         }
 
         var paraPathMatch = Regex.Match(path, @"^/slide\[(\d+)\]/shape\[(\d+)\]/paragraph\[(\d+)\](?:/run\[(\d+)\])?$");
@@ -72,7 +87,7 @@ public partial class PowerPointHandler
             var sIdx = int.Parse(paraPathMatch.Groups[1].Value);
             var shIdx = int.Parse(paraPathMatch.Groups[2].Value);
             var pIdx = int.Parse(paraPathMatch.Groups[3].Value);
-            var (_, shape) = ResolveShape(sIdx, shIdx);
+            var (paraSlidePart, shape) = ResolveShape(sIdx, shIdx);
             var paragraphs = shape.TextBody?.Elements<Drawing.Paragraph>().ToList()
                 ?? throw new ArgumentException("Shape has no text body");
             if (pIdx < 1 || pIdx > paragraphs.Count)
@@ -88,7 +103,7 @@ public partial class PowerPointHandler
                 if (rIdx < 1 || rIdx > paraRuns.Count)
                     throw new ArgumentException($"Run {rIdx} not found (paragraph has {paraRuns.Count} runs)");
                 return RunToNode(paraRuns[rIdx - 1],
-                    $"/slide[{sIdx}]/shape[{shIdx}]/paragraph[{pIdx}]/run[{rIdx}]");
+                    $"/slide[{sIdx}]/shape[{shIdx}]/paragraph[{pIdx}]/run[{rIdx}]", paraSlidePart);
             }
 
             // /slide[N]/shape[M]/paragraph[P]
@@ -110,7 +125,7 @@ public partial class PowerPointHandler
                 foreach (var run in runs)
                 {
                     paraNode.Children.Add(RunToNode(run,
-                        $"/slide[{sIdx}]/shape[{shIdx}]/paragraph[{pIdx}]/run[{runIdx + 1}]"));
+                        $"/slide[{sIdx}]/shape[{shIdx}]/paragraph[{pIdx}]/run[{runIdx + 1}]", paraSlidePart));
                     runIdx++;
                 }
             }
@@ -190,7 +205,7 @@ public partial class PowerPointHandler
                 ?.GetFirstChild<PlaceholderShape>();
             var shapeTree = GetSlide(phSlidePart).CommonSlideData?.ShapeTree;
             var shapeIdx = shapeTree?.Elements<Shape>().ToList().IndexOf(phShape) ?? 0;
-            var node = ShapeToNode(phShape, phSlideIdx, shapeIdx + 1, depth);
+            var node = ShapeToNode(phShape, phSlideIdx, shapeIdx + 1, depth, phSlidePart);
             node.Path = path;
             node.Type = "placeholder";
             if (ph?.Type?.HasValue == true) node.Format["phType"] = ph.Type.InnerText;
@@ -252,6 +267,7 @@ public partial class PowerPointHandler
                     .Where(IsTitle).Select(GetShapeText).FirstOrDefault() ?? "(untitled)"
             };
             ReadSlideBackground(slide, slideNode);
+            ReadSlideTransition(slide, slideNode);
             slideNode.Children = GetSlideChildNodes(targetSlidePart, slideIdx, depth);
             slideNode.ChildCount = slideNode.Children.Count;
             return slideNode;
@@ -269,7 +285,7 @@ public partial class PowerPointHandler
             var shapes = shapeTreeEl.Elements<Shape>().ToList();
             if (elementIdx < 1 || elementIdx > shapes.Count)
                 throw new ArgumentException($"Shape {elementIdx} not found (total: {shapes.Count})");
-            return ShapeToNode(shapes[elementIdx - 1], slideIdx, elementIdx, depth);
+            return ShapeToNode(shapes[elementIdx - 1], slideIdx, elementIdx, depth, targetSlidePart);
         }
         else if (elementType == "table")
         {
@@ -317,7 +333,7 @@ public partial class PowerPointHandler
         bool isKnownType = string.IsNullOrEmpty(rawType)
             || rawType is "shape" or "textbox" or "title" or "picture" or "pic"
                 or "equation" or "math" or "formula"
-                or "table" or "placeholder";
+                or "table" or "placeholder" or "notes";
         if (!isKnownType)
         {
             var genericParsed = GenericXmlQuery.ParseSelector(selector);
@@ -325,6 +341,28 @@ public partial class PowerPointHandler
             {
                 results.AddRange(GenericXmlQuery.Query(
                     GetSlide(slidePart), genericParsed.element, genericParsed.attrs, genericParsed.containsText));
+            }
+            return results;
+        }
+
+        // Notes query (notes live outside the shape tree in NotesSlidePart)
+        if (rawType == "notes")
+        {
+            int notesSlideNum = 0;
+            foreach (var sp in GetSlideParts())
+            {
+                notesSlideNum++;
+                if (sp.NotesSlidePart == null) continue;
+                var notesText = GetNotesText(sp.NotesSlidePart);
+                if (string.IsNullOrEmpty(notesText)) continue;
+                if (parsed.TextContains != null && !notesText.Contains(parsed.TextContains, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                results.Add(new DocumentNode
+                {
+                    Path = $"/slide[{notesSlideNum}]/notes",
+                    Type = "notes",
+                    Text = notesText
+                });
             }
             return results;
         }
@@ -365,7 +403,7 @@ public partial class PowerPointHandler
                 }
                 else if (MatchesShapeSelector(shape, parsed))
                 {
-                    results.Add(ShapeToNode(shape, slideNum, shapeIdx + 1, 0));
+                    results.Add(ShapeToNode(shape, slideNum, shapeIdx + 1, 0, slidePart));
                 }
                 shapeIdx++;
             }
@@ -422,7 +460,7 @@ public partial class PowerPointHandler
                             continue;
                     }
 
-                    var node = ShapeToNode(shape, slideNum, phIdx, 0);
+                    var node = ShapeToNode(shape, slideNum, phIdx, 0, slidePart);
                     node.Path = $"/slide[{slideNum}]/placeholder[{phIdx}]";
                     node.Type = "placeholder";
                     if (ph.Type?.HasValue == true) node.Format["phType"] = ph.Type.InnerText;

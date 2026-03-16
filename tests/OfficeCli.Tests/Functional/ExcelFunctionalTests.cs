@@ -259,4 +259,49 @@ public class ExcelFunctionalTests : IDisposable
         sheet.Children.Should().HaveCountGreaterThanOrEqualTo(1);
         sheet.Children.Should().Contain(c => c.Type == "row");
     }
+
+    // ==================== XLSX Hyperlinks ====================
+
+    [Fact]
+    public void CellLink_Lifecycle()
+    {
+        // 1. Set cell value + link
+        _handler.Set("/Sheet1/A1", new Dictionary<string, string>
+        {
+            ["value"] = "Visit us",
+            ["link"] = "https://first.com"
+        });
+
+        // 2. Get + Verify
+        var node = _handler.Get("/Sheet1/A1");
+        node.Text.Should().Be("Visit us");
+        node.Format.Should().ContainKey("link");
+        ((string)node.Format["link"]).Should().StartWith("https://first.com");
+
+        // 3. Set updated link + Verify
+        _handler.Set("/Sheet1/A1", new Dictionary<string, string> { ["link"] = "https://updated.com" });
+        node = _handler.Get("/Sheet1/A1");
+        ((string)node.Format["link"]).Should().StartWith("https://updated.com");
+
+        // 4. Remove link + Verify
+        _handler.Set("/Sheet1/A1", new Dictionary<string, string> { ["link"] = "none" });
+        node = _handler.Get("/Sheet1/A1");
+        node.Format.Should().NotContainKey("link");
+    }
+
+    [Fact]
+    public void CellLink_Persist_SurvivesReopenFile()
+    {
+        _handler.Set("/Sheet1/B1", new Dictionary<string, string>
+        {
+            ["value"] = "Link cell",
+            ["link"] = "https://original.com"
+        });
+        _handler.Set("/Sheet1/B1", new Dictionary<string, string> { ["link"] = "https://persist.com" });
+
+        var handler2 = Reopen();
+        var node = handler2.Get("/Sheet1/B1");
+        node.Format.Should().ContainKey("link");
+        ((string)node.Format["link"]).Should().StartWith("https://persist.com");
+    }
 }

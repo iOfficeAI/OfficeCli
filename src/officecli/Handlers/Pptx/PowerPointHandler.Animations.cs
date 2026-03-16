@@ -537,6 +537,126 @@ public partial class PowerPointHandler
 
     // ==================== Effect Presets ====================
 
+    // ==================== Read back ====================
+
+    /// <summary>
+    /// Populate Format["animation"] on a shape DocumentNode by inspecting the slide Timing tree.
+    /// Returns a string of the form "effectName-class-durationMs".
+    /// </summary>
+    private static void ReadShapeAnimation(SlidePart slidePart, Shape shape, OfficeCli.Core.DocumentNode node)
+    {
+        var shapeId = shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value;
+        if (shapeId == null) return;
+
+        var timing = slidePart.Slide?.GetFirstChild<Timing>();
+        if (timing == null) return;
+
+        var shapeIdStr = shapeId.Value.ToString();
+        var shapeTarget = timing.Descendants<ShapeTarget>()
+            .FirstOrDefault(st => st.ShapeId?.Value == shapeIdStr);
+        if (shapeTarget == null) return;
+
+        // Find the effect CommonTimeNode (the one with PresetClass + PresetId)
+        CommonTimeNode? effectCTn = null;
+        OpenXmlElement? cur = shapeTarget;
+        while (cur != null)
+        {
+            if (cur is CommonTimeNode ctn && ctn.PresetClass != null && ctn.PresetId != null)
+            { effectCTn = ctn; break; }
+            cur = cur.Parent;
+        }
+        if (effectCTn == null) return;
+
+        var clsVal = effectCTn.PresetClass?.Value;
+        var cls = clsVal == TimeNodePresetClassValues.Exit ? "exit"
+                : clsVal == TimeNodePresetClassValues.Emphasis ? "emphasis"
+                : "entrance";
+
+        // Duration from the animEffect child
+        var animEffect = effectCTn.Descendants<AnimateEffect>().FirstOrDefault();
+        var dur = 500;
+        if (int.TryParse(animEffect?.CommonBehavior?.CommonTimeNode?.Duration, out var d)) dur = d;
+
+        // Effect name from filter string
+        var filter = animEffect?.Filter?.Value ?? "";
+        var presetId = effectCTn.PresetId?.Value ?? 10;
+        var effectName = filter switch
+        {
+            "fly"                                       => "fly",
+            var f when f.StartsWith("blinds")           => "blinds",
+            "box"                                       => "box",
+            var f when f.StartsWith("checkerboard")     => "checkerboard",
+            "circle"                                    => "circle",
+            var f when f.StartsWith("crawl")            => "crawl",
+            "diamond"                                   => "diamond",
+            "dissolve"                                  => "dissolve",
+            "fade"                                      => "fade",
+            "flash"                                     => "flash",
+            "plus"                                      => "plus",
+            "random"                                    => "random",
+            var f when f.StartsWith("barn")             => "split",
+            var f when f.StartsWith("strips")           => "strips",
+            "swivel"                                    => "swivel",
+            "wedge"                                     => "wedge",
+            var f when f.StartsWith("wheel")            => "wheel",
+            var f when f.StartsWith("wipe")             => "wipe",
+            "zoom"                                      => "zoom",
+            "" when presetId == 1                       => "appear",
+            _                                           => "fade"
+        };
+
+        node.Format["animation"] = $"{effectName}-{cls}-{dur}";
+    }
+
+    /// <summary>
+    /// Populate Format["transition"], Format["advanceTime"], Format["advanceClick"]
+    /// on a slide DocumentNode.
+    /// </summary>
+    internal static void ReadSlideTransition(Slide slide, OfficeCli.Core.DocumentNode node)
+    {
+        var trans = slide.GetFirstChild<Transition>();
+        if (trans == null) return;
+
+        // Determine type from first child element
+        var transElem = trans.ChildElements.FirstOrDefault(c => c is not OpenXmlLeafElement);
+        if (transElem != null)
+        {
+            var typeName = transElem.LocalName.ToLowerInvariant() switch
+            {
+                "fade"      => "fade",
+                "cut"       => "cut",
+                "dissolve"  => "dissolve",
+                "wipe"      => "wipe",
+                "push"      => "push",
+                "cover"     => "cover",
+                "pull"      => "pull",
+                "wheel"     => "wheel",
+                "zoom"      => "zoom",
+                "box"       => "zoom",
+                "split"     => "split",
+                "blinds"    => "blinds",
+                "checker"   => "checker",
+                "randombar" => "bars",
+                "comb"      => "comb",
+                "strips"    => "strips",
+                "circle"    => "circle",
+                "diamond"   => "diamond",
+                "newsflash" => "newsflash",
+                "plus"      => "plus",
+                "random"    => "random",
+                "wedge"     => "wedge",
+                "flash"     => "flash",
+                _           => transElem.LocalName.ToLowerInvariant()
+            };
+            node.Format["transition"] = typeName;
+        }
+
+        if (trans.AdvanceAfterTime != null)
+            node.Format["advanceTime"] = trans.AdvanceAfterTime.Value;
+        if (trans.AdvanceOnClick?.Value == false)
+            node.Format["advanceClick"] = false;
+    }
+
     /// <summary>Returns (presetId, animFilter) for the given effect name.</summary>
     private static (int presetId, string? filter) GetAnimPreset(
         string effect, TimeNodePresetClassValues cls)

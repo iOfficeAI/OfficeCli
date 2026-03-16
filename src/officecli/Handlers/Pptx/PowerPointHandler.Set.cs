@@ -14,6 +14,26 @@ public partial class PowerPointHandler
 {
     public List<string> Set(string path, Dictionary<string, string> properties)
     {
+        // Try notes path: /slide[N]/notes
+        var notesSetMatch = Regex.Match(path, @"^/slide\[(\d+)\]/notes$");
+        if (notesSetMatch.Success)
+        {
+            var slideIdx = int.Parse(notesSetMatch.Groups[1].Value);
+            var slidePartsN = GetSlideParts().ToList();
+            if (slideIdx < 1 || slideIdx > slidePartsN.Count)
+                throw new ArgumentException($"Slide {slideIdx} not found");
+            var notesPart = EnsureNotesSlidePart(slidePartsN[slideIdx - 1]);
+            var unsupportedN = new List<string>();
+            foreach (var (key, value) in properties)
+            {
+                if (key.Equals("text", StringComparison.OrdinalIgnoreCase))
+                    SetNotesText(notesPart, value);
+                else
+                    unsupportedN.Add(key);
+            }
+            return unsupportedN;
+        }
+
         // Try run-level path: /slide[N]/shape[M]/run[K]
         var runMatch = Regex.Match(path, @"^/slide\[(\d+)\]/shape\[(\d+)\]/run\[(\d+)\]$");
         if (runMatch.Success)
@@ -28,7 +48,12 @@ public partial class PowerPointHandler
                 throw new ArgumentException($"Run {runIdx} not found (shape has {allRuns.Count} runs)");
 
             var targetRun = allRuns[runIdx - 1];
-            var unsupported = SetRunOrShapeProperties(properties, new List<Drawing.Run> { targetRun }, shape);
+            var linkValRun = properties.GetValueOrDefault("link");
+            var runOnlyProps = properties
+                .Where(kv => !kv.Key.Equals("link", StringComparison.OrdinalIgnoreCase))
+                .ToDictionary(kv => kv.Key, kv => kv.Value);
+            var unsupported = SetRunOrShapeProperties(runOnlyProps, new List<Drawing.Run> { targetRun }, shape);
+            if (linkValRun != null) ApplyRunHyperlink(slidePart, targetRun, linkValRun);
             GetSlide(slidePart).Save();
             return unsupported;
         }
@@ -286,18 +311,22 @@ public partial class PowerPointHandler
             var (slidePart, shape) = ResolveShape(slideIdx, shapeIdx);
             var allRuns = shape.Descendants<Drawing.Run>().ToList();
 
-            // Separate animation property (needs slidePart) from shape properties
+            // Separate animation and link (both need slidePart) from other shape properties
             var animValue = properties.GetValueOrDefault("animation")
                 ?? properties.GetValueOrDefault("animate");
+            var linkValue = properties.GetValueOrDefault("link");
             var shapeProps = properties
                 .Where(kv => !kv.Key.Equals("animation", StringComparison.OrdinalIgnoreCase)
-                          && !kv.Key.Equals("animate", StringComparison.OrdinalIgnoreCase))
+                          && !kv.Key.Equals("animate", StringComparison.OrdinalIgnoreCase)
+                          && !kv.Key.Equals("link", StringComparison.OrdinalIgnoreCase))
                 .ToDictionary(kv => kv.Key, kv => kv.Value);
 
             var unsupported = SetRunOrShapeProperties(shapeProps, allRuns, shape);
 
             if (animValue != null)
                 ApplyShapeAnimation(slidePart, shape, animValue);
+            if (linkValue != null)
+                ApplyShapeHyperlink(slidePart, shape, linkValue);
 
             GetSlide(slidePart).Save();
             return unsupported;

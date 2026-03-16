@@ -62,8 +62,10 @@ For large documents, ALWAYS use `--max-lines` or `--start`/`--end` to limit outp
 | Word table row | `/body/tbl[1]/tr[1]` | `height`, `header`(bool), ... |
 | Word table | `/body/tbl[1]` | `alignment`, `width`, ... |
 | Word document | `/` | `defaultFont`, `pageBackground`, `pageWidth`, `pageHeight`, `marginTop/Bottom/Left/Right`, ... |
-| Excel cell | `/Sheet1/A1` | `value`, `formula`, `clear`, `font.bold/italic/strike/underline/color/size/name`, `fill`(hex RGB), `alignment.horizontal/vertical/wrapText`, `numFmt`, ... |
-| PPT shape | `/slide[1]/shape[1]` | `text`(`\n` for line breaks), `font`, `size`, `bold`, `italic`, `underline`, `strikethrough`, `color`, `fill`, `gradient`(e.g. `FF0000-0000FF-90`), `line`, `lineWidth`, `lineDash`, `preset`, `margin`, `align`, `valign`, `list`(bullet/numbered/alpha/roman), `lineSpacing`, `spaceBefore`, `spaceAfter`, `rotation`, `opacity`, `autoFit`, `x`, `y`, `width`, `height` |
+| Excel cell | `/Sheet1/A1` | `value`, `formula`, `clear`, `font.bold/italic/strike/underline/color/size/name`, `fill`(hex RGB), `alignment.horizontal/vertical/wrapText`, `numFmt`, `link`(url/none) |
+| PPT slide | `/slide[1]` | `background`(hex/gradient/`image:path`/none), `transition`(fade/wipe/push/…), `advanceTime`(ms), `advanceClick`(bool) |
+| PPT notes | `/slide[1]/notes` | `text` |
+| PPT shape | `/slide[1]/shape[1]` | `text`(`\n` for line breaks), `name`, `font`, `size`, `bold`, `italic`, `underline`, `strikethrough`, `color`, `fill`, `gradient`(e.g. `FF0000-0000FF-90`), `line`, `lineWidth`, `lineDash`, `preset`, `margin`, `align`, `valign`, `list`(bullet/numbered/alpha/roman), `lineSpacing`, `spaceBefore`, `spaceAfter`, `rotation`, `opacity`, `autoFit`, `shadow`(hex), `glow`(hex), `reflection`(true/none), `animation`(effect-class-ms), `link`(url/none), `x`, `y`, `width`, `height` |
 | PPT table | `/slide[1]/table[1]` | `x`, `y`, `width`, `height`, `name`, ... |
 | PPT table row | `/slide[1]/table[1]/tr[1]` | `height`; other props (text, bold, fill, ...) apply to all cells in row |
 | PPT table cell | `/slide[1]/table[1]/tr[1]/tc[1]` | `text`, `font`, `size`, `bold`, `italic`, `color`, `fill`, `align`, `gridspan`/`colspan`, `rowspan`, `vmerge`, `hmerge` |
@@ -77,7 +79,7 @@ Composite props (`pBdr`, `tabs`, `lang`, `bdr`) → use L3 (`raw-set --action se
 |--------|--------------|
 | Word | `paragraph`(text,font,size,bold,style,alignment,...), `run`(text,font,size,bold,italic,...), `table`(rows,cols), `picture`(path,width,height,alt,...), `equation`(formula,mode), `comment`(text,author,initials,date,...) |
 | Excel | `sheet`(name), `row`(cols), `cell`(ref,value,formula,...), `databar`(sqref,min,max,color,...) |
-| PPT | `slide`(title,text), `shape`(text,font,size,name,bold,italic,underline,strikethrough,color,fill,gradient,line,lineWidth,lineDash,preset,margin,align,valign,list,lineSpacing,rotation,opacity,autoFit,x,y,width,height), `table`(rows,cols,x,y,width,height; cells: gridspan,rowspan,vmerge,hmerge), `picture`(path,width,height,x,y,alt), `equation`(formula,x,y,width,height) |
+| PPT | `slide`(title,text), `shape`(text,font,size,name,bold,italic,underline,strikethrough,color,fill,gradient,line,lineWidth,lineDash,preset,margin,align,valign,list,lineSpacing,spaceBefore,spaceAfter,rotation,opacity,autoFit,shadow,glow,reflection,animation,link,x,y,width,height), `table`(rows,cols,x,y,width,height; cells: gridspan,rowspan,vmerge,hmerge), `picture`(path,width,height,x,y,alt), `equation`(formula,x,y,width,height) |
 
 Dimensions: raw EMU or suffixed `cm`/`in`/`pt`/`px`. Equation formula: LaTeX subset. `--from <path>` clones an existing element (cross-part relationships handled automatically).
 

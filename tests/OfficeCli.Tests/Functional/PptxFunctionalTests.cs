@@ -364,4 +364,263 @@ public class PptxFunctionalTests : IDisposable
         var node = handler2.Get("/slide[1]/shape[1]");
         node.Text.Should().Be("Persistent");
     }
+
+    // ==================== Speaker Notes ====================
+
+    [Fact]
+    public void Notes_Lifecycle()
+    {
+        // 1. Add slide + notes
+        _handler.Add("/", "slide", null, new Dictionary<string, string>());
+        var path = _handler.Add("/slide[1]", "notes", null, new Dictionary<string, string> { ["text"] = "Original note" });
+        path.Should().Be("/slide[1]/notes");
+
+        // 2. Get + Verify
+        var node = _handler.Get("/slide[1]/notes");
+        node.Type.Should().Be("notes");
+        node.Text.Should().Be("Original note");
+
+        // 3. Query + Verify
+        var results = _handler.Query("notes");
+        results.Should().Contain(n => n.Type == "notes" && n.Text == "Original note");
+
+        // 4. Set + Verify
+        _handler.Set("/slide[1]/notes", new Dictionary<string, string> { ["text"] = "Updated note" });
+        node = _handler.Get("/slide[1]/notes");
+        node.Text.Should().Be("Updated note");
+
+        // 5. Query reflects update
+        results = _handler.Query("notes");
+        results.Should().Contain(n => n.Text == "Updated note");
+    }
+
+    [Fact]
+    public void Notes_Persist_SurvivesReopenFile()
+    {
+        _handler.Add("/", "slide", null, new Dictionary<string, string>());
+        _handler.Add("/slide[1]", "notes", null, new Dictionary<string, string> { ["text"] = "Persist me" });
+        _handler.Set("/slide[1]/notes", new Dictionary<string, string> { ["text"] = "Persisted note" });
+
+        var handler2 = Reopen();
+        var node = handler2.Get("/slide[1]/notes");
+        node.Text.Should().Be("Persisted note");
+    }
+
+    // ==================== PPTX Hyperlinks ====================
+
+    [Fact]
+    public void ShapeLink_Lifecycle()
+    {
+        // 1. Add slide + shape with link
+        _handler.Add("/", "slide", null, new Dictionary<string, string>());
+        _handler.Add("/slide[1]", "shape", null, new Dictionary<string, string>
+        {
+            ["text"] = "Click me",
+            ["link"] = "https://first.com"
+        });
+
+        // 2. Get + Verify
+        var node = _handler.Get("/slide[1]/shape[1]");
+        node.Format.Should().ContainKey("link");
+        ((string)node.Format["link"]).Should().StartWith("https://first.com");
+
+        // 3. Set new link + Verify
+        _handler.Set("/slide[1]/shape[1]", new Dictionary<string, string> { ["link"] = "https://updated.com" });
+        node = _handler.Get("/slide[1]/shape[1]");
+        ((string)node.Format["link"]).Should().StartWith("https://updated.com");
+
+        // 4. Remove link + Verify
+        _handler.Set("/slide[1]/shape[1]", new Dictionary<string, string> { ["link"] = "none" });
+        node = _handler.Get("/slide[1]/shape[1]");
+        node.Format.Should().NotContainKey("link");
+    }
+
+    [Fact]
+    public void ShapeLink_Persist_SurvivesReopenFile()
+    {
+        _handler.Add("/", "slide", null, new Dictionary<string, string>());
+        _handler.Add("/slide[1]", "shape", null, new Dictionary<string, string>
+        {
+            ["text"] = "Persistent link",
+            ["link"] = "https://persist.com"
+        });
+
+        var handler2 = Reopen();
+        var node = handler2.Get("/slide[1]/shape[1]");
+        node.Format.Should().ContainKey("link");
+        ((string)node.Format["link"]).Should().StartWith("https://persist.com");
+    }
+
+    // ==================== PPTX lineDash ====================
+
+    [Fact]
+    public void ShapeLineDash_Lifecycle()
+    {
+        // 1. Add shape with lineDash
+        _handler.Add("/", "slide", null, new Dictionary<string, string>());
+        _handler.Add("/slide[1]", "shape", null, new Dictionary<string, string>
+        {
+            ["text"] = "dashed border",
+            ["line"] = "FF0000",
+            ["lineDash"] = "dash"
+        });
+
+        // 2. Get + Verify
+        var node = _handler.Get("/slide[1]/shape[1]");
+        node.Format.Should().ContainKey("lineDash");
+        node.Format["lineDash"].Should().Be("dash");
+
+        // 3. Set new dash style + Verify
+        _handler.Set("/slide[1]/shape[1]", new Dictionary<string, string> { ["lineDash"] = "dot" });
+        node = _handler.Get("/slide[1]/shape[1]");
+        node.Format["lineDash"].Should().Be("dot");
+
+        // 4. Set solid (remove dash) + Verify
+        _handler.Set("/slide[1]/shape[1]", new Dictionary<string, string> { ["lineDash"] = "solid" });
+        node = _handler.Get("/slide[1]/shape[1]");
+        node.Format["lineDash"].Should().Be("solid");
+    }
+
+    [Fact]
+    public void ShapeLineDash_Persist_SurvivesReopenFile()
+    {
+        _handler.Add("/", "slide", null, new Dictionary<string, string>());
+        _handler.Add("/slide[1]", "shape", null, new Dictionary<string, string>
+        {
+            ["text"] = "persist dash",
+            ["line"] = "0000FF",
+            ["lineDash"] = "dashdot"
+        });
+
+        Reopen();
+        var node = _handler.Get("/slide[1]/shape[1]");
+        node.Format.Should().ContainKey("lineDash");
+        node.Format["lineDash"].Should().Be("dashdot");
+    }
+
+    // ==================== PPTX Effects (shadow / glow / reflection) ====================
+
+    [Fact]
+    public void ShapeShadow_Lifecycle()
+    {
+        // 1. Add shape with shadow
+        _handler.Add("/", "slide", null, new Dictionary<string, string>());
+        _handler.Add("/slide[1]", "shape", null, new Dictionary<string, string>
+        {
+            ["text"] = "shadowed",
+            ["shadow"] = "000000"
+        });
+
+        // 2. Get + Verify
+        var node = _handler.Get("/slide[1]/shape[1]");
+        node.Format.Should().ContainKey("shadow");
+        node.Format["shadow"].Should().Be("000000");
+
+        // 3. Set new shadow color + Verify
+        _handler.Set("/slide[1]/shape[1]", new Dictionary<string, string> { ["shadow"] = "404040" });
+        node = _handler.Get("/slide[1]/shape[1]");
+        node.Format["shadow"].Should().Be("404040");
+
+        // 4. Remove shadow + Verify
+        _handler.Set("/slide[1]/shape[1]", new Dictionary<string, string> { ["shadow"] = "none" });
+        node = _handler.Get("/slide[1]/shape[1]");
+        node.Format.Should().NotContainKey("shadow");
+    }
+
+    [Fact]
+    public void ShapeGlow_Lifecycle()
+    {
+        // 1. Add shape with glow
+        _handler.Add("/", "slide", null, new Dictionary<string, string>());
+        _handler.Add("/slide[1]", "shape", null, new Dictionary<string, string>
+        {
+            ["text"] = "glowing",
+            ["glow"] = "0070FF"
+        });
+
+        // 2. Get + Verify
+        var node = _handler.Get("/slide[1]/shape[1]");
+        node.Format.Should().ContainKey("glow");
+        node.Format["glow"].Should().Be("0070FF");
+
+        // 3. Set new glow + Verify
+        _handler.Set("/slide[1]/shape[1]", new Dictionary<string, string> { ["glow"] = "FF0000-10" });
+        node = _handler.Get("/slide[1]/shape[1]");
+        node.Format["glow"].Should().Be("FF0000");
+
+        // 4. Remove glow + Verify
+        _handler.Set("/slide[1]/shape[1]", new Dictionary<string, string> { ["glow"] = "none" });
+        node = _handler.Get("/slide[1]/shape[1]");
+        node.Format.Should().NotContainKey("glow");
+    }
+
+    [Fact]
+    public void ShapeReflection_Lifecycle()
+    {
+        // 1. Add shape with reflection
+        _handler.Add("/", "slide", null, new Dictionary<string, string>());
+        _handler.Add("/slide[1]", "shape", null, new Dictionary<string, string>
+        {
+            ["text"] = "reflected",
+            ["reflection"] = "half"
+        });
+
+        // 2. Get + Verify
+        var node = _handler.Get("/slide[1]/shape[1]");
+        node.Format.Should().ContainKey("reflection");
+        node.Format["reflection"].Should().Be("true");
+
+        // 3. Remove reflection + Verify
+        _handler.Set("/slide[1]/shape[1]", new Dictionary<string, string> { ["reflection"] = "none" });
+        node = _handler.Get("/slide[1]/shape[1]");
+        node.Format.Should().NotContainKey("reflection");
+
+        // 4. Re-add via Set + Verify
+        _handler.Set("/slide[1]/shape[1]", new Dictionary<string, string> { ["reflection"] = "full" });
+        node = _handler.Get("/slide[1]/shape[1]");
+        node.Format.Should().ContainKey("reflection");
+    }
+
+    // ==================== PPTX Animation ====================
+
+    [Fact]
+    public void ShapeAnimation_Lifecycle()
+    {
+        // 1. Add shape with animation
+        _handler.Add("/", "slide", null, new Dictionary<string, string>());
+        _handler.Add("/slide[1]", "shape", null, new Dictionary<string, string>
+        {
+            ["text"] = "animated",
+            ["animation"] = "fade"
+        });
+
+        // 2. Get shape — shape itself is accessible
+        var node = _handler.Get("/slide[1]/shape[1]");
+        node.Text.Should().Be("animated");
+
+        // 3. Set different animation + Verify shape still accessible
+        _handler.Set("/slide[1]/shape[1]", new Dictionary<string, string> { ["animation"] = "fly" });
+        node = _handler.Get("/slide[1]/shape[1]");
+        node.Text.Should().Be("animated");
+
+        // 4. Remove animation + Verify
+        _handler.Set("/slide[1]/shape[1]", new Dictionary<string, string> { ["animation"] = "none" });
+        node = _handler.Get("/slide[1]/shape[1]");
+        node.Text.Should().Be("animated");
+    }
+
+    [Fact]
+    public void ShapeAnimation_Persist_SurvivesReopenFile()
+    {
+        _handler.Add("/", "slide", null, new Dictionary<string, string>());
+        _handler.Add("/slide[1]", "shape", null, new Dictionary<string, string>
+        {
+            ["text"] = "persist anim",
+            ["animation"] = "fade-entrance-500"
+        });
+
+        Reopen();
+        var node = _handler.Get("/slide[1]/shape[1]");
+        node.Text.Should().Be("persist anim");
+    }
 }

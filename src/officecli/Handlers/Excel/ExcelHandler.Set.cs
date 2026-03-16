@@ -95,6 +95,31 @@ public partial class ExcelHandler
                     cell.CellValue = null;
                     cell.CellFormula = null;
                     break;
+                case "link":
+                {
+                    var ws = GetSheet(worksheet);
+                    var hyperlinksEl = ws.GetFirstChild<Hyperlinks>();
+                    if (string.IsNullOrEmpty(value) || value.Equals("none", StringComparison.OrdinalIgnoreCase))
+                    {
+                        hyperlinksEl?.Elements<Hyperlink>()
+                            .Where(h => h.Reference?.Value?.Equals(cellRef, StringComparison.OrdinalIgnoreCase) == true)
+                            .ToList().ForEach(h => h.Remove());
+                    }
+                    else
+                    {
+                        var hlRel = worksheet.AddHyperlinkRelationship(new Uri(value), isExternal: true);
+                        if (hyperlinksEl == null)
+                        {
+                            hyperlinksEl = new Hyperlinks();
+                            ws.AppendChild(hyperlinksEl);
+                        }
+                        hyperlinksEl.Elements<Hyperlink>()
+                            .Where(h => h.Reference?.Value?.Equals(cellRef, StringComparison.OrdinalIgnoreCase) == true)
+                            .ToList().ForEach(h => h.Remove());
+                        hyperlinksEl.AppendChild(new Hyperlink { Reference = cellRef.ToUpperInvariant(), Id = hlRel.Id });
+                    }
+                    break;
+                }
                 default:
                     if (!GenericXmlQuery.SetGenericAttribute(cell, key, value))
                         unsupported.Add(key);

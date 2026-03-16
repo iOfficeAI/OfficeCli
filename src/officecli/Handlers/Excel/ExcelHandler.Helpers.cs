@@ -98,7 +98,7 @@ public partial class ExcelHandler
         return children;
     }
 
-    private DocumentNode CellToNode(string sheetName, Cell cell)
+    private DocumentNode CellToNode(string sheetName, Cell cell, WorksheetPart? part = null)
     {
         var cellRef = cell.CellReference?.Value ?? "?";
         var value = GetCellDisplayValue(cell);
@@ -116,6 +116,22 @@ public partial class ExcelHandler
         node.Format["type"] = type;
         if (formula != null) node.Format["formula"] = formula;
         if (string.IsNullOrEmpty(value)) node.Format["empty"] = true;
+
+        // Hyperlink readback
+        if (part != null)
+        {
+            var hyperlink = GetSheet(part).GetFirstChild<Hyperlinks>()?.Elements<Hyperlink>()
+                .FirstOrDefault(h => h.Reference?.Value?.Equals(cellRef, StringComparison.OrdinalIgnoreCase) == true);
+            if (hyperlink?.Id?.Value != null)
+            {
+                try
+                {
+                    var rel = part.HyperlinkRelationships.FirstOrDefault(r => r.Id == hyperlink.Id.Value);
+                    if (rel != null) node.Format["link"] = rel.Uri.ToString();
+                }
+                catch { }
+            }
+        }
 
         return node;
     }

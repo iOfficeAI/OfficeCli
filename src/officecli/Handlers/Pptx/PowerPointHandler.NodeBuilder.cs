@@ -20,7 +20,7 @@ public partial class PowerPointHandler
         int shapeIdx = 0;
         foreach (var shape in shapeTree.Elements<Shape>())
         {
-            children.Add(ShapeToNode(shape, slideNum, shapeIdx + 1, depth));
+            children.Add(ShapeToNode(shape, slideNum, shapeIdx + 1, depth, slidePart));
             shapeIdx++;
         }
 
@@ -119,7 +119,7 @@ public partial class PowerPointHandler
         return node;
     }
 
-    private static DocumentNode ShapeToNode(Shape shape, int slideNum, int shapeIdx, int depth)
+    private static DocumentNode ShapeToNode(Shape shape, int slideNum, int shapeIdx, int depth, OpenXmlPart? part = null)
     {
         var text = GetShapeText(shape);
         var name = GetShapeName(shape);
@@ -157,6 +157,11 @@ public partial class PowerPointHandler
         var shapeFillHex = shapeFill?.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
         if (shapeFillHex != null) node.Format["fill"] = shapeFillHex;
         if (shape.ShapeProperties?.GetFirstChild<Drawing.NoFill>() != null) node.Format["fill"] = "none";
+
+        // Opacity (Alpha on SolidFill)
+        var alphaVal = shapeFill?.GetFirstChild<Drawing.RgbColorModelHex>()
+            ?.GetFirstChild<Drawing.Alpha>()?.Val?.Value;
+        if (alphaVal.HasValue) node.Format["opacity"] = $"{alphaVal.Value / 100000.0:0.##}";
 
         // Shape preset
         var presetGeom = shape.ShapeProperties?.GetFirstChild<Drawing.PresetGeometry>();
@@ -207,6 +212,18 @@ public partial class PowerPointHandler
                 node.Format["underline"] = firstRun.RunProperties.Underline.InnerText;
             if (firstRun.RunProperties.Strike?.HasValue == true && firstRun.RunProperties.Strike.Value != Drawing.TextStrikeValues.NoStrike)
                 node.Format["strikethrough"] = firstRun.RunProperties.Strike.InnerText;
+
+            // Text color (from first run)
+            var runColorHex = firstRun.RunProperties.GetFirstChild<Drawing.SolidFill>()
+                ?.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
+            if (runColorHex != null) node.Format["color"] = runColorHex;
+
+            // Hyperlink on first run
+            if (part != null)
+            {
+                var linkUrl = ReadRunHyperlinkUrl(firstRun, part);
+                if (linkUrl != null) node.Format["link"] = linkUrl;
+            }
         }
 
         // Line/border
@@ -218,7 +235,27 @@ public partial class PowerPointHandler
             if (outline.GetFirstChild<Drawing.NoFill>() != null) node.Format["line"] = "none";
             if (outline.Width?.HasValue == true) node.Format["lineWidth"] = FormatEmu(outline.Width.Value);
             var dash = outline.GetFirstChild<Drawing.PresetDash>();
-            if (dash?.Val?.HasValue == true) node.Format["lineDash"] = dash.Val.InnerText;
+            if (dash?.Val?.HasValue == true) node.Format["lineDash"] = dash.Val.InnerText.ToLowerInvariant();
+        }
+
+        // Effects (shadow, glow, reflection)
+        var effectList = shape.ShapeProperties?.GetFirstChild<Drawing.EffectList>();
+        if (effectList != null)
+        {
+            var outerShadow = effectList.GetFirstChild<Drawing.OuterShadow>();
+            if (outerShadow != null)
+            {
+                var colorHex = outerShadow.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value ?? "000000";
+                node.Format["shadow"] = colorHex;
+            }
+            var glow = effectList.GetFirstChild<Drawing.Glow>();
+            if (glow != null)
+            {
+                var colorHex = glow.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value ?? "000000";
+                node.Format["glow"] = colorHex;
+            }
+            if (effectList.GetFirstChild<Drawing.Reflection>() != null)
+                node.Format["reflection"] = "true";
         }
 
         // Rotation
@@ -245,12 +282,29 @@ public partial class PowerPointHandler
             // Vertical alignment
             if (bodyPr.Anchor?.HasValue == true)
                 node.Format["valign"] = bodyPr.Anchor.InnerText;
+
+            // AutoFit
+            if (bodyPr.GetFirstChild<Drawing.NormalAutoFit>() != null) node.Format["autoFit"] = "normal";
+            else if (bodyPr.GetFirstChild<Drawing.ShapeAutoFit>() != null) node.Format["autoFit"] = "shape";
+            else if (bodyPr.GetFirstChild<Drawing.NoAutoFit>() != null) node.Format["autoFit"] = "none";
         }
 
         // Text alignment (from first paragraph)
         var firstPara = shape.TextBody?.Elements<Drawing.Paragraph>().FirstOrDefault();
         if (firstPara?.ParagraphProperties?.Alignment?.HasValue == true)
             node.Format["align"] = firstPara.ParagraphProperties.Alignment.InnerText;
+
+        // Paragraph spacing (from first paragraph)
+        var pProps = firstPara?.ParagraphProperties;
+        if (pProps != null)
+        {
+            var ls = pProps.GetFirstChild<Drawing.LineSpacing>()?.GetFirstChild<Drawing.SpacingPercent>()?.Val?.Value;
+            if (ls.HasValue) node.Format["lineSpacing"] = $"{ls.Value / 1000.0:0.##}";
+            var sb = pProps.GetFirstChild<Drawing.SpaceBefore>()?.GetFirstChild<Drawing.SpacingPoints>()?.Val?.Value;
+            if (sb.HasValue) node.Format["spaceBefore"] = $"{sb.Value / 100.0:0.##}";
+            var sa = pProps.GetFirstChild<Drawing.SpaceAfter>()?.GetFirstChild<Drawing.SpacingPoints>()?.Val?.Value;
+            if (sa.HasValue) node.Format["spaceAfter"] = $"{sa.Value / 100.0:0.##}";
+        }
 
         // Count paragraphs regardless of depth
         if (shape.TextBody != null)
@@ -287,7 +341,7 @@ public partial class PowerPointHandler
                         foreach (var run in paraRuns)
                         {
                             paraNode.Children.Add(RunToNode(run,
-                                $"/slide[{slideNum}]/shape[{shapeIdx}]/paragraph[{paraIdx + 1}]/run[{runIdx + 1}]"));
+                                $"/slide[{slideNum}]/shape[{shapeIdx}]/paragraph[{paraIdx + 1}]/run[{runIdx + 1}]", part));
                             runIdx++;
                         }
                     }
@@ -298,10 +352,14 @@ public partial class PowerPointHandler
             }
         }
 
+        // Animation (requires SlidePart to access Timing tree)
+        if (part is SlidePart animSlidePart)
+            ReadShapeAnimation(animSlidePart, shape, node);
+
         return node;
     }
 
-    private static DocumentNode RunToNode(Drawing.Run run, string path)
+    private static DocumentNode RunToNode(Drawing.Run run, string path, OpenXmlPart? part = null)
     {
         var node = new DocumentNode
         {
@@ -323,6 +381,12 @@ public partial class PowerPointHandler
             var solidFill = run.RunProperties.GetFirstChild<Drawing.SolidFill>();
             var rgbHex = solidFill?.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
             if (rgbHex != null) node.Format["color"] = rgbHex;
+            // Hyperlink
+            if (part != null)
+            {
+                var linkUrl = ReadRunHyperlinkUrl(run, part);
+                if (linkUrl != null) node.Format["link"] = linkUrl;
+            }
         }
 
         return node;
