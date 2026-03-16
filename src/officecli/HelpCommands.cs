@@ -593,6 +593,8 @@ Paths:
 Format keys returned by Get:
 
   Slide (/slide[N]):
+    layout        Layout name (e.g. "Blank", "Title Slide", "Title and Content")
+    layoutType    Layout type (e.g. "blank", "title", "obj")
     background    Solid hex, gradient (C1-C2[-angle]), or "image"
     transition    Transition type name (fade, wipe, push, etc.)
     advanceTime   Auto-advance time in ms (if set)
@@ -793,6 +795,10 @@ Types and properties:
 
   slide  -- parent: /
     title (optional), text (optional),
+    layout (optional) — by name, type, or index:
+      Name: "Title Slide", "Title and Content", "Two Content", "Blank", etc.
+      Type: blank, title, titleonly, twocontent, titlecontent, section, comparison, caption
+      Index: 1, 2, 3, ... (1-based index of available layouts)
     background (optional) — RRGGBB, gradient (C1-C2[-angle]), or image:/path/to/file.png
 
   notes  -- parent: /slide[N]
@@ -827,6 +833,9 @@ Types and properties:
 
 Examples:
   officecli add pres.pptx / --type slide --prop title="Agenda" --prop text="Topics for today"
+  officecli add pres.pptx / --type slide --prop layout=blank
+  officecli add pres.pptx / --type slide --prop layout="Title Slide" --prop title="Welcome"
+  officecli add pres.pptx / --type slide --prop layout=twocontent --prop title="Comparison"
   officecli add pres.pptx / --type slide --prop title="Dark Slide" --prop background=1F3864
   officecli add pres.pptx '/slide[1]' --type shape --prop text="Hello" --prop font=Arial --prop size=18
   officecli add pres.pptx '/slide[1]' --type shape --prop text="Go" --prop preset=rightArrow --prop fill=4472C4

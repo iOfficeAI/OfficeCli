@@ -121,6 +121,7 @@ public static class BlankDocCreator
         ) { Name = "Office Theme" };
         themePart.Theme.Save();
 
+        // Layout 1: Blank
         slideLayoutPart.SlideLayout = new DocumentFormat.OpenXml.Presentation.SlideLayout(
             new DocumentFormat.OpenXml.Presentation.CommonSlideData(
                 new DocumentFormat.OpenXml.Presentation.ShapeTree(
@@ -131,12 +132,68 @@ public static class BlankDocCreator
                     ),
                     new DocumentFormat.OpenXml.Presentation.GroupShapeProperties()
                 )
-            )
+            ) { Name = "Blank" }
         ) { Type = DocumentFormat.OpenXml.Presentation.SlideLayoutValues.Blank };
         slideLayoutPart.SlideLayout.Save();
-
-        // slideLayout needs back-reference to slideMaster
         slideLayoutPart.AddPart(slideMasterPart);
+
+        // Layout 2: Title Slide (title + subtitle)
+        var titleLayoutPart = slideMasterPart.AddNewPart<DocumentFormat.OpenXml.Packaging.SlideLayoutPart>("rId2");
+        titleLayoutPart.SlideLayout = new DocumentFormat.OpenXml.Presentation.SlideLayout(
+            new DocumentFormat.OpenXml.Presentation.CommonSlideData(
+                new DocumentFormat.OpenXml.Presentation.ShapeTree(
+                    new DocumentFormat.OpenXml.Presentation.NonVisualGroupShapeProperties(
+                        new DocumentFormat.OpenXml.Presentation.NonVisualDrawingProperties { Id = 1, Name = "" },
+                        new DocumentFormat.OpenXml.Presentation.NonVisualGroupShapeDrawingProperties(),
+                        new DocumentFormat.OpenXml.Presentation.ApplicationNonVisualDrawingProperties()
+                    ),
+                    new DocumentFormat.OpenXml.Presentation.GroupShapeProperties(),
+                    CreateLayoutPlaceholder(2, "Title", PlaceholderValues.CenteredTitle, 685800, 2130425, 7772400, 1470025),
+                    CreateLayoutPlaceholder(3, "Subtitle", PlaceholderValues.SubTitle, 1371600, 3886200, 6400800, 1752600)
+                )
+            ) { Name = "Title Slide" }
+        ) { Type = DocumentFormat.OpenXml.Presentation.SlideLayoutValues.Title };
+        titleLayoutPart.SlideLayout.Save();
+        titleLayoutPart.AddPart(slideMasterPart);
+
+        // Layout 3: Title and Content
+        var contentLayoutPart = slideMasterPart.AddNewPart<DocumentFormat.OpenXml.Packaging.SlideLayoutPart>("rId3");
+        contentLayoutPart.SlideLayout = new DocumentFormat.OpenXml.Presentation.SlideLayout(
+            new DocumentFormat.OpenXml.Presentation.CommonSlideData(
+                new DocumentFormat.OpenXml.Presentation.ShapeTree(
+                    new DocumentFormat.OpenXml.Presentation.NonVisualGroupShapeProperties(
+                        new DocumentFormat.OpenXml.Presentation.NonVisualDrawingProperties { Id = 1, Name = "" },
+                        new DocumentFormat.OpenXml.Presentation.NonVisualGroupShapeDrawingProperties(),
+                        new DocumentFormat.OpenXml.Presentation.ApplicationNonVisualDrawingProperties()
+                    ),
+                    new DocumentFormat.OpenXml.Presentation.GroupShapeProperties(),
+                    CreateLayoutPlaceholder(2, "Title", PlaceholderValues.Title, 838200, 365125, 10515600, 1325563),
+                    CreateLayoutPlaceholder(3, "Content", PlaceholderValues.Body, 838200, 1825625, 10515600, 4351338)
+                )
+            ) { Name = "Title and Content" }
+        ) { Type = DocumentFormat.OpenXml.Presentation.SlideLayoutValues.ObjectText };
+        contentLayoutPart.SlideLayout.Save();
+        contentLayoutPart.AddPart(slideMasterPart);
+
+        // Layout 4: Two Content
+        var twoContentLayoutPart = slideMasterPart.AddNewPart<DocumentFormat.OpenXml.Packaging.SlideLayoutPart>("rId4");
+        twoContentLayoutPart.SlideLayout = new DocumentFormat.OpenXml.Presentation.SlideLayout(
+            new DocumentFormat.OpenXml.Presentation.CommonSlideData(
+                new DocumentFormat.OpenXml.Presentation.ShapeTree(
+                    new DocumentFormat.OpenXml.Presentation.NonVisualGroupShapeProperties(
+                        new DocumentFormat.OpenXml.Presentation.NonVisualDrawingProperties { Id = 1, Name = "" },
+                        new DocumentFormat.OpenXml.Presentation.NonVisualGroupShapeDrawingProperties(),
+                        new DocumentFormat.OpenXml.Presentation.ApplicationNonVisualDrawingProperties()
+                    ),
+                    new DocumentFormat.OpenXml.Presentation.GroupShapeProperties(),
+                    CreateLayoutPlaceholder(2, "Title", PlaceholderValues.Title, 838200, 365125, 10515600, 1325563),
+                    CreateLayoutPlaceholder(3, "Content Left", PlaceholderValues.Body, 838200, 1825625, 5181600, 4351338),
+                    CreateLayoutPlaceholder(4, "Content Right", PlaceholderValues.Body, 6172200, 1825625, 5181600, 4351338)
+                )
+            ) { Name = "Two Content" }
+        ) { Type = DocumentFormat.OpenXml.Presentation.SlideLayoutValues.TwoColumnText };
+        twoContentLayoutPart.SlideLayout.Save();
+        twoContentLayoutPart.AddPart(slideMasterPart);
 
         slideMasterPart.SlideMaster = new DocumentFormat.OpenXml.Presentation.SlideMaster(
             new DocumentFormat.OpenXml.Presentation.CommonSlideData(
@@ -165,7 +222,10 @@ public static class BlankDocCreator
                 FollowedHyperlink = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.FollowedHyperlink,
             },
             new DocumentFormat.OpenXml.Presentation.SlideLayoutIdList(
-                new DocumentFormat.OpenXml.Presentation.SlideLayoutId { Id = 2147483649, RelationshipId = "rId1" }
+                new DocumentFormat.OpenXml.Presentation.SlideLayoutId { Id = 2147483649, RelationshipId = "rId1" },
+                new DocumentFormat.OpenXml.Presentation.SlideLayoutId { Id = 2147483650, RelationshipId = "rId2" },
+                new DocumentFormat.OpenXml.Presentation.SlideLayoutId { Id = 2147483651, RelationshipId = "rId3" },
+                new DocumentFormat.OpenXml.Presentation.SlideLayoutId { Id = 2147483652, RelationshipId = "rId4" }
             )
         );
         slideMasterPart.SlideMaster.Save();
@@ -179,5 +239,29 @@ public static class BlankDocCreator
             new NotesSize { Cx = 6858000, Cy = 9144000 }
         );
         presentationPart.Presentation.Save();
+    }
+
+    private static Shape CreateLayoutPlaceholder(uint id, string name, PlaceholderValues phType,
+        long x, long y, long cx, long cy)
+    {
+        var shape = new Shape();
+        shape.NonVisualShapeProperties = new NonVisualShapeProperties(
+            new NonVisualDrawingProperties { Id = id, Name = name },
+            new NonVisualShapeDrawingProperties(new DocumentFormat.OpenXml.Drawing.ShapeLocks { NoGrouping = true }),
+            new ApplicationNonVisualDrawingProperties(new PlaceholderShape { Type = phType })
+        );
+        shape.ShapeProperties = new ShapeProperties(
+            new DocumentFormat.OpenXml.Drawing.Transform2D(
+                new DocumentFormat.OpenXml.Drawing.Offset { X = x, Y = y },
+                new DocumentFormat.OpenXml.Drawing.Extents { Cx = cx, Cy = cy }
+            )
+        );
+        shape.TextBody = new TextBody(
+            new DocumentFormat.OpenXml.Drawing.BodyProperties(),
+            new DocumentFormat.OpenXml.Drawing.ListStyle(),
+            new DocumentFormat.OpenXml.Drawing.Paragraph(
+                new DocumentFormat.OpenXml.Drawing.EndParagraphRunProperties { Language = "zh-CN" })
+        );
+        return shape;
     }
 }

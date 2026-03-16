@@ -756,4 +756,96 @@ public class PptxFunctionalTests : IDisposable
             if (File.Exists(imgPath)) File.Delete(imgPath);
         }
     }
+
+    // ==================== Slide Layout ====================
+
+    [Fact]
+    public void SlideLayout_Default_HasLayoutInfo()
+    {
+        // 1. Add slide without specifying layout
+        _handler.Add("/", "slide", null, new() { ["title"] = "Default Layout" });
+
+        // 2. Get + Verify layout info is returned
+        var node = _handler.Get("/slide[1]");
+        node.Format.Should().ContainKey("layout");
+        ((string)node.Format["layout"]).Should().NotBeNullOrEmpty();
+
+        // 3. Persist + Verify
+        Reopen();
+        node = _handler.Get("/slide[1]");
+        node.Format.Should().ContainKey("layout");
+    }
+
+    [Fact]
+    public void SlideLayout_ByIndex_SelectsDifferentLayout()
+    {
+        // 1. Add two slides with different layout indices
+        _handler.Add("/", "slide", null, new() { ["title"] = "Layout 1", ["layout"] = "1" });
+        _handler.Add("/", "slide", null, new() { ["title"] = "Layout 2", ["layout"] = "2" });
+
+        // 2. Get + Verify they have different layouts
+        var node1 = _handler.Get("/slide[1]");
+        var node2 = _handler.Get("/slide[2]");
+        node1.Format.Should().ContainKey("layout");
+        node2.Format.Should().ContainKey("layout");
+
+        // Layout names should be different (assuming blank doc has >1 layout)
+        var layout1 = (string)node1.Format["layout"];
+        var layout2 = (string)node2.Format["layout"];
+        layout1.Should().NotBeNullOrEmpty();
+        layout2.Should().NotBeNullOrEmpty();
+        layout1.Should().NotBe(layout2, "different layout indices should yield different layouts");
+
+        // 3. Persist + Verify
+        Reopen();
+        node1 = _handler.Get("/slide[1]");
+        node2 = _handler.Get("/slide[2]");
+        ((string)node1.Format["layout"]).Should().Be(layout1);
+        ((string)node2.Format["layout"]).Should().Be(layout2);
+    }
+
+    [Fact]
+    public void SlideLayout_ByType_Blank()
+    {
+        // 1. Add slide with blank layout type
+        _handler.Add("/", "slide", null, new() { ["layout"] = "blank" });
+
+        // 2. Get + Verify
+        var node = _handler.Get("/slide[1]");
+        node.Format.Should().ContainKey("layoutType");
+        ((string)node.Format["layoutType"]).Should().Be("blank");
+
+        // 3. Persist + Verify
+        Reopen();
+        node = _handler.Get("/slide[1]");
+        ((string)node.Format["layoutType"]).Should().Be("blank");
+    }
+
+    [Fact]
+    public void SlideLayout_ByName_MatchesLayoutName()
+    {
+        // 1. Get the name of layout #1 to use as a name lookup
+        _handler.Add("/", "slide", null, new() { ["layout"] = "1" });
+        var node = _handler.Get("/slide[1]");
+        var layoutName = (string)node.Format["layout"];
+
+        // 2. Add another slide using that layout name
+        _handler.Add("/", "slide", null, new() { ["title"] = "By Name", ["layout"] = layoutName });
+        var node2 = _handler.Get("/slide[2]");
+        ((string)node2.Format["layout"]).Should().Be(layoutName);
+    }
+
+    [Fact]
+    public void SlideLayout_RootGet_ShowsLayoutPerSlide()
+    {
+        // 1. Add slides with different layouts
+        _handler.Add("/", "slide", null, new() { ["title"] = "Slide A", ["layout"] = "1" });
+        _handler.Add("/", "slide", null, new() { ["title"] = "Slide B", ["layout"] = "blank" });
+
+        // 2. Get root
+        var root = _handler.Get("/");
+        root.Children.Should().HaveCount(2);
+        root.Children[0].Format.Should().ContainKey("layout");
+        root.Children[1].Format.Should().ContainKey("layout");
+    }
 }

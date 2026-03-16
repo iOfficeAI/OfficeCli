@@ -32,6 +32,8 @@ public partial class PowerPointHandler
                     Type = "slide",
                     Preview = title
                 };
+                var lName = GetSlideLayoutName(slidePart);
+                if (lName != null) slideNode.Format["layout"] = lName;
                 ReadSlideBackground(GetSlide(slidePart), slideNode);
                 ReadSlideTransition(GetSlide(slidePart), slideNode);
 
@@ -266,6 +268,10 @@ public partial class PowerPointHandler
                 Preview = slide.CommonSlideData?.ShapeTree?.Elements<Shape>()
                     .Where(IsTitle).Select(GetShapeText).FirstOrDefault() ?? "(untitled)"
             };
+            var layoutName = GetSlideLayoutName(targetSlidePart);
+            if (layoutName != null) slideNode.Format["layout"] = layoutName;
+            var layoutType = GetSlideLayoutType(targetSlidePart);
+            if (layoutType != null) slideNode.Format["layoutType"] = layoutType;
             ReadSlideBackground(slide, slideNode);
             ReadSlideTransition(slide, slideNode);
             slideNode.Children = GetSlideChildNodes(targetSlidePart, slideIdx, depth);

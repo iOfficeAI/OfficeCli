@@ -28,15 +28,10 @@ public partial class PowerPointHandler
                 var newSlidePart = presentationPart.AddNewPart<SlidePart>();
 
                 // Link slide to slideLayout (required by PowerPoint)
-                var slideMasterPart = presentationPart.SlideMasterParts.FirstOrDefault();
-                if (slideMasterPart != null)
-                {
-                    var slideLayoutPart = slideMasterPart.SlideLayoutParts.FirstOrDefault();
-                    if (slideLayoutPart != null)
-                    {
-                        newSlidePart.AddPart(slideLayoutPart);
-                    }
-                }
+                var slideLayoutPart = ResolveSlideLayout(
+                    presentationPart, properties.GetValueOrDefault("layout"));
+                if (slideLayoutPart != null)
+                    newSlidePart.AddPart(slideLayoutPart);
 
                 newSlidePart.Slide = new Slide(
                     new CommonSlideData(

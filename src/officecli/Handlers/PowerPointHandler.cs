@@ -234,6 +234,102 @@ public partial class PowerPointHandler : IDocumentHandler
         if (ph.Index?.HasValue == true) node.Format["phIndex"] = ph.Index.Value;
         return node;
     }
+    // ==================== Layout ====================
+
+    /// <summary>
+    /// Resolve a SlideLayoutPart by name, type, or index.
+    /// If layoutHint is null, returns the first layout.
+    /// Matching order: exact name → layout type → numeric index → first layout.
+    /// </summary>
+    private static SlideLayoutPart? ResolveSlideLayout(PresentationPart presentationPart, string? layoutHint)
+    {
+        var allLayouts = presentationPart.SlideMasterParts
+            .SelectMany(m => m.SlideLayoutParts).ToList();
+        if (allLayouts.Count == 0) return null;
+
+        if (string.IsNullOrEmpty(layoutHint))
+            return allLayouts.FirstOrDefault();
+
+        // 1. Match by layout name (CommonSlideData.Name or SlideLayout.MatchingName)
+        var byName = allLayouts.FirstOrDefault(lp =>
+        {
+            var sl = lp.SlideLayout;
+            var csdName = sl?.CommonSlideData?.Name?.Value;
+            var matchName = sl?.MatchingName?.Value;
+            return string.Equals(csdName, layoutHint, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(matchName, layoutHint, StringComparison.OrdinalIgnoreCase);
+        });
+        if (byName != null) return byName;
+
+        // 2. Match by layout type keyword
+        var layoutType = layoutHint.ToLowerInvariant() switch
+        {
+            "title"                                     => SlideLayoutValues.Title,
+            "titleonly" or "title_only"                  => SlideLayoutValues.TitleOnly,
+            "blank"                                     => SlideLayoutValues.Blank,
+            "twocontent" or "two_content" or "twocol"   => SlideLayoutValues.TwoColumnText,
+            "titlecontent" or "title_content"            => SlideLayoutValues.ObjectText,
+            "section" or "sectionheader"                 => SlideLayoutValues.SectionHeader,
+            "comparison"                                 => SlideLayoutValues.TwoTextAndTwoObjects,
+            "contentwithcaption" or "caption"            => SlideLayoutValues.ObjectAndText,
+            "picturewithcaption" or "pictxt"             => SlideLayoutValues.PictureText,
+            "custom"                                     => SlideLayoutValues.Custom,
+            _ => (SlideLayoutValues?)null
+        };
+        if (layoutType.HasValue)
+        {
+            var byType = allLayouts.FirstOrDefault(lp =>
+                lp.SlideLayout?.Type?.HasValue == true &&
+                lp.SlideLayout.Type.Value == layoutType.Value);
+            if (byType != null) return byType;
+        }
+
+        // 3. Match by 1-based numeric index
+        if (int.TryParse(layoutHint, out var idx) && idx >= 1 && idx <= allLayouts.Count)
+            return allLayouts[idx - 1];
+
+        // 4. Fuzzy match: layout name contains the hint (case-insensitive)
+        var fuzzy = allLayouts.FirstOrDefault(lp =>
+        {
+            var csdName = lp.SlideLayout?.CommonSlideData?.Name?.Value;
+            return csdName != null && csdName.Contains(layoutHint, StringComparison.OrdinalIgnoreCase);
+        });
+        if (fuzzy != null) return fuzzy;
+
+        throw new ArgumentException(
+            $"Layout '{layoutHint}' not found. Available layouts: " +
+            string.Join(", ", allLayouts.Select((lp, i) =>
+            {
+                var name = lp.SlideLayout?.CommonSlideData?.Name?.Value ?? "(unnamed)";
+                var type = lp.SlideLayout?.Type?.HasValue == true ? lp.SlideLayout.Type.InnerText : "?";
+                return $"[{i + 1}] {name} ({type})";
+            })));
+    }
+
+    /// <summary>
+    /// Get the layout name for a slide part.
+    /// Falls back to type name if no explicit name is set.
+    /// </summary>
+    private static string? GetSlideLayoutName(SlidePart slidePart)
+    {
+        var layoutPart = slidePart.SlideLayoutPart;
+        if (layoutPart?.SlideLayout == null) return null;
+        return layoutPart.SlideLayout.CommonSlideData?.Name?.Value
+            ?? layoutPart.SlideLayout.MatchingName?.Value
+            ?? (layoutPart.SlideLayout.Type?.HasValue == true
+                ? layoutPart.SlideLayout.Type.InnerText : null);
+    }
+
+    /// <summary>
+    /// Get the layout type for a slide part.
+    /// </summary>
+    private static string? GetSlideLayoutType(SlidePart slidePart)
+    {
+        var layoutPart = slidePart.SlideLayoutPart;
+        if (layoutPart?.SlideLayout?.Type?.HasValue != true) return null;
+        return layoutPart.SlideLayout.Type.InnerText;
+    }
+
     // ==================== Raw Layer ====================
 
     public string Raw(string partPath, int? startRow = null, int? endRow = null, HashSet<string>? cols = null)
