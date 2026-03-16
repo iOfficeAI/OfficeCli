@@ -1291,4 +1291,391 @@ public class PptxFunctionalTests : IDisposable
         root = _handler.Get("/");
         ((string)root.Format["slideSize"]).Should().Be("custom");
     }
+
+    // ==================== Chart Formatting ====================
+
+    [Fact]
+    public void Chart_SeriesColors_Lifecycle()
+    {
+        // 1. Add chart with custom colors
+        _handler.Add("/", "slide", null, new() { ["title"] = "Colors" });
+        _handler.Add("/slide[1]", "chart", null, new()
+        {
+            ["charttype"] = "column",
+            ["categories"] = "A,B",
+            ["series1"] = "S1:10,20",
+            ["series2"] = "S2:30,40",
+            ["colors"] = "FF0000,00FF00"
+        });
+
+        // 2. Get + Verify series colors at depth 1
+        var node = _handler.Get("/slide[1]/chart[1]", 1);
+        node.Children.Should().HaveCount(2);
+        ((string)node.Children[0].Format["color"]).Should().Be("FF0000");
+        ((string)node.Children[1].Format["color"]).Should().Be("00FF00");
+
+        // 3. Set — change colors
+        _handler.Set("/slide[1]/chart[1]", new() { ["colors"] = "0000FF,FFFF00" });
+        node = _handler.Get("/slide[1]/chart[1]", 1);
+        ((string)node.Children[0].Format["color"]).Should().Be("0000FF");
+
+        // 4. Persist + Verify
+        Reopen();
+        node = _handler.Get("/slide[1]/chart[1]", 1);
+        ((string)node.Children[0].Format["color"]).Should().Be("0000FF");
+    }
+
+    [Fact]
+    public void Chart_DataLabels_Lifecycle()
+    {
+        _handler.Add("/", "slide", null, new() { ["title"] = "Labels" });
+        _handler.Add("/slide[1]", "chart", null, new()
+        {
+            ["charttype"] = "column",
+            ["series1"] = "S1:10,20,30"
+        });
+
+        // 1. Set data labels
+        _handler.Set("/slide[1]/chart[1]", new() { ["datalabels"] = "value" });
+
+        // 2. Get + Verify
+        var node = _handler.Get("/slide[1]/chart[1]");
+        node.Format.Should().ContainKey("dataLabels");
+        ((string)node.Format["dataLabels"]).Should().Contain("value");
+
+        // 3. Set to none
+        _handler.Set("/slide[1]/chart[1]", new() { ["datalabels"] = "none" });
+        node = _handler.Get("/slide[1]/chart[1]");
+        node.Format.Should().NotContainKey("dataLabels");
+
+        // 4. Set multiple
+        _handler.Set("/slide[1]/chart[1]", new() { ["datalabels"] = "value,percent" });
+        node = _handler.Get("/slide[1]/chart[1]");
+        ((string)node.Format["dataLabels"]).Should().Contain("value");
+        ((string)node.Format["dataLabels"]).Should().Contain("percent");
+
+        Reopen();
+        node = _handler.Get("/slide[1]/chart[1]");
+        ((string)node.Format["dataLabels"]).Should().Contain("value");
+    }
+
+    [Fact]
+    public void Chart_AxisTitle_Lifecycle()
+    {
+        _handler.Add("/", "slide", null, new() { ["title"] = "Axis" });
+        _handler.Add("/slide[1]", "chart", null, new()
+        {
+            ["charttype"] = "column",
+            ["series1"] = "Revenue:100,200"
+        });
+
+        // Set axis titles
+        _handler.Set("/slide[1]/chart[1]", new() { ["axistitle"] = "Amount ($)" });
+
+        // Persist + Verify (axis title is in raw XML, verify no crash)
+        Reopen();
+        var node = _handler.Get("/slide[1]/chart[1]");
+        node.Format.Should().ContainKey("chartType");
+    }
+
+    // ==================== Combo Chart ====================
+
+    [Fact]
+    public void Chart_Combo_Lifecycle()
+    {
+        _handler.Add("/", "slide", null, new() { ["title"] = "Combo" });
+        _handler.Add("/slide[1]", "chart", null, new()
+        {
+            ["charttype"] = "combo",
+            ["categories"] = "Q1,Q2,Q3,Q4",
+            ["series1"] = "Revenue:100,200,300,400",
+            ["series2"] = "Trend:150,200,250,350",
+            ["combosplit"] = "1"
+        });
+
+        // Get + Verify combo type detected
+        var node = _handler.Get("/slide[1]/chart[1]");
+        ((string)node.Format["chartType"]).Should().Be("combo");
+        ((int)node.Format["seriesCount"]).Should().Be(2);
+
+        // Persist + Verify
+        Reopen();
+        node = _handler.Get("/slide[1]/chart[1]");
+        ((string)node.Format["chartType"]).Should().Be("combo");
+    }
+
+    // ==================== Table Style ====================
+
+    [Fact]
+    public void TableStyle_Lifecycle()
+    {
+        _handler.Add("/", "slide", null, new() { ["title"] = "Table Style" });
+        _handler.Add("/slide[1]", "table", null, new() { ["rows"] = "2", ["cols"] = "2" });
+
+        // Set table style
+        _handler.Set("/slide[1]/table[1]", new() { ["tablestyle"] = "medium2" });
+
+        // Persist + Verify
+        Reopen();
+        var node = _handler.Get("/slide[1]/table[1]");
+        node.Type.Should().Be("table");
+    }
+
+    // ==================== Picture Cropping ====================
+
+    [Fact]
+    public void PictureCrop_Lifecycle()
+    {
+        // Create test image
+        var imgPath = Path.Combine(Path.GetTempPath(), $"test_crop_{Guid.NewGuid():N}.png");
+        try
+        {
+            var pngBytes = new byte[]
+            {
+                0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A,
+                0x00,0x00,0x00,0x0D,0x49,0x48,0x44,0x52,
+                0x00,0x00,0x00,0x01,0x00,0x00,0x00,0x01,0x08,0x02,0x00,0x00,0x00,0x90,0x77,0x53,0xDE,
+                0x00,0x00,0x00,0x0C,0x49,0x44,0x41,0x54,
+                0x08,0xD7,0x63,0xF8,0xCF,0xC0,0x00,0x00,0x00,0x02,0x00,0x01,0xE2,0x21,0xBC,0x33,
+                0x00,0x00,0x00,0x00,0x49,0x45,0x4E,0x44,0xAE,0x42,0x60,0x82
+            };
+            File.WriteAllBytes(imgPath, pngBytes);
+
+            _handler.Add("/", "slide", null, new() { ["title"] = "Crop Test" });
+            _handler.Add("/slide[1]", "picture", null, new() { ["path"] = imgPath });
+
+            // Set crop (10% from each side)
+            _handler.Set("/slide[1]/picture[1]", new() { ["crop"] = "10,10,10,10" });
+
+            // Get + Verify
+            var node = _handler.Get("/slide[1]/picture[1]");
+            node.Format.Should().ContainKey("crop");
+            ((string)node.Format["crop"]).Should().Be("10,10,10,10");
+
+            // Set individual crop
+            _handler.Set("/slide[1]/picture[1]", new() { ["cropleft"] = "20" });
+            node = _handler.Get("/slide[1]/picture[1]");
+            ((string)node.Format["crop"]).Should().StartWith("20,");
+
+            // Persist + Verify
+            Reopen();
+            node = _handler.Get("/slide[1]/picture[1]");
+            node.Format.Should().ContainKey("crop");
+        }
+        finally
+        {
+            if (File.Exists(imgPath)) File.Delete(imgPath);
+        }
+    }
+
+    // ==================== Ungroup ====================
+
+    [Fact]
+    public void Ungroup_Lifecycle()
+    {
+        // 1. Add slide + shapes, group them
+        _handler.Add("/", "slide", null, new() { ["title"] = "Ungroup" });
+        _handler.Add("/slide[1]", "shape", null, new()
+        {
+            ["text"] = "A", ["x"] = "1cm", ["y"] = "1cm", ["width"] = "3cm", ["height"] = "2cm"
+        });
+        _handler.Add("/slide[1]", "shape", null, new()
+        {
+            ["text"] = "B", ["x"] = "5cm", ["y"] = "1cm", ["width"] = "3cm", ["height"] = "2cm"
+        });
+        _handler.Add("/slide[1]", "group", null, new() { ["shapes"] = "2,3" });
+
+        // 2. Remove (ungroup) the group
+        _handler.Remove("/slide[1]/group[1]");
+
+        // 3. Shapes should be back as individual shapes
+        Reopen();
+        var slide = _handler.Get("/slide[1]");
+        // Title + 2 ungrouped shapes should exist
+        slide.Children.Count(c => c.Type == "textbox" || c.Type == "title").Should().BeGreaterThanOrEqualTo(3);
+    }
+
+    // ==================== WordArt ====================
+
+    [Fact]
+    public void WordArt_Lifecycle()
+    {
+        _handler.Add("/", "slide", null, new() { ["title"] = "WordArt" });
+        _handler.Add("/slide[1]", "shape", null, new() { ["text"] = "Wavy Text" });
+
+        // 1. Set text warp
+        _handler.Set("/slide[1]/shape[2]", new() { ["textwarp"] = "textWave1" });
+
+        // 2. Get + Verify
+        var node = _handler.Get("/slide[1]/shape[2]");
+        node.Format.Should().ContainKey("textWarp");
+        ((string)node.Format["textWarp"]).Should().Be("textWave1");
+
+        // 3. Remove warp
+        _handler.Set("/slide[1]/shape[2]", new() { ["textwarp"] = "none" });
+        node = _handler.Get("/slide[1]/shape[2]");
+        node.Format.Should().NotContainKey("textWarp");
+
+        // 4. Set again + Persist
+        _handler.Set("/slide[1]/shape[2]", new() { ["textwarp"] = "textChevron" });
+        Reopen();
+        node = _handler.Get("/slide[1]/shape[2]");
+        ((string)node.Format["textWarp"]).Should().Be("textChevron");
+    }
+
+    // ==================== Picture Replace ====================
+
+    [Fact]
+    public void PictureReplace_Lifecycle()
+    {
+        var img1 = Path.Combine(Path.GetTempPath(), $"test_r1_{Guid.NewGuid():N}.png");
+        var img2 = Path.Combine(Path.GetTempPath(), $"test_r2_{Guid.NewGuid():N}.png");
+        try
+        {
+            var png = new byte[]
+            {
+                0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A,
+                0x00,0x00,0x00,0x0D,0x49,0x48,0x44,0x52,
+                0x00,0x00,0x00,0x01,0x00,0x00,0x00,0x01,0x08,0x02,0x00,0x00,0x00,0x90,0x77,0x53,0xDE,
+                0x00,0x00,0x00,0x0C,0x49,0x44,0x41,0x54,
+                0x08,0xD7,0x63,0xF8,0xCF,0xC0,0x00,0x00,0x00,0x02,0x00,0x01,0xE2,0x21,0xBC,0x33,
+                0x00,0x00,0x00,0x00,0x49,0x45,0x4E,0x44,0xAE,0x42,0x60,0x82
+            };
+            File.WriteAllBytes(img1, png);
+            File.WriteAllBytes(img2, png);
+
+            _handler.Add("/", "slide", null, new() { ["title"] = "Replace" });
+            _handler.Add("/slide[1]", "picture", null, new() { ["path"] = img1 });
+
+            // Replace image
+            _handler.Set("/slide[1]/picture[1]", new() { ["path"] = img2 });
+
+            // Should not throw
+            Reopen();
+            var node = _handler.Get("/slide[1]/picture[1]");
+            node.Type.Should().Be("picture");
+        }
+        finally
+        {
+            if (File.Exists(img1)) File.Delete(img1);
+            if (File.Exists(img2)) File.Delete(img2);
+        }
+    }
+
+    // ==================== Chart Axis Formatting ====================
+
+    [Fact]
+    public void Chart_AxisFormatting_Lifecycle()
+    {
+        _handler.Add("/", "slide", null, new() { ["title"] = "Axis" });
+        _handler.Add("/slide[1]", "chart", null, new()
+        {
+            ["charttype"] = "column",
+            ["series1"] = "Data:10,50,100"
+        });
+
+        // Set axis min/max/unit
+        _handler.Set("/slide[1]/chart[1]", new()
+        {
+            ["axismin"] = "0",
+            ["axismax"] = "150",
+            ["majorunit"] = "25",
+            ["axisnumfmt"] = "0.0"
+        });
+
+        // Persist + Verify no crash
+        Reopen();
+        var node = _handler.Get("/slide[1]/chart[1]");
+        node.Format.Should().ContainKey("chartType");
+    }
+
+    // ==================== Master Editing ====================
+
+    [Fact]
+    public void MasterEdit_LayoutName()
+    {
+        // Set layout name
+        _handler.Set("/slideLayout[1]", new() { ["name"] = "My Custom Blank" });
+
+        // After reopen, the layout name should persist
+        Reopen();
+        _handler.Add("/", "slide", null, new() { ["layout"] = "My Custom Blank" });
+        var node = _handler.Get("/slide[1]");
+        ((string)node.Format["layout"]).Should().Be("My Custom Blank");
+    }
+
+    // ==================== Video/Audio ====================
+
+    [Fact]
+    public void Media_Video_Lifecycle()
+    {
+        var videoPath = Path.Combine(Path.GetTempPath(), $"test_vid_{Guid.NewGuid():N}.mp4");
+        try
+        {
+            File.WriteAllBytes(videoPath, new byte[] { 0x00, 0x00, 0x00, 0x20 });
+
+            // 1. Add video
+            _handler.Add("/", "slide", null, new() { ["title"] = "Video" });
+            _handler.Add("/slide[1]", "video", null, new()
+            {
+                ["path"] = videoPath,
+                ["width"] = "10cm",
+                ["height"] = "6cm",
+                ["volume"] = "60",
+                ["autoplay"] = "true"
+            });
+
+            // 2. Get — should show as "video" type
+            var slide = _handler.Get("/slide[1]");
+            slide.Children.Should().Contain(c => c.Type == "video");
+            var videoNode = slide.Children.First(c => c.Type == "video");
+            videoNode.Format.Should().ContainKey("volume");
+            ((int)videoNode.Format["volume"]).Should().Be(60);
+            videoNode.Format.Should().ContainKey("autoplay");
+
+            // 3. Set — change volume
+            _handler.Set("/slide[1]/video[1]", new() { ["volume"] = "40" });
+            slide = _handler.Get("/slide[1]");
+            videoNode = slide.Children.First(c => c.Type == "video");
+            ((int)videoNode.Format["volume"]).Should().Be(40);
+
+            // 4. Query — find videos
+            var videos = _handler.Query("video");
+            videos.Should().HaveCount(1);
+            videos[0].Type.Should().Be("video");
+
+            // 5. Persist + Verify
+            Reopen();
+            slide = _handler.Get("/slide[1]");
+            slide.Children.Should().Contain(c => c.Type == "video");
+
+            // 6. Remove video
+            _handler.Remove("/slide[1]/video[1]");
+            slide = _handler.Get("/slide[1]");
+            slide.Children.Should().NotContain(c => c.Type == "video");
+        }
+        finally
+        {
+            if (File.Exists(videoPath)) File.Delete(videoPath);
+        }
+    }
+
+    // ==================== Hyperlink Remove ====================
+
+    [Fact]
+    public void ShapeHyperlink_Remove()
+    {
+        _handler.Add("/", "slide", null, new() { ["title"] = "Link" });
+        _handler.Add("/slide[1]", "shape", null, new() { ["text"] = "Click me" });
+
+        // Add link
+        _handler.Set("/slide[1]/shape[2]", new() { ["link"] = "https://example.com" });
+        var node = _handler.Get("/slide[1]/shape[2]");
+        node.Format.Should().ContainKey("link");
+
+        // Remove link
+        _handler.Set("/slide[1]/shape[2]", new() { ["link"] = "none" });
+        node = _handler.Get("/slide[1]/shape[2]");
+        node.Format.Should().NotContainKey("link");
+    }
 }
