@@ -6,6 +6,7 @@ using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using OfficeCli.Core;
+using XDR = DocumentFormat.OpenXml.Drawing.Spreadsheet;
 
 
 namespace OfficeCli.Handlers;
@@ -14,6 +15,48 @@ public partial class ExcelHandler
 {
     public List<string> Set(string path, Dictionary<string, string> properties)
     {
+        // Handle /namedrange[N] or /namedrange[Name]
+        var namedRangeMatch = Regex.Match(path.TrimStart('/'), @"^namedrange\[(.+?)\]$", RegexOptions.IgnoreCase);
+        if (namedRangeMatch.Success)
+        {
+            var selector = namedRangeMatch.Groups[1].Value;
+            var workbook = GetWorkbook();
+            var definedNames = workbook.GetFirstChild<DefinedNames>();
+            if (definedNames == null)
+                throw new ArgumentException("No named ranges found in workbook");
+
+            var allDefs = definedNames.Elements<DefinedName>().ToList();
+            DefinedName? dn;
+
+            if (int.TryParse(selector, out var dnIndex))
+            {
+                if (dnIndex < 1 || dnIndex > allDefs.Count)
+                    throw new ArgumentException($"Named range index {dnIndex} out of range (1-{allDefs.Count})");
+                dn = allDefs[dnIndex - 1];
+            }
+            else
+            {
+                dn = allDefs.FirstOrDefault(d =>
+                    d.Name?.Value?.Equals(selector, StringComparison.OrdinalIgnoreCase) == true)
+                    ?? throw new ArgumentException($"Named range '{selector}' not found");
+            }
+
+            var nrUnsupported = new List<string>();
+            foreach (var (key, value) in properties)
+            {
+                switch (key.ToLowerInvariant())
+                {
+                    case "ref": dn.Text = value; break;
+                    case "name": dn.Name = value; break;
+                    case "comment": dn.Comment = value; break;
+                    default: nrUnsupported.Add(key); break;
+                }
+            }
+
+            workbook.Save();
+            return nrUnsupported;
+        }
+
         // Parse path: /SheetName, /SheetName/A1, /SheetName/A1:D1, /SheetName/col[A], /SheetName/row[1], /SheetName/autofilter
         var segments = path.TrimStart('/').Split('/', 2);
         var sheetName = segments[0];
@@ -29,6 +72,231 @@ public partial class ExcelHandler
         }
 
         var cellRef = segments[1];
+
+        // Handle /SheetName/validation[N]
+        var validationSetMatch = Regex.Match(cellRef, @"^validation\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (validationSetMatch.Success)
+        {
+            var dvIdx = int.Parse(validationSetMatch.Groups[1].Value);
+            var dvs = GetSheet(worksheet).GetFirstChild<DataValidations>();
+            if (dvs == null)
+                throw new ArgumentException("No data validations found in sheet");
+
+            var dvList = dvs.Elements<DataValidation>().ToList();
+            if (dvIdx < 1 || dvIdx > dvList.Count)
+                throw new ArgumentException($"Validation index {dvIdx} out of range (1-{dvList.Count})");
+
+            var dv = dvList[dvIdx - 1];
+            var dvUnsupported = new List<string>();
+
+            foreach (var (key, value) in properties)
+            {
+                switch (key.ToLowerInvariant())
+                {
+                    case "sqref":
+                        dv.SequenceOfReferences = new ListValue<StringValue>(
+                            value.Split(' ').Select(s => new StringValue(s)));
+                        break;
+                    case "type":
+                        dv.Type = value.ToLowerInvariant() switch
+                        {
+                            "list" => DataValidationValues.List,
+                            "whole" => DataValidationValues.Whole,
+                            "decimal" => DataValidationValues.Decimal,
+                            "date" => DataValidationValues.Date,
+                            "time" => DataValidationValues.Time,
+                            "textlength" => DataValidationValues.TextLength,
+                            "custom" => DataValidationValues.Custom,
+                            _ => throw new ArgumentException($"Unknown validation type: {value}")
+                        };
+                        break;
+                    case "formula1":
+                        if (dv.Type?.Value == DataValidationValues.List && !value.StartsWith("\""))
+                            dv.Formula1 = new Formula1($"\"{value}\"");
+                        else
+                            dv.Formula1 = new Formula1(value);
+                        break;
+                    case "formula2":
+                        dv.Formula2 = new Formula2(value);
+                        break;
+                    case "allowblank":
+                        dv.AllowBlank = IsTruthy(value);
+                        break;
+                    case "showerror":
+                        dv.ShowErrorMessage = IsTruthy(value);
+                        break;
+                    case "errortitle":
+                        dv.ErrorTitle = value;
+                        break;
+                    case "error":
+                        dv.Error = value;
+                        break;
+                    case "showinput":
+                        dv.ShowInputMessage = IsTruthy(value);
+                        break;
+                    case "prompttitle":
+                        dv.PromptTitle = value;
+                        break;
+                    case "prompt":
+                        dv.Prompt = value;
+                        break;
+                    default:
+                        dvUnsupported.Add(key);
+                        break;
+                }
+            }
+
+            GetSheet(worksheet).Save();
+            return dvUnsupported;
+        }
+
+        // Handle /SheetName/picture[N]
+        var picSetMatch = Regex.Match(cellRef, @"^picture\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (picSetMatch.Success)
+        {
+            var picIdx = int.Parse(picSetMatch.Groups[1].Value);
+            var drawingsPart = worksheet.DrawingsPart
+                ?? throw new ArgumentException("Sheet has no drawings/pictures");
+            var wsDrawing = drawingsPart.WorksheetDrawing
+                ?? throw new ArgumentException("Sheet has no drawings/pictures");
+
+            var picAnchors = wsDrawing.Elements<XDR.TwoCellAnchor>()
+                .Where(a => a.Descendants<XDR.Picture>().Any()).ToList();
+            if (picIdx < 1 || picIdx > picAnchors.Count)
+                throw new ArgumentException($"Picture index {picIdx} out of range (1..{picAnchors.Count})");
+
+            var anchor = picAnchors[picIdx - 1];
+            var picUnsupported = new List<string>();
+
+            foreach (var (key, value) in properties)
+            {
+                switch (key.ToLowerInvariant())
+                {
+                    case "x":
+                        if (anchor.FromMarker != null)
+                            anchor.FromMarker.ColumnId!.Text = value;
+                        break;
+                    case "y":
+                        if (anchor.FromMarker != null)
+                            anchor.FromMarker.RowId!.Text = value;
+                        break;
+                    case "width":
+                        if (anchor.FromMarker != null && anchor.ToMarker != null)
+                        {
+                            var fromCol = int.TryParse(anchor.FromMarker.ColumnId?.Text, out var fc) ? fc : 0;
+                            anchor.ToMarker.ColumnId!.Text = (fromCol + int.Parse(value)).ToString();
+                        }
+                        break;
+                    case "height":
+                        if (anchor.FromMarker != null && anchor.ToMarker != null)
+                        {
+                            var fromRow = int.TryParse(anchor.FromMarker.RowId?.Text, out var fr) ? fr : 0;
+                            anchor.ToMarker.RowId!.Text = (fromRow + int.Parse(value)).ToString();
+                        }
+                        break;
+                    case "alt":
+                        var nvProps = anchor.Descendants<XDR.NonVisualDrawingProperties>().FirstOrDefault();
+                        if (nvProps != null) nvProps.Description = value;
+                        break;
+                    default:
+                        picUnsupported.Add(key);
+                        break;
+                }
+            }
+
+            drawingsPart.WorksheetDrawing.Save();
+            return picUnsupported;
+        }
+
+        // Handle /SheetName/table[N]
+        var tableSetMatch = Regex.Match(cellRef, @"^table\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (tableSetMatch.Success)
+        {
+            var tableIdx = int.Parse(tableSetMatch.Groups[1].Value);
+            var tableParts = worksheet.TableDefinitionParts.ToList();
+            if (tableIdx < 1 || tableIdx > tableParts.Count)
+                throw new ArgumentException($"Table index {tableIdx} out of range (1..{tableParts.Count})");
+
+            var table = tableParts[tableIdx - 1].Table
+                ?? throw new ArgumentException($"Table {tableIdx} has no definition");
+
+            var tblUnsupported = new List<string>();
+            foreach (var (key, value) in properties)
+            {
+                switch (key.ToLowerInvariant())
+                {
+                    case "name": table.Name = value; break;
+                    case "displayname": table.DisplayName = value; break;
+                    case "style":
+                        var styleInfo = table.GetFirstChild<TableStyleInfo>();
+                        if (styleInfo != null) styleInfo.Name = value;
+                        else table.AppendChild(new TableStyleInfo
+                        {
+                            Name = value, ShowFirstColumn = false, ShowLastColumn = false,
+                            ShowRowStripes = true, ShowColumnStripes = false
+                        });
+                        break;
+                    case "ref":
+                        table.Reference = value.ToUpperInvariant();
+                        var af = table.GetFirstChild<AutoFilter>();
+                        if (af != null) af.Reference = value.ToUpperInvariant();
+                        break;
+                    default: tblUnsupported.Add(key); break;
+                }
+            }
+
+            tableParts[tableIdx - 1].Table!.Save();
+            return tblUnsupported;
+        }
+
+        // Handle /SheetName/comment[N]
+        var commentSetMatch = Regex.Match(cellRef, @"^comment\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (commentSetMatch.Success)
+        {
+            var cmtIndex = int.Parse(commentSetMatch.Groups[1].Value);
+            var commentsPart = worksheet.WorksheetCommentsPart;
+            if (commentsPart?.Comments == null)
+                throw new ArgumentException($"No comments found in sheet: {sheetName}");
+
+            var cmtList = commentsPart.Comments.GetFirstChild<CommentList>();
+            var cmtElement = cmtList?.Elements<Comment>().ElementAtOrDefault(cmtIndex - 1)
+                ?? throw new ArgumentException($"Comment [{cmtIndex}] not found");
+
+            var cmtUnsupported = new List<string>();
+            foreach (var (key, value) in properties)
+            {
+                switch (key.ToLowerInvariant())
+                {
+                    case "text":
+                        cmtElement.CommentText = new CommentText(
+                            new Run(
+                                new RunProperties(new FontSize { Val = 9 }, new Color { Indexed = 81 },
+                                    new RunFont { Val = "Tahoma" }),
+                                new Text(value) { Space = SpaceProcessingModeValues.Preserve }
+                            )
+                        );
+                        break;
+                    case "author":
+                        var authors = commentsPart.Comments.GetFirstChild<Authors>()!;
+                        var existingAuthors = authors.Elements<Author>().ToList();
+                        var aIdx = existingAuthors.FindIndex(a => a.Text == value);
+                        if (aIdx >= 0)
+                            cmtElement.AuthorId = (uint)aIdx;
+                        else
+                        {
+                            authors.AppendChild(new Author(value));
+                            cmtElement.AuthorId = (uint)existingAuthors.Count;
+                        }
+                        break;
+                    default:
+                        cmtUnsupported.Add(key);
+                        break;
+                }
+            }
+
+            commentsPart.Comments.Save();
+            return cmtUnsupported;
+        }
 
         // Handle /SheetName/autofilter
         if (cellRef.Equals("autofilter", StringComparison.OrdinalIgnoreCase))
@@ -374,12 +642,7 @@ public partial class ExcelHandler
                         if (mergeCells == null)
                         {
                             mergeCells = new MergeCells();
-                            // MergeCells must be after SheetData, before Hyperlinks/Drawing
-                            var sheetData = ws.GetFirstChild<SheetData>();
-                            if (sheetData != null)
-                                sheetData.InsertAfterSelf(mergeCells);
-                            else
-                                ws.AppendChild(mergeCells);
+                            ws.AppendChild(mergeCells);
                         }
 
                         // Avoid duplicate
@@ -413,8 +676,56 @@ public partial class ExcelHandler
             }
         }
 
+        ReorderWorksheetChildren(ws);
         ws.Save();
         return unsupported;
+    }
+
+    /// <summary>
+    /// Reorder worksheet children to match OpenXML schema sequence.
+    /// Fixes element ordering violations that occur when elements are inserted via DOM methods.
+    /// Schema order: sheetPr, dimension, sheetViews, sheetFormatPr, cols, sheetData,
+    ///   sheetCalcPr, sheetProtection, protectedRanges, scenarios, autoFilter, sortState,
+    ///   dataConsolidate, customSheetViews, mergeCells, phoneticPr, conditionalFormatting,
+    ///   dataValidations, hyperlinks, printOptions, pageMargins, pageSetup, headerFooter,
+    ///   rowBreaks, colBreaks, drawing, legacyDrawing, tableParts, extLst
+    /// </summary>
+    private static void ReorderWorksheetChildren(Worksheet ws)
+    {
+        // Define schema element order (only elements we care about)
+        var order = new Dictionary<string, int>
+        {
+            ["sheetPr"] = 0, ["dimension"] = 1, ["sheetViews"] = 2, ["sheetFormatPr"] = 3,
+            ["cols"] = 4, ["sheetData"] = 5, ["sheetCalcPr"] = 6, ["sheetProtection"] = 7,
+            ["protectedRanges"] = 8, ["scenarios"] = 9, ["autoFilter"] = 10, ["sortState"] = 11,
+            ["dataConsolidate"] = 12, ["customSheetViews"] = 13, ["mergeCells"] = 14,
+            ["phoneticPr"] = 15, ["conditionalFormatting"] = 16, ["dataValidations"] = 17,
+            ["hyperlinks"] = 18, ["printOptions"] = 19, ["pageMargins"] = 20,
+            ["pageSetup"] = 21, ["headerFooter"] = 22, ["rowBreaks"] = 23, ["colBreaks"] = 24,
+            ["drawing"] = 25, ["legacyDrawing"] = 26, ["tableParts"] = 27, ["extLst"] = 99
+        };
+
+        var children = ws.ChildElements.ToList();
+        var sorted = children
+            .OrderBy(c => order.TryGetValue(c.LocalName, out var idx) ? idx : 50)
+            .ToList();
+
+        // Check if already in order
+        bool needsReorder = false;
+        for (int i = 0; i < children.Count; i++)
+        {
+            if (!ReferenceEquals(children[i], sorted[i]))
+            {
+                needsReorder = true;
+                break;
+            }
+        }
+
+        if (needsReorder)
+        {
+            foreach (var child in children) child.Remove();
+            foreach (var child in sorted) ws.AppendChild(child);
+        }
     }
 
     // ==================== Column Set (width, hidden) ====================
