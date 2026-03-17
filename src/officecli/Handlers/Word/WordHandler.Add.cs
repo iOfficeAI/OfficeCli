@@ -212,7 +212,7 @@ public partial class WordHandler
                 }
                 else
                 {
-                    parent.AppendChild(para);
+                    AppendToParent(parent, para);
                     resultPath = $"{parentPath}/p[{paraCount + 1}]";
                 }
                 break;
@@ -258,17 +258,17 @@ public partial class WordHandler
                             if (index.Value < children.Count)
                                 parent.InsertBefore(wrapPara, children[index.Value]);
                             else
-                                parent.AppendChild(wrapPara);
+                                AppendToParent(parent, wrapPara);
                         }
                         else
                         {
-                            parent.AppendChild(wrapPara);
+                            AppendToParent(parent, wrapPara);
                         }
                         resultPath = $"{parentPath}/oMathPara[{mathParaCount + 1}]";
                     }
                     else
                     {
-                        parent.AppendChild(mathPara);
+                        AppendToParent(parent, mathPara);
                         resultPath = $"{parentPath}/oMathPara[1]";
                     }
                     newElement = mathPara;
@@ -350,9 +350,9 @@ public partial class WordHandler
                 var tblProps = new TableProperties(
                     new TableBorders(
                         new TopBorder { Val = BorderValues.Single, Size = 4 },
+                        new LeftBorder { Val = BorderValues.Single, Size = 4 },
                         new BottomBorder { Val = BorderValues.Single, Size = 4 },
-                        new StartBorder { Val = BorderValues.Single, Size = 4 },
-                        new EndBorder { Val = BorderValues.Single, Size = 4 },
+                        new RightBorder { Val = BorderValues.Single, Size = 4 },
                         new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4 },
                         new InsideVerticalBorder { Val = BorderValues.Single, Size = 4 }
                     )
@@ -379,7 +379,7 @@ public partial class WordHandler
                     table.AppendChild(row);
                 }
 
-                parent.AppendChild(table);
+                AppendToParent(parent, table);
                 var tblCount = parent.Elements<Table>().Count();
                 resultPath = $"{parentPath}/tbl[{tblCount}]";
                 newElement = table;
@@ -530,7 +530,7 @@ public partial class WordHandler
                 else
                 {
                     chartPara = new Paragraph(chartRun);
-                    parent.AppendChild(chartPara);
+                    AppendToParent(parent, chartPara);
                 }
                 newElement = chartPara;
 
@@ -615,7 +615,7 @@ public partial class WordHandler
                     }
                     else
                     {
-                        parent.AppendChild(imgPara);
+                        AppendToParent(parent, imgPara);
                         resultPath = $"{parentPath}/p[{imgParaCount + 1}]";
                     }
                 }
@@ -801,7 +801,7 @@ public partial class WordHandler
 
                 sectPProps.AppendChild(sectPr);
                 sectPara.AppendChild(sectPProps);
-                parent.AppendChild(sectPara);
+                AppendToParent(parent, sectPara);
 
                 // Count section properties in document
                 var secCount = body.Elements<Paragraph>()
@@ -922,7 +922,7 @@ public partial class WordHandler
                         new ParagraphProperties(new ParagraphStyleId { Val = "TOCHeading" }),
                         new Run(new Text(tocTitle))
                     );
-                    parent.AppendChild(titlePara);
+                    AppendToParent(parent, titlePara);
                 }
 
                 // Field begin
@@ -936,7 +936,7 @@ public partial class WordHandler
                 // Field end
                 tocPara.AppendChild(new Run(new FieldChar { FieldCharType = FieldCharValues.End }));
 
-                parent.AppendChild(tocPara);
+                AppendToParent(parent, tocPara);
 
                 // Add UpdateFieldsOnOpen setting
                 var settingsPart2 = _doc.MainDocumentPart!.DocumentSettingsPart

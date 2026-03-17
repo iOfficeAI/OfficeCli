@@ -18,6 +18,24 @@ public partial class WordHandler
     private static bool IsTruthy(string value) =>
         ParseHelpers.IsTruthy(value);
 
+    /// <summary>
+    /// Append a child element to parent, but if parent is Body, insert before
+    /// the final SectionProperties to maintain valid OOXML structure.
+    /// </summary>
+    private static void AppendToParent(OpenXmlElement parent, OpenXmlElement child)
+    {
+        if (parent is Body body)
+        {
+            var lastSectPr = body.GetFirstChild<SectionProperties>();
+            if (lastSectPr != null)
+            {
+                body.InsertBefore(child, lastSectPr);
+                return;
+            }
+        }
+        parent.AppendChild(child);
+    }
+
     private static double ParseFontSize(string value) =>
         ParseHelpers.ParseFontSize(value);
 
