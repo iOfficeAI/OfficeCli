@@ -14,7 +14,8 @@ public class ResidentServer : IDisposable
     private readonly string _pipeName;
     private CancellationTokenSource _cts = new();
     private readonly SemaphoreSlim _commandLock = new(1, 1);
-    private bool _closeRequested;
+    private readonly TimeSpan _idleTimeout = TimeSpan.FromMinutes(12);
+    private CancellationTokenSource _idleCts = new();
     private bool _disposed;
 
     public string PipeName => _pipeName;
@@ -43,6 +44,9 @@ public class ResidentServer : IDisposable
         // Start ping responder on a dedicated pipe (never blocked by business commands)
         var pingTask = RunPingResponderAsync(token);
 
+        // Start idle watchdog
+        var idleTask = RunIdleWatchdogAsync(token);
+
         // Main command loop - accept connections concurrently, serialize command execution
         while (!token.IsCancellationRequested)
         {
@@ -67,7 +71,40 @@ public class ResidentServer : IDisposable
             }
         }
 
-        await pingTask;
+        // Both tasks observe the same token; swallow cancellation on shutdown
+        try { await pingTask; } catch (OperationCanceledException) { }
+        try { await idleTask; } catch (OperationCanceledException) { }
+    }
+
+    private void ResetIdleTimer()
+    {
+        // Cancel the old idle CTS to restart the delay; don't Dispose here to avoid
+        // a race with RunIdleWatchdogAsync reading the token concurrently.
+        var oldCts = Interlocked.Exchange(ref _idleCts, new CancellationTokenSource());
+        oldCts.Cancel();
+    }
+
+    private async Task RunIdleWatchdogAsync(CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            try
+            {
+                // Snapshot the current idle CTS; ResetIdleTimer() swaps it to restart the wait
+                var idleCts = Volatile.Read(ref _idleCts);
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(idleCts.Token, token);
+                await Task.Delay(_idleTimeout, linked.Token);
+
+                // Reached here = idle timeout elapsed without reset
+                Console.Error.WriteLine($"Resident idle for {_idleTimeout.TotalMinutes} minutes, closing.");
+                _cts.Cancel();
+                break;
+            }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested)
+            {
+                // _idleCts was cancelled (timer reset), loop and wait again
+            }
+        }
     }
 
     private async Task RunPingResponderAsync(CancellationToken token)
@@ -95,7 +132,6 @@ public class ResidentServer : IDisposable
                     }
                     else if (request?.Command == "__close__")
                     {
-                        _closeRequested = true;
                         var response = MakeResponse(0, "Closing resident.", "");
                         await writer.WriteLineAsync(response.AsMemory(), token);
                         _cts.Cancel();
@@ -125,11 +161,13 @@ public class ResidentServer : IDisposable
             await _commandLock.WaitAsync(token);
             try
             {
+                ResetIdleTimer();
                 await HandleClientAsync(server, token);
             }
             finally
             {
                 _commandLock.Release();
+                ResetIdleTimer();
             }
         }
         catch (OperationCanceledException) { }
@@ -409,12 +447,30 @@ public class ResidentServer : IDisposable
         {
             _disposed = true;
             _cts.Cancel();
-            // Wait for any in-flight command to finish before releasing the handler
-            _commandLock.Wait();
-            _commandLock.Release();
-            _handler.Dispose();
-            _commandLock.Dispose();
+
+            // Run the entire shutdown sequence on a background thread.
+            // A watchdog on the calling thread ensures the process always exits.
+            var shutdownTask = Task.Run(() =>
+            {
+                // Wait for any in-flight command to finish (preserves data integrity)
+                _commandLock.Wait();
+                _commandLock.Release();
+
+                try { _handler.Dispose(); }
+                catch (Exception ex) { Console.Error.WriteLine($"Warning: handler dispose error: {ex.Message}"); }
+
+                _commandLock.Dispose();
+            });
+
+            // Watchdog: if shutdown takes longer than 10min, force exit
+            if (!shutdownTask.Wait(TimeSpan.FromMinutes(10)))
+            {
+                Console.Error.WriteLine("Warning: shutdown timed out after 10 minutes, forcing exit.");
+                Environment.Exit(1);
+            }
+
             _cts.Dispose();
+            _idleCts.Dispose();
         }
     }
 }

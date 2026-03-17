@@ -16,7 +16,7 @@ var rootCommand = new RootCommand("""
 rootCommand.Add(jsonOption);
 
 // ==================== open command (start resident) ====================
-var openFileArg = new Argument<FileInfo>("file") { Description = "Office document path" };
+var openFileArg = new Argument<FileInfo>("file") { Description = "Office document path (required even with open/close mode)" };
 var openCommand = new Command("open", "Start a resident process to keep the document in memory for faster subsequent commands");
 openCommand.Add(openFileArg);
 
@@ -80,7 +80,7 @@ openCommand.SetAction(result => SafeRun(() =>
 rootCommand.Add(openCommand);
 
 // ==================== close command (stop resident) ====================
-var closeFileArg = new Argument<FileInfo>("file") { Description = "Office document path" };
+var closeFileArg = new Argument<FileInfo>("file") { Description = "Office document path (required even with open/close mode)" };
 var closeCommand = new Command("close", "Stop the resident process for the document");
 closeCommand.Add(closeFileArg);
 
@@ -96,7 +96,7 @@ closeCommand.SetAction(result => SafeRun(() =>
 rootCommand.Add(closeCommand);
 
 // ==================== __resident-serve__ (internal, hidden) ====================
-var serveFileArg = new Argument<FileInfo>("file") { Description = "Office document path" };
+var serveFileArg = new Argument<FileInfo>("file") { Description = "Office document path (required even with open/close mode)" };
 var serveCommand = new Command("__resident-serve__", "Internal: run resident server (do not call directly)");
 serveCommand.Hidden = true;
 serveCommand.Add(serveFileArg);
@@ -186,7 +186,7 @@ viewCommand.SetAction(result => SafeRun(() =>
 rootCommand.Add(viewCommand);
 
 // ==================== get command ====================
-var getFileArg = new Argument<FileInfo>("file") { Description = "Office document path" };
+var getFileArg = new Argument<FileInfo>("file") { Description = "Office document path (required even with open/close mode)" };
 var pathArg = new Argument<string>("path") { Description = "DOM path (e.g. /body/p[1])" };
 pathArg.DefaultValueFactory = _ => "/";
 var depthOpt = new Option<int>("--depth") { Description = "Depth of child nodes to include" };
@@ -223,7 +223,7 @@ getCommand.SetAction(result => SafeRun(() =>
 rootCommand.Add(getCommand);
 
 // ==================== query command ====================
-var queryFileArg = new Argument<FileInfo>("file") { Description = "Office document path" };
+var queryFileArg = new Argument<FileInfo>("file") { Description = "Office document path (required even with open/close mode)" };
 var selectorArg = new Argument<string>("selector") { Description = "CSS-like selector (e.g. paragraph[style=Normal] > run[font!=Arial])" };
 
 var queryCommand = new Command("query", "Query document elements with CSS-like selectors");
@@ -254,7 +254,7 @@ queryCommand.SetAction(result => SafeRun(() =>
 rootCommand.Add(queryCommand);
 
 // ==================== set command ====================
-var setFileArg = new Argument<FileInfo>("file") { Description = "Office document path" };
+var setFileArg = new Argument<FileInfo>("file") { Description = "Office document path (required even with open/close mode)" };
 var setPathArg = new Argument<string>("path") { Description = "DOM path to the element" };
 var propsOpt = new Option<string[]>("--prop") { Description = "Property to set (key=value)", AllowMultipleArgumentsPerToken = true };
 
@@ -298,7 +298,7 @@ setCommand.SetAction(result => SafeRun(() =>
 rootCommand.Add(setCommand);
 
 // ==================== add command ====================
-var addFileArg = new Argument<FileInfo>("file") { Description = "Office document path" };
+var addFileArg = new Argument<FileInfo>("file") { Description = "Office document path (required even with open/close mode)" };
 var addParentPathArg = new Argument<string>("parent") { Description = "Parent DOM path (e.g. /body, /Sheet1, /slide[1])" };
 var addTypeOpt = new Option<string>("--type") { Description = "Element type to add (e.g. paragraph, run, table, sheet, row, cell, slide, shape)" };
 var addFromOpt = new Option<string?>("--from") { Description = "Copy from an existing element path (e.g. /slide[1]/shape[2])" };
@@ -373,7 +373,7 @@ addCommand.SetAction(result => SafeRun(() =>
 rootCommand.Add(addCommand);
 
 // ==================== remove command ====================
-var removeFileArg = new Argument<FileInfo>("file") { Description = "Office document path" };
+var removeFileArg = new Argument<FileInfo>("file") { Description = "Office document path (required even with open/close mode)" };
 var removePathArg = new Argument<string>("path") { Description = "DOM path of the element to remove" };
 
 var removeCommand = new Command("remove", "Remove an element from the document");
@@ -399,7 +399,7 @@ removeCommand.SetAction(result => SafeRun(() =>
 rootCommand.Add(removeCommand);
 
 // ==================== move command ====================
-var moveFileArg = new Argument<FileInfo>("file") { Description = "Office document path" };
+var moveFileArg = new Argument<FileInfo>("file") { Description = "Office document path (required even with open/close mode)" };
 var movePathArg = new Argument<string>("path") { Description = "DOM path of the element to move" };
 var moveToOpt = new Option<string?>("--to") { Description = "Target parent path. If omitted, reorders within the current parent" };
 var moveIndexOpt = new Option<int?>("--index") { Description = "Insert position (0-based). If omitted, appends to end" };
@@ -433,7 +433,7 @@ moveCommand.SetAction(result => SafeRun(() =>
 rootCommand.Add(moveCommand);
 
 // ==================== raw command ====================
-var rawFileArg = new Argument<FileInfo>("file") { Description = "Office document path" };
+var rawFileArg = new Argument<FileInfo>("file") { Description = "Office document path (required even with open/close mode)" };
 var rawPathArg = new Argument<string>("part") { Description = "Part path (e.g. /document, /styles, /header[0])" };
 rawPathArg.DefaultValueFactory = _ => "/document";
 
@@ -475,7 +475,7 @@ rawCommand.SetAction(result => SafeRun(() =>
 rootCommand.Add(rawCommand);
 
 // ==================== raw-set command ====================
-var rawSetFileArg = new Argument<FileInfo>("file") { Description = "Office document path" };
+var rawSetFileArg = new Argument<FileInfo>("file") { Description = "Office document path (required even with open/close mode)" };
 var rawSetPartArg = new Argument<string>("part") { Description = "Part path (e.g. /document, /styles, /Sheet1, /slide[1])" };
 var rawSetXpathOpt = new Option<string>("--xpath") { Description = "XPath to target element(s)", Required = true };
 var rawSetActionOpt = new Option<string>("--action") { Description = "Action: append, prepend, insertbefore, insertafter, replace, remove, setattr", Required = true };
@@ -545,7 +545,7 @@ addPartCommand.SetAction(result => SafeRun(() =>
 rootCommand.Add(addPartCommand);
 
 // ==================== validate command ====================
-var validateFileArg = new Argument<FileInfo>("file") { Description = "Office document path" };
+var validateFileArg = new Argument<FileInfo>("file") { Description = "Office document path (required even with open/close mode)" };
 var validateCommand = new Command("validate", "Validate document against OpenXML schema");
 validateCommand.Add(validateFileArg);
 validateCommand.SetAction(result => SafeRun(() =>
