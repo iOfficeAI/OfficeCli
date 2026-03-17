@@ -94,7 +94,7 @@ public static class EmuConverter
     private static bool HasKnownUnitSuffix(string value, out string unit)
     {
         // Check for common but unsupported units
-        string[] unsupported = { "mm", "em", "rem", "ex", "pc", "vw", "vh" };
+        string[] unsupported = { "mm", "rem", "em", "ex", "pc", "vw", "vh" };
         foreach (var u in unsupported)
         {
             if (value.EndsWith(u, StringComparison.OrdinalIgnoreCase))

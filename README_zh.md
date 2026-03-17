@@ -219,6 +219,67 @@ officecli close report.docx       # 保存并退出
 
 通过命名管道通信，命令间延迟接近零。
 
+## Python 使用示例
+
+OfficeCli 是 CLI 工具，在 Python 中通过 `subprocess` 调用即可，JSON 输出方便解析。
+
+```python
+import subprocess
+import json
+
+def run(cmd: list[str]) -> str:
+    return subprocess.check_output(["officecli"] + cmd, text=True)
+
+def run_json(cmd: list[str]) -> dict | list:
+    return json.loads(run(cmd + ["--json"]))
+
+# 创建文档
+run(["create", "report.docx"])
+run(["create", "budget.xlsx"])
+run(["create", "deck.pptx"])
+
+# 读取内容
+text = run(["view", "report.docx", "text"])
+issues = run_json(["view", "budget.xlsx", "issues"])
+
+# 读取单元格
+cell = run_json(["get", "budget.xlsx", "/Sheet1/B5"])
+print(cell["text"])  # 单元格值
+
+# 修改内容
+run(["set", "report.docx", "/body/p[1]/r[1]", "--prop", "text=Hello World", "--prop", "bold=true"])
+run(["set", "budget.xlsx", "/Sheet1/A1", "--prop", "formula==SUM(A2:A10)"])
+
+# 查询元素
+shapes = run_json(["query", "deck.pptx", "shape"])
+
+# 驻留模式 — 批量编辑，无需每次重新加载文件
+run(["open", "deck.pptx"])
+for i, title in enumerate(["简介", "数据", "总结"], start=1):
+    run(["set", "deck.pptx", f"/slide[{i}]/shape[1]", "--prop", f"text={title}"])
+run(["close", "deck.pptx"])
+```
+
+异步或高并发场景，可使用 `asyncio.create_subprocess_exec`：
+
+```python
+import asyncio, json
+
+async def run_json_async(args: list[str]) -> dict | list:
+    proc = await asyncio.create_subprocess_exec(
+        "officecli", *args, "--json",
+        stdout=asyncio.subprocess.PIPE,
+    )
+    stdout, _ = await proc.communicate()
+    return json.loads(stdout)
+
+async def main():
+    slides = await run_json_async(["query", "deck.pptx", "shape"])
+    print(slides)
+
+asyncio.run(main())
+```
+
 ## AI 智能体集成
 
 ### 为什么 AI 智能体应该使用 OfficeCli？

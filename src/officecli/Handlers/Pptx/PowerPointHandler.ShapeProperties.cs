@@ -324,7 +324,7 @@ public partial class PowerPointHandler
                         var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
                         pProps.RemoveAllChildren<Drawing.LineSpacing>();
                         pProps.AppendChild(new Drawing.LineSpacing(
-                            new Drawing.SpacingPercent { Val = (int)(double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) * 1000) })); // e.g. 1.5 → 150000 (150%)
+                            new Drawing.SpacingPercent { Val = (int)(double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) * 100000) })); // e.g. 1.5 → 150000 (150%)
                     }
                     break;
                 }

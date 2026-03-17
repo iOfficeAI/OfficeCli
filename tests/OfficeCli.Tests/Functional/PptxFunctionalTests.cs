@@ -1820,4 +1820,78 @@ public class PptxFunctionalTests : IDisposable
         node = _handler.Get("/slide[1]/shape[2]");
         node.Format.Should().NotContainKey("link");
     }
+
+    // ==================== Remove shape with animation cleanup ====================
+
+    [Fact]
+    public void RemoveShape_WithAnimation_AnimationIsCleanedUp()
+    {
+        _handler.Add("/", "slide", null, new());
+        _handler.Add("/slide[1]", "shape", null, new() { ["text"] = "Animated", ["fill"] = "FF0000" });
+        _handler.Set("/slide[1]/shape[1]", new() { ["animation"] = "fade-entrance-500" });
+
+        // Verify animation exists
+        var node = _handler.Get("/slide[1]/shape[1]");
+        node.Format.Should().ContainKey("animation");
+
+        // Remove the shape
+        _handler.Remove("/slide[1]/shape[1]");
+
+        // File should be valid after reopen (no orphaned animation references)
+        Reopen();
+        var slide = _handler.Get("/slide[1]");
+        slide.Children.Should().BeEmpty("shape was removed, no shapes should remain");
+    }
+
+    [Fact]
+    public void RemoveShape_WithAnimation_OtherShapeAnimationSurvives()
+    {
+        _handler.Add("/", "slide", null, new());
+        _handler.Add("/slide[1]", "shape", null, new() { ["text"] = "Keep", ["fill"] = "00FF00" });
+        _handler.Add("/slide[1]", "shape", null, new() { ["text"] = "Remove", ["fill"] = "FF0000" });
+        _handler.Set("/slide[1]/shape[1]", new() { ["animation"] = "fade-entrance-500" });
+        _handler.Set("/slide[1]/shape[2]", new() { ["animation"] = "fly-entrance-600" });
+
+        // Remove shape[2]
+        _handler.Remove("/slide[1]/shape[2]");
+
+        // shape[1] should still have its animation
+        var node = _handler.Get("/slide[1]/shape[1]");
+        node.Text.Should().Be("Keep");
+        node.Format.Should().ContainKey("animation");
+        ((string)node.Format["animation"]).Should().Contain("fade");
+    }
+
+    [Fact]
+    public void RemoveShape_WithAnimation_Persist_FileRemainsValid()
+    {
+        _handler.Add("/", "slide", null, new());
+        _handler.Add("/slide[1]", "shape", null, new() { ["text"] = "Stay" });
+        _handler.Add("/slide[1]", "shape", null, new() { ["text"] = "Go" });
+        _handler.Set("/slide[1]/shape[1]", new() { ["animation"] = "zoom-entrance-400" });
+        _handler.Set("/slide[1]/shape[2]", new() { ["animation"] = "fade-entrance-300" });
+
+        _handler.Remove("/slide[1]/shape[2]");
+
+        // Reopen — this will fail if animation XML references a deleted shape
+        Reopen();
+
+        var shapes = _handler.Get("/slide[1]").Children;
+        shapes.Should().HaveCount(1);
+        shapes[0].Text.Should().Be("Stay");
+        shapes[0].Format.Should().ContainKey("animation");
+    }
+
+    [Fact]
+    public void RemoveShape_NoAnimation_DoesNotCorrupt()
+    {
+        _handler.Add("/", "slide", null, new());
+        _handler.Add("/slide[1]", "shape", null, new() { ["text"] = "Plain" });
+
+        _handler.Remove("/slide[1]/shape[1]");
+
+        Reopen();
+        var slide = _handler.Get("/slide[1]");
+        slide.Children.Should().BeEmpty();
+    }
 }

@@ -1228,7 +1228,11 @@ public partial class PowerPointHandler
             var shapes = shapeTree.Elements<Shape>().ToList();
             if (elementIdx < 1 || elementIdx > shapes.Count)
                 throw new ArgumentException($"Shape {elementIdx} not found");
-            shapes[elementIdx - 1].Remove();
+            var shapeToRemove = shapes[elementIdx - 1];
+            var shapeId = shapeToRemove.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value ?? 0;
+            if (shapeId > 0)
+                RemoveShapeAnimations(GetSlide(slidePart), (uint)shapeId);
+            shapeToRemove.Remove();
         }
         else if (elementType is "picture" or "pic" or "video" or "audio")
         {

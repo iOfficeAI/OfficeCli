@@ -109,6 +109,7 @@ public partial class PowerPointHandler
         spPr.RemoveAllChildren<Drawing.NoFill>();
         spPr.RemoveAllChildren<Drawing.GradientFill>();
         spPr.RemoveAllChildren<Drawing.PatternFill>();
+        spPr.RemoveAllChildren<Drawing.BlipFill>();
 
         if (value.Equals("none", StringComparison.OrdinalIgnoreCase))
             InsertFillElement(spPr, new Drawing.NoFill());
@@ -127,6 +128,8 @@ public partial class PowerPointHandler
         spPr.RemoveAllChildren<Drawing.SolidFill>();
         spPr.RemoveAllChildren<Drawing.NoFill>();
         spPr.RemoveAllChildren<Drawing.GradientFill>();
+        spPr.RemoveAllChildren<Drawing.PatternFill>();
+        spPr.RemoveAllChildren<Drawing.BlipFill>();
         InsertFillElement(spPr, BuildGradientFill(value));
     }
 

@@ -558,8 +558,8 @@ public partial class PowerPointHandler
                     var chartNode = ChartToNode(gf, slidePart, slideNum, chartIdx, 0);
                     if (parsed.TextContains != null)
                     {
-                        var titleVal = chartNode.Format.ContainsKey("title") ? (string)chartNode.Format["title"] : "";
-                        if (!titleVal.Contains(parsed.TextContains, StringComparison.OrdinalIgnoreCase))
+                        var titleVal = chartNode.Format.ContainsKey("title") ? chartNode.Format["title"]?.ToString() ?? "" : "";
+                        if (!titleVal.Contains(parsed.TextContains!, StringComparison.OrdinalIgnoreCase))
                             continue;
                     }
                     results.Add(chartNode);

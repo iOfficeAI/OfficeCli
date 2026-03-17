@@ -81,11 +81,7 @@ public partial class PowerPointHandler
             "pull" or "uncover" => new PullTransition { Direction = ParseSlideDirStr(direction ?? "right") },
             "wheel" => new WheelTransition { Spokes = new UInt32Value(4u) },
             "zoom" or "box" => new ZoomTransition { Direction = ParseInOutDir(direction ?? "in") },
-            "split" => new SplitTransition
-            {
-                Orientation = ParseOrientation(direction ?? "horizontal"),
-                Direction = ParseInOutDir("in")
-            },
+            "split" => BuildSplitTransition(direction),
             "blinds" or "venetian" => new BlindsTransition { Direction = ParseOrientation(direction ?? "horizontal") },
             "checker" or "checkerboard" => new CheckerTransition { Direction = ParseOrientation(direction ?? "horizontal") },
             "comb" => new CombTransition { Direction = ParseOrientation(direction ?? "horizontal") },
@@ -169,6 +165,28 @@ public partial class PowerPointHandler
             "ld" or "leftdown" or "downleft" => TransitionCornerDirectionValues.LeftDown,
             _ => TransitionCornerDirectionValues.RightDown
         };
+
+    private static SplitTransition BuildSplitTransition(string? direction)
+    {
+        var orient = DirectionValues.Horizontal;
+        var inOut = TransitionInOutDirectionValues.In;
+        if (direction != null)
+        {
+            foreach (var token in direction.Split('-', ' '))
+            {
+                var t = token.ToLowerInvariant();
+                if (t is "v" or "vert" or "vertical")
+                    orient = DirectionValues.Vertical;
+                else if (t is "h" or "horz" or "horizontal")
+                    orient = DirectionValues.Horizontal;
+                else if (t is "out")
+                    inOut = TransitionInOutDirectionValues.Out;
+                else if (t is "in")
+                    inOut = TransitionInOutDirectionValues.In;
+            }
+        }
+        return new SplitTransition { Orientation = orient, Direction = inOut };
+    }
 
     // ==================== Shape Animations ====================
 

@@ -219,6 +219,32 @@ officecli close report.docx       # Save and stop
 
 Communication happens via named pipes for near-zero latency between commands.
 
+## Python Usage
+
+```python
+import subprocess, json
+
+def cli(*args): return subprocess.check_output(["officecli", *args], text=True)
+def cli_json(*args): return json.loads(cli(*args, "--json"))
+
+cli("create", "deck.pptx")
+cli("set", "deck.pptx", "/slide[1]/shape[1]", "--prop", "text=Hello")
+shapes = cli_json("query", "deck.pptx", "shape")
+```
+
+## JavaScript Usage
+
+```js
+const { execFileSync } = require('child_process')
+
+const cli = (...args) => execFileSync('officecli', args, { encoding: 'utf8' })
+const cliJson = (...args) => JSON.parse(cli(...args, '--json'))
+
+cli('create', 'deck.pptx')
+cli('set', 'deck.pptx', '/slide[1]/shape[1]', '--prop', 'text=Hello')
+const shapes = cliJson('query', 'deck.pptx', 'shape')
+```
+
 ## AI Agent Integration
 
 ### Why OfficeCli for agents?

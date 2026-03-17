@@ -123,14 +123,14 @@ public partial class WordHandler
     private static string? GetRunFont(Run run)
     {
         var fonts = run.RunProperties?.RunFonts;
-        return fonts?.EastAsia?.Value ?? fonts?.Ascii?.Value ?? fonts?.HighAnsi?.Value;
+        return fonts?.Ascii?.Value ?? fonts?.HighAnsi?.Value ?? fonts?.EastAsia?.Value;
     }
 
     private static string? GetRunFontSize(Run run)
     {
         var size = run.RunProperties?.FontSize?.Val?.Value;
         if (size == null) return null;
-        return $"{int.Parse(size) / 2}pt"; // stored as half-points
+        return $"{int.Parse(size) / 2.0:0.##}pt"; // stored as half-points
     }
 
     private string GetRunFormatDescription(Run run, Paragraph? para = null)

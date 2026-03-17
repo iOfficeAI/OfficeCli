@@ -263,7 +263,7 @@ public partial class PowerPointHandler
             if (font != null) node.Format["font"] = font;
 
             var fontSize = firstRun.RunProperties.FontSize?.Value;
-            if (fontSize.HasValue) node.Format["size"] = $"{fontSize.Value / 100}pt";
+            if (fontSize.HasValue) node.Format["size"] = $"{fontSize.Value / 100.0:0.##}pt";
 
             if (firstRun.RunProperties.Bold?.Value == true) node.Format["bold"] = true;
             if (firstRun.RunProperties.Italic?.Value == true) node.Format["italic"] = true;
@@ -294,7 +294,7 @@ public partial class PowerPointHandler
             if (outline.GetFirstChild<Drawing.NoFill>() != null) node.Format["line"] = "none";
             if (outline.Width?.HasValue == true) node.Format["lineWidth"] = FormatEmu(outline.Width.Value);
             var dash = outline.GetFirstChild<Drawing.PresetDash>();
-            if (dash?.Val?.HasValue == true) node.Format["lineDash"] = dash.Val.InnerText.ToLowerInvariant();
+            if (dash?.Val?.HasValue == true) node.Format["lineDash"] = dash!.Val!.InnerText!.ToLowerInvariant();
             var lineColorEl = lineSolidFill?.GetFirstChild<Drawing.RgbColorModelHex>() as OpenXmlElement
                 ?? lineSolidFill?.GetFirstChild<Drawing.SchemeColor>();
             var lineAlpha = lineColorEl?.GetFirstChild<Drawing.Alpha>()?.Val?.Value;
@@ -367,7 +367,7 @@ public partial class PowerPointHandler
         if (pProps != null)
         {
             var ls = pProps.GetFirstChild<Drawing.LineSpacing>()?.GetFirstChild<Drawing.SpacingPercent>()?.Val?.Value;
-            if (ls.HasValue) node.Format["lineSpacing"] = $"{ls.Value / 1000.0:0.##}";
+            if (ls.HasValue) node.Format["lineSpacing"] = $"{ls.Value / 100000.0:0.##}";
             var sb = pProps.GetFirstChild<Drawing.SpaceBefore>()?.GetFirstChild<Drawing.SpacingPoints>()?.Val?.Value;
             if (sb.HasValue) node.Format["spaceBefore"] = $"{sb.Value / 100.0:0.##}";
             var sa = pProps.GetFirstChild<Drawing.SpaceAfter>()?.GetFirstChild<Drawing.SpacingPoints>()?.Val?.Value;
@@ -442,7 +442,7 @@ public partial class PowerPointHandler
                 ?? run.RunProperties.GetFirstChild<Drawing.EastAsianFont>()?.Typeface;
             if (f != null) node.Format["font"] = f;
             var fs = run.RunProperties.FontSize?.Value;
-            if (fs.HasValue) node.Format["size"] = $"{fs.Value / 100}pt";
+            if (fs.HasValue) node.Format["size"] = $"{fs.Value / 100.0:0.##}pt";
             if (run.RunProperties.Bold?.Value == true) node.Format["bold"] = true;
             if (run.RunProperties.Italic?.Value == true) node.Format["italic"] = true;
             // Color
@@ -570,12 +570,13 @@ public partial class PowerPointHandler
     private static Shape CreateTextShape(uint id, string name, string text, bool isTitle)
     {
         var shape = new Shape();
+        var appNvPr = new ApplicationNonVisualDrawingProperties();
+        if (isTitle)
+            appNvPr.AppendChild(new PlaceholderShape { Type = PlaceholderValues.Title });
         shape.NonVisualShapeProperties = new NonVisualShapeProperties(
             new NonVisualDrawingProperties { Id = id, Name = name },
             new NonVisualShapeDrawingProperties(),
-            new ApplicationNonVisualDrawingProperties(
-                isTitle ? new PlaceholderShape { Type = PlaceholderValues.Title } : new PlaceholderShape()
-            )
+            appNvPr
         );
         var spPr = new ShapeProperties();
         if (isTitle)
