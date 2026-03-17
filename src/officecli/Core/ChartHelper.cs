@@ -249,119 +249,21 @@ internal static class ChartHelper
         chart.AppendChild(new C.DisplayBlanksAs { Val = C.DisplayBlanksAsValues.Gap });
 
         chartSpace.AppendChild(chart);
-
-        // Apply additional properties that SetChartProperties supports but aren't handled above.
-        // This allows Add to accept the same full set of properties as Set (one-step chart creation).
-        var extraKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "datalabels", "labels",
-            "axistitle", "vtitle", "cattitle", "htitle",
-            "axismin", "min", "axismax", "max",
-            "majorunit", "minorunit",
-            "axisnumfmt", "axisnumberformat"
-        };
-        var extraProps = properties
-            .Where(kv => extraKeys.Contains(kv.Key))
-            .ToDictionary(kv => kv.Key, kv => kv.Value);
-        if (extraProps.Count > 0)
-            ApplyChartPropertiesToChart(chart, extraProps);
-
         return chartSpace;
     }
 
     /// <summary>
-    /// Apply chart properties directly to a C.Chart object (used by BuildChartSpace for Add-time props).
-    /// This is a subset of SetChartProperties that works on the in-memory chart before saving.
+    /// Keys that BuildChartSpace doesn't handle directly but SetChartProperties does.
+    /// After saving ChartSpace to a ChartPart, call SetChartProperties with these to apply them.
     /// </summary>
-    private static void ApplyChartPropertiesToChart(C.Chart chart, Dictionary<string, string> properties)
+    internal static readonly HashSet<string> DeferredAddKeys = new(StringComparer.OrdinalIgnoreCase)
     {
-        foreach (var (key, value) in properties)
-        {
-            switch (key.ToLowerInvariant())
-            {
-                case "datalabels" or "labels":
-                {
-                    var plotArea = chart.GetFirstChild<C.PlotArea>();
-                    if (plotArea == null) break;
-                    foreach (var chartTypeEl in plotArea.ChildElements
-                        .Where(e => e.LocalName.Contains("Chart") || e.LocalName.Contains("chart")))
-                    {
-                        chartTypeEl.RemoveAllChildren<C.DataLabels>();
-                        if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
-                        {
-                            var dl = new C.DataLabels();
-                            var parts = value.ToLowerInvariant().Split(',').Select(s => s.Trim()).ToHashSet();
-                            dl.AppendChild(new C.ShowValue { Val = parts.Contains("value") || parts.Contains("true") || parts.Contains("all") });
-                            dl.AppendChild(new C.ShowCategoryName { Val = parts.Contains("category") || parts.Contains("all") });
-                            dl.AppendChild(new C.ShowSeriesName { Val = parts.Contains("series") || parts.Contains("all") });
-                            dl.AppendChild(new C.ShowPercent { Val = parts.Contains("percent") || parts.Contains("all") });
-                            dl.AppendChild(new C.ShowLegendKey { Val = false });
-                            chartTypeEl.AppendChild(dl);
-                        }
-                    }
-                    break;
-                }
-                case "axistitle" or "vtitle":
-                {
-                    var valAxis = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.ValueAxis>();
-                    if (valAxis == null) break;
-                    valAxis.RemoveAllChildren<C.Title>();
-                    if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
-                        valAxis.InsertAfter(BuildChartTitle(value), valAxis.GetFirstChild<C.Scaling>());
-                    break;
-                }
-                case "cattitle" or "htitle":
-                {
-                    var catAxis = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.CategoryAxis>();
-                    if (catAxis == null) break;
-                    catAxis.RemoveAllChildren<C.Title>();
-                    if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
-                        catAxis.InsertAfter(BuildChartTitle(value), catAxis.GetFirstChild<C.Scaling>());
-                    break;
-                }
-                case "axismin" or "min":
-                {
-                    var scaling = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.ValueAxis>()?.GetFirstChild<C.Scaling>();
-                    if (scaling == null) break;
-                    scaling.RemoveAllChildren<C.MinAxisValue>();
-                    scaling.AppendChild(new C.MinAxisValue { Val = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) });
-                    break;
-                }
-                case "axismax" or "max":
-                {
-                    var scaling = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.ValueAxis>()?.GetFirstChild<C.Scaling>();
-                    if (scaling == null) break;
-                    scaling.RemoveAllChildren<C.MaxAxisValue>();
-                    scaling.AppendChild(new C.MaxAxisValue { Val = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) });
-                    break;
-                }
-                case "majorunit":
-                {
-                    var valAxis = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.ValueAxis>();
-                    if (valAxis == null) break;
-                    valAxis.RemoveAllChildren<C.MajorUnit>();
-                    valAxis.AppendChild(new C.MajorUnit { Val = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) });
-                    break;
-                }
-                case "minorunit":
-                {
-                    var valAxis = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.ValueAxis>();
-                    if (valAxis == null) break;
-                    valAxis.RemoveAllChildren<C.MinorUnit>();
-                    valAxis.AppendChild(new C.MinorUnit { Val = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) });
-                    break;
-                }
-                case "axisnumfmt" or "axisnumberformat":
-                {
-                    var valAxis = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.ValueAxis>();
-                    if (valAxis == null) break;
-                    valAxis.RemoveAllChildren<C.NumberingFormat>();
-                    valAxis.AppendChild(new C.NumberingFormat { FormatCode = value, SourceLinked = false });
-                    break;
-                }
-            }
-        }
-    }
+        "datalabels", "labels",
+        "axistitle", "vtitle", "cattitle", "htitle",
+        "axismin", "min", "axismax", "max",
+        "majorunit", "minorunit",
+        "axisnumfmt", "axisnumberformat"
+    };
 
     // ==================== Chart Type Builders ====================
 
@@ -524,10 +426,7 @@ internal static class ChartHelper
         var series = new C.BarChartSeries(
             new C.Index { Val = idx },
             new C.Order { Val = idx },
-            new C.SeriesText(new C.StringLiteral(
-                new C.PointCount { Val = 1 },
-                new C.StringPoint(new C.NumericValue(name)) { Index = 0 }
-            ))
+            new C.SeriesText(new C.NumericValue(name))
         );
         if (color != null) ApplySeriesColor(series, color);
         if (categories != null) series.AppendChild(BuildCategoryData(categories));
@@ -541,10 +440,7 @@ internal static class ChartHelper
         var series = new C.LineChartSeries(
             new C.Index { Val = idx },
             new C.Order { Val = idx },
-            new C.SeriesText(new C.StringLiteral(
-                new C.PointCount { Val = 1 },
-                new C.StringPoint(new C.NumericValue(name)) { Index = 0 }
-            ))
+            new C.SeriesText(new C.NumericValue(name))
         );
         if (color != null) ApplySeriesColor(series, color);
         if (categories != null) series.AppendChild(BuildCategoryData(categories));
@@ -558,10 +454,7 @@ internal static class ChartHelper
         var series = new C.AreaChartSeries(
             new C.Index { Val = idx },
             new C.Order { Val = idx },
-            new C.SeriesText(new C.StringLiteral(
-                new C.PointCount { Val = 1 },
-                new C.StringPoint(new C.NumericValue(name)) { Index = 0 }
-            ))
+            new C.SeriesText(new C.NumericValue(name))
         );
         if (color != null) ApplySeriesColor(series, color);
         if (categories != null) series.AppendChild(BuildCategoryData(categories));
@@ -575,10 +468,7 @@ internal static class ChartHelper
         var series = new C.PieChartSeries(
             new C.Index { Val = idx },
             new C.Order { Val = idx },
-            new C.SeriesText(new C.StringLiteral(
-                new C.PointCount { Val = 1 },
-                new C.StringPoint(new C.NumericValue(name)) { Index = 0 }
-            ))
+            new C.SeriesText(new C.NumericValue(name))
         );
         if (color != null) ApplySeriesColor(series, color);
         if (categories != null) series.AppendChild(BuildCategoryData(categories));
@@ -592,10 +482,7 @@ internal static class ChartHelper
         var series = new C.ScatterChartSeries(
             new C.Index { Val = idx },
             new C.Order { Val = idx },
-            new C.SeriesText(new C.StringLiteral(
-                new C.PointCount { Val = 1 },
-                new C.StringPoint(new C.NumericValue(name)) { Index = 0 }
-            ))
+            new C.SeriesText(new C.NumericValue(name))
         );
 
         if (xValues != null)
@@ -927,10 +814,7 @@ internal static class ChartHelper
             if (serText != null)
             {
                 serText.RemoveAllChildren();
-                serText.AppendChild(new C.StringLiteral(
-                    new C.PointCount { Val = 1 },
-                    new C.StringPoint(new C.NumericValue(sName)) { Index = 0 }
-                ));
+                serText.AppendChild(new C.NumericValue(sName));
             }
 
             var valEl = ser.GetFirstChild<C.Values>();
@@ -994,12 +878,19 @@ internal static class ChartHelper
                         {
                             var dl = new C.DataLabels();
                             var parts = value.ToLowerInvariant().Split(',').Select(s => s.Trim()).ToHashSet();
+                            dl.AppendChild(new C.ShowLegendKey { Val = false });
                             dl.AppendChild(new C.ShowValue { Val = parts.Contains("value") || parts.Contains("true") || parts.Contains("all") });
                             dl.AppendChild(new C.ShowCategoryName { Val = parts.Contains("category") || parts.Contains("all") });
                             dl.AppendChild(new C.ShowSeriesName { Val = parts.Contains("series") || parts.Contains("all") });
                             dl.AppendChild(new C.ShowPercent { Val = parts.Contains("percent") || parts.Contains("all") });
-                            dl.AppendChild(new C.ShowLegendKey { Val = false });
-                            chartTypeEl.AppendChild(dl);
+                            // Insert dLbls before gapWidth/overlap/axId per schema order
+                            var dlInsertBefore = chartTypeEl.GetFirstChild<C.GapWidth>() as OpenXmlElement
+                                ?? chartTypeEl.GetFirstChild<C.Overlap>() as OpenXmlElement
+                                ?? chartTypeEl.GetFirstChild<C.AxisId>();
+                            if (dlInsertBefore != null)
+                                chartTypeEl.InsertBefore(dl, dlInsertBefore);
+                            else
+                                chartTypeEl.AppendChild(dl);
                         }
                     }
                     break;
@@ -1024,7 +915,12 @@ internal static class ChartHelper
                     if (valAxis == null) { unsupported.Add(key); break; }
                     valAxis.RemoveAllChildren<C.Title>();
                     if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
-                        valAxis.InsertAfter(BuildChartTitle(value), valAxis.GetFirstChild<C.Scaling>());
+                    {
+                        var insertAfter = (OpenXmlElement?)valAxis.GetFirstChild<C.MinorGridlines>()
+                            ?? (OpenXmlElement?)valAxis.GetFirstChild<C.MajorGridlines>()
+                            ?? valAxis.GetFirstChild<C.AxisPosition>();
+                        if (insertAfter != null) valAxis.InsertAfter(BuildChartTitle(value), insertAfter);
+                    }
                     break;
                 }
 
@@ -1035,7 +931,12 @@ internal static class ChartHelper
                     if (catAxis == null) { unsupported.Add(key); break; }
                     catAxis.RemoveAllChildren<C.Title>();
                     if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
-                        catAxis.InsertAfter(BuildChartTitle(value), catAxis.GetFirstChild<C.Scaling>());
+                    {
+                        var insertAfter = (OpenXmlElement?)catAxis.GetFirstChild<C.MinorGridlines>()
+                            ?? (OpenXmlElement?)catAxis.GetFirstChild<C.MajorGridlines>()
+                            ?? catAxis.GetFirstChild<C.AxisPosition>();
+                        if (insertAfter != null) catAxis.InsertAfter(BuildChartTitle(value), insertAfter);
+                    }
                     break;
                 }
 
@@ -1057,7 +958,11 @@ internal static class ChartHelper
                     var scaling = valAxis?.GetFirstChild<C.Scaling>();
                     if (scaling == null) { unsupported.Add(key); break; }
                     scaling.RemoveAllChildren<C.MaxAxisValue>();
-                    scaling.AppendChild(new C.MaxAxisValue { Val = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) });
+                    var maxEl = new C.MaxAxisValue { Val = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) };
+                    // Schema order: logBase?, orientation, max?, min? — insert max after orientation
+                    var orient = scaling.GetFirstChild<C.Orientation>();
+                    if (orient != null) orient.InsertAfterSelf(maxEl);
+                    else scaling.PrependChild(maxEl);
                     break;
                 }
 
@@ -1087,7 +992,11 @@ internal static class ChartHelper
                     var valAxis = plotArea2?.GetFirstChild<C.ValueAxis>();
                     if (valAxis == null) { unsupported.Add(key); break; }
                     valAxis.RemoveAllChildren<C.NumberingFormat>();
-                    valAxis.AppendChild(new C.NumberingFormat { FormatCode = value, SourceLinked = false });
+                    var nf = new C.NumberingFormat { FormatCode = value, SourceLinked = false };
+                    // Schema order: ...title, numFmt, majorTickMark... — insert before majorTickMark
+                    var nfInsertBefore = valAxis.GetFirstChild<C.MajorTickMark>();
+                    if (nfInsertBefore != null) valAxis.InsertBefore(nf, nfInsertBefore);
+                    else valAxis.AppendChild(nf);
                     break;
                 }
 
@@ -1134,10 +1043,7 @@ internal static class ChartHelper
                             if (serText != null)
                             {
                                 serText.RemoveAllChildren();
-                                serText.AppendChild(new C.StringLiteral(
-                                    new C.PointCount { Val = 1 },
-                                    new C.StringPoint(new C.NumericValue(sName)) { Index = 0 }
-                                ));
+                                serText.AppendChild(new C.NumericValue(sName));
                             }
                         }
                         else

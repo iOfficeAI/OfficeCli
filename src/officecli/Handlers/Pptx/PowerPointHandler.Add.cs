@@ -470,6 +470,13 @@ public partial class PowerPointHandler
                 chartPart.ChartSpace = ChartHelper.BuildChartSpace(chartType, chartTitle, categories, seriesData, properties);
                 chartPart.ChartSpace.Save();
 
+                // Apply deferred properties (axisTitle, dataLabels, etc.) via SetChartProperties
+                var deferredProps = properties
+                    .Where(kv => ChartHelper.DeferredAddKeys.Contains(kv.Key))
+                    .ToDictionary(kv => kv.Key, kv => kv.Value);
+                if (deferredProps.Count > 0)
+                    ChartHelper.SetChartProperties(chartPart, deferredProps);
+
                 // Position
                 long chartX = properties.TryGetValue("x", out var xv) ? ParseEmu(xv) : 838200;     // ~2.3cm
                 long chartY = properties.TryGetValue("y", out var yv) ? ParseEmu(yv) : 1825625;     // ~5cm

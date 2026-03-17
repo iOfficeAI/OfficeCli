@@ -480,7 +480,16 @@ public partial class WordHandler
                 // Create ChartPart and build chart
                 var chartPart = chartMainPart.AddNewPart<ChartPart>();
                 chartPart.ChartSpace = Core.ChartHelper.BuildChartSpace(chartType, chartTitle, categories, seriesData, properties);
-                chartPart.ChartSpace.Save();
+
+                // Apply deferred properties (axisTitle, dataLabels, etc.) via SetChartProperties
+                // Must be called BEFORE Save() so the in-memory DOM is still available
+                var deferredProps = properties
+                    .Where(kv => Core.ChartHelper.DeferredAddKeys.Contains(kv.Key))
+                    .ToDictionary(kv => kv.Key, kv => kv.Value);
+                if (deferredProps.Count > 0)
+                    Core.ChartHelper.SetChartProperties(chartPart, deferredProps);
+                else
+                    chartPart.ChartSpace.Save();
 
                 var chartRelId = chartMainPart.GetIdOfPart(chartPart);
 

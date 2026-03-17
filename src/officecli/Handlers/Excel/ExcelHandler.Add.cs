@@ -872,6 +872,13 @@ public partial class ExcelHandler
                 chartPart.ChartSpace = ChartHelper.BuildChartSpace(chartType, chartTitle, categories, seriesData, properties);
                 chartPart.ChartSpace.Save();
 
+                // Apply deferred properties (axisTitle, dataLabels, etc.) via SetChartProperties
+                var deferredProps = properties
+                    .Where(kv => ChartHelper.DeferredAddKeys.Contains(kv.Key))
+                    .ToDictionary(kv => kv.Key, kv => kv.Value);
+                if (deferredProps.Count > 0)
+                    ChartHelper.SetChartProperties(chartPart, deferredProps);
+
                 // Position via TwoCellAnchor
                 var fromCol = properties.TryGetValue("x", out var xStr) ? int.Parse(xStr) : 0;
                 var fromRow = properties.TryGetValue("y", out var yStr) ? int.Parse(yStr) : 0;
