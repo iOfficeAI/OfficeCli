@@ -101,6 +101,12 @@ public class ExcelStyleManager
         var fontProps = styleProps
             .Where(kv => kv.Key.StartsWith("font.", StringComparison.OrdinalIgnoreCase))
             .ToDictionary(kv => kv.Key[5..].ToLowerInvariant(), kv => kv.Value);
+        // Map shorthand keys (bold, italic, strike, underline) to font.* equivalents
+        foreach (var shortKey in new[] { "bold", "italic", "strike", "underline" })
+        {
+            if (styleProps.TryGetValue(shortKey, out var shortVal))
+                fontProps[shortKey] = shortVal;
+        }
         if (fontProps.Count > 0)
         {
             fontId = GetOrCreateFont(stylesheet, fontId, fontProps);
@@ -110,7 +116,7 @@ public class ExcelStyleManager
         // --- fill ---
         uint fillId = baseXf.FillId?.Value ?? 0;
         bool applyFill = baseXf.ApplyFill?.Value ?? false;
-        if (styleProps.TryGetValue("fill", out var fillColor))
+        if (styleProps.TryGetValue("fill", out var fillColor) || styleProps.TryGetValue("bgcolor", out fillColor))
         {
             fillId = GetOrCreateFill(stylesheet, fillColor);
             applyFill = true;
@@ -170,7 +176,8 @@ public class ExcelStyleManager
     public static bool IsStyleKey(string key)
     {
         var lower = key.ToLowerInvariant();
-        return lower is "numfmt" or "fill"
+        return lower is "numfmt" or "fill" or "bgcolor"
+            or "bold" or "italic" or "strike" or "underline"
             || lower.StartsWith("font.")
             || lower.StartsWith("alignment.")
             || lower.StartsWith("border.");
@@ -252,7 +259,7 @@ public class ExcelStyleManager
             ? IsTruthy(sVal) : baseFont.Strike != null;
         string? underline = fontProps.TryGetValue("underline", out var uVal)
             ? (uVal.ToLowerInvariant() is "double" ? "double" : (IsTruthy(uVal) ? "single" : null))
-            : (baseFont.Underline != null ? "single" : null);
+            : (baseFont.Underline != null ? (baseFont.Underline.Val?.InnerText == "double" ? "double" : "single") : null);
         double size = fontProps.TryGetValue("size", out var szVal) && double.TryParse(szVal, out var sz)
             ? sz : baseFont.FontSize?.Val?.Value ?? 11;
         string name = fontProps.GetValueOrDefault("name",
@@ -299,6 +306,11 @@ public class ExcelStyleManager
         if ((font.Italic != null) != italic) return false;
         if ((font.Strike != null) != strike) return false;
         if ((font.Underline != null) != (underline != null)) return false;
+        if (font.Underline != null && underline != null)
+        {
+            var fontUlType = font.Underline.Val?.InnerText == "double" ? "double" : "single";
+            if (fontUlType != underline) return false;
+        }
         if (Math.Abs((font.FontSize?.Val?.Value ?? 11) - size) > 0.01) return false;
         if (!string.Equals(font.FontName?.Val?.Value, name, StringComparison.OrdinalIgnoreCase)) return false;
 
@@ -617,7 +629,7 @@ public class ExcelStyleManager
     }
 
     private static bool IsTruthy(string value) =>
-        value.ToLowerInvariant() is "true" or "1" or "yes";
+        ParseHelpers.IsTruthy(value);
 
     private static HorizontalAlignmentValues? ParseHAlign(string value) =>
         value.ToLowerInvariant() switch

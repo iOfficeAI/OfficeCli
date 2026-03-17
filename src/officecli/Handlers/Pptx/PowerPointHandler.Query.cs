@@ -145,6 +145,70 @@ public partial class PowerPointHandler
             return paraNode;
         }
 
+        // Try animation path: /slide[N]/shape[M]/animation[A]
+        var animPathMatch = Regex.Match(path, @"^/slide\[(\d+)\]/shape\[(\d+)\]/animation\[(\d+)\]$");
+        if (animPathMatch.Success)
+        {
+            var sIdx = int.Parse(animPathMatch.Groups[1].Value);
+            var shIdx = int.Parse(animPathMatch.Groups[2].Value);
+            var aIdx = int.Parse(animPathMatch.Groups[3].Value);
+            var (animSlidePart, animShape) = ResolveShape(sIdx, shIdx);
+
+            var animNode = new DocumentNode { Path = path, Type = "animation" };
+
+            // Read animation info from timing tree
+            var shapeId = animShape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value;
+            if (shapeId != null)
+            {
+                var timing = GetSlide(animSlidePart).GetFirstChild<Timing>();
+                if (timing != null)
+                {
+                    var shapeIdStr = shapeId.Value.ToString();
+                    // Find all effect CTns for this shape
+                    var effectCTns = timing.Descendants<CommonTimeNode>()
+                        .Where(ctn => ctn.PresetClass != null && ctn.PresetId != null &&
+                               ctn.Descendants<ShapeTarget>().Any(st => st.ShapeId?.Value == shapeIdStr))
+                        .ToList();
+
+                    if (aIdx >= 1 && aIdx <= effectCTns.Count)
+                    {
+                        var effectCTn = effectCTns[aIdx - 1];
+                        var presetId = effectCTn.PresetId?.Value ?? 0;
+                        var clsVal = effectCTn.PresetClass?.Value;
+                        var cls = clsVal == TimeNodePresetClassValues.Exit ? "exit"
+                                : clsVal == TimeNodePresetClassValues.Emphasis ? "emphasis"
+                                : "entrance";
+
+                        var animEffect = effectCTn.Descendants<AnimateEffect>().FirstOrDefault();
+                        var filter = animEffect?.Filter?.Value ?? "";
+
+                        var effectName = filter switch
+                        {
+                            "fly" => "fly",
+                            "fade" => "fade",
+                            "zoom" => "zoom",
+                            "" when presetId == 1 => "appear",
+                            "" when presetId == 24 => "bounce",
+                            _ => presetId switch
+                            {
+                                1 => "appear", 2 => "fly", 10 => "fade",
+                                21 => "zoom", 24 => "bounce", _ => "unknown"
+                            }
+                        };
+
+                        animNode.Format["effect"] = effectName;
+                        animNode.Format["class"] = cls;
+                        animNode.Format["presetId"] = presetId;
+
+                        var dur = 500;
+                        if (int.TryParse(animEffect?.CommonBehavior?.CommonTimeNode?.Duration, out var dd)) dur = dd;
+                        animNode.Format["duration"] = dur;
+                    }
+                }
+            }
+            return animNode;
+        }
+
         // Try table cell path: /slide[N]/table[M]/tr[R]/tc[C]
         var tblCellGetMatch = Regex.Match(path, @"^/slide\[(\d+)\]/table\[(\d+)\]/tr\[(\d+)\]/tc\[(\d+)\]$");
         if (tblCellGetMatch.Success)
@@ -285,6 +349,12 @@ public partial class PowerPointHandler
             if (layoutType != null) slideNode.Format["layoutType"] = layoutType;
             ReadSlideBackground(slide, slideNode);
             ReadSlideTransition(slide, slideNode);
+            if (targetSlidePart.NotesSlidePart != null)
+            {
+                var notesText = GetNotesText(targetSlidePart.NotesSlidePart);
+                if (!string.IsNullOrEmpty(notesText))
+                    slideNode.Format["notes"] = notesText;
+            }
             slideNode.Children = GetSlideChildNodes(targetSlidePart, slideIdx, depth);
             slideNode.ChildCount = slideNode.Children.Count;
             return slideNode;

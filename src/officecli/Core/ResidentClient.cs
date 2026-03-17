@@ -35,6 +35,7 @@ public static class ResidentClient
             if (response == null) return false;
 
             // Stdout contains the file path when responding to ping
+            if (string.IsNullOrEmpty(response.Stdout)) return false;
             var residentFilePath = Path.GetFullPath(response.Stdout);
             var requestedFilePath = Path.GetFullPath(filePath);
             return string.Equals(residentFilePath, requestedFilePath, StringComparison.OrdinalIgnoreCase);

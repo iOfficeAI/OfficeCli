@@ -159,10 +159,14 @@ public partial class ExcelHandler
             {
                 var cmtSegments = parentPath.TrimStart('/').Split('/', 2);
                 var cmtSheetName = cmtSegments[0];
+                // Extract cell reference from path if present (e.g., /Sheet1/A1 -> A1)
+                string? cmtRefFromPath = null;
+                if (cmtSegments.Length > 1 && Regex.IsMatch(cmtSegments[1], @"^[A-Z]+\d+$", RegexOptions.IgnoreCase))
+                    cmtRefFromPath = cmtSegments[1];
                 var cmtWorksheet = FindWorksheet(cmtSheetName)
                     ?? throw new ArgumentException($"Sheet not found: {cmtSheetName}");
 
-                var cmtRef = properties.GetValueOrDefault("ref")
+                var cmtRef = properties.GetValueOrDefault("ref") ?? cmtRefFromPath
                     ?? throw new ArgumentException("Property 'ref' is required for comment");
                 var cmtText = properties.GetValueOrDefault("text", "");
                 var cmtAuthor = properties.GetValueOrDefault("author", "Author");
@@ -224,7 +228,8 @@ public partial class ExcelHandler
                     ?? throw new ArgumentException($"Sheet not found: {dvSheetName}");
 
                 var dvSqref = properties.GetValueOrDefault("sqref")
-                    ?? throw new ArgumentException("Property 'sqref' is required for validation");
+                    ?? properties.GetValueOrDefault("ref")
+                    ?? throw new ArgumentException("Property 'sqref' (or 'ref') is required for validation");
 
                 var dv = new DataValidation
                 {
@@ -345,15 +350,36 @@ public partial class ExcelHandler
                 return $"/{afSheetName}/autofilter";
             }
 
+            case "cf":
+            {
+                // Dispatch to specific CF type based on "type" property
+                var cfType = properties.GetValueOrDefault("type", "databar").ToLowerInvariant();
+                return cfType switch
+                {
+                    "iconset" => Add(parentPath, "iconset", index, properties),
+                    "colorscale" => Add(parentPath, "colorscale", index, properties),
+                    "formula" => Add(parentPath, "formulacf", index, properties),
+                    _ => Add(parentPath, "conditionalformatting", index, properties)
+                };
+            }
+
             case "databar":
             case "conditionalformatting":
             {
+                // Dispatch to specific CF type if "type" property is specified
+                if (properties.TryGetValue("type", out var cfTypeVal))
+                {
+                    var cfTypeLower = cfTypeVal.ToLowerInvariant();
+                    if (cfTypeLower is "iconset") return Add(parentPath, "iconset", index, properties);
+                    if (cfTypeLower is "colorscale") return Add(parentPath, "colorscale", index, properties);
+                    if (cfTypeLower is "formula") return Add(parentPath, "formulacf", index, properties);
+                }
                 var cfSegments = parentPath.TrimStart('/').Split('/', 2);
                 var cfSheetName = cfSegments[0];
                 var cfWorksheet = FindWorksheet(cfSheetName)
                     ?? throw new ArgumentException($"Sheet not found: {cfSheetName}");
 
-                var sqref = properties.GetValueOrDefault("sqref", "A1:A10");
+                var sqref = properties.GetValueOrDefault("sqref") ?? properties.GetValueOrDefault("ref", "A1:A10");
                 var minVal = properties.GetValueOrDefault("min", "0");
                 var maxVal = properties.GetValueOrDefault("max", "1");
                 var cfColor = properties.GetValueOrDefault("color", "638EC6");
@@ -458,7 +484,7 @@ public partial class ExcelHandler
                     ?? throw new ArgumentException($"Sheet not found: {isSheetName}");
 
                 var isSqref = properties.GetValueOrDefault("sqref", "A1:A10");
-                var iconSetName = properties.GetValueOrDefault("iconset", "3TrafficLights1");
+                var iconSetName = properties.GetValueOrDefault("iconset") ?? properties.GetValueOrDefault("icons", "3TrafficLights1");
                 var reverse = properties.TryGetValue("reverse", out var revVal) && IsTruthy(revVal);
                 var showValue = !properties.TryGetValue("showvalue", out var svVal) || IsTruthy(svVal);
 
@@ -602,9 +628,11 @@ public partial class ExcelHandler
                 var picWorksheet = FindWorksheet(picSheetName)
                     ?? throw new ArgumentException($"Sheet not found: {picSheetName}");
 
-                var imgPath = properties.GetValueOrDefault("path", "");
+                var imgPath = properties.GetValueOrDefault("path", "") ?? "";
+                if (string.IsNullOrEmpty(imgPath))
+                    imgPath = properties.GetValueOrDefault("src", "");
                 if (string.IsNullOrEmpty(imgPath) || !File.Exists(imgPath))
-                    throw new ArgumentException("picture requires a valid 'path' property");
+                    throw new ArgumentException("picture requires a valid 'path' or 'src' property");
 
                 var px = int.TryParse(properties.GetValueOrDefault("x", "0"), out var xv) ? xv : 0;
                 var py = int.TryParse(properties.GetValueOrDefault("y", "0"), out var yv) ? yv : 0;
@@ -697,8 +725,8 @@ public partial class ExcelHandler
                 var tblWorksheet = FindWorksheet(tblSheetName)
                     ?? throw new ArgumentException($"Sheet not found: {tblSheetName}");
 
-                var rangeRef = (properties.GetValueOrDefault("ref")
-                    ?? throw new ArgumentException("Property 'ref' is required for table")).ToUpperInvariant();
+                var rangeRef = (properties.GetValueOrDefault("ref") ?? properties.GetValueOrDefault("range")
+                    ?? throw new ArgumentException("Property 'ref' or 'range' is required for table")).ToUpperInvariant();
 
                 var existingTableIds = _doc.WorkbookPart!.WorksheetParts
                     .SelectMany(wp => wp.TableDefinitionParts)
@@ -721,7 +749,11 @@ public partial class ExcelHandler
                 string[] colNames;
                 if (properties.TryGetValue("columns", out var tblColsStr))
                 {
-                    colNames = tblColsStr.Split(',').Select(c => c.Trim()).ToArray();
+                    var userColNames = tblColsStr.Split(',').Select(c => c.Trim()).ToArray();
+                    // Pad with default names if fewer columns provided than range requires
+                    colNames = new string[colCount];
+                    for (int i = 0; i < colCount; i++)
+                        colNames[i] = i < userColNames.Length ? userColNames[i] : $"Column{i + 1}";
                 }
                 else
                 {
@@ -956,9 +988,36 @@ public partial class ExcelHandler
         if (rowMatch.Success)
         {
             var rowIdx = uint.Parse(rowMatch.Groups[1].Value);
-            var row = sheetData.Elements<Row>().FirstOrDefault(r => r.RowIndex?.Value == rowIdx)
-                ?? throw new ArgumentException($"Row {rowIdx} not found");
-            row.Remove();
+            var row = sheetData.Elements<Row>().FirstOrDefault(r => r.RowIndex?.Value == rowIdx);
+            row?.Remove();
+
+            // Clean up merge cell references that include this row
+            var ws = GetSheet(worksheet);
+            var mergeCells = ws.GetFirstChild<MergeCells>();
+            if (mergeCells != null)
+            {
+                var toRemove = new List<MergeCell>();
+                foreach (var mc in mergeCells.Elements<MergeCell>())
+                {
+                    var mergeRef = mc.Reference?.Value;
+                    if (string.IsNullOrEmpty(mergeRef)) continue;
+                    var parts = mergeRef.Split(':');
+                    if (parts.Length != 2) continue;
+                    var (_, startRow) = ParseCellReference(parts[0]);
+                    var (_, endRow) = ParseCellReference(parts[1]);
+                    if (rowIdx >= (uint)startRow && rowIdx <= (uint)endRow)
+                        toRemove.Add(mc);
+                }
+                foreach (var mc in toRemove) mc.Remove();
+                if (!mergeCells.HasChildren) mergeCells.Remove();
+            }
+
+            if (row == null)
+            {
+                // Row didn't exist as data, but we cleaned up merge references
+                SaveWorksheet(worksheet);
+                return;
+            }
         }
         else
         {
@@ -1007,8 +1066,11 @@ public partial class ExcelHandler
         var rowMatch = Regex.Match(elementRef, @"^row\[(\d+)\]$");
         if (rowMatch.Success)
         {
-            var rowIdx = uint.Parse(rowMatch.Groups[1].Value);
-            var row = sheetData.Elements<Row>().FirstOrDefault(r => r.RowIndex?.Value == rowIdx)
+            var rowIdx = int.Parse(rowMatch.Groups[1].Value);
+            // Try ordinal lookup first (Nth row element), then fall back to RowIndex
+            var allRows = sheetData.Elements<Row>().ToList();
+            var row = (rowIdx >= 1 && rowIdx <= allRows.Count ? allRows[rowIdx - 1] : null)
+                ?? sheetData.Elements<Row>().FirstOrDefault(r => r.RowIndex?.Value == (uint)rowIdx)
                 ?? throw new ArgumentException($"Row {rowIdx} not found");
             row.Remove();
 
@@ -1026,9 +1088,8 @@ public partial class ExcelHandler
             }
 
             SaveWorksheet(worksheet);
-            var newRows = targetSheetData.Elements<Row>().ToList();
-            var newIdx = newRows.IndexOf(row) + 1;
-            return $"{effectiveParentPath}/row[{newIdx}]";
+            var rowIndex = row.RowIndex?.Value ?? (uint)(targetSheetData.Elements<Row>().ToList().IndexOf(row) + 1);
+            return $"{effectiveParentPath}/row[{rowIndex}]";
         }
 
         throw new ArgumentException($"Move not supported for: {elementRef}. Supported: row[N]");

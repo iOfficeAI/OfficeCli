@@ -810,14 +810,16 @@ public static class FormulaParser
 
                 // Parse content until \right
                 var content = new List<OpenXmlElement>();
+                var closeChar = openChar switch { "(" => ")", "[" => "]", "{" => "}", "|" => "|", _ => ")" };
                 while (pos < tokens.Count)
                 {
                     if (tokens[pos].Type == TokenType.Command && tokens[pos].Value == "right")
                     {
                         pos++;
-                        // Get closing delimiter character
+                        // Get closing delimiter character — capture the actual delimiter
                         if (pos < tokens.Count && tokens[pos].Type == TokenType.Text)
                         {
+                            closeChar = tokens[pos].Value[..1];
                             if (tokens[pos].Value.Length > 1)
                                 tokens[pos] = new Token(TokenType.Text, tokens[pos].Value[1..]);
                             else
@@ -825,6 +827,7 @@ public static class FormulaParser
                         }
                         else if (pos < tokens.Count && tokens[pos].Type == TokenType.RBracket)
                         {
+                            closeChar = "]";
                             pos++;
                         }
                         break;
@@ -872,12 +875,6 @@ public static class FormulaParser
                         pos++;
                     }
                 }
-
-                var closeChar = ")";
-                if (openChar == "(") closeChar = ")";
-                else if (openChar == "[") closeChar = "]";
-                else if (openChar == "{") closeChar = "}";
-                else if (openChar == "|") closeChar = "|";
 
                 var dPr = new M.DelimiterProperties();
                 if (openChar != "(")
@@ -1236,12 +1233,14 @@ public static class FormulaParser
             if (mPr != null)
             {
                 var colCount = rows.Max(r => r.Count);
+                var mcs = new M.MatrixColumns();
                 for (int ci = 0; ci < colCount; ci++)
                 {
-                    mPr.AppendChild(new M.MatrixColumns(new M.MatrixColumn(
+                    mcs.AppendChild(new M.MatrixColumn(
                         new M.MatrixColumnJustification { Val = M.HorizontalAlignmentValues.Left }
-                    )));
+                    ));
                 }
+                mPr.AppendChild(mcs);
             }
         }
 

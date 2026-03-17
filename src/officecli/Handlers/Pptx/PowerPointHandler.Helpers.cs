@@ -12,6 +12,12 @@ namespace OfficeCli.Handlers;
 
 public partial class PowerPointHandler
 {
+    private static bool IsTruthy(string value) =>
+        ParseHelpers.IsTruthy(value);
+
+    private static double ParseFontSize(string value) =>
+        ParseHelpers.ParseFontSize(value);
+
     private static string GetShapeText(Shape shape)
     {
         var textBody = shape.TextBody;
@@ -158,23 +164,7 @@ public partial class PowerPointHandler
     private static string GetShapeName(Shape shape) =>
         shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Name?.Value ?? "?";
 
-    private static long ParseEmu(string value)
-    {
-        value = value.Trim();
-        if (value.EndsWith("cm", StringComparison.OrdinalIgnoreCase))
-            return (long)(double.Parse(value[..^2]) * 360000);
-        if (value.EndsWith("in", StringComparison.OrdinalIgnoreCase))
-            return (long)(double.Parse(value[..^2]) * 914400);
-        if (value.EndsWith("pt", StringComparison.OrdinalIgnoreCase))
-            return (long)(double.Parse(value[..^2]) * 12700);
-        if (value.EndsWith("px", StringComparison.OrdinalIgnoreCase))
-            return (long)(double.Parse(value[..^2]) * 9525);
-        return long.Parse(value);
-    }
+    private static long ParseEmu(string value) => Core.EmuConverter.ParseEmu(value);
 
-    private static string FormatEmu(long emu)
-    {
-        var cm = emu / 360000.0;
-        return $"{cm:0.##}cm";
-    }
+    private static string FormatEmu(long emu) => Core.EmuConverter.FormatEmu(emu);
 }

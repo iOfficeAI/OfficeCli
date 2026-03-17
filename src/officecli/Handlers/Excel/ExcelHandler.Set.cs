@@ -183,15 +183,19 @@ public partial class ExcelHandler
                     case "width":
                         if (anchor.FromMarker != null && anchor.ToMarker != null)
                         {
+                            if (!int.TryParse(value, out var widthVal))
+                                throw new FormatException($"Invalid width value: '{value}'. Expected an integer.");
                             var fromCol = int.TryParse(anchor.FromMarker.ColumnId?.Text, out var fc) ? fc : 0;
-                            anchor.ToMarker.ColumnId!.Text = (fromCol + int.Parse(value)).ToString();
+                            anchor.ToMarker.ColumnId!.Text = (fromCol + widthVal).ToString();
                         }
                         break;
                     case "height":
                         if (anchor.FromMarker != null && anchor.ToMarker != null)
                         {
+                            if (!int.TryParse(value, out var heightVal))
+                                throw new FormatException($"Invalid height value: '{value}'. Expected an integer.");
                             var fromRow = int.TryParse(anchor.FromMarker.RowId?.Text, out var fr) ? fr : 0;
-                            anchor.ToMarker.RowId!.Text = (fromRow + int.Parse(value)).ToString();
+                            anchor.ToMarker.RowId!.Text = (fromRow + heightVal).ToString();
                         }
                         break;
                     case "alt":
@@ -304,8 +308,8 @@ public partial class ExcelHandler
             return SetAutoFilter(worksheet, properties);
         }
 
-        // Handle /SheetName/cf[N]
-        var cfSetMatch = Regex.Match(cellRef, @"^cf\[(\d+)\]$");
+        // Handle /SheetName/cf[N] or /SheetName/conditionalformatting[N]
+        var cfSetMatch = Regex.Match(cellRef, @"^(?:cf|conditionalformatting)\[(\d+)\]$", RegexOptions.IgnoreCase);
         if (cfSetMatch.Success)
         {
             var cfIdx = int.Parse(cfSetMatch.Groups[1].Value);
@@ -344,19 +348,20 @@ public partial class ExcelHandler
                         else unsup.Add(key);
                         break;
                     case "iconset":
+                    case "icons":
                         var iconSetEl = rule?.GetFirstChild<IconSet>();
                         if (iconSetEl != null)
-                            iconSetEl.IconSetValue = new EnumValue<IconSetValues>(new IconSetValues(value));
+                            iconSetEl.IconSetValue = new EnumValue<IconSetValues>(ParseIconSetValues(value));
                         else unsup.Add(key);
                         break;
                     case "reverse":
                         var isEl = rule?.GetFirstChild<IconSet>();
-                        if (isEl != null) isEl.Reverse = bool.Parse(value);
+                        if (isEl != null) isEl.Reverse = IsTruthy(value);
                         else unsup.Add(key);
                         break;
                     case "showvalue":
                         var isEl2 = rule?.GetFirstChild<IconSet>();
-                        if (isEl2 != null) isEl2.ShowValue = bool.Parse(value);
+                        if (isEl2 != null) isEl2.ShowValue = IsTruthy(value);
                         else unsup.Add(key);
                         break;
                     default:
@@ -478,9 +483,14 @@ public partial class ExcelHandler
             {
                 case "value":
                     cell.CellValue = new CellValue(value);
-                    // Auto-detect type
+                    // Auto-detect type: number, boolean, or string
                     if (double.TryParse(value, out _))
                         cell.DataType = null; // Number is default
+                    else if (value.Equals("true", StringComparison.OrdinalIgnoreCase) || value.Equals("false", StringComparison.OrdinalIgnoreCase))
+                    {
+                        cell.DataType = new EnumValue<CellValues>(CellValues.Boolean);
+                        cell.CellValue = new CellValue(value.Equals("true", StringComparison.OrdinalIgnoreCase) ? "1" : "0");
+                    }
                     else
                     {
                         cell.DataType = new EnumValue<CellValues>(CellValues.String);
@@ -489,6 +499,7 @@ public partial class ExcelHandler
                 case "formula":
                     cell.CellFormula = new CellFormula(value);
                     cell.CellValue = null;
+                    cell.DataType = null; // Formula cells should not retain DataType
                     break;
                 case "type":
                     cell.DataType = value.ToLowerInvariant() switch
@@ -502,6 +513,7 @@ public partial class ExcelHandler
                 case "clear":
                     cell.CellValue = null;
                     cell.CellFormula = null;
+                    cell.DataType = null; // Reset type on clear
                     break;
                 case "link":
                 {
@@ -610,6 +622,22 @@ public partial class ExcelHandler
                     }
                     break;
                 }
+                case "merge":
+                {
+                    // Sheet-level merge: value is the range to merge (e.g., "A1:A3")
+                    var rangeRef = value.ToUpperInvariant();
+                    var mergeCells = ws.GetFirstChild<MergeCells>();
+                    if (mergeCells == null)
+                    {
+                        mergeCells = new MergeCells();
+                        ws.AppendChild(mergeCells);
+                    }
+                    var existing = mergeCells.Elements<MergeCell>()
+                        .FirstOrDefault(m => m.Reference?.Value?.Equals(rangeRef, StringComparison.OrdinalIgnoreCase) == true);
+                    if (existing == null)
+                        mergeCells.AppendChild(new MergeCell { Reference = rangeRef });
+                    break;
+                }
                 default:
                     unsupported.Add(key);
                     break;
@@ -714,7 +742,7 @@ public partial class ExcelHandler
             switch (key.ToLowerInvariant())
             {
                 case "width":
-                    col.Width = double.Parse(value);
+                    col.Width = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
                     col.CustomWidth = true;
                     break;
                 case "hidden":
@@ -758,7 +786,7 @@ public partial class ExcelHandler
             switch (key.ToLowerInvariant())
             {
                 case "height":
-                    row.Height = double.Parse(value);
+                    row.Height = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
                     row.CustomHeight = true;
                     break;
                 case "hidden":

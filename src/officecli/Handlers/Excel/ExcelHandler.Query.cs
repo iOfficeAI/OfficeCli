@@ -366,7 +366,7 @@ public partial class ExcelHandler
         var results = new List<DocumentNode>();
 
         // Check if element type is known (Scheme A) or should fall back to generic XML (Scheme B)
-        var elementMatch = Regex.Match(selector.Split('!').Last(), @"^([\w:]+)");
+        var elementMatch = Regex.Match(selector.Split('!').Last(), @"^(\w+)");
         var elementName = elementMatch.Success ? elementMatch.Groups[1].Value : "";
         bool isKnownType = string.IsNullOrEmpty(elementName)
             || elementName is "cell" or "row" or "sheet" or "validation" or "comment" or "note" or "table" or "listobject"
@@ -454,7 +454,7 @@ public partial class ExcelHandler
                 {
                     if (MatchesCellSelector(cell, sheetName, parsed))
                     {
-                        results.Add(CellToNode(sheetName, cell));
+                        results.Add(CellToNode(sheetName, cell, worksheetPart));
                     }
                 }
             }

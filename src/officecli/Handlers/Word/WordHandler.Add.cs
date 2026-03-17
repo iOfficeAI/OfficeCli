@@ -24,6 +24,14 @@ public partial class WordHandler
         {
             parent = body;
         }
+        else if (parentPath == "/styles")
+        {
+            // Ensure styles part exists for style operations
+            var stylesPart = _doc.MainDocumentPart!.StyleDefinitionsPart
+                ?? _doc.MainDocumentPart.AddNewPart<StyleDefinitionsPart>();
+            stylesPart.Styles ??= new Styles();
+            parent = stylesPart.Styles;
+        }
         else
         {
             var parts = ParsePath(parentPath);
@@ -55,9 +63,12 @@ public partial class WordHandler
                     };
                 if (properties.TryGetValue("firstlineindent", out var indent))
                 {
+                    var indentVal = (long)(double.Parse(indent, System.Globalization.CultureInfo.InvariantCulture) * 480);
+                    if (indentVal < 0 || indentVal > int.MaxValue)
+                        throw new OverflowException($"First line indent value out of range: {indent}");
                     pProps.Indentation = new Indentation
                     {
-                        FirstLine = (int.Parse(indent) * 480).ToString()
+                        FirstLine = indentVal.ToString()
                     };
                 }
                 if (properties.TryGetValue("spacebefore", out var sb4))
@@ -115,13 +126,13 @@ public partial class WordHandler
                     var ind = pProps.Indentation ?? (pProps.Indentation = new Indentation());
                     ind.Hanging = addHI;
                 }
-                if (properties.TryGetValue("keepnext", out var addKN) && bool.Parse(addKN))
+                if (properties.TryGetValue("keepnext", out var addKN) && IsTruthy(addKN))
                     pProps.KeepNext = new KeepNext();
-                if ((properties.TryGetValue("keeplines", out var addKL) || properties.TryGetValue("keeptogether", out addKL)) && bool.Parse(addKL))
+                if ((properties.TryGetValue("keeplines", out var addKL) || properties.TryGetValue("keeptogether", out addKL)) && IsTruthy(addKL))
                     pProps.KeepLines = new KeepLines();
-                if (properties.TryGetValue("pagebreakbefore", out var addPBB) && bool.Parse(addPBB))
+                if (properties.TryGetValue("pagebreakbefore", out var addPBB) && IsTruthy(addPBB))
                     pProps.PageBreakBefore = new PageBreakBefore();
-                if (properties.TryGetValue("widowcontrol", out var addWC) && bool.Parse(addWC))
+                if (properties.TryGetValue("widowcontrol", out var addWC) && IsTruthy(addWC))
                     pProps.WidowControl = new WidowControl();
                 if (properties.TryGetValue("liststyle", out var listStyle))
                 {
@@ -145,27 +156,27 @@ public partial class WordHandler
                     }
                     if (properties.TryGetValue("size", out var size))
                     {
-                        rProps.AppendChild(new FontSize { Val = (int.Parse(size) * 2).ToString() });
+                        rProps.AppendChild(new FontSize { Val = ((int)(ParseFontSize(size) * 2)).ToString() });
                     }
-                    if (properties.TryGetValue("bold", out var bold) && bool.Parse(bold))
+                    if (properties.TryGetValue("bold", out var bold) && IsTruthy(bold))
                         rProps.Bold = new Bold();
-                    if (properties.TryGetValue("italic", out var pItalic) && bool.Parse(pItalic))
+                    if (properties.TryGetValue("italic", out var pItalic) && IsTruthy(pItalic))
                         rProps.Italic = new Italic();
                     if (properties.TryGetValue("color", out var pColor))
                         rProps.Color = new Color { Val = pColor.ToUpperInvariant() };
                     if (properties.TryGetValue("underline", out var pUnderline))
                         rProps.Underline = new Underline { Val = new UnderlineValues(pUnderline) };
-                    if (properties.TryGetValue("strike", out var pStrike) && bool.Parse(pStrike))
+                    if (properties.TryGetValue("strike", out var pStrike) && IsTruthy(pStrike))
                         rProps.Strike = new Strike();
                     if (properties.TryGetValue("highlight", out var pHighlight))
                         rProps.Highlight = new Highlight { Val = new HighlightColorValues(pHighlight) };
-                    if (properties.TryGetValue("caps", out var pCaps) && bool.Parse(pCaps))
+                    if (properties.TryGetValue("caps", out var pCaps) && IsTruthy(pCaps))
                         rProps.Caps = new Caps();
-                    if (properties.TryGetValue("smallcaps", out var pSmallCaps) && bool.Parse(pSmallCaps))
+                    if (properties.TryGetValue("smallcaps", out var pSmallCaps) && IsTruthy(pSmallCaps))
                         rProps.SmallCaps = new SmallCaps();
-                    if (properties.TryGetValue("superscript", out var pSup) && bool.Parse(pSup))
+                    if (properties.TryGetValue("superscript", out var pSup) && IsTruthy(pSup))
                         rProps.VerticalTextAlignment = new VerticalTextAlignment { Val = VerticalPositionValues.Superscript };
-                    if (properties.TryGetValue("subscript", out var pSub) && bool.Parse(pSub))
+                    if (properties.TryGetValue("subscript", out var pSub) && IsTruthy(pSub))
                         rProps.VerticalTextAlignment = new VerticalTextAlignment { Val = VerticalPositionValues.Subscript };
                     if (properties.TryGetValue("shd", out var pShd) || properties.TryGetValue("shading", out pShd))
                     {
@@ -274,26 +285,26 @@ public partial class WordHandler
                 if (properties.TryGetValue("font", out var rFont))
                     newRProps.AppendChild(new RunFonts { Ascii = rFont, HighAnsi = rFont, EastAsia = rFont });
                 if (properties.TryGetValue("size", out var rSize))
-                    newRProps.AppendChild(new FontSize { Val = (int.Parse(rSize) * 2).ToString() });
-                if (properties.TryGetValue("bold", out var rBold) && bool.Parse(rBold))
+                    newRProps.AppendChild(new FontSize { Val = ((int)(ParseFontSize(rSize) * 2)).ToString() });
+                if (properties.TryGetValue("bold", out var rBold) && IsTruthy(rBold))
                     newRProps.Bold = new Bold();
-                if (properties.TryGetValue("italic", out var rItalic) && bool.Parse(rItalic))
+                if (properties.TryGetValue("italic", out var rItalic) && IsTruthy(rItalic))
                     newRProps.Italic = new Italic();
                 if (properties.TryGetValue("color", out var rColor))
                     newRProps.Color = new Color { Val = rColor.ToUpperInvariant() };
                 if (properties.TryGetValue("underline", out var rUnderline))
                     newRProps.Underline = new Underline { Val = new UnderlineValues(rUnderline) };
-                if (properties.TryGetValue("strike", out var rStrike) && bool.Parse(rStrike))
+                if (properties.TryGetValue("strike", out var rStrike) && IsTruthy(rStrike))
                     newRProps.Strike = new Strike();
                 if (properties.TryGetValue("highlight", out var rHighlight))
                     newRProps.Highlight = new Highlight { Val = new HighlightColorValues(rHighlight) };
-                if (properties.TryGetValue("caps", out var rCaps) && bool.Parse(rCaps))
+                if (properties.TryGetValue("caps", out var rCaps) && IsTruthy(rCaps))
                     newRProps.Caps = new Caps();
-                if (properties.TryGetValue("smallcaps", out var rSmallCaps) && bool.Parse(rSmallCaps))
+                if (properties.TryGetValue("smallcaps", out var rSmallCaps) && IsTruthy(rSmallCaps))
                     newRProps.SmallCaps = new SmallCaps();
-                if (properties.TryGetValue("superscript", out var rSup) && bool.Parse(rSup))
+                if (properties.TryGetValue("superscript", out var rSup) && IsTruthy(rSup))
                     newRProps.VerticalTextAlignment = new VerticalTextAlignment { Val = VerticalPositionValues.Superscript };
-                if (properties.TryGetValue("subscript", out var rSub) && bool.Parse(rSub))
+                if (properties.TryGetValue("subscript", out var rSub) && IsTruthy(rSub))
                     newRProps.VerticalTextAlignment = new VerticalTextAlignment { Val = VerticalPositionValues.Subscript };
                 if (properties.TryGetValue("shd", out var rShd) || properties.TryGetValue("shading", out rShd))
                 {
@@ -449,8 +460,8 @@ public partial class WordHandler
             }
 
             case "picture" or "image" or "img":
-                if (!properties.TryGetValue("path", out var imgPath))
-                    throw new ArgumentException("'path' property is required for picture type");
+                if (!properties.TryGetValue("path", out var imgPath) && !properties.TryGetValue("src", out imgPath))
+                    throw new ArgumentException("'path' (or 'src') property is required for picture type");
                 if (!File.Exists(imgPath))
                     throw new FileNotFoundException($"Image file not found: {imgPath}");
 
@@ -485,7 +496,7 @@ public partial class WordHandler
                 var altText = properties.GetValueOrDefault("alt", Path.GetFileName(imgPath));
 
                 Run imgRun;
-                if (properties.TryGetValue("anchor", out var anchorVal) && bool.Parse(anchorVal))
+                if (properties.TryGetValue("anchor", out var anchorVal) && IsTruthy(anchorVal))
                 {
                     var wrapType = properties.GetValueOrDefault("wrap", "none");
                     long hPos = properties.TryGetValue("hposition", out var hPosStr) ? ParseEmu(hPosStr) : 0;
@@ -496,7 +507,7 @@ public partial class WordHandler
                     var vRel = properties.TryGetValue("vrelative", out var vRelStr)
                         ? ParseVerticalRelative(vRelStr)
                         : DW.VerticalRelativePositionValues.Margin;
-                    var behind = properties.TryGetValue("behindtext", out var behindStr) && bool.Parse(behindStr);
+                    var behind = properties.TryGetValue("behindtext", out var behindStr) && IsTruthy(behindStr);
                     imgRun = CreateAnchorImageRun(relId, cxEmu, cyEmu, altText, wrapType, hPos, vPos, hRel, vRel, behind);
                 }
                 else
@@ -629,7 +640,7 @@ public partial class WordHandler
                 if (properties.TryGetValue("font", out var hlFont))
                     hlRProps.RunFonts = new RunFonts { Ascii = hlFont, HighAnsi = hlFont };
                 if (properties.TryGetValue("size", out var hlSize))
-                    hlRProps.FontSize = new FontSize { Val = (int.Parse(hlSize) * 2).ToString() };
+                    hlRProps.FontSize = new FontSize { Val = ((int)(ParseFontSize(hlSize) * 2)).ToString() };
 
                 var hlRun = new Run(hlRProps);
                 var hlText = properties.GetValueOrDefault("text", hlUrl);
@@ -685,10 +696,18 @@ public partial class WordHandler
                 });
 
                 // Allow per-section overrides
-                if (properties.TryGetValue("pagewidth", out var sw))
-                    (sectPr.GetFirstChild<PageSize>() ?? sectPr.AppendChild(new PageSize())).Width = uint.Parse(sw);
-                if (properties.TryGetValue("pageheight", out var sh))
-                    (sectPr.GetFirstChild<PageSize>() ?? sectPr.AppendChild(new PageSize())).Height = uint.Parse(sh);
+                if (properties.TryGetValue("pagewidth", out var sw) || properties.TryGetValue("width", out sw))
+                {
+                    if (!uint.TryParse(sw, out var swVal))
+                        throw new FormatException($"Invalid page width: {sw}");
+                    (sectPr.GetFirstChild<PageSize>() ?? sectPr.AppendChild(new PageSize())).Width = swVal;
+                }
+                if (properties.TryGetValue("pageheight", out var sh) || properties.TryGetValue("height", out sh))
+                {
+                    if (!uint.TryParse(sh, out var shVal))
+                        throw new FormatException($"Invalid page height: {sh}");
+                    (sectPr.GetFirstChild<PageSize>() ?? sectPr.AppendChild(new PageSize())).Height = shVal;
+                }
                 if (properties.TryGetValue("orientation", out var orient))
                 {
                     var ps = sectPr.GetFirstChild<PageSize>() ?? sectPr.AppendChild(new PageSize());
@@ -805,8 +824,8 @@ public partial class WordHandler
                 // Table of Contents field code
                 var levels = properties.GetValueOrDefault("levels", "1-3");
                 var tocTitle = properties.GetValueOrDefault("title", "");
-                var hyperlinks = !properties.TryGetValue("hyperlinks", out var hlVal) || bool.Parse(hlVal);
-                var pageNumbers = !properties.TryGetValue("pagenumbers", out var pnVal) || bool.Parse(pnVal);
+                var hyperlinks = !properties.TryGetValue("hyperlinks", out var hlVal) || IsTruthy(hlVal);
+                var pageNumbers = !properties.TryGetValue("pagenumbers", out var pnVal) || IsTruthy(pnVal);
 
                 // Build field code instruction
                 var instrBuilder = new StringBuilder($" TOC \\o \"{levels}\"");
@@ -881,7 +900,7 @@ public partial class WordHandler
                 };
                 newStyle.AppendChild(new StyleName { Val = styleName });
 
-                if (properties.TryGetValue("basedon", out var basedOn))
+                if (properties.TryGetValue("basedon", out var basedOn) && !string.IsNullOrEmpty(basedOn))
                     newStyle.AppendChild(new BasedOn { Val = basedOn });
                 if (properties.TryGetValue("next", out var nextStyle))
                     newStyle.AppendChild(new NextParagraphStyle { Val = nextStyle });
@@ -927,15 +946,15 @@ public partial class WordHandler
                 }
                 if (properties.TryGetValue("size", out var sSize))
                 {
-                    styleRPr.FontSize = new FontSize { Val = (int.Parse(sSize) * 2).ToString() };
+                    styleRPr.FontSize = new FontSize { Val = ((int)(ParseFontSize(sSize) * 2)).ToString() };
                     hasRPr = true;
                 }
-                if (properties.TryGetValue("bold", out var sBold) && bool.Parse(sBold))
+                if (properties.TryGetValue("bold", out var sBold) && IsTruthy(sBold))
                 {
                     styleRPr.Bold = new Bold();
                     hasRPr = true;
                 }
-                if (properties.TryGetValue("italic", out var sItalic) && bool.Parse(sItalic))
+                if (properties.TryGetValue("italic", out var sItalic) && IsTruthy(sItalic))
                 {
                     styleRPr.Italic = new Italic();
                     hasRPr = true;
@@ -983,10 +1002,10 @@ public partial class WordHandler
                     if (properties.TryGetValue("font", out var hFont))
                         hRProps.AppendChild(new RunFonts { Ascii = hFont, HighAnsi = hFont, EastAsia = hFont });
                     if (properties.TryGetValue("size", out var hSize))
-                        hRProps.AppendChild(new FontSize { Val = (int.Parse(hSize) * 2).ToString() });
-                    if (properties.TryGetValue("bold", out var hBold) && bool.Parse(hBold))
+                        hRProps.AppendChild(new FontSize { Val = ((int)(ParseFontSize(hSize) * 2)).ToString() });
+                    if (properties.TryGetValue("bold", out var hBold) && IsTruthy(hBold))
                         hRProps.Bold = new Bold();
-                    if (properties.TryGetValue("italic", out var hItalic) && bool.Parse(hItalic))
+                    if (properties.TryGetValue("italic", out var hItalic) && IsTruthy(hItalic))
                         hRProps.Italic = new Italic();
                     if (properties.TryGetValue("color", out var hColor))
                         hRProps.Color = new Color { Val = hColor.ToUpperInvariant() };
@@ -1063,10 +1082,10 @@ public partial class WordHandler
                     if (properties.TryGetValue("font", out var fFont))
                         fRProps.AppendChild(new RunFonts { Ascii = fFont, HighAnsi = fFont, EastAsia = fFont });
                     if (properties.TryGetValue("size", out var fSize))
-                        fRProps.AppendChild(new FontSize { Val = (int.Parse(fSize) * 2).ToString() });
-                    if (properties.TryGetValue("bold", out var fBold) && bool.Parse(fBold))
+                        fRProps.AppendChild(new FontSize { Val = ((int)(ParseFontSize(fSize) * 2)).ToString() });
+                    if (properties.TryGetValue("bold", out var fBold) && IsTruthy(fBold))
                         fRProps.Bold = new Bold();
-                    if (properties.TryGetValue("italic", out var fItalic) && bool.Parse(fItalic))
+                    if (properties.TryGetValue("italic", out var fItalic) && IsTruthy(fItalic))
                         fRProps.Italic = new Italic();
                     if (properties.TryGetValue("color", out var fColor))
                         fRProps.Color = new Color { Val = fColor.ToUpperInvariant() };
@@ -1216,7 +1235,22 @@ public partial class WordHandler
         }
 
         element.Remove();
-        InsertAtPosition(targetParent, element, index);
+
+        // Insert at the specified position among same-type siblings
+        if (index.HasValue)
+        {
+            var sameTypeSiblings = targetParent.ChildElements
+                .Where(e => e.LocalName == element.LocalName).ToList();
+            var insertIdx = index.Value - 1; // Convert 1-based to 0-based
+            if (insertIdx >= 0 && insertIdx < sameTypeSiblings.Count)
+                sameTypeSiblings[insertIdx].InsertBeforeSelf(element);
+            else
+                targetParent.AppendChild(element);
+        }
+        else
+        {
+            targetParent.AppendChild(element);
+        }
 
         _doc.MainDocumentPart?.Document?.Save();
 

@@ -27,13 +27,13 @@ public partial class PowerPointHandler
                     case "slidewidth" or "width":
                         var sldSz = presentation.GetFirstChild<SlideSize>()
                             ?? presentation.AppendChild(new SlideSize());
-                        sldSz.Cx = (int)ParseEmu(value);
+                        sldSz.Cx = Core.EmuConverter.ParseEmuAsInt(value);
                         sldSz.Type = SlideSizeValues.Custom;
                         break;
                     case "slideheight" or "height":
                         var sldSz2 = presentation.GetFirstChild<SlideSize>()
                             ?? presentation.AppendChild(new SlideSize());
-                        sldSz2.Cy = (int)ParseEmu(value);
+                        sldSz2.Cy = Core.EmuConverter.ParseEmuAsInt(value);
                         sldSz2.Type = SlideSizeValues.Custom;
                         break;
                     case "slidesize":
@@ -381,7 +381,7 @@ public partial class PowerPointHandler
                                 "medium4" or "mediumstyle4" => "{D7AC3CCA-C797-4891-BE02-D94E43425B78}",
                                 "light1" or "lightstyle1" => "{9D7B26C5-4107-4FEC-AEDC-1716B250A1EF}",
                                 "light2" or "lightstyle2" => "{ED083AE6-46FA-4A59-8FB0-9F97EB10719F}",
-                                "light3" or "lightstyle3" => "{3B4B98B0-60AC-42C2-AFA5-B58CD77FA1E5}",
+                                "light3" or "lightstyle3" => "{C083E6E3-FA7D-4D7B-A595-EF9225AFEA82}",
                                 "dark1" or "darkstyle1" => "{E8034E78-7F5D-4C2E-B375-FC64B27BC917}",
                                 "dark2" or "darkstyle2" => "{125E5076-3810-47DD-B79F-674D7AD40C01}",
                                 "none" => "{2D5ABB26-0587-4C30-8999-92F81FD0307C}",
@@ -498,7 +498,9 @@ public partial class PowerPointHandler
                     case "volume":
                     {
                         if (shapeId == null) { unsupported.Add(key); break; }
-                        var vol = (int)(double.Parse(value) * 1000); // 0-100 → 0-100000
+                        if (!double.TryParse(value, out var volVal))
+                            throw new ArgumentException($"Invalid volume value: '{value}'. Expected a number (0-100).");
+                        var vol = (int)(volVal * 1000); // 0-100 → 0-100000
                         var mediaNode = FindMediaTimingNode(slidePart, shapeId.Value);
                         if (mediaNode != null) mediaNode.Volume = vol;
                         break;
@@ -510,7 +512,7 @@ public partial class PowerPointHandler
                         var cTn = mediaNode?.CommonTimeNode;
                         var startCond = cTn?.StartConditionList?.GetFirstChild<Condition>();
                         if (startCond != null)
-                            startCond.Delay = bool.Parse(value) ? "0" : "indefinite";
+                            startCond.Delay = IsTruthy(value) ? "0" : "indefinite";
                         break;
                     }
                     case "trimstart":
@@ -644,20 +646,20 @@ public partial class PowerPointHandler
                             var parts = value.Split(',');
                             if (parts.Length == 4)
                             {
-                                srcRect.Left = (int)(double.Parse(parts[0].Trim()) * 1000);
-                                srcRect.Top = (int)(double.Parse(parts[1].Trim()) * 1000);
-                                srcRect.Right = (int)(double.Parse(parts[2].Trim()) * 1000);
-                                srcRect.Bottom = (int)(double.Parse(parts[3].Trim()) * 1000);
+                                srcRect.Left = (int)(double.Parse(parts[0].Trim(), System.Globalization.CultureInfo.InvariantCulture) * 1000);
+                                srcRect.Top = (int)(double.Parse(parts[1].Trim(), System.Globalization.CultureInfo.InvariantCulture) * 1000);
+                                srcRect.Right = (int)(double.Parse(parts[2].Trim(), System.Globalization.CultureInfo.InvariantCulture) * 1000);
+                                srcRect.Bottom = (int)(double.Parse(parts[3].Trim(), System.Globalization.CultureInfo.InvariantCulture) * 1000);
                             }
                             else if (parts.Length == 1)
                             {
-                                var pct = (int)(double.Parse(value) * 1000);
+                                var pct = (int)(double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) * 1000);
                                 srcRect.Left = pct; srcRect.Top = pct; srcRect.Right = pct; srcRect.Bottom = pct;
                             }
                         }
                         else
                         {
-                            var pct = (int)(double.Parse(value) * 1000); // percent (0-100) → 1/1000ths
+                            var pct = (int)(double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) * 1000); // percent (0-100) → 1/1000ths
                             switch (key.ToLowerInvariant())
                             {
                                 case "cropleft": srcRect.Left = pct; break;
@@ -708,7 +710,13 @@ public partial class PowerPointHandler
                     case "advanceclick" or "advanceonclick":
                     {
                         var trans = slide2.GetFirstChild<Transition>() ?? slide2.AppendChild(new Transition());
-                        trans.AdvanceOnClick = bool.Parse(value);
+                        trans.AdvanceOnClick = IsTruthy(value);
+                        break;
+                    }
+                    case "notes":
+                    {
+                        var notesPart = EnsureNotesSlidePart(slidePart2);
+                        SetNotesText(notesPart, value);
                         break;
                     }
                     default:

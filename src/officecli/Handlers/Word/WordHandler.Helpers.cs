@@ -15,6 +15,12 @@ public partial class WordHandler
 {
     // ==================== Private Helpers ====================
 
+    private static bool IsTruthy(string value) =>
+        ParseHelpers.IsTruthy(value);
+
+    private static double ParseFontSize(string value) =>
+        ParseHelpers.ParseFontSize(value);
+
     private static string GetParagraphText(Paragraph para)
     {
         return string.Concat(para.Descendants<Text>().Select(t => t.Text));
@@ -287,5 +293,49 @@ public partial class WordHandler
             sibling = sibling.NextSibling();
         }
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Ensure PageSize exists in SectionProperties in correct schema order.
+    /// Schema order: SectionType, PageSize, PageMargin, ...
+    /// </summary>
+    private static PageSize EnsureSectPrPageSize(SectionProperties sectPr)
+    {
+        var existing = sectPr.GetFirstChild<PageSize>();
+        if (existing != null) return existing;
+
+        var ps = new PageSize();
+        // Insert after SectionType if present, otherwise prepend
+        var sectionType = sectPr.GetFirstChild<SectionType>();
+        if (sectionType != null)
+            sectionType.InsertAfterSelf(ps);
+        else
+            sectPr.PrependChild(ps);
+        return ps;
+    }
+
+    /// <summary>
+    /// Ensure PageMargin exists in SectionProperties in correct schema order.
+    /// Schema order: SectionType, PageSize, PageMargin, ...
+    /// </summary>
+    private static PageMargin EnsureSectPrPageMargin(SectionProperties sectPr)
+    {
+        var existing = sectPr.GetFirstChild<PageMargin>();
+        if (existing != null) return existing;
+
+        var pm = new PageMargin();
+        // Insert after PageSize if present, after SectionType, or prepend
+        var pageSize = sectPr.GetFirstChild<PageSize>();
+        if (pageSize != null)
+            pageSize.InsertAfterSelf(pm);
+        else
+        {
+            var sectionType = sectPr.GetFirstChild<SectionType>();
+            if (sectionType != null)
+                sectionType.InsertAfterSelf(pm);
+            else
+                sectPr.PrependChild(pm);
+        }
+        return pm;
     }
 }

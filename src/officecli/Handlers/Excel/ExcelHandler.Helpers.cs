@@ -164,7 +164,23 @@ public partial class ExcelHandler
         var cellRef = cell.CellReference?.Value ?? "?";
         var value = GetCellDisplayValue(cell);
         var formula = cell.CellFormula?.Text;
-        var type = cell.DataType?.Value.ToString() ?? "Number";
+        string type;
+        if (cell.DataType?.HasValue != true)
+            type = "Number";
+        else if (cell.DataType.Value == CellValues.String)
+            type = "String";
+        else if (cell.DataType.Value == CellValues.SharedString)
+            type = "SharedString";
+        else if (cell.DataType.Value == CellValues.Boolean)
+            type = "Boolean";
+        else if (cell.DataType.Value == CellValues.Error)
+            type = "Error";
+        else if (cell.DataType.Value == CellValues.InlineString)
+            type = "InlineString";
+        else if (cell.DataType.Value == CellValues.Date)
+            type = "Date";
+        else
+            type = "Number";
 
         var node = new DocumentNode
         {
@@ -202,6 +218,39 @@ public partial class ExcelHandler
                 if (cellFormats != null && styleIndex < (uint)cellFormats.Elements<CellFormat>().Count())
                 {
                     var xf = cellFormats.Elements<CellFormat>().ElementAt((int)styleIndex);
+                    // Font readback
+                    var fontId = xf.FontId?.Value ?? 0;
+                    if (fontId > 0)
+                    {
+                        var fonts = wbStylesPart.Stylesheet.Fonts;
+                        if (fonts != null && fontId < (uint)fonts.Elements<Font>().Count())
+                        {
+                            var font = fonts.Elements<Font>().ElementAt((int)fontId);
+                            if (font.Bold != null) node.Format["font.bold"] = true;
+                            if (font.Italic != null) node.Format["font.italic"] = true;
+                            if (font.Strike != null) node.Format["font.strike"] = true;
+                            if (font.Underline != null)
+                                node.Format["underline"] = font.Underline.Val?.InnerText == "double" ? "double" : "single";
+                            if (font.Color?.Rgb?.Value != null) node.Format["font.color"] = font.Color.Rgb.Value;
+                            if (font.FontSize?.Val?.Value != null) node.Format["font.size"] = font.FontSize.Val.Value;
+                            if (font.FontName?.Val?.Value != null) node.Format["font.name"] = font.FontName.Val.Value;
+                        }
+                    }
+
+                    // Fill readback
+                    var fillId = xf.FillId?.Value ?? 0;
+                    if (fillId > 0)
+                    {
+                        var fills = wbStylesPart.Stylesheet.Fills;
+                        if (fills != null && fillId < (uint)fills.Elements<Fill>().Count())
+                        {
+                            var fill = fills.Elements<Fill>().ElementAt((int)fillId);
+                            var pf = fill.PatternFill;
+                            if (pf?.ForegroundColor?.Rgb?.Value != null)
+                                node.Format["bgcolor"] = pf.ForegroundColor.Rgb.Value;
+                        }
+                    }
+
                     var borderId = xf.BorderId?.Value ?? 0;
                     if (borderId > 0)
                     {
@@ -345,7 +394,7 @@ public partial class ExcelHandler
     // ==================== Conditional Formatting Helpers ====================
 
     private static bool IsTruthy(string value) =>
-        value.ToLowerInvariant() is "true" or "1" or "yes";
+        ParseHelpers.IsTruthy(value);
 
     private static IconSetValues ParseIconSetValues(string name)
     {
@@ -368,7 +417,7 @@ public partial class ExcelHandler
             "5arrowsgray" => IconSetValues.FiveArrowsGray,
             "5rating" => IconSetValues.FiveRating,
             "5quarters" => IconSetValues.FiveQuarters,
-            _ => IconSetValues.ThreeTrafficLights1
+            _ => throw new ArgumentException($"Unknown icon set name: '{name}'. Valid names: 3Arrows, 3ArrowsGray, 3Flags, 3TrafficLights1, 3TrafficLights2, 3Signs, 3Symbols, 3Symbols2, 4Arrows, 4ArrowsGray, 4Rating, 4RedToBlack, 4TrafficLights, 5Arrows, 5ArrowsGray, 5Rating, 5Quarters")
         };
     }
 
@@ -425,7 +474,7 @@ public partial class ExcelHandler
                 if (colonIdx < 0) continue;
                 var sName = seriesPart[..colonIdx].Trim();
                 var vals = seriesPart[(colonIdx + 1)..].Split(',')
-                    .Select(v => double.Parse(v.Trim())).ToArray();
+                    .Select(v => double.Parse(v.Trim(), System.Globalization.CultureInfo.InvariantCulture)).ToArray();
                 result.Add((sName, vals));
             }
             return result;
@@ -437,14 +486,14 @@ public partial class ExcelHandler
             var colonIdx = seriesStr.IndexOf(':');
             if (colonIdx < 0)
             {
-                var vals = seriesStr.Split(',').Select(v => double.Parse(v.Trim())).ToArray();
+                var vals = seriesStr.Split(',').Select(v => double.Parse(v.Trim(), System.Globalization.CultureInfo.InvariantCulture)).ToArray();
                 result.Add(($"Series {i}", vals));
             }
             else
             {
                 var sName = seriesStr[..colonIdx].Trim();
                 var vals = seriesStr[(colonIdx + 1)..].Split(',')
-                    .Select(v => double.Parse(v.Trim())).ToArray();
+                    .Select(v => double.Parse(v.Trim(), System.Globalization.CultureInfo.InvariantCulture)).ToArray();
                 result.Add((sName, vals));
             }
         }
@@ -716,10 +765,7 @@ public partial class ExcelHandler
         var series = new C.BarChartSeries(
             new C.Index { Val = idx },
             new C.Order { Val = idx },
-            new C.SeriesText(new C.StringLiteral(
-                new C.PointCount { Val = 1 },
-                new C.StringPoint(new C.NumericValue(name)) { Index = 0 }
-            ))
+            new C.SeriesText(new C.NumericValue(name))
         );
         if (color != null) ExcelChartApplySeriesColor(series, color);
         if (categories != null) series.AppendChild(ExcelChartBuildCategoryData(categories));
@@ -733,10 +779,7 @@ public partial class ExcelHandler
         var series = new C.LineChartSeries(
             new C.Index { Val = idx },
             new C.Order { Val = idx },
-            new C.SeriesText(new C.StringLiteral(
-                new C.PointCount { Val = 1 },
-                new C.StringPoint(new C.NumericValue(name)) { Index = 0 }
-            ))
+            new C.SeriesText(new C.NumericValue(name))
         );
         if (color != null) ExcelChartApplySeriesColor(series, color);
         if (categories != null) series.AppendChild(ExcelChartBuildCategoryData(categories));
@@ -750,10 +793,7 @@ public partial class ExcelHandler
         var series = new C.AreaChartSeries(
             new C.Index { Val = idx },
             new C.Order { Val = idx },
-            new C.SeriesText(new C.StringLiteral(
-                new C.PointCount { Val = 1 },
-                new C.StringPoint(new C.NumericValue(name)) { Index = 0 }
-            ))
+            new C.SeriesText(new C.NumericValue(name))
         );
         if (color != null) ExcelChartApplySeriesColor(series, color);
         if (categories != null) series.AppendChild(ExcelChartBuildCategoryData(categories));
@@ -767,10 +807,7 @@ public partial class ExcelHandler
         var series = new C.PieChartSeries(
             new C.Index { Val = idx },
             new C.Order { Val = idx },
-            new C.SeriesText(new C.StringLiteral(
-                new C.PointCount { Val = 1 },
-                new C.StringPoint(new C.NumericValue(name)) { Index = 0 }
-            ))
+            new C.SeriesText(new C.NumericValue(name))
         );
         if (color != null) ExcelChartApplySeriesColor(series, color);
         if (categories != null) series.AppendChild(ExcelChartBuildCategoryData(categories));
@@ -784,10 +821,7 @@ public partial class ExcelHandler
         var series = new C.ScatterChartSeries(
             new C.Index { Val = idx },
             new C.Order { Val = idx },
-            new C.SeriesText(new C.StringLiteral(
-                new C.PointCount { Val = 1 },
-                new C.StringPoint(new C.NumericValue(name)) { Index = 0 }
-            ))
+            new C.SeriesText(new C.NumericValue(name))
         );
 
         if (xValues != null)

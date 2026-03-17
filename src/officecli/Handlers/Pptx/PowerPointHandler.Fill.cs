@@ -175,21 +175,33 @@ public partial class PowerPointHandler
     /// </summary>
     private static void ApplyTextMargin(Drawing.BodyProperties bodyPr, string value)
     {
+        // Maximum reasonable inset: ~142cm (max slide dimension in OOXML = 51206400 EMU)
+        const int MaxInsetEmu = 51206400;
+
         var parts = value.Split(',');
         if (parts.Length == 1)
         {
-            var emu = ParseEmu(parts[0]);
-            bodyPr.LeftInset = (int)emu;
-            bodyPr.TopInset = (int)emu;
-            bodyPr.RightInset = (int)emu;
-            bodyPr.BottomInset = (int)emu;
+            var emu = Core.EmuConverter.ParseEmuAsInt(parts[0]);
+            if (emu > MaxInsetEmu)
+                throw new ArgumentException($"Inset value {emu} EMU exceeds maximum allowed ({MaxInsetEmu} EMU / ~142cm).");
+            bodyPr.LeftInset = emu;
+            bodyPr.TopInset = emu;
+            bodyPr.RightInset = emu;
+            bodyPr.BottomInset = emu;
         }
         else if (parts.Length == 4)
         {
-            bodyPr.LeftInset = (int)ParseEmu(parts[0].Trim());
-            bodyPr.TopInset = (int)ParseEmu(parts[1].Trim());
-            bodyPr.RightInset = (int)ParseEmu(parts[2].Trim());
-            bodyPr.BottomInset = (int)ParseEmu(parts[3].Trim());
+            var insets = new int[4];
+            for (int i = 0; i < 4; i++)
+            {
+                insets[i] = Core.EmuConverter.ParseEmuAsInt(parts[i].Trim());
+                if (insets[i] > MaxInsetEmu)
+                    throw new ArgumentException($"Inset value {insets[i]} EMU exceeds maximum allowed ({MaxInsetEmu} EMU / ~142cm).");
+            }
+            bodyPr.LeftInset = insets[0];
+            bodyPr.TopInset = insets[1];
+            bodyPr.RightInset = insets[2];
+            bodyPr.BottomInset = insets[3];
         }
         else
         {

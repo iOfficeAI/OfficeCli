@@ -62,7 +62,7 @@ public partial class PowerPointHandler
                 if (colonIdx < 0) continue;
                 var name = seriesPart[..colonIdx].Trim();
                 var vals = seriesPart[(colonIdx + 1)..].Split(',')
-                    .Select(v => double.Parse(v.Trim())).ToArray();
+                    .Select(v => double.Parse(v.Trim(), System.Globalization.CultureInfo.InvariantCulture)).ToArray();
                 result.Add((name, vals));
             }
             return result;
@@ -76,14 +76,14 @@ public partial class PowerPointHandler
             if (colonIdx < 0)
             {
                 // No name, use "Series N"
-                var vals = seriesStr.Split(',').Select(v => double.Parse(v.Trim())).ToArray();
+                var vals = seriesStr.Split(',').Select(v => double.Parse(v.Trim(), System.Globalization.CultureInfo.InvariantCulture)).ToArray();
                 result.Add(($"Series {i}", vals));
             }
             else
             {
                 var name = seriesStr[..colonIdx].Trim();
                 var vals = seriesStr[(colonIdx + 1)..].Split(',')
-                    .Select(v => double.Parse(v.Trim())).ToArray();
+                    .Select(v => double.Parse(v.Trim(), System.Globalization.CultureInfo.InvariantCulture)).ToArray();
                 result.Add((name, vals));
             }
         }
@@ -605,7 +605,7 @@ public partial class PowerPointHandler
                             new Drawing.DefaultRunProperties { FontSize = 1400, Bold = true }
                         ),
                         new Drawing.Run(
-                            new Drawing.RunProperties { Language = "zh-CN", FontSize = 1400, Bold = true },
+                            new Drawing.RunProperties { Language = "en-US", FontSize = 1400, Bold = true },
                             new Drawing.Text(titleText)
                         )
                     )
@@ -1037,7 +1037,7 @@ public partial class PowerPointHandler
                     var scaling = valAxis?.GetFirstChild<C.Scaling>();
                     if (scaling == null) { unsupported.Add(key); break; }
                     scaling.RemoveAllChildren<C.MinAxisValue>();
-                    scaling.AppendChild(new C.MinAxisValue { Val = double.Parse(value) });
+                    scaling.AppendChild(new C.MinAxisValue { Val = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) });
                     break;
                 }
 
@@ -1048,7 +1048,7 @@ public partial class PowerPointHandler
                     var scaling = valAxis?.GetFirstChild<C.Scaling>();
                     if (scaling == null) { unsupported.Add(key); break; }
                     scaling.RemoveAllChildren<C.MaxAxisValue>();
-                    scaling.AppendChild(new C.MaxAxisValue { Val = double.Parse(value) });
+                    scaling.AppendChild(new C.MaxAxisValue { Val = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) });
                     break;
                 }
 
@@ -1058,7 +1058,7 @@ public partial class PowerPointHandler
                     var valAxis = plotArea2?.GetFirstChild<C.ValueAxis>();
                     if (valAxis == null) { unsupported.Add(key); break; }
                     valAxis.RemoveAllChildren<C.MajorUnit>();
-                    valAxis.AppendChild(new C.MajorUnit { Val = double.Parse(value) });
+                    valAxis.AppendChild(new C.MajorUnit { Val = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) });
                     break;
                 }
 
@@ -1068,7 +1068,7 @@ public partial class PowerPointHandler
                     var valAxis = plotArea2?.GetFirstChild<C.ValueAxis>();
                     if (valAxis == null) { unsupported.Add(key); break; }
                     valAxis.RemoveAllChildren<C.MinorUnit>();
-                    valAxis.AppendChild(new C.MinorUnit { Val = double.Parse(value) });
+                    valAxis.AppendChild(new C.MinorUnit { Val = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) });
                     break;
                 }
 
@@ -1123,7 +1123,7 @@ public partial class PowerPointHandler
                         if (colonIdx >= 0)
                         {
                             var sName = value[..colonIdx].Trim();
-                            vals = value[(colonIdx + 1)..].Split(',').Select(v => double.Parse(v.Trim())).ToArray();
+                            vals = value[(colonIdx + 1)..].Split(',').Select(v => double.Parse(v.Trim(), System.Globalization.CultureInfo.InvariantCulture)).ToArray();
                             // Update series name
                             var serText = ser.GetFirstChild<C.SeriesText>();
                             if (serText != null)
@@ -1137,7 +1137,7 @@ public partial class PowerPointHandler
                         }
                         else
                         {
-                            vals = value.Split(',').Select(v => double.Parse(v.Trim())).ToArray();
+                            vals = value.Split(',').Select(v => double.Parse(v.Trim(), System.Globalization.CultureInfo.InvariantCulture)).ToArray();
                         }
 
                         // Update values

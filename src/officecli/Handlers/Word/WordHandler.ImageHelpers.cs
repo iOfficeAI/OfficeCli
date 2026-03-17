@@ -14,27 +14,18 @@ public partial class WordHandler
 {
     // ==================== Image Helpers ====================
 
-    private static long ParseEmu(string value)
-    {
-        // Support: raw EMU number, or suffixed with cm/in/pt/px
-        value = value.Trim();
-        if (value.EndsWith("cm", StringComparison.OrdinalIgnoreCase))
-            return (long)(double.Parse(value[..^2]) * 360000);
-        if (value.EndsWith("in", StringComparison.OrdinalIgnoreCase))
-            return (long)(double.Parse(value[..^2]) * 914400);
-        if (value.EndsWith("pt", StringComparison.OrdinalIgnoreCase))
-            return (long)(double.Parse(value[..^2]) * 12700);
-        if (value.EndsWith("px", StringComparison.OrdinalIgnoreCase))
-            return (long)(double.Parse(value[..^2]) * 9525);
-        return long.Parse(value); // raw EMU
-    }
+    private static long ParseEmu(string value) => Core.EmuConverter.ParseEmu(value);
+
+    private static uint _nextImageId = 1;
+    private static uint NextImageId() => _nextImageId++;
 
     private static Run CreateImageRun(string relationshipId, long cx, long cy, string altText)
     {
+        var docPropId = NextImageId();
         var inline = new DW.Inline(
             new DW.Extent { Cx = cx, Cy = cy },
             new DW.EffectExtent { LeftEdge = 0, TopEdge = 0, RightEdge = 0, BottomEdge = 0 },
-            new DW.DocProperties { Id = (uint)Environment.TickCount, Name = altText, Description = altText },
+            new DW.DocProperties { Id = docPropId, Name = altText, Description = altText },
             new DW.NonVisualGraphicFrameDrawingProperties(
                 new A.GraphicFrameLocks { NoChangeAspect = true }
             ),
@@ -42,7 +33,7 @@ public partial class WordHandler
                 new A.GraphicData(
                     new PIC.Picture(
                         new PIC.NonVisualPictureProperties(
-                            new PIC.NonVisualDrawingProperties { Id = 0U, Name = altText },
+                            new PIC.NonVisualDrawingProperties { Id = docPropId, Name = altText },
                             new PIC.NonVisualPictureDrawingProperties()
                         ),
                         new PIC.BlipFill(
@@ -96,6 +87,7 @@ public partial class WordHandler
             _ => new DW.WrapNone() as OpenXmlElement
         };
 
+        var anchorDocPropId = NextImageId();
         var anchor = new DW.Anchor(
             new DW.SimplePosition { X = 0, Y = 0 },
             new DW.HorizontalPosition(new DW.PositionOffset(hPos.ToString()))
@@ -105,14 +97,14 @@ public partial class WordHandler
             new DW.Extent { Cx = cx, Cy = cy },
             new DW.EffectExtent { LeftEdge = 0, TopEdge = 0, RightEdge = 0, BottomEdge = 0 },
             wrapElement,
-            new DW.DocProperties { Id = (uint)Environment.TickCount, Name = altText, Description = altText },
+            new DW.DocProperties { Id = anchorDocPropId, Name = altText, Description = altText },
             new DW.NonVisualGraphicFrameDrawingProperties(
                 new A.GraphicFrameLocks { NoChangeAspect = true }),
             new A.Graphic(
                 new A.GraphicData(
                     new PIC.Picture(
                         new PIC.NonVisualPictureProperties(
-                            new PIC.NonVisualDrawingProperties { Id = 0U, Name = altText },
+                            new PIC.NonVisualDrawingProperties { Id = anchorDocPropId, Name = altText },
                             new PIC.NonVisualPictureDrawingProperties()),
                         new PIC.BlipFill(
                             new A.Blip { Embed = relationshipId, CompressionState = A.BlipCompressionValues.Print },

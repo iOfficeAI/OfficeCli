@@ -45,6 +45,16 @@ public partial class PowerPointHandler
             var imagePath = value[6..].Trim();
             ApplyBackgroundImageFill(bgPr, slidePart, imagePath);
         }
+        else if (value.StartsWith("radial:", StringComparison.OrdinalIgnoreCase) ||
+                 value.StartsWith("path:", StringComparison.OrdinalIgnoreCase))
+        {
+            // Validate that radial:/path: prefix has valid color data
+            if (!IsGradientColorString(value))
+                throw new ArgumentException(
+                    $"Invalid gradient specification: '{value}'. " +
+                    "Radial/path gradients require at least 2 hex colors, e.g. 'radial:FF0000-0000FF'");
+            bgPr.Append(BuildGradientFill(value));
+        }
         else if (IsGradientColorString(value))
         {
             bgPr.Append(BuildGradientFill(value));
@@ -165,11 +175,18 @@ public partial class PowerPointHandler
     /// </summary>
     private static bool IsGradientColorString(string value)
     {
-        // Handle radial:/path: prefix
+        // Handle radial:/path: prefix — must have color data after prefix
         var v = value;
-        if (v.StartsWith("radial:", StringComparison.OrdinalIgnoreCase) ||
-            v.StartsWith("path:", StringComparison.OrdinalIgnoreCase))
-            return true;
+        if (v.StartsWith("radial:", StringComparison.OrdinalIgnoreCase))
+        {
+            var after = v[7..];
+            return after.Length > 0 && after.Split('-').Any(p => IsHexColorString(p));
+        }
+        if (v.StartsWith("path:", StringComparison.OrdinalIgnoreCase))
+        {
+            var after = v[5..];
+            return after.Length > 0 && after.Split('-').Any(p => IsHexColorString(p));
+        }
 
         var parts = v.Split('-');
         return parts.Length >= 2 && IsHexColorString(parts[0].TrimStart('#'));
@@ -237,6 +254,10 @@ public partial class PowerPointHandler
                 colorParts.RemoveAt(colorParts.Count - 1);
             }
         }
+
+        // If only one color remains after removing angle/focus, duplicate it
+        if (colorParts.Count == 1)
+            colorParts.Add(colorParts[0]);
 
         var gradFill = new Drawing.GradientFill();
         var gsLst = new Drawing.GradientStopList();

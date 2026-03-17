@@ -29,12 +29,19 @@ public partial class PowerPointHandler
             return;
         }
 
+        if (string.IsNullOrWhiteSpace(value))
+            throw new ArgumentException("Shadow value cannot be empty. Use 'none' to remove shadow.");
+
         var parts = value.Split('-');
         var colorHex = parts[0].TrimStart('#').ToUpperInvariant();
-        var blurPt   = parts.Length > 1 ? double.Parse(parts[1]) : 4.0;
-        var angleDeg = parts.Length > 2 ? double.Parse(parts[2]) : 45.0;
-        var distPt   = parts.Length > 3 ? double.Parse(parts[3]) : 3.0;
-        var opacity  = parts.Length > 4 ? double.Parse(parts[4]) : 40.0;
+        if (!double.TryParse(parts.Length > 1 ? parts[1] : "4", out var blurPt))
+            throw new ArgumentException($"Invalid shadow blur value: '{parts[1]}'. Expected a number.");
+        if (!double.TryParse(parts.Length > 2 ? parts[2] : "45", out var angleDeg))
+            throw new ArgumentException($"Invalid shadow angle value: '{parts[2]}'. Expected a number.");
+        if (!double.TryParse(parts.Length > 3 ? parts[3] : "3", out var distPt))
+            throw new ArgumentException($"Invalid shadow distance value: '{parts[3]}'. Expected a number.");
+        if (!double.TryParse(parts.Length > 4 ? parts[4] : "40", out var opacity))
+            throw new ArgumentException($"Invalid shadow opacity value: '{parts[4]}'. Expected a number.");
 
         var shadow = new Drawing.OuterShadow
         {
@@ -71,8 +78,10 @@ public partial class PowerPointHandler
 
         var parts = value.Split('-');
         var colorHex = parts[0].TrimStart('#').ToUpperInvariant();
-        var radiusPt = parts.Length > 1 ? double.Parse(parts[1]) : 8.0;
-        var opacity  = parts.Length > 2 ? double.Parse(parts[2]) : 75.0;
+        if (!double.TryParse(parts.Length > 1 ? parts[1] : "8", out var radiusPt))
+            throw new ArgumentException($"Invalid glow radius value: '{parts[1]}'. Expected a number.");
+        if (!double.TryParse(parts.Length > 2 ? parts[2] : "75", out var opacity))
+            throw new ArgumentException($"Invalid glow opacity value: '{parts[2]}'. Expected a number.");
 
         var glow = new Drawing.Glow { Radius = (long)(radiusPt * 12700) };
         var clr = new Drawing.RgbColorModelHex { Val = colorHex };
@@ -107,7 +116,7 @@ public partial class PowerPointHandler
             "tight" or "small" => 55000,
             "true" or "half"   => 90000,
             "full"             => 100000,
-            _ => int.TryParse(value, out var pct) ? pct * 1000 : 90000
+            _ => int.TryParse(value, out var pct) ? (int)Math.Min((long)pct * 1000, 100000) : 90000
         };
 
         var reflection = new Drawing.Reflection

@@ -211,7 +211,7 @@ public partial class PowerPointHandler
 
         // Parse duration
         var durationMs = 500;
-        if (parts.Length > 2 && int.TryParse(parts[2], out var d)) durationMs = d;
+        if (parts.Length > 2 && int.TryParse(parts[2], out var d)) durationMs = Math.Max(0, d);
 
         // Parse trigger
         var triggerStr = parts.Length > 3 ? parts[3].ToLowerInvariant() : "click";
@@ -222,8 +222,9 @@ public partial class PowerPointHandler
             _ => AnimTrigger.OnClick
         };
 
-        // Get filter string and preset ID from effect name
+        // Get filter string, preset ID, and subtype from effect name
         var (presetId, filter) = GetAnimPreset(effectName, presetClass);
+        var presetSubtype = GetAnimPresetSubtype(effectName);
         var nodeType = trigger switch
         {
             AnimTrigger.AfterPrevious => TimeNodeValues.AfterEffect,
@@ -244,7 +245,7 @@ public partial class PowerPointHandler
         // Build the click-group par
         var clickGroup = BuildClickGroup(
             shapeId.ToString(), presetId, presetClass, nodeType,
-            durationMs, filter, grpId, outerDelay, ref nextId);
+            durationMs, filter, grpId, outerDelay, presetSubtype, ref nextId);
 
         mainSeqCTn.ChildTimeNodeList!.AppendChild(clickGroup);
 
@@ -373,10 +374,12 @@ public partial class PowerPointHandler
         string? filter,
         int grpId,
         string outerDelay,
+        int presetSubtype,
         ref uint nextId)
     {
         var isEntrance = presetClass == TimeNodePresetClassValues.Entrance;
-        var animTransition = isEntrance ? AnimateEffectTransitionValues.In : AnimateEffectTransitionValues.Out;
+        var isEmphasis = presetClass == TimeNodePresetClassValues.Emphasis;
+        var animTransition = isEntrance || isEmphasis ? AnimateEffectTransitionValues.In : AnimateEffectTransitionValues.Out;
 
         // --- innermost cTn (the actual effect) ---
         var effectId = nextId++;
@@ -404,7 +407,7 @@ public partial class PowerPointHandler
                 new TargetElement(new ShapeTarget { ShapeId = shapeId }),
                 new AttributeNameList(new AttributeName("style.visibility"))
             ),
-            new ToVariantValue(new StringVariantValue { Val = isEntrance ? "visible" : "hidden" })
+            new ToVariantValue(new StringVariantValue { Val = isEntrance || isEmphasis ? "visible" : "hidden" })
         );
         effectChildList.AppendChild(setBehavior);
 
@@ -432,7 +435,7 @@ public partial class PowerPointHandler
             Id = effectId,
             PresetId = presetId,
             PresetClass = presetClass,
-            PresetSubtype = 0,
+            PresetSubtype = presetSubtype,
             Fill = TimeNodeFillValues.Hold,
             GroupId = (uint)grpId,
             NodeType = nodeType,
@@ -579,7 +582,7 @@ public partial class PowerPointHandler
 
         // Effect name from filter string
         var filter = animEffect?.Filter?.Value ?? "";
-        var presetId = effectCTn.PresetId?.Value ?? 10;
+        var presetId = effectCTn.PresetId?.Value ?? 0;
         var effectName = filter switch
         {
             "fly"                                       => "fly",
@@ -602,7 +605,15 @@ public partial class PowerPointHandler
             var f when f.StartsWith("wipe")             => "wipe",
             "zoom"                                      => "zoom",
             "" when presetId == 1                       => "appear",
-            _                                           => "fade"
+            "" when presetId == 24                      => "bounce",
+            _                                           => presetId switch
+            {
+                1  => "appear",
+                10 => "fade",
+                21 => "zoom",
+                24 => "bounce",
+                _  => "unknown"
+            }
         };
 
         node.Format["animation"] = $"{effectName}-{cls}-{dur}";
@@ -657,6 +668,20 @@ public partial class PowerPointHandler
             node.Format["advanceClick"] = false;
     }
 
+    /// <summary>Returns a preset subtype for the given effect name, or 0 for default.</summary>
+    private static int GetAnimPresetSubtype(string effect) =>
+        effect switch
+        {
+            "fly" or "flyin" or "flyout" => 4,  // from bottom
+            "wipe"                       => 1,   // from left
+            "blinds"                     => 10,  // horizontal
+            "checkerboard" or "checker"  => 5,   // across
+            "strips"                     => 7,   // down-left
+            "split"                      => 10,  // horizontal in
+            "wheel"                      => 1,   // 1 spoke
+            _                            => 0    // default
+        };
+
     /// <summary>Returns (presetId, animFilter) for the given effect name.</summary>
     private static (int presetId, string? filter) GetAnimPreset(
         string effect, TimeNodePresetClassValues cls)
@@ -686,7 +711,7 @@ public partial class PowerPointHandler
                 "wheel"                           => (19, "wheel(1)"),
                 "wipe"                            => (20, "wipe(left)"),
                 "zoom"                            => (21, "zoom"),
-                "bounce"                          => (21, "zoom"),
+                "bounce"                          => (24, null),
                 "swipe" or "sweep"                => (2,  "fly"),
                 _ => throw new ArgumentException(
                     $"Unknown animation effect: '{effect}'. " +
@@ -702,8 +727,9 @@ public partial class PowerPointHandler
             "grow" or "shrink"      => (26, null),
             "bold" or "boldflash"   => (1,  null),
             "wave"                  => (14, null),
+            "fade"                  => (10, "fade"),
             _ => throw new ArgumentException(
-                $"Unknown emphasis effect: '{effect}'. Supported: spin, grow, bold, wave.")
+                $"Unknown emphasis effect: '{effect}'. Supported: spin, grow, bold, wave, fade.")
         };
     }
 

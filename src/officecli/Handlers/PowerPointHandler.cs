@@ -222,7 +222,7 @@ public partial class PowerPointHandler : IDocumentHandler
                 {
                     newShape.TextBody.RemoveAllChildren<Drawing.Paragraph>();
                     newShape.TextBody.Append(new Drawing.Paragraph(
-                        new Drawing.EndParagraphRunProperties { Language = "zh-CN" }));
+                        new Drawing.EndParagraphRunProperties { Language = "en-US" }));
                 }
                 shapeTree.AppendChild(newShape);
                 return newShape;
@@ -330,14 +330,14 @@ public partial class PowerPointHandler : IDocumentHandler
         {
             if (sharedRelIds.Contains(relId)) continue; // still referenced by another shape
 
-            try { slidePart.DeletePart(relId); } catch { }
+            try { slidePart.DeletePart(relId); } catch (ArgumentException) { }
             // Also try removing data part relationships (video/audio/media)
             try
             {
                 foreach (var dpr in slidePart.DataPartReferenceRelationships.Where(r => r.Id == relId).ToList())
                     slidePart.DeleteReferenceRelationship(dpr);
             }
-            catch { }
+            catch (ArgumentException) { }
         }
     }
 

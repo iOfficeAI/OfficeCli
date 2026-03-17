@@ -49,6 +49,22 @@ public partial class PowerPointHandler
             picIdx++;
         }
 
+        int grpIdx = 0;
+        foreach (var grp in shapeTree.Elements<GroupShape>())
+        {
+            grpIdx++;
+            var grpName = grp.NonVisualGroupShapeProperties?.NonVisualDrawingProperties?.Name?.Value ?? "Group";
+            var grpNode = new DocumentNode
+            {
+                Path = $"/slide[{slideNum}]/group[{grpIdx}]",
+                Type = "group",
+                Preview = grpName,
+                ChildCount = grp.Elements<Shape>().Count() + grp.Elements<Picture>().Count()
+            };
+            grpNode.Format["name"] = grpName;
+            children.Add(grpNode);
+        }
+
         return children;
     }
 
@@ -70,6 +86,12 @@ public partial class PowerPointHandler
         node.Format["name"] = name;
         node.Format["rows"] = rows.Count;
         node.Format["cols"] = cols;
+
+        // Table style
+        var tblPr = table.GetFirstChild<Drawing.TableProperties>();
+        var tableStyleId = tblPr?.GetFirstChild<Drawing.TableStyleId>()?.InnerText;
+        if (!string.IsNullOrEmpty(tableStyleId))
+            node.Format["tableStyleId"] = tableStyleId;
 
         // Position
         var offset = gf.Transform?.Offset;
@@ -584,7 +606,7 @@ public partial class PowerPointHandler
         {
             body.AppendChild(new Drawing.Paragraph(
                 new Drawing.Run(
-                    new Drawing.RunProperties { Language = "zh-CN" },
+                    new Drawing.RunProperties { Language = "en-US" },
                     new Drawing.Text(line)
                 )
             ));

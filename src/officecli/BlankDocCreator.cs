@@ -260,7 +260,7 @@ public static class BlankDocCreator
             new DocumentFormat.OpenXml.Drawing.BodyProperties(),
             new DocumentFormat.OpenXml.Drawing.ListStyle(),
             new DocumentFormat.OpenXml.Drawing.Paragraph(
-                new DocumentFormat.OpenXml.Drawing.EndParagraphRunProperties { Language = "zh-CN" })
+                new DocumentFormat.OpenXml.Drawing.EndParagraphRunProperties { Language = "en-US" })
         );
         return shape;
     }

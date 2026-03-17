@@ -74,7 +74,7 @@ public partial class PowerPointHandler
                     break;
 
                 case "size":
-                    var sizeVal = int.Parse(value) * 100;
+                    var sizeVal = (int)(ParseFontSize(value) * 100);
                     foreach (var run in runs)
                     {
                         var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
@@ -83,7 +83,7 @@ public partial class PowerPointHandler
                     break;
 
                 case "bold":
-                    var isBold = bool.Parse(value);
+                    var isBold = IsTruthy(value);
                     foreach (var run in runs)
                     {
                         var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
@@ -92,7 +92,7 @@ public partial class PowerPointHandler
                     break;
 
                 case "italic":
-                    var isItalic = bool.Parse(value);
+                    var isItalic = IsTruthy(value);
                     foreach (var run in runs)
                     {
                         var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
@@ -176,7 +176,7 @@ public partial class PowerPointHandler
                     break;
                 }
 
-                case "margin":
+                case "margin" or "inset":
                 {
                     var bodyPr = shape.TextBody?.Elements<Drawing.BodyProperties>().FirstOrDefault();
                     if (bodyPr == null) { unsupported.Add(key); break; }
@@ -240,7 +240,7 @@ public partial class PowerPointHandler
                     var spPr = shape.ShapeProperties;
                     if (spPr == null) { unsupported.Add(key); break; }
                     var outline = spPr.GetFirstChild<Drawing.Outline>() ?? spPr.AppendChild(new Drawing.Outline());
-                    outline.Width = (int)ParseEmu(value);
+                    outline.Width = Core.EmuConverter.ParseEmuAsInt(value);
                     break;
                 }
 
@@ -275,7 +275,7 @@ public partial class PowerPointHandler
                         if (color != null)
                         {
                             color.RemoveAllChildren<Drawing.Alpha>();
-                            var pct = (int)(double.Parse(value) * 100000); // 0.0-1.0 → 0-100000
+                            var pct = (int)(double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) * 100000); // 0.0-1.0 → 0-100000
                             color.AppendChild(new Drawing.Alpha { Val = pct });
                         }
                     }
@@ -287,7 +287,7 @@ public partial class PowerPointHandler
                     var spPr = shape.ShapeProperties;
                     if (spPr == null) { unsupported.Add(key); break; }
                     var xfrm = spPr.Transform2D ?? (spPr.Transform2D = new Drawing.Transform2D());
-                    xfrm.Rotation = (int)(double.Parse(value) * 60000); // degrees to 60000ths
+                    xfrm.Rotation = (int)(double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) * 60000); // degrees to 60000ths
                     break;
                 }
 
@@ -302,7 +302,7 @@ public partial class PowerPointHandler
                         if (color != null)
                         {
                             color.RemoveAllChildren<Drawing.Alpha>();
-                            var pct = (int)(double.Parse(value) * 100000); // 0.0-1.0 → 0-100000
+                            var pct = (int)(double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) * 100000); // 0.0-1.0 → 0-100000
                             color.AppendChild(new Drawing.Alpha { Val = pct });
                         }
                     }
@@ -324,7 +324,7 @@ public partial class PowerPointHandler
                         var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
                         pProps.RemoveAllChildren<Drawing.LineSpacing>();
                         pProps.AppendChild(new Drawing.LineSpacing(
-                            new Drawing.SpacingPercent { Val = (int)(double.Parse(value) * 1000) })); // e.g. 1.5 → 150000 (150%)
+                            new Drawing.SpacingPercent { Val = (int)(double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) * 1000) })); // e.g. 1.5 → 150000 (150%)
                     }
                     break;
                 }
@@ -335,7 +335,7 @@ public partial class PowerPointHandler
                     {
                         var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
                         pProps.RemoveAllChildren<Drawing.SpaceBefore>();
-                        pProps.AppendChild(new Drawing.SpaceBefore(new Drawing.SpacingPoints { Val = (int)(double.Parse(value) * 100) })); // pt
+                        pProps.AppendChild(new Drawing.SpaceBefore(new Drawing.SpacingPoints { Val = (int)(double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) * 100) })); // pt
                     }
                     break;
                 }
@@ -346,7 +346,7 @@ public partial class PowerPointHandler
                     {
                         var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
                         pProps.RemoveAllChildren<Drawing.SpaceAfter>();
-                        pProps.AppendChild(new Drawing.SpaceAfter(new Drawing.SpacingPoints { Val = (int)(double.Parse(value) * 100) })); // pt
+                        pProps.AppendChild(new Drawing.SpaceAfter(new Drawing.SpacingPoints { Val = (int)(double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) * 100) })); // pt
                     }
                     break;
                 }
@@ -452,7 +452,7 @@ public partial class PowerPointHandler
                         foreach (var line in lines)
                         {
                             textBody.AppendChild(new Drawing.Paragraph(new Drawing.Run(
-                                new Drawing.RunProperties { Language = "zh-CN" },
+                                new Drawing.RunProperties { Language = "en-US" },
                                 new Drawing.Text(line))));
                         }
                         cell.PrependChild(textBody);
@@ -466,7 +466,7 @@ public partial class PowerPointHandler
                         {
                             var newRun = new Drawing.Run();
                             if (runProps != null) newRun.RunProperties = runProps.CloneNode(true) as Drawing.RunProperties;
-                            else newRun.RunProperties = new Drawing.RunProperties { Language = "zh-CN" };
+                            else newRun.RunProperties = new Drawing.RunProperties { Language = "en-US" };
                             newRun.Text = new Drawing.Text(line);
                             textBody.Append(new Drawing.Paragraph(newRun));
                         }
@@ -484,7 +484,7 @@ public partial class PowerPointHandler
                     }
                     break;
                 case "size":
-                    var sz = int.Parse(value) * 100;
+                    var sz = (int)(ParseFontSize(value) * 100);
                     foreach (var run in cell.Descendants<Drawing.Run>())
                     {
                         var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
@@ -492,7 +492,7 @@ public partial class PowerPointHandler
                     }
                     break;
                 case "bold":
-                    var b = bool.Parse(value);
+                    var b = IsTruthy(value);
                     foreach (var run in cell.Descendants<Drawing.Run>())
                     {
                         var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
@@ -500,7 +500,7 @@ public partial class PowerPointHandler
                     }
                     break;
                 case "italic":
-                    var it = bool.Parse(value);
+                    var it = IsTruthy(value);
                     foreach (var run in cell.Descendants<Drawing.Run>())
                     {
                         var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
@@ -556,10 +556,10 @@ public partial class PowerPointHandler
                     cell.RowSpan = new DocumentFormat.OpenXml.Int32Value(int.Parse(value));
                     break;
                 case "vmerge":
-                    cell.VerticalMerge = new DocumentFormat.OpenXml.BooleanValue(bool.Parse(value));
+                    cell.VerticalMerge = new DocumentFormat.OpenXml.BooleanValue(IsTruthy(value));
                     break;
                 case "hmerge":
-                    cell.HorizontalMerge = new DocumentFormat.OpenXml.BooleanValue(bool.Parse(value));
+                    cell.HorizontalMerge = new DocumentFormat.OpenXml.BooleanValue(IsTruthy(value));
                     break;
                 default:
                     if (!GenericXmlQuery.SetGenericAttribute(cell, key, value))

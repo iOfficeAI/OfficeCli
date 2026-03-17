@@ -36,7 +36,7 @@ public partial class WordHandler
         }
 
         // TOC paths: /toc[N]
-        var tocMatch = System.Text.RegularExpressions.Regex.Match(path, @"^/toc\[(\d+)\]$");
+        var tocMatch = System.Text.RegularExpressions.Regex.Match(path, @"/toc\[(\d+)\]$");
         if (tocMatch.Success)
         {
             var tocIdx = int.Parse(tocMatch.Groups[1].Value);
@@ -67,18 +67,18 @@ public partial class WordHandler
             // Update hyperlinks switch
             if (properties.TryGetValue("hyperlinks", out var hlSwitch))
             {
-                if (bool.Parse(hlSwitch) && !instr.Contains("\\h"))
+                if (IsTruthy(hlSwitch) && !instr.Contains("\\h"))
                     instr = instr.TrimEnd() + " \\h ";
-                else if (!bool.Parse(hlSwitch))
+                else if (!IsTruthy(hlSwitch))
                     instr = instr.Replace("\\h", "").Replace("  ", " ");
             }
 
             // Update page numbers switch (\\z = hide page numbers)
             if (properties.TryGetValue("pagenumbers", out var pnSwitch))
             {
-                if (!bool.Parse(pnSwitch) && !instr.Contains("\\z"))
+                if (!IsTruthy(pnSwitch) && !instr.Contains("\\z"))
                     instr = instr.TrimEnd() + " \\z ";
-                else if (bool.Parse(pnSwitch))
+                else if (IsTruthy(pnSwitch))
                     instr = instr.Replace("\\z", "").Replace("  ", " ");
             }
 
@@ -97,14 +97,23 @@ public partial class WordHandler
             return unsupported;
         }
 
-        // Footnote paths: /footnote[N]
-        var fnSetMatch = System.Text.RegularExpressions.Regex.Match(path, @"^/footnote\[(\d+)\]$");
+        // Footnote paths: /footnote[N] or .../footnote[N]
+        var fnSetMatch = System.Text.RegularExpressions.Regex.Match(path, @"/footnote\[(\d+)\]$");
         if (fnSetMatch.Success)
         {
             var fnId = int.Parse(fnSetMatch.Groups[1].Value);
             var fn = _doc.MainDocumentPart?.FootnotesPart?.Footnotes?
-                .Elements<Footnote>().FirstOrDefault(f => f.Id?.Value == fnId)
-                ?? throw new ArgumentException($"Footnote {fnId} not found");
+                .Elements<Footnote>().FirstOrDefault(f => f.Id?.Value == fnId);
+            if (fn == null)
+            {
+                // Try ordinal lookup (1-based index among user footnotes)
+                var userFns = _doc.MainDocumentPart?.FootnotesPart?.Footnotes?
+                    .Elements<Footnote>().Where(f => f.Id?.Value > 0).ToList();
+                if (userFns != null && fnId >= 1 && fnId <= userFns.Count)
+                    fn = userFns[fnId - 1];
+                else
+                    throw new ArgumentException($"Footnote {fnId} not found");
+            }
 
             if (properties.TryGetValue("text", out var fnText))
             {
@@ -113,23 +122,41 @@ public partial class WordHandler
                     .Where(r => r.GetFirstChild<FootnoteReferenceMark>() == null).ToList();
                 if (contentRuns.Count > 0)
                 {
+                    // Update first content run; keep space as separate element
                     var textEl = contentRuns[0].GetFirstChild<Text>();
-                    if (textEl != null) textEl.Text = " " + fnText;
-                    else contentRuns[0].AppendChild(new Text(" " + fnText) { Space = SpaceProcessingModeValues.Preserve });
+                    if (textEl != null)
+                    {
+                        textEl.Text = fnText;
+                        textEl.Space = SpaceProcessingModeValues.Preserve;
+                    }
+                    else
+                        contentRuns[0].AppendChild(new Text(fnText) { Space = SpaceProcessingModeValues.Preserve });
+                    // Remove extra runs so text is not duplicated
+                    for (int i = 1; i < contentRuns.Count; i++)
+                        contentRuns[i].Remove();
                 }
             }
             _doc.MainDocumentPart?.FootnotesPart?.Footnotes?.Save();
             return unsupported;
         }
 
-        // Endnote paths: /endnote[N]
-        var enSetMatch = System.Text.RegularExpressions.Regex.Match(path, @"^/endnote\[(\d+)\]$");
+        // Endnote paths: /endnote[N] or .../endnote[N]
+        var enSetMatch = System.Text.RegularExpressions.Regex.Match(path, @"/endnote\[(\d+)\]$");
         if (enSetMatch.Success)
         {
             var enId = int.Parse(enSetMatch.Groups[1].Value);
             var en = _doc.MainDocumentPart?.EndnotesPart?.Endnotes?
-                .Elements<Endnote>().FirstOrDefault(e => e.Id?.Value == enId)
-                ?? throw new ArgumentException($"Endnote {enId} not found");
+                .Elements<Endnote>().FirstOrDefault(e => e.Id?.Value == enId);
+            if (en == null)
+            {
+                // Try ordinal lookup (1-based index among user endnotes)
+                var userEns = _doc.MainDocumentPart?.EndnotesPart?.Endnotes?
+                    .Elements<Endnote>().Where(e => e.Id?.Value > 0).ToList();
+                if (userEns != null && enId >= 1 && enId <= userEns.Count)
+                    en = userEns[enId - 1];
+                else
+                    throw new ArgumentException($"Endnote {enId} not found");
+            }
 
             if (properties.TryGetValue("text", out var enText))
             {
@@ -138,8 +165,16 @@ public partial class WordHandler
                 if (contentRuns.Count > 0)
                 {
                     var textEl = contentRuns[0].GetFirstChild<Text>();
-                    if (textEl != null) textEl.Text = " " + enText;
-                    else contentRuns[0].AppendChild(new Text(" " + enText) { Space = SpaceProcessingModeValues.Preserve });
+                    if (textEl != null)
+                    {
+                        textEl.Text = enText;
+                        textEl.Space = SpaceProcessingModeValues.Preserve;
+                    }
+                    else
+                        contentRuns[0].AppendChild(new Text(enText) { Space = SpaceProcessingModeValues.Preserve });
+                    // Remove extra runs so text is not duplicated
+                    for (int i = 1; i < contentRuns.Count; i++)
+                        contentRuns[i].Remove();
                 }
             }
             _doc.MainDocumentPart?.EndnotesPart?.Endnotes?.Save();
@@ -152,6 +187,19 @@ public partial class WordHandler
         {
             var secIdx = int.Parse(secSetMatch.Groups[1].Value);
             var sectionProps = FindSectionProperties();
+
+            // If no section properties exist and requesting section 1, create one
+            if (sectionProps.Count == 0 && secIdx == 1)
+            {
+                var sBody = _doc.MainDocumentPart?.Document?.Body;
+                if (sBody != null)
+                {
+                    var newSectPr = new SectionProperties();
+                    sBody.AppendChild(newSectPr);
+                    sectionProps = FindSectionProperties();
+                }
+            }
+
             if (secIdx < 1 || secIdx > sectionProps.Count)
                 throw new ArgumentException($"Section {secIdx} not found (total: {sectionProps.Count})");
 
@@ -171,27 +219,27 @@ public partial class WordHandler
                         };
                         break;
                     case "pagewidth":
-                        (sectPr.GetFirstChild<PageSize>() ?? sectPr.AppendChild(new PageSize())).Width = uint.Parse(value);
+                        EnsureSectPrPageSize(sectPr).Width = uint.TryParse(value, out var pgW) ? pgW : throw new FormatException($"Invalid page width: {value}");
                         break;
                     case "pageheight":
-                        (sectPr.GetFirstChild<PageSize>() ?? sectPr.AppendChild(new PageSize())).Height = uint.Parse(value);
+                        EnsureSectPrPageSize(sectPr).Height = uint.TryParse(value, out var pgH) ? pgH : throw new FormatException($"Invalid page height: {value}");
                         break;
                     case "orientation":
-                        var ps = sectPr.GetFirstChild<PageSize>() ?? sectPr.AppendChild(new PageSize());
+                        var ps = EnsureSectPrPageSize(sectPr);
                         ps.Orient = value.ToLowerInvariant() == "landscape"
                             ? PageOrientationValues.Landscape : PageOrientationValues.Portrait;
                         break;
                     case "margintop":
-                        (sectPr.GetFirstChild<PageMargin>() ?? sectPr.AppendChild(new PageMargin())).Top = int.Parse(value);
+                        EnsureSectPrPageMargin(sectPr).Top = int.Parse(value);
                         break;
                     case "marginbottom":
-                        (sectPr.GetFirstChild<PageMargin>() ?? sectPr.AppendChild(new PageMargin())).Bottom = int.Parse(value);
+                        EnsureSectPrPageMargin(sectPr).Bottom = int.Parse(value);
                         break;
                     case "marginleft":
-                        (sectPr.GetFirstChild<PageMargin>() ?? sectPr.AppendChild(new PageMargin())).Left = uint.Parse(value);
+                        EnsureSectPrPageMargin(sectPr).Left = uint.Parse(value);
                         break;
                     case "marginright":
-                        (sectPr.GetFirstChild<PageMargin>() ?? sectPr.AppendChild(new PageMargin())).Right = uint.Parse(value);
+                        EnsureSectPrPageMargin(sectPr).Right = uint.Parse(value);
                         break;
                     default:
                         unsupported.Add(key);
@@ -235,15 +283,15 @@ public partial class WordHandler
                         break;
                     case "size":
                         var rPr2 = style.StyleRunProperties ?? style.AppendChild(new StyleRunProperties());
-                        rPr2.FontSize = new FontSize { Val = (int.Parse(value) * 2).ToString() };
+                        rPr2.FontSize = new FontSize { Val = ((int)(ParseFontSize(value) * 2)).ToString() };
                         break;
                     case "bold":
                         var rPr3 = style.StyleRunProperties ?? style.AppendChild(new StyleRunProperties());
-                        rPr3.Bold = bool.Parse(value) ? new Bold() : null;
+                        rPr3.Bold = IsTruthy(value) ? new Bold() : null;
                         break;
                     case "italic":
                         var rPr4 = style.StyleRunProperties ?? style.AppendChild(new StyleRunProperties());
-                        rPr4.Italic = bool.Parse(value) ? new Italic() : null;
+                        rPr4.Italic = IsTruthy(value) ? new Italic() : null;
                         break;
                     case "color":
                         var rPr5 = style.StyleRunProperties ?? style.AppendChild(new StyleRunProperties());
@@ -333,40 +381,40 @@ public partial class WordHandler
                         if (textEl != null) textEl.Text = value;
                         break;
                     case "bold":
-                        EnsureRunProperties(run).Bold = bool.Parse(value) ? new Bold() : null;
+                        EnsureRunProperties(run).Bold = IsTruthy(value) ? new Bold() : null;
                         break;
                     case "italic":
-                        EnsureRunProperties(run).Italic = bool.Parse(value) ? new Italic() : null;
+                        EnsureRunProperties(run).Italic = IsTruthy(value) ? new Italic() : null;
                         break;
                     case "caps":
-                        EnsureRunProperties(run).Caps = bool.Parse(value) ? new Caps() : null;
+                        EnsureRunProperties(run).Caps = IsTruthy(value) ? new Caps() : null;
                         break;
                     case "smallcaps":
-                        EnsureRunProperties(run).SmallCaps = bool.Parse(value) ? new SmallCaps() : null;
+                        EnsureRunProperties(run).SmallCaps = IsTruthy(value) ? new SmallCaps() : null;
                         break;
                     case "dstrike":
-                        EnsureRunProperties(run).DoubleStrike = bool.Parse(value) ? new DoubleStrike() : null;
+                        EnsureRunProperties(run).DoubleStrike = IsTruthy(value) ? new DoubleStrike() : null;
                         break;
                     case "vanish":
-                        EnsureRunProperties(run).Vanish = bool.Parse(value) ? new Vanish() : null;
+                        EnsureRunProperties(run).Vanish = IsTruthy(value) ? new Vanish() : null;
                         break;
                     case "outline":
-                        EnsureRunProperties(run).Outline = bool.Parse(value) ? new Outline() : null;
+                        EnsureRunProperties(run).Outline = IsTruthy(value) ? new Outline() : null;
                         break;
                     case "shadow":
-                        EnsureRunProperties(run).Shadow = bool.Parse(value) ? new Shadow() : null;
+                        EnsureRunProperties(run).Shadow = IsTruthy(value) ? new Shadow() : null;
                         break;
                     case "emboss":
-                        EnsureRunProperties(run).Emboss = bool.Parse(value) ? new Emboss() : null;
+                        EnsureRunProperties(run).Emboss = IsTruthy(value) ? new Emboss() : null;
                         break;
                     case "imprint":
-                        EnsureRunProperties(run).Imprint = bool.Parse(value) ? new Imprint() : null;
+                        EnsureRunProperties(run).Imprint = IsTruthy(value) ? new Imprint() : null;
                         break;
                     case "noproof":
-                        EnsureRunProperties(run).NoProof = bool.Parse(value) ? new NoProof() : null;
+                        EnsureRunProperties(run).NoProof = IsTruthy(value) ? new NoProof() : null;
                         break;
                     case "rtl":
-                        EnsureRunProperties(run).RightToLeftText = bool.Parse(value) ? new RightToLeftText() : null;
+                        EnsureRunProperties(run).RightToLeftText = IsTruthy(value) ? new RightToLeftText() : null;
                         break;
                     case "font":
                         var rPrFont = EnsureRunProperties(run);
@@ -385,7 +433,7 @@ public partial class WordHandler
                     case "size":
                         EnsureRunProperties(run).FontSize = new FontSize
                         {
-                            Val = (int.Parse(value) * 2).ToString() // half-points
+                            Val = ((int)(ParseFontSize(value) * 2)).ToString() // half-points
                         };
                         break;
                     case "highlight":
@@ -404,15 +452,15 @@ public partial class WordHandler
                         };
                         break;
                     case "strike":
-                        EnsureRunProperties(run).Strike = bool.Parse(value) ? new Strike() : null;
+                        EnsureRunProperties(run).Strike = IsTruthy(value) ? new Strike() : null;
                         break;
                     case "superscript":
-                        EnsureRunProperties(run).VerticalTextAlignment = bool.Parse(value)
+                        EnsureRunProperties(run).VerticalTextAlignment = IsTruthy(value)
                             ? new VerticalTextAlignment { Val = VerticalPositionValues.Superscript }
                             : null;
                         break;
                     case "subscript":
-                        EnsureRunProperties(run).VerticalTextAlignment = bool.Parse(value)
+                        EnsureRunProperties(run).VerticalTextAlignment = IsTruthy(value)
                             ? new VerticalTextAlignment { Val = VerticalPositionValues.Subscript }
                             : null;
                         break;
@@ -526,7 +574,7 @@ public partial class WordHandler
                         break;
                     case "firstlineindent":
                         var indent = pProps.Indentation ?? (pProps.Indentation = new Indentation());
-                        indent.FirstLine = (int.Parse(value) * 480).ToString(); // chars to twips (~480 per char)
+                        indent.FirstLine = ((long)(double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) * 480)).ToString(); // chars to twips (~480 per char)
                         indent.Hanging = null; // firstline and hanging are mutually exclusive
                         break;
                     case "leftindent" or "indentleft":
@@ -543,25 +591,25 @@ public partial class WordHandler
                         indentH.FirstLine = null; // hanging and firstline are mutually exclusive
                         break;
                     case "keepnext":
-                        if (bool.Parse(value))
+                        if (IsTruthy(value))
                             pProps.KeepNext ??= new KeepNext();
                         else
                             pProps.KeepNext = null;
                         break;
                     case "keeplines" or "keeptogether":
-                        if (bool.Parse(value))
+                        if (IsTruthy(value))
                             pProps.KeepLines ??= new KeepLines();
                         else
                             pProps.KeepLines = null;
                         break;
                     case "pagebreakbefore":
-                        if (bool.Parse(value))
+                        if (IsTruthy(value))
                             pProps.PageBreakBefore ??= new PageBreakBefore();
                         else
                             pProps.PageBreakBefore = null;
                         break;
                     case "widowcontrol":
-                        if (bool.Parse(value))
+                        if (IsTruthy(value))
                             pProps.WidowControl ??= new WidowControl();
                         else
                             pProps.WidowControl = null;
@@ -610,6 +658,51 @@ public partial class WordHandler
                     case "start":
                         SetListStartValue(para, int.Parse(value));
                         break;
+                    case "size":
+                    case "font":
+                    case "bold":
+                    case "italic":
+                    case "color":
+                        // Apply run-level formatting to all runs in the paragraph
+                        foreach (var pRun in para.Descendants<Run>())
+                        {
+                            var pRunProps = EnsureRunProperties(pRun);
+                            switch (key.ToLowerInvariant())
+                            {
+                                case "size":
+                                    pRunProps.FontSize = new FontSize { Val = ((int)(ParseFontSize(value) * 2)).ToString() };
+                                    break;
+                                case "font":
+                                    pRunProps.RunFonts = new RunFonts { Ascii = value, HighAnsi = value, EastAsia = value };
+                                    break;
+                                case "bold":
+                                    pRunProps.Bold = IsTruthy(value) ? new Bold() : null;
+                                    break;
+                                case "italic":
+                                    pRunProps.Italic = IsTruthy(value) ? new Italic() : null;
+                                    break;
+                                case "color":
+                                    pRunProps.Color = new Color { Val = value.ToUpperInvariant() };
+                                    break;
+                            }
+                        }
+                        break;
+                    case "text":
+                        // Set text on paragraph: update first run or create one
+                        var existingRuns = para.Elements<Run>().ToList();
+                        if (existingRuns.Count > 0)
+                        {
+                            var firstText = existingRuns[0].GetFirstChild<Text>();
+                            if (firstText != null) firstText.Text = value;
+                            else existingRuns[0].AppendChild(new Text(value) { Space = SpaceProcessingModeValues.Preserve });
+                            // Remove extra runs
+                            for (int i = 1; i < existingRuns.Count; i++) existingRuns[i].Remove();
+                        }
+                        else
+                        {
+                            para.AppendChild(new Run(new Text(value) { Space = SpaceProcessingModeValues.Preserve }));
+                        }
+                        break;
                     default:
                         if (!GenericXmlQuery.TryCreateTypedChild(pProps, key, value))
                             unsupported.Add(key);
@@ -653,13 +746,13 @@ public partial class WordHandler
                                         rPr.RunFonts = new RunFonts { Ascii = value, HighAnsi = value, EastAsia = value };
                                         break;
                                     case "size":
-                                        rPr.FontSize = new FontSize { Val = (int.Parse(value) * 2).ToString() };
+                                        rPr.FontSize = new FontSize { Val = ((int)(ParseFontSize(value) * 2)).ToString() };
                                         break;
                                     case "bold":
-                                        rPr.Bold = bool.Parse(value) ? new Bold() : null;
+                                        rPr.Bold = IsTruthy(value) ? new Bold() : null;
                                         break;
                                     case "italic":
-                                        rPr.Italic = bool.Parse(value) ? new Italic() : null;
+                                        rPr.Italic = IsTruthy(value) ? new Italic() : null;
                                         break;
                                     case "color":
                                         rPr.Color = new Color { Val = value.ToUpperInvariant() };
@@ -766,7 +859,7 @@ public partial class WordHandler
                         trPr.AppendChild(new TableRowHeight { Val = uint.Parse(value), HeightType = HeightRuleValues.AtLeast });
                         break;
                     case "header":
-                        if (bool.Parse(value))
+                        if (IsTruthy(value))
                             trPr.AppendChild(new TableHeader());
                         else
                             trPr.GetFirstChild<TableHeader>()?.Remove();
@@ -862,15 +955,15 @@ public partial class WordHandler
                     break;
                 case "size":
                     foreach (var run in container.Descendants<Run>())
-                        EnsureRunProperties(run).FontSize = new FontSize { Val = (int.Parse(value) * 2).ToString() };
+                        EnsureRunProperties(run).FontSize = new FontSize { Val = ((int)(ParseFontSize(value) * 2)).ToString() };
                     break;
                 case "bold":
                     foreach (var run in container.Descendants<Run>())
-                        EnsureRunProperties(run).Bold = bool.Parse(value) ? new Bold() : null;
+                        EnsureRunProperties(run).Bold = IsTruthy(value) ? new Bold() : null;
                     break;
                 case "italic":
                     foreach (var run in container.Descendants<Run>())
-                        EnsureRunProperties(run).Italic = bool.Parse(value) ? new Italic() : null;
+                        EnsureRunProperties(run).Italic = IsTruthy(value) ? new Italic() : null;
                     break;
                 case "color":
                     foreach (var run in container.Descendants<Run>())

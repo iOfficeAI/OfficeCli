@@ -85,8 +85,10 @@ public partial class PowerPointHandler
                 }
 
                 presentation.Save();
-                var slideCount = slideIdList.Elements<SlideId>().Count();
-                return $"/slide[{slideCount}]";
+                // Find the actual position of the inserted slide
+                var slideIds = slideIdList.Elements<SlideId>().ToList();
+                var insertedIdx = slideIds.FindIndex(s => s.RelationshipId?.Value == relId) + 1;
+                return $"/slide[{insertedIdx}]";
 
             case "shape" or "textbox":
                 var slideMatch = Regex.Match(parentPath, @"^/slide\[(\d+)\]$");
@@ -103,8 +105,13 @@ public partial class PowerPointHandler
                     ?? throw new InvalidOperationException("Slide has no shape tree");
 
                 var text = properties.GetValueOrDefault("text", "");
-                var shapeName = properties.GetValueOrDefault("name", $"TextBox {shapeTree.Elements<Shape>().Count() + 1}");
-                var shapeId = (uint)(shapeTree.Elements<Shape>().Count() + shapeTree.Elements<Picture>().Count() + 2);
+                // Use max existing ID + 1 to avoid collisions after element deletion
+                var maxExistingId = shapeTree.ChildElements
+                    .Select(e => e.Descendants<NonVisualDrawingProperties>().FirstOrDefault()?.Id?.Value ?? 0)
+                    .DefaultIfEmpty(1U)
+                    .Max();
+                var shapeId = maxExistingId + 1;
+                var shapeName = properties.GetValueOrDefault("name", $"TextBox {shapeId}");
 
                 var newShape = CreateTextShape(shapeId, shapeName, text, false);
 
@@ -119,7 +126,7 @@ public partial class PowerPointHandler
                 }
                 if (properties.TryGetValue("size", out var sizeStr))
                 {
-                    var sizeVal = int.Parse(sizeStr) * 100;
+                    var sizeVal = (int)(ParseFontSize(sizeStr) * 100);
                     foreach (var run in newShape.Descendants<Drawing.Run>())
                     {
                         var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
@@ -128,7 +135,7 @@ public partial class PowerPointHandler
                 }
                 if (properties.TryGetValue("bold", out var boldStr))
                 {
-                    var isBold = bool.Parse(boldStr);
+                    var isBold = IsTruthy(boldStr);
                     foreach (var run in newShape.Descendants<Drawing.Run>())
                     {
                         var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
@@ -137,7 +144,7 @@ public partial class PowerPointHandler
                 }
                 if (properties.TryGetValue("italic", out var italicStr))
                 {
-                    var isItalic = bool.Parse(italicStr);
+                    var isItalic = IsTruthy(italicStr);
                     foreach (var run in newShape.Descendants<Drawing.Run>())
                     {
                         var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
@@ -267,7 +274,7 @@ public partial class PowerPointHandler
                         Extents = new Drawing.Extents { Cx = cxEmu, Cy = cyEmu }
                     };
                     if (properties.TryGetValue("rotation", out var rotVal) || properties.TryGetValue("rotate", out rotVal))
-                        xfrm.Rotation = (int)(double.Parse(rotVal) * 60000);
+                        xfrm.Rotation = (int)(double.Parse(rotVal, System.Globalization.CultureInfo.InvariantCulture) * 60000);
                     newShape.ShapeProperties!.Transform2D = xfrm;
 
                     var presetName = properties.GetValueOrDefault("preset", "rect");
@@ -300,7 +307,7 @@ public partial class PowerPointHandler
                 if (properties.TryGetValue("linewidth", out var lwStr) || properties.TryGetValue("line.width", out lwStr))
                 {
                     var outline = newShape.ShapeProperties!.GetFirstChild<Drawing.Outline>() ?? newShape.ShapeProperties.AppendChild(new Drawing.Outline());
-                    outline.Width = (int)ParseEmu(lwStr);
+                    outline.Width = Core.EmuConverter.ParseEmuAsInt(lwStr);
                 }
 
                 // List style (bullet/numbered)
@@ -339,8 +346,9 @@ public partial class PowerPointHandler
 
             case "picture" or "image" or "img":
             {
-                if (!properties.TryGetValue("path", out var imgPath))
-                    throw new ArgumentException("'path' property is required for picture type");
+                if (!properties.TryGetValue("path", out var imgPath)
+                    && !properties.TryGetValue("src", out imgPath))
+                    throw new ArgumentException("'path' or 'src' property is required for picture type");
                 if (!File.Exists(imgPath))
                     throw new FileNotFoundException($"Image file not found: {imgPath}");
 
@@ -541,7 +549,7 @@ public partial class PowerPointHandler
                         cell.Append(new Drawing.TextBody(
                             new Drawing.BodyProperties(),
                             new Drawing.ListStyle(),
-                            new Drawing.Paragraph(new Drawing.EndParagraphRunProperties { Language = "zh-CN" })
+                            new Drawing.Paragraph(new Drawing.EndParagraphRunProperties { Language = "en-US" })
                         ));
                         cell.Append(new Drawing.TableCellProperties());
                         tableRow.Append(cell);
@@ -820,7 +828,7 @@ public partial class PowerPointHandler
                 // 5. Add media timing node (controls playback behavior)
                 var mediaSlide = GetSlide(mediaSlidePart);
                 var vol = properties.TryGetValue("volume", out var volStr)
-                    ? (int)(double.Parse(volStr) * 1000) // 0-100 → 0-100000
+                    ? (int)(double.Parse(volStr, System.Globalization.CultureInfo.InvariantCulture) * 1000) // 0-100 → 0-100000
                     : 80000; // default 80%
                 var autoPlay = properties.GetValueOrDefault("autoplay", "false")
                     .Equals("true", StringComparison.OrdinalIgnoreCase);
@@ -896,7 +904,7 @@ public partial class PowerPointHandler
                 else
                     cxnOutline.AppendChild(BuildSolidFill("000000"));
                 if (properties.TryGetValue("linewidth", out var lwVal))
-                    cxnOutline.Width = (int)ParseEmu(lwVal);
+                    cxnOutline.Width = Core.EmuConverter.ParseEmuAsInt(lwVal);
                 connector.ShapeProperties.AppendChild(cxnOutline);
 
                 cxnShapeTree.AppendChild(connector);
@@ -941,11 +949,13 @@ public partial class PowerPointHandler
                 }
 
                 // Calculate bounding box
-                long minX = long.MaxValue, minY = long.MaxValue, maxX = 0, maxY = 0;
+                long minX = long.MaxValue, minY = long.MaxValue, maxX = long.MinValue, maxY = long.MinValue;
+                bool hasTransform = false;
                 foreach (var s in toGroup)
                 {
                     var xfrm = s.ShapeProperties?.Transform2D;
                     if (xfrm?.Offset == null || xfrm.Extents == null) continue;
+                    hasTransform = true;
                     long sx = xfrm.Offset.X ?? 0;
                     long sy = xfrm.Offset.Y ?? 0;
                     long scx = xfrm.Extents.Cx ?? 0;
@@ -955,6 +965,7 @@ public partial class PowerPointHandler
                     if (sx + scx > maxX) maxX = sx + scx;
                     if (sy + scy > maxY) maxY = sy + scy;
                 }
+                if (!hasTransform) { minX = 0; minY = 0; maxX = 0; maxY = 0; }
 
                 var groupShape = new GroupShape();
                 groupShape.NonVisualGroupShapeProperties = new NonVisualGroupShapeProperties(
@@ -1014,10 +1025,10 @@ public partial class PowerPointHandler
                     var cellPara = new Drawing.Paragraph();
                     if (!string.IsNullOrEmpty(cellText))
                         cellPara.Append(new Drawing.Run(
-                            new Drawing.RunProperties { Language = "zh-CN" },
+                            new Drawing.RunProperties { Language = "en-US" },
                             new Drawing.Text(cellText)));
                     else
-                        cellPara.Append(new Drawing.EndParagraphRunProperties { Language = "zh-CN" });
+                        cellPara.Append(new Drawing.EndParagraphRunProperties { Language = "en-US" });
                     newTblCell.Append(new Drawing.TextBody(bodyProps, listStyle, cellPara));
                     newTblCell.Append(new Drawing.TableCellProperties());
                     newTblRow.Append(newTblCell);
@@ -1056,10 +1067,10 @@ public partial class PowerPointHandler
                 var cPara = new Drawing.Paragraph();
                 if (properties.TryGetValue("text", out var cText) && !string.IsNullOrEmpty(cText))
                     cPara.Append(new Drawing.Run(
-                        new Drawing.RunProperties { Language = "zh-CN" },
+                        new Drawing.RunProperties { Language = "en-US" },
                         new Drawing.Text(cText)));
                 else
-                    cPara.Append(new Drawing.EndParagraphRunProperties { Language = "zh-CN" });
+                    cPara.Append(new Drawing.EndParagraphRunProperties { Language = "en-US" });
                 newCell.Append(new Drawing.TextBody(cBodyProps, cListStyle, cPara));
                 newCell.Append(new Drawing.TableCellProperties());
 
@@ -1079,6 +1090,44 @@ public partial class PowerPointHandler
                 GetSlide(cellSlidePart).Save();
                 var cellIdx = cellRow.Elements<Drawing.TableCell>().ToList().IndexOf(newCell) + 1;
                 return $"{parentPath}/tc[{cellIdx}]";
+            }
+
+            case "animation" or "animate":
+            {
+                // Add animation to a shape: parentPath must be /slide[N]/shape[M]
+                var animMatch = System.Text.RegularExpressions.Regex.Match(parentPath, @"^/slide\[(\d+)\]/shape\[(\d+)\]$");
+                if (!animMatch.Success)
+                    throw new ArgumentException("Animations must be added to a shape: /slide[N]/shape[M]");
+
+                var animSlideIdx = int.Parse(animMatch.Groups[1].Value);
+                var animShapeIdx = int.Parse(animMatch.Groups[2].Value);
+                var (animSlidePart, animShape) = ResolveShape(animSlideIdx, animShapeIdx);
+
+                // Build animation value string from properties
+                var effect = properties.GetValueOrDefault("effect", "fade");
+                var cls = properties.GetValueOrDefault("class", "entrance");
+                var duration = properties.GetValueOrDefault("duration", "500");
+                var trigger = properties.GetValueOrDefault("trigger", "onclick");
+
+                // Map trigger property to animation format
+                var triggerPart = trigger.ToLowerInvariant() switch
+                {
+                    "onclick" or "click" => "click",
+                    "after" or "afterprevious" => "after",
+                    "with" or "withprevious" => "with",
+                    _ => "click"
+                };
+
+                var animValue = $"{effect}-{cls}-{duration}-{triggerPart}";
+                ApplyShapeAnimation(animSlidePart, animShape, animValue);
+                GetSlide(animSlidePart).Save();
+
+                // Count animations on this shape
+                var animShapeId = animShape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value ?? 0;
+                var timing = GetSlide(animSlidePart).GetFirstChild<Timing>();
+                var animCount = timing?.Descendants<ShapeTarget>()
+                    .Count(st => st.ShapeId?.Value == animShapeId.ToString()) ?? 0;
+                return $"{parentPath}/animation[{animCount}]";
             }
 
             default:
@@ -1328,11 +1377,11 @@ public partial class PowerPointHandler
                 ?? throw new InvalidOperationException("Slide has no shape tree");
         }
 
-        srcElement.Remove();
-
-        // Copy relationships if moving across slides
+        // Copy relationships BEFORE removing from source (so rel IDs are still accessible)
         if (srcSlidePart != tgtSlidePart)
             CopyRelationships(srcElement, srcSlidePart, tgtSlidePart);
+
+        srcElement.Remove();
 
         InsertAtPosition(tgtShapeTree, srcElement, index);
 
@@ -1425,7 +1474,7 @@ public partial class PowerPointHandler
                     {
                         newRelId = targetPart.GetIdOfPart(referencedPart);
                     }
-                    catch
+                    catch (ArgumentException)
                     {
                         newRelId = targetPart.CreateRelationshipToPart(referencedPart);
                     }
@@ -1435,7 +1484,7 @@ public partial class PowerPointHandler
                         el.SetAttribute(new OpenXmlAttribute(attr.Prefix, attr.LocalName, attr.NamespaceUri, newRelId));
                     }
                 }
-                catch { /* Not a valid relationship, skip */ }
+                catch (ArgumentOutOfRangeException) { /* Not a valid relationship ID, skip */ }
             }
         }
     }

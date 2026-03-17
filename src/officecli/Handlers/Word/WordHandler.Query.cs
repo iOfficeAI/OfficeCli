@@ -154,7 +154,12 @@ public partial class WordHandler
         var parts = ParsePath(path);
         var element = NavigateToElement(parts);
         if (element == null)
-            return new DocumentNode { Path = path, Type = "error", Text = $"Path not found: {path}" };
+        {
+            // Check if the path contains footnote/endnote/toc which are handled differently
+            if (path.Contains("footnote") || path.Contains("endnote") || path.Contains("toc"))
+                return new DocumentNode { Path = path, Type = "error", Text = $"Path not found: {path}" };
+            throw new ArgumentException($"Path not found: {path}");
+        }
 
         return ElementToNode(element, path, depth);
     }
