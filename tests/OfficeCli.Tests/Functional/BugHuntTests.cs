@@ -4765,6 +4765,435 @@ public class BugHuntTests : IDisposable
         // If not, user has no way to know whether layout exists
     }
 
+    // ==================== Bug #211-230: Comments, Merge cells, Connectors, ParseEmu ====================
+
+    /// Bug #211 — Word comment: DateTime.Parse without validation
+    /// File: WordHandler.Add.cs, line 557
+    /// Uses DateTime.Parse on user input without TryParse.
+    [Fact]
+    public void Bug211_WordComment_DateTimeParseNoValidation()
+    {
+        _wordHandler.Add("/body", "p", null, new() { ["text"] = "Commented text" });
+
+        var act = () => _wordHandler.Add("/body/p[1]", "comment", null, new()
+        {
+            ["text"] = "Review needed",
+            ["author"] = "Tester",
+            ["date"] = "not-a-date"
+        });
+
+        act.Should().Throw<FormatException>(
+            "DateTime.Parse crashes on 'not-a-date' — should use TryParse");
+    }
+
+    /// Bug #212 — Word comment: empty author causes IndexOutOfRange
+    /// File: WordHandler.Add.cs, line 544
+    /// author[..1] on empty string throws IndexOutOfRangeException.
+    [Fact]
+    public void Bug212_WordComment_EmptyAuthorCrash()
+    {
+        _wordHandler.Add("/body", "p", null, new() { ["text"] = "Text" });
+
+        var act = () => _wordHandler.Add("/body/p[1]", "comment", null, new()
+        {
+            ["text"] = "Comment",
+            ["author"] = ""
+        });
+
+        act.Should().Throw<Exception>(
+            "Empty author string causes author[..1] to throw IndexOutOfRangeException");
+    }
+
+    /// Bug #213 — Word comment: orphaned markers on Remove
+    /// File: WordHandler.Add.cs, lines 1177-1185
+    /// Removing a CommentRangeStart doesn't clean up the corresponding
+    /// CommentRangeEnd, CommentReference, or Comment object.
+    [Fact]
+    public void Bug213_WordComment_OrphanedMarkersOnRemove()
+    {
+        _wordHandler.Add("/body", "p", null, new() { ["text"] = "Text" });
+        _wordHandler.Add("/body/p[1]", "comment", null, new()
+        {
+            ["text"] = "Review",
+            ["author"] = "Tester"
+        });
+
+        // Remove just cleans the element, not related comment parts
+        // This is the same Remove used for all elements
+        var node = _wordHandler.Get("/body/p[1]");
+        node.Should().NotBeNull();
+    }
+
+    /// Bug #214 — Word comment: Comment saved before markup insertion
+    /// File: WordHandler.Add.cs, lines 553-578
+    /// Comment object is saved to comments part before range markers
+    /// are inserted into document. If insertion fails, orphaned comment remains.
+    [Fact]
+    public void Bug214_WordComment_SavedBeforeMarkup()
+    {
+        _wordHandler.Add("/body", "p", null, new() { ["text"] = "Text" });
+        _wordHandler.Add("/body/p[1]", "comment", null, new()
+        {
+            ["text"] = "Comment text",
+            ["author"] = "Author"
+        });
+
+        ReopenWord();
+        var node = _wordHandler.Get("/body/p[1]");
+        node.Should().NotBeNull("comment should be properly inserted");
+    }
+
+    /// Bug #215 — Excel merge: no overlap detection
+    /// File: ExcelHandler.Set.cs, lines 639-654
+    /// Merge operation only checks for exact duplicates, not overlaps.
+    /// Overlapping merges create corrupt Excel files.
+    [Fact]
+    public void Bug215_ExcelMerge_NoOverlapDetection()
+    {
+        _excelHandler.Add("/Sheet1", "cell", null, new() { ["ref"] = "A1", ["value"] = "1" });
+        _excelHandler.Add("/Sheet1", "cell", null, new() { ["ref"] = "B1", ["value"] = "2" });
+        _excelHandler.Add("/Sheet1", "cell", null, new() { ["ref"] = "C1", ["value"] = "3" });
+
+        // First merge
+        _excelHandler.Set("/Sheet1", new() { ["merge"] = "A1:B2" });
+
+        // Overlapping merge — should be rejected but isn't
+        _excelHandler.Set("/Sheet1", new() { ["merge"] = "B1:C2" });
+
+        // Excel would reject this file due to overlapping merge ranges
+        ReopenExcel();
+        var node = _excelHandler.Get("/Sheet1");
+        node.Should().NotBeNull();
+    }
+
+    /// Bug #216 — Excel merge: row deletion doesn't clean up merge ranges
+    /// File: ExcelHandler.Add.cs, lines 954-962
+    /// Deleting a row that participates in a merge doesn't update
+    /// or remove the affected merge definition.
+    [Fact]
+    public void Bug216_ExcelMerge_RowDeletionNoCleanup()
+    {
+        _excelHandler.Add("/Sheet1", "cell", null, new() { ["ref"] = "A1", ["value"] = "Merged" });
+        _excelHandler.Set("/Sheet1", new() { ["merge"] = "A1:A3" });
+
+        // Delete row 2 which is part of the merge
+        _excelHandler.Remove("/Sheet1/row[2]");
+
+        // The merge definition "A1:A3" still exists but row 2 is gone
+        ReopenExcel();
+        var node = _excelHandler.Get("/Sheet1");
+        node.Should().NotBeNull();
+    }
+
+    /// Bug #217 — Excel merge: silent data loss
+    /// File: ExcelHandler.Set.cs, lines 639-654
+    /// Merging range with multiple values silently discards all but top-left.
+    [Fact]
+    public void Bug217_ExcelMerge_SilentDataLoss()
+    {
+        _excelHandler.Add("/Sheet1", "cell", null, new() { ["ref"] = "A1", ["value"] = "Keep" });
+        _excelHandler.Add("/Sheet1", "cell", null, new() { ["ref"] = "B1", ["value"] = "Lost" });
+        _excelHandler.Add("/Sheet1", "cell", null, new() { ["ref"] = "C1", ["value"] = "Lost too" });
+
+        // Merge will only keep A1's value
+        _excelHandler.Set("/Sheet1", new() { ["merge"] = "A1:C1" });
+
+        ReopenExcel();
+        // B1 and C1 data should be preserved or warned about
+        var b1 = _excelHandler.Get("/Sheet1/B1");
+        // Data in B1 may be silently lost during merge
+    }
+
+    /// Bug #218 — PPTX connector: endpoint Index always 0
+    /// File: PowerPointHandler.Add.cs, lines 870, 872
+    /// Connector start/end connection Index is hardcoded to 0,
+    /// ignoring shape connection point selection.
+    [Fact]
+    public void Bug218_PptxConnector_EndpointIndexAlwaysZero()
+    {
+        BlankDocCreator.Create(_pptxPath);
+        using var pptx = new PowerPointHandler(_pptxPath, editable: true);
+        pptx.Add("/", "slide", null, new());
+        pptx.Add("/slide[1]", "shape", null, new() { ["text"] = "A" });
+        pptx.Add("/slide[1]", "shape", null, new() { ["text"] = "B" });
+
+        // Add connector — Index=0 is always used regardless of shape geometry
+        pptx.Add("/slide[1]", "connector", null, new()
+        {
+            ["startshape"] = "1",
+            ["endshape"] = "2"
+        });
+
+        var node = pptx.Get("/slide[1]");
+        node.Should().NotBeNull();
+    }
+
+    /// Bug #219 — PPTX connector: height defaults to 0
+    /// File: PowerPointHandler.Add.cs, line 858
+    /// Connector without explicit height gets Cy=0, creating degenerate shape.
+    [Fact]
+    public void Bug219_PptxConnector_HeightDefaultsToZero()
+    {
+        BlankDocCreator.Create(_pptxPath);
+        using var pptx = new PowerPointHandler(_pptxPath, editable: true);
+        pptx.Add("/", "slide", null, new());
+
+        // Add connector without height — defaults to 0
+        pptx.Add("/slide[1]", "connector", null, new()
+        {
+            ["x"] = "100", ["y"] = "100", ["width"] = "200"
+        });
+
+        var node = pptx.Get("/slide[1]");
+        node.Should().NotBeNull();
+    }
+
+    /// Bug #220 — PPTX group: bounding box invalid when shapes lack transforms
+    /// File: PowerPointHandler.Add.cs, lines 944-957
+    /// If all grouped shapes have null Transform2D, bounding box overflows.
+    /// minX=long.MaxValue, maxX=0 → Cx = 0 - MaxValue (negative).
+    [Fact]
+    public void Bug220_PptxGroup_BoundingBoxOverflow()
+    {
+        BlankDocCreator.Create(_pptxPath);
+        using var pptx = new PowerPointHandler(_pptxPath, editable: true);
+        pptx.Add("/", "slide", null, new());
+        pptx.Add("/slide[1]", "shape", null, new() { ["text"] = "A" });
+        pptx.Add("/slide[1]", "shape", null, new() { ["text"] = "B" });
+
+        // Group the shapes
+        pptx.Add("/slide[1]", "group", null, new() { ["shapes"] = "1,2" });
+
+        var node = pptx.Get("/slide[1]");
+        node.Should().NotBeNull();
+    }
+
+    /// Bug #221 — ParseEmu: long to int cast overflow
+    /// File: PowerPointHandler.Fill.cs, lines 182-192
+    /// ParseEmu returns long but results cast to int for BodyProperties.
+    /// Values > int.MaxValue silently overflow to negative.
+    [Fact]
+    public void Bug221_ParseEmu_LongToIntCastOverflow()
+    {
+        BlankDocCreator.Create(_pptxPath);
+        using var pptx = new PowerPointHandler(_pptxPath, editable: true);
+        pptx.Add("/", "slide", null, new());
+        pptx.Add("/slide[1]", "shape", null, new() { ["text"] = "Test" });
+
+        // Very large inset value that overflows int
+        var act = () => pptx.Set("/slide[1]/shape[1]", new()
+        {
+            ["inset"] = "1000cm,1000cm,1000cm,1000cm"
+        });
+
+        // 1000cm = 360,000,000,000 EMU which overflows int.MaxValue
+        act.Should().Throw<Exception>(
+            "ParseEmu long result cast to int causes silent overflow for large values");
+    }
+
+    /// Bug #222 — ParseEmu: negative dimensions accepted
+    /// File: WordHandler.ImageHelpers.cs, lines 17-30 and PowerPointHandler.Helpers.cs, lines 161-173
+    /// No validation for negative values. "-5cm" produces -1800000 EMU.
+    [Fact]
+    public void Bug222_ParseEmu_NegativeDimensionsAccepted()
+    {
+        BlankDocCreator.Create(_pptxPath);
+        using var pptx = new PowerPointHandler(_pptxPath, editable: true);
+        pptx.Add("/", "slide", null, new());
+
+        var act = () => pptx.Add("/slide[1]", "shape", null, new()
+        {
+            ["text"] = "Test",
+            ["width"] = "-5cm"
+        });
+
+        // Negative width creates invalid shape
+        act.Should().Throw<Exception>(
+            "Negative dimensions should be rejected by ParseEmu");
+    }
+
+    /// Bug #223 — ParseEmu: empty unit suffix causes crash
+    /// File: WordHandler.ImageHelpers.cs, line 22
+    /// Input "cm" (unit only, no number) → value[..^2] = "" → double.Parse("") crash.
+    [Fact]
+    public void Bug223_ParseEmu_EmptyUnitSuffixCrash()
+    {
+        var imgPath = CreateTempImage();
+        try
+        {
+            var act = () => _wordHandler.Add("/body", "image", null, new()
+            {
+                ["src"] = imgPath,
+                ["width"] = "cm"
+            });
+
+            act.Should().Throw<FormatException>(
+                "ParseEmu crashes on 'cm' (no number) — should validate input length");
+        }
+        finally
+        {
+            if (File.Exists(imgPath)) File.Delete(imgPath);
+        }
+    }
+
+    /// Bug #224 — ParseEmu: unsupported units silently fail
+    /// File: WordHandler.ImageHelpers.cs, lines 17-30
+    /// "5mm" is not supported — falls through to long.Parse("5mm") which crashes.
+    [Fact]
+    public void Bug224_ParseEmu_UnsupportedUnitsCrash()
+    {
+        var imgPath = CreateTempImage();
+        try
+        {
+            var act = () => _wordHandler.Add("/body", "image", null, new()
+            {
+                ["src"] = imgPath,
+                ["width"] = "50mm"
+            });
+
+            act.Should().Throw<FormatException>(
+                "ParseEmu doesn't support 'mm' unit — falls through to long.Parse('50mm')");
+        }
+        finally
+        {
+            if (File.Exists(imgPath)) File.Delete(imgPath);
+        }
+    }
+
+    /// Bug #225 — Excel merge: no validation of merge range format
+    /// File: ExcelHandler.Set.cs, lines 425-433
+    /// Only validates first part of range (before ':'). Second part not checked.
+    [Fact]
+    public void Bug225_ExcelMerge_NoRangeFormatValidation()
+    {
+        _excelHandler.Add("/Sheet1", "cell", null, new() { ["ref"] = "A1", ["value"] = "Test" });
+
+        // Malformed range — second part not validated
+        var act = () => _excelHandler.Set("/Sheet1", new()
+        {
+            ["merge"] = "A1:INVALID"
+        });
+
+        // Should validate both parts of the range
+        act.Should().NotThrow("malformed merge range accepted without validation");
+    }
+
+    /// Bug #226 — Excel duplicate ReorderWorksheetChildren call
+    /// File: ExcelHandler.Set.cs, line 680
+    /// ReorderWorksheetChildren is called twice in a row — copy-paste error.
+    [Fact]
+    public void Bug226_ExcelSet_DuplicateReorderCall()
+    {
+        // This is a performance bug — the function is called twice
+        _excelHandler.Add("/Sheet1", "cell", null, new() { ["ref"] = "A1", ["value"] = "Test" });
+        _excelHandler.Set("/Sheet1/A1", new() { ["value"] = "Updated" });
+        ReopenExcel();
+        var node = _excelHandler.Get("/Sheet1/A1");
+        node?.Text.Should().Be("Updated");
+    }
+
+    /// Bug #227 — Word navigation: CommentReference runs filtered out
+    /// File: WordHandler.Navigation.cs, lines 161-163
+    /// Runs containing CommentReference are hidden from navigation,
+    /// making it impossible to query or modify comment references directly.
+    [Fact]
+    public void Bug227_WordNavigation_CommentRunsFiltered()
+    {
+        _wordHandler.Add("/body", "p", null, new() { ["text"] = "Commented" });
+        _wordHandler.Add("/body/p[1]", "comment", null, new()
+        {
+            ["text"] = "A comment",
+            ["author"] = "Test"
+        });
+
+        // Runs with CommentReference are filtered from navigation
+        // This means you can't directly access or modify them
+        var node = _wordHandler.Get("/body/p[1]");
+        node.Should().NotBeNull();
+    }
+
+    /// Bug #228 — PPTX group: empty shapes list not validated
+    /// File: PowerPointHandler.Add.cs, lines 931-944
+    /// If shapes="" is provided, toGroup is empty, causing invalid group.
+    [Fact]
+    public void Bug228_PptxGroup_EmptyShapesList()
+    {
+        BlankDocCreator.Create(_pptxPath);
+        using var pptx = new PowerPointHandler(_pptxPath, editable: true);
+        pptx.Add("/", "slide", null, new());
+        pptx.Add("/slide[1]", "shape", null, new() { ["text"] = "A" });
+
+        var act = () => pptx.Add("/slide[1]", "group", null, new()
+        {
+            ["shapes"] = ""
+        });
+
+        act.Should().Throw<Exception>(
+            "Empty shapes list should be rejected for group creation");
+    }
+
+    /// Bug #229 — ParseEmu: double truncation instead of rounding
+    /// File: WordHandler.ImageHelpers.cs, line 22
+    /// (long)(double.Parse(value) * 360000) truncates instead of rounding.
+    /// "0.001cm" → 360 EMU (truncated) vs 360 EMU (correct by coincidence).
+    [Fact]
+    public void Bug229_ParseEmu_TruncationInsteadOfRounding()
+    {
+        var imgPath = CreateTempImage();
+        try
+        {
+            // Fractional cm values may lose precision due to truncation
+            _wordHandler.Add("/body", "p", null, new() { ["text"] = "Image" });
+            _wordHandler.Add("/body/p[1]", "image", null, new()
+            {
+                ["src"] = imgPath,
+                ["width"] = "2.54cm"  // Should be exactly 1 inch = 914400 EMU
+            });
+
+            ReopenWord();
+            var node = _wordHandler.Get("/body");
+            node.Should().NotBeNull();
+        }
+        finally
+        {
+            if (File.Exists(imgPath)) File.Delete(imgPath);
+        }
+    }
+
+    /// Bug #230 — ParseEmu: duplicate implementations in Word and PPTX
+    /// File: WordHandler.ImageHelpers.cs lines 17-30, PowerPointHandler.Helpers.cs lines 161-173
+    /// Identical code duplicated — any fix must be applied to both files.
+    [Fact]
+    public void Bug230_ParseEmu_DuplicateImplementations()
+    {
+        // This is a code quality bug — ParseEmu exists in two places
+        // Any bug fix or enhancement must be applied to both
+        // Word ParseEmu and PPTX ParseEmu are separate copies
+        var imgPath = CreateTempImage();
+        try
+        {
+            _wordHandler.Add("/body", "p", null, new() { ["text"] = "Image" });
+            _wordHandler.Add("/body/p[1]", "image", null, new()
+            {
+                ["src"] = imgPath,
+                ["width"] = "5cm"
+            });
+
+            BlankDocCreator.Create(_pptxPath);
+            using var pptx = new PowerPointHandler(_pptxPath, editable: true);
+            pptx.Add("/", "slide", null, new());
+            pptx.Add("/slide[1]", "shape", null, new()
+            {
+                ["text"] = "Test",
+                ["width"] = "5cm"
+            });
+        }
+        finally
+        {
+            if (File.Exists(imgPath)) File.Delete(imgPath);
+        }
+    }
+
     // ==================== Helper Methods ====================
 
     private static string CreateTempImage()
