@@ -355,6 +355,12 @@ public partial class WordHandler
                 switch (key.ToLowerInvariant())
                 {
                     case "name":
+                        // Check for duplicate bookmark names
+                        var existingBk = _doc.MainDocumentPart?.Document?.Body?
+                            .Descendants<BookmarkStart>()
+                            .FirstOrDefault(b => b.Name?.Value == value && b != bkStart);
+                        if (existingBk != null)
+                            throw new ArgumentException($"Bookmark name '{value}' already exists");
                         bkStart.Name = value;
                         break;
                     case "text":
@@ -486,13 +492,13 @@ public partial class WordHandler
                         if (shdParts.Length == 1)
                         {
                             shd.Val = ShadingPatternValues.Clear;
-                            shd.Fill = shdParts[0];
+                            shd.Fill = shdParts[0].TrimStart('#').ToUpperInvariant();
                         }
                         else if (shdParts.Length >= 2)
                         {
                             shd.Val = new ShadingPatternValues(shdParts[0]);
-                            shd.Fill = shdParts[1];
-                            if (shdParts.Length >= 3) shd.Color = shdParts[2];
+                            shd.Fill = shdParts[1].TrimStart('#').ToUpperInvariant();
+                            if (shdParts.Length >= 3) shd.Color = shdParts[2].TrimStart('#').ToUpperInvariant();
                         }
                         EnsureRunProperties(run).Shading = shd;
                         break;
@@ -542,7 +548,11 @@ public partial class WordHandler
                         }
                         else
                         {
-                            var newRelId = mainPart3.AddHyperlinkRelationship(new Uri(value), isExternal: true).Id;
+                            // Accept both absolute and relative URIs (Open-XML-SDK supports both)
+                            var uri = Uri.TryCreate(value, UriKind.Absolute, out var absUri)
+                                ? absUri
+                                : new Uri(value, UriKind.Relative);
+                            var newRelId = mainPart3.AddHyperlinkRelationship(uri, isExternal: true).Id;
                             if (run.Parent is Hyperlink existingHl)
                             {
                                 existingHl.Id = newRelId;
@@ -635,13 +645,13 @@ public partial class WordHandler
                         if (shdPartsP.Length == 1)
                         {
                             shdP.Val = ShadingPatternValues.Clear;
-                            shdP.Fill = shdPartsP[0];
+                            shdP.Fill = shdPartsP[0].TrimStart('#').ToUpperInvariant();
                         }
                         else if (shdPartsP.Length >= 2)
                         {
                             shdP.Val = new ShadingPatternValues(shdPartsP[0]);
-                            shdP.Fill = shdPartsP[1];
-                            if (shdPartsP.Length >= 3) shdP.Color = shdPartsP[2];
+                            shdP.Fill = shdPartsP[1].TrimStart('#').ToUpperInvariant();
+                            if (shdPartsP.Length >= 3) shdP.Color = shdPartsP[2].TrimStart('#').ToUpperInvariant();
                         }
                         pProps.Shading = shdP;
                         break;
@@ -677,6 +687,9 @@ public partial class WordHandler
                     case "bold":
                     case "italic":
                     case "color":
+                    case "highlight":
+                    case "underline":
+                    case "strike":
                         // Apply run-level formatting to all runs in the paragraph
                         foreach (var pRun in para.Descendants<Run>())
                         {
@@ -697,6 +710,15 @@ public partial class WordHandler
                                     break;
                                 case "color":
                                     pRunProps.Color = new Color { Val = value.TrimStart('#').ToUpperInvariant() };
+                                    break;
+                                case "highlight":
+                                    pRunProps.Highlight = new Highlight { Val = new HighlightColorValues(value) };
+                                    break;
+                                case "underline":
+                                    pRunProps.Underline = new Underline { Val = new UnderlineValues(value) };
+                                    break;
+                                case "strike":
+                                    pRunProps.Strike = IsTruthy(value) ? new Strike() : null;
                                     break;
                             }
                         }
@@ -748,6 +770,9 @@ public partial class WordHandler
                     case "bold":
                     case "italic":
                     case "color":
+                    case "highlight":
+                    case "underline":
+                    case "strike":
                         // Apply to all runs in all paragraphs in the cell
                         foreach (var cellPara in cell.Elements<Paragraph>())
                         {
@@ -771,6 +796,15 @@ public partial class WordHandler
                                     case "color":
                                         rPr.Color = new Color { Val = value.TrimStart('#').ToUpperInvariant() };
                                         break;
+                                    case "highlight":
+                                        rPr.Highlight = new Highlight { Val = new HighlightColorValues(value) };
+                                        break;
+                                    case "underline":
+                                        rPr.Underline = new Underline { Val = new UnderlineValues(value) };
+                                        break;
+                                    case "strike":
+                                        rPr.Strike = IsTruthy(value) ? new Strike() : null;
+                                        break;
                                 }
                             }
                         }
@@ -781,13 +815,13 @@ public partial class WordHandler
                         if (shdParts.Length == 1)
                         {
                             shd.Val = ShadingPatternValues.Clear;
-                            shd.Fill = shdParts[0];
+                            shd.Fill = shdParts[0].TrimStart('#').ToUpperInvariant();
                         }
                         else if (shdParts.Length >= 2)
                         {
                             shd.Val = new ShadingPatternValues(shdParts[0]);
-                            shd.Fill = shdParts[1];
-                            if (shdParts.Length >= 3) shd.Color = shdParts[2];
+                            shd.Fill = shdParts[1].TrimStart('#').ToUpperInvariant();
+                            if (shdParts.Length >= 3) shd.Color = shdParts[2].TrimStart('#').ToUpperInvariant();
                         }
                         tcPr.Shading = shd;
                         break;
@@ -822,11 +856,66 @@ public partial class WordHandler
                     case "width":
                         tcPr.TableCellWidth = new TableCellWidth { Width = value, Type = TableWidthUnitValues.Dxa };
                         break;
+                    case "padding":
+                    {
+                        var dxa = value;
+                        var mar = tcPr.TableCellMargin ?? (tcPr.TableCellMargin = new TableCellMargin());
+                        mar.TopMargin = new TopMargin { Width = dxa, Type = TableWidthUnitValues.Dxa };
+                        mar.BottomMargin = new BottomMargin { Width = dxa, Type = TableWidthUnitValues.Dxa };
+                        mar.LeftMargin = new LeftMargin { Width = dxa, Type = TableWidthUnitValues.Dxa };
+                        mar.RightMargin = new RightMargin { Width = dxa, Type = TableWidthUnitValues.Dxa };
+                        break;
+                    }
+                    case "padding.top":
+                    {
+                        var mar = tcPr.TableCellMargin ?? (tcPr.TableCellMargin = new TableCellMargin());
+                        mar.TopMargin = new TopMargin { Width = value, Type = TableWidthUnitValues.Dxa };
+                        break;
+                    }
+                    case "padding.bottom":
+                    {
+                        var mar = tcPr.TableCellMargin ?? (tcPr.TableCellMargin = new TableCellMargin());
+                        mar.BottomMargin = new BottomMargin { Width = value, Type = TableWidthUnitValues.Dxa };
+                        break;
+                    }
+                    case "padding.left":
+                    {
+                        var mar = tcPr.TableCellMargin ?? (tcPr.TableCellMargin = new TableCellMargin());
+                        mar.LeftMargin = new LeftMargin { Width = value, Type = TableWidthUnitValues.Dxa };
+                        break;
+                    }
+                    case "padding.right":
+                    {
+                        var mar = tcPr.TableCellMargin ?? (tcPr.TableCellMargin = new TableCellMargin());
+                        mar.RightMargin = new RightMargin { Width = value, Type = TableWidthUnitValues.Dxa };
+                        break;
+                    }
+                    case "textdirection" or "textdir":
+                        tcPr.TextDirection = new TextDirection
+                        {
+                            Val = value.ToLowerInvariant() switch
+                            {
+                                "btlr" or "vertical" => TextDirectionValues.BottomToTopLeftToRight,
+                                "tbrl" or "vertical-rl" => TextDirectionValues.TopToBottomRightToLeft,
+                                "lrtb" or "horizontal" => TextDirectionValues.LefToRightTopToBottom,
+                                "tbrl-r" or "tb-rl-rotated" => TextDirectionValues.TopToBottomRightToLeftRotated,
+                                "lrtb-r" or "lr-tb-rotated" => TextDirectionValues.LefttoRightTopToBottomRotated,
+                                "tblr-r" or "tb-lr-rotated" => TextDirectionValues.TopToBottomLeftToRightRotated,
+                                _ => TextDirectionValues.LefToRightTopToBottom
+                            }
+                        };
+                        break;
+                    case "nowrap":
+                        tcPr.NoWrap = IsTruthy(value) ? new NoWrap() : null;
+                        break;
                     case "vmerge":
                         tcPr.VerticalMerge = new VerticalMerge
                         {
                             Val = value.ToLowerInvariant() == "restart" ? MergedCellValues.Restart : MergedCellValues.Continue
                         };
+                        break;
+                    case var k when k.StartsWith("border"):
+                        ApplyCellBorders(tcPr, key, value);
                         break;
                     case "gridspan":
                         var newSpan = int.Parse(value);
@@ -837,10 +926,29 @@ public partial class WordHandler
                         if (element.Parent is TableRow parentRow)
                         {
                             var table = parentRow.Parent as Table;
-                            var gridCols = table?.GetFirstChild<TableGrid>()
-                                ?.Elements<GridColumn>().Count() ?? 0;
+                            var gridColList = table?.GetFirstChild<TableGrid>()
+                                ?.Elements<GridColumn>().ToList();
+                            var gridCols = gridColList?.Count ?? 0;
                             if (gridCols > 0)
                             {
+                                // Calculate the grid column index where this cell starts
+                                int startCol = 0;
+                                foreach (var prevTc in parentRow.Elements<TableCell>())
+                                {
+                                    if (prevTc == element) break;
+                                    startCol += prevTc.TableCellProperties?.GridSpan?.Val?.Value ?? 1;
+                                }
+
+                                // Update cell width to sum of spanned grid columns
+                                int spanWidth = 0;
+                                for (int gi = startCol; gi < startCol + newSpan && gi < gridCols; gi++)
+                                {
+                                    if (int.TryParse(gridColList![gi].Width?.Value, out var gw))
+                                        spanWidth += gw;
+                                }
+                                if (spanWidth > 0)
+                                    tcPr.TableCellWidth = new TableCellWidth { Width = spanWidth.ToString(), Type = TableWidthUnitValues.Dxa };
+
                                 // Calculate total columns occupied by current cells
                                 var totalSpan = parentRow.Elements<TableCell>().Sum(tc =>
                                     tc.TableCellProperties?.GridSpan?.Val?.Value ?? 1);
@@ -872,6 +980,10 @@ public partial class WordHandler
                     case "height":
                         trPr.GetFirstChild<TableRowHeight>()?.Remove();
                         trPr.AppendChild(new TableRowHeight { Val = uint.Parse(value), HeightType = HeightRuleValues.AtLeast });
+                        break;
+                    case "height.exact":
+                        trPr.GetFirstChild<TableRowHeight>()?.Remove();
+                        trPr.AppendChild(new TableRowHeight { Val = uint.Parse(value), HeightType = HeightRuleValues.Exact });
                         break;
                     case "header":
                         if (IsTruthy(value))
@@ -905,7 +1017,40 @@ public partial class WordHandler
                         };
                         break;
                     case "width":
-                        tblPr.TableWidth = new TableWidth { Width = value, Type = TableWidthUnitValues.Dxa };
+                        if (value.EndsWith('%'))
+                        {
+                            var pct = int.Parse(value.TrimEnd('%')) * 50; // OOXML pct = percent * 50
+                            tblPr.TableWidth = new TableWidth { Width = pct.ToString(), Type = TableWidthUnitValues.Pct };
+                        }
+                        else
+                        {
+                            tblPr.TableWidth = new TableWidth { Width = value, Type = TableWidthUnitValues.Dxa };
+                        }
+                        break;
+                    case "indent":
+                        tblPr.TableIndentation = new TableIndentation { Width = int.Parse(value), Type = TableWidthUnitValues.Dxa };
+                        break;
+                    case "cellspacing":
+                        tblPr.TableCellSpacing = new TableCellSpacing { Width = value, Type = TableWidthUnitValues.Dxa };
+                        break;
+                    case "layout":
+                        tblPr.TableLayout = new TableLayout
+                        {
+                            Type = value.ToLowerInvariant() == "fixed" ? TableLayoutValues.Fixed : TableLayoutValues.Autofit
+                        };
+                        break;
+                    case "padding":
+                    {
+                        var dxa = value;
+                        var cm = tblPr.TableCellMarginDefault ?? tblPr.AppendChild(new TableCellMarginDefault());
+                        cm.TopMargin = new TopMargin { Width = dxa, Type = TableWidthUnitValues.Dxa };
+                        cm.TableCellLeftMargin = new TableCellLeftMargin { Width = short.Parse(dxa), Type = TableWidthValues.Dxa };
+                        cm.BottomMargin = new BottomMargin { Width = dxa, Type = TableWidthUnitValues.Dxa };
+                        cm.TableCellRightMargin = new TableCellRightMargin { Width = short.Parse(dxa), Type = TableWidthValues.Dxa };
+                        break;
+                    }
+                    case var k when k.StartsWith("border"):
+                        ApplyTableBorders(tblPr, key, value);
                         break;
                     default:
                         if (!GenericXmlQuery.TryCreateTypedChild(tblPr, key, value))
@@ -984,6 +1129,18 @@ public partial class WordHandler
                     foreach (var run in container.Descendants<Run>())
                         EnsureRunProperties(run).Color = new Color { Val = value.TrimStart('#').ToUpperInvariant() };
                     break;
+                case "underline":
+                    foreach (var run in container.Descendants<Run>())
+                        EnsureRunProperties(run).Underline = new Underline { Val = new UnderlineValues(value) };
+                    break;
+                case "strike":
+                    foreach (var run in container.Descendants<Run>())
+                        EnsureRunProperties(run).Strike = IsTruthy(value) ? new Strike() : null;
+                    break;
+                case "highlight":
+                    foreach (var run in container.Descendants<Run>())
+                        EnsureRunProperties(run).Highlight = new Highlight { Val = new HighlightColorValues(value) };
+                    break;
                 case "alignment":
                 {
                     var firstPara = container.Elements<Paragraph>().FirstOrDefault();
@@ -1013,5 +1170,120 @@ public partial class WordHandler
             mainPart.HeaderParts.ElementAt(index).Header?.Save();
         else
             mainPart.FooterParts.ElementAt(index).Footer?.Save();
+    }
+
+    // Border style format: "style" or "style;size" or "style;size;color" or "style;size;color;space"
+    // Styles: none, single, thick, double, dotted, dashed, dotDash, dotDotDash, triple,
+    //         thinThickSmallGap, thickThinSmallGap, thinThickThinSmallGap,
+    //         thinThickMediumGap, thickThinMediumGap, thinThickThinMediumGap,
+    //         thinThickLargeGap, thickThinLargeGap, thinThickThinLargeGap, wave, doubleWave, threeDEmboss, threeDEngrave
+    private static BorderValues ParseBorderStyle(string style) => style.ToLowerInvariant() switch
+    {
+        "none" or "nil" => BorderValues.Nil,
+        "single" or "thin" => BorderValues.Single,
+        "thick" or "medium" => BorderValues.Thick,
+        "double" => BorderValues.Double,
+        "dotted" => BorderValues.Dotted,
+        "dashed" => BorderValues.Dashed,
+        "dotdash" => BorderValues.DotDash,
+        "dotdotdash" => BorderValues.DotDotDash,
+        "triple" => BorderValues.Triple,
+        "thinthicksmallgap" => BorderValues.ThinThickSmallGap,
+        "thickthinsmallgap" => BorderValues.ThickThinSmallGap,
+        "thinthickthinsmallgap" => BorderValues.ThinThickThinSmallGap,
+        "thinthickmediumgap" => BorderValues.ThinThickMediumGap,
+        "thickthinmediumgap" => BorderValues.ThickThinMediumGap,
+        "thinthickthinmediumgap" => BorderValues.ThinThickThinMediumGap,
+        "thinthicklargegap" => BorderValues.ThinThickLargeGap,
+        "thickthinlargegap" => BorderValues.ThickThinLargeGap,
+        "thinthickthinlargegap" => BorderValues.ThinThickThinLargeGap,
+        "wave" => BorderValues.Wave,
+        "doublewave" => BorderValues.DoubleWave,
+        "threedembed" or "3demboss" => BorderValues.ThreeDEmboss,
+        "threedengrave" or "3dengrave" => BorderValues.ThreeDEngrave,
+        _ => BorderValues.Single
+    };
+
+    private static (BorderValues style, uint size, string? color, uint space) ParseBorderValue(string value)
+    {
+        var parts = value.Split(';');
+        var style = ParseBorderStyle(parts[0]);
+        uint size = parts.Length > 1 && uint.TryParse(parts[1], out var s) ? s
+            : style == BorderValues.Nil ? 0u
+            : style == BorderValues.Thick ? 12u : 4u;
+        string? color = parts.Length > 2 ? parts[2].TrimStart('#').ToUpperInvariant() : null;
+        uint space = parts.Length > 3 && uint.TryParse(parts[3], out var sp) ? sp : 0u;
+        return (style, size, color, space);
+    }
+
+    private static T MakeBorder<T>(BorderValues style, uint size, string? color, uint space) where T : BorderType, new()
+    {
+        var b = new T { Val = style, Size = size, Space = space };
+        if (color != null) b.Color = color;
+        return b;
+    }
+
+    private static void ApplyTableBorders(TableProperties tblPr, string key, string value)
+    {
+        var borders = tblPr.TableBorders ?? tblPr.AppendChild(new TableBorders());
+        var (style, size, color, space) = ParseBorderValue(value);
+
+        switch (key.ToLowerInvariant())
+        {
+            case "border.all" or "border":
+                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space);
+                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space);
+                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space);
+                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space);
+                borders.InsideHorizontalBorder = MakeBorder<InsideHorizontalBorder>(style, size, color, space);
+                borders.InsideVerticalBorder = MakeBorder<InsideVerticalBorder>(style, size, color, space);
+                break;
+            case "border.top":
+                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space);
+                break;
+            case "border.bottom":
+                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space);
+                break;
+            case "border.left":
+                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space);
+                break;
+            case "border.right":
+                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space);
+                break;
+            case "border.insideh" or "border.horizontal":
+                borders.InsideHorizontalBorder = MakeBorder<InsideHorizontalBorder>(style, size, color, space);
+                break;
+            case "border.insidev" or "border.vertical":
+                borders.InsideVerticalBorder = MakeBorder<InsideVerticalBorder>(style, size, color, space);
+                break;
+        }
+    }
+
+    private static void ApplyCellBorders(TableCellProperties tcPr, string key, string value)
+    {
+        var borders = tcPr.TableCellBorders ?? tcPr.AppendChild(new TableCellBorders());
+        var (style, size, color, space) = ParseBorderValue(value);
+
+        switch (key.ToLowerInvariant())
+        {
+            case "border.all" or "border":
+                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space);
+                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space);
+                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space);
+                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space);
+                break;
+            case "border.top":
+                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space);
+                break;
+            case "border.bottom":
+                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space);
+                break;
+            case "border.left":
+                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space);
+                break;
+            case "border.right":
+                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space);
+                break;
+        }
     }
 }

@@ -268,10 +268,7 @@ public partial class PowerPointHandler
                 ? 0
                 : (int)((long)i * 100000 / (colorParts.Count - 1));
             var gs = new Drawing.GradientStop { Position = pos };
-            gs.AppendChild(new Drawing.RgbColorModelHex
-            {
-                Val = colorParts[i].TrimStart('#').ToUpperInvariant()
-            });
+            gs.AppendChild(BuildColorElement(colorParts[i]));
             gsLst.AppendChild(gs);
         }
 

@@ -409,13 +409,38 @@ internal static class ChartHelper
     {
         series.RemoveAllChildren<C.ChartShapeProperties>();
         var spPr = new C.ChartShapeProperties();
-        spPr.AppendChild(new Drawing.SolidFill(
-            new Drawing.RgbColorModelHex { Val = color.TrimStart('#').ToUpperInvariant() }));
+        var solidFill = new Drawing.SolidFill();
+        solidFill.AppendChild(BuildChartColorElement(color));
+        spPr.AppendChild(solidFill);
         var serText = series.GetFirstChild<C.SeriesText>();
         if (serText != null)
             serText.InsertAfterSelf(spPr);
         else
             series.PrependChild(spPr);
+    }
+
+    /// <summary>
+    /// Build a color element supporting both hex RGB and scheme color names.
+    /// </summary>
+    private static OpenXmlElement BuildChartColorElement(string value)
+    {
+        var schemeColor = value.ToLowerInvariant().TrimStart('#') switch
+        {
+            "accent1" => Drawing.SchemeColorValues.Accent1,
+            "accent2" => Drawing.SchemeColorValues.Accent2,
+            "accent3" => Drawing.SchemeColorValues.Accent3,
+            "accent4" => Drawing.SchemeColorValues.Accent4,
+            "accent5" => Drawing.SchemeColorValues.Accent5,
+            "accent6" => Drawing.SchemeColorValues.Accent6,
+            "dk1" or "dark1" => Drawing.SchemeColorValues.Dark1,
+            "dk2" or "dark2" => Drawing.SchemeColorValues.Dark2,
+            "lt1" or "light1" => Drawing.SchemeColorValues.Light1,
+            "lt2" or "light2" => Drawing.SchemeColorValues.Light2,
+            _ => (Drawing.SchemeColorValues?)null
+        };
+        if (schemeColor.HasValue)
+            return new Drawing.SchemeColor { Val = schemeColor.Value };
+        return new Drawing.RgbColorModelHex { Val = value.TrimStart('#').ToUpperInvariant() };
     }
 
     // ==================== Series Builders ====================

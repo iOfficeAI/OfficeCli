@@ -22,9 +22,17 @@ irm https://raw.githubusercontent.com/iOfficeAI/OfficeCli/main/install.ps1 | iex
 
 **Strategy:** L1 (read) → L2 (DOM edit) → L3 (raw XML). Always prefer higher layers. Add `--json` for structured output.
 
-**Performance:** Use `open <file>`/`close <file>` when running multiple commands on the same file to avoid repeated loading.
+**Performance:** Use `open <file>`/`close <file>` for interactive sessions, or `batch` for scripted multi-operation workflows.
 
-**Batch:** For 3+ operations, plan all changes first, generate a single script (work backwards on inserts), execute once.
+**Batch:** For 3+ mutations, use `batch` (one open/save cycle). Pipe JSON array via stdin or `--input file.json`. Add `--json` for structured output, `--stop-on-error` to abort on failure.
+
+```bash
+echo '[{"command":"set","path":"/Sheet1/A1","props":{"value":"Name","bold":"true"}},
+      {"command":"add","parent":"/","type":"slide","props":{"title":"Hello"}},
+      {"command":"remove","path":"/body/p[2]"}]' | officecli batch doc.xlsx --json
+```
+
+Batch fields: `command`(add/set/get/query/remove/move/view/raw/raw-set/validate), `path`, `parent`, `type`, `from`, `to`, `index`, `props`(dict), `selector`, `mode`, `depth`, `part`, `xpath`, `action`, `xml`.
 
 **Help:** If unsure about usage, run `officecli <format> <command>` for detailed help (e.g. `officecli pptx add`, `officecli docx set`, `officecli xlsx get`).
 
@@ -39,11 +47,11 @@ officecli get <file> '/body/p[3]' --depth 2 [--json]
 officecli query <file> 'paragraph[style=Normal] > run[font!=宋体]'
 ```
 
-**get** supports any XML path via element localName: `/body/tbl[1]/tblPr`, `/Sheet1/sheetViews/sheetView[1]`, `/slide[1]/cSld/spTree/sp[1]/nvSpPr`. Use `--depth N` to expand children. Word also supports: `/` (core properties), `/footnote[N]`, `/endnote[N]`, `/toc[N]`, `/section[N]`, `/styles/StyleId` (N = id returned by add).
+**get** supports any XML path via element localName: `/body/tbl[1]/tblPr`, `/Sheet1/sheetViews/sheetView[1]`, `/slide[1]/cSld/spTree/sp[1]/nvSpPr`. Use `--depth N` to expand children. Word also supports: `/` (core properties), `/footnote[N]`, `/endnote[N]`, `/toc[N]`, `/section[N]`, `/styles/StyleId`, `/chart[N]` (N = id returned by add). Excel also supports: `/SheetName/chart[N]`.
 
 **view modes:** `outline` (structure), `stats` (statistics with style inheritance), `issues` (`--type format|content|structure`, `--limit N`), `text` (plain with line numbers), `annotated` (with formatting)
 
-**query selectors:** `[attr=value]`, `[attr!=value]`, `:contains("text")`, `:empty`, `:has(formula)`, `:no-alt`. Built-in types: `paragraph`, `run`, `picture`, `equation`, `cell`, `table`. Falls back to generic XML element name (e.g. `wsp`, `a:ln`, `srgbClr[val=0070C0]`).
+**query selectors:** `[attr=value]`, `[attr!=value]`, `:contains("text")`, `:empty`, `:has(formula)`, `:no-alt`. Built-in types: `paragraph`, `run`, `picture`, `equation`, `cell`, `table`, `chart`, `bookmark`. Falls back to generic XML element name (e.g. `wsp`, `a:ln`, `srgbClr[val=0070C0]`).
 
 For large documents, ALWAYS use `--max-lines` or `--start`/`--end` to limit output.
 
@@ -84,12 +92,14 @@ officecli set doc.pptx '/slide[1]/cSld/spTree/sp[1]/txBody/p[1]/r[1]/rPr[1]/soli
 | Word TOC | `/toc[N]` | `levels`, `hyperlinks`(bool), `pagenumbers`(bool) |
 | Word section | `/section[N]` | `type`(nextPage\|continuous\|evenPage\|oddPage), `pagewidth`, `pageheight`, `orientation`, `marginTop/Bottom/Left/Right` |
 | Word style | `/styles/StyleId` | `name`, `basedon`, `next`, `font`, `size`, `bold`, `italic`, `color`, `alignment`, `spacebefore`, `spaceafter` |
+| Word chart | `/chart[N]` | `title`, `legend`, `categories`, `data`, `series1..N`, `colors`, `dataLabels`, `axisTitle`, `catTitle`, `axisMin`, `axisMax`, `majorUnit`, `axisNumFmt` |
 | Excel cell | `/Sheet1/A1` | `value`, `formula`, `clear`, `link`, `font.bold/italic/strike/underline/color/size/name`, `fill`(hex), `border.all/left/right/top/bottom`(thin\|medium\|thick\|double\|none), `border.color`, `alignment.horizontal/vertical/wrapText`, `numFmt`, ... |
 | Excel merge | `/Sheet1/A1:D1` | `merge`(bool) |
 | Excel column | `/Sheet1/col[A]` | `width`, `hidden`(bool) |
 | Excel row | `/Sheet1/row[1]` | `height`(pt), `hidden`(bool) |
 | Excel sheet | `/Sheet1` | `freeze`(cell ref, e.g. A2) |
 | Excel autofilter | `/Sheet1/autofilter` | `range`(e.g. A1:F100) |
+| Excel chart | `/Sheet1/chart[N]` | `title`, `legend`, `categories`, `data`, `series1..N`, `colors`, `dataLabels`, `axisTitle`, `catTitle`, `axisMin`, `axisMax`, `majorUnit`, `axisNumFmt` |
 | PPT shape | `/slide[1]/shape[1]` | `text`, `font`, `size`, `bold`, `italic`, `color`, `fill`, `gradient`(linear/radial), `image`(blipFill), `line`, `lineWidth`, `lineDash`, `lineOpacity`, `opacity`, `shadow`, `glow`, `reflection`, ... |
 | PPT chart | `/slide[1]/chart[1]` | `title`, `legend`, `categories`, `data`, `series1..N`, `colors`, `dataLabels`, `axisTitle`, `catTitle`, `axisMin`, `axisMax`, `majorUnit`, `axisNumFmt` |
 | PPT video/audio | `/slide[1]/video[1]` | `volume`(0-100), `autoplay`(bool), `trimStart`(ms), `trimEnd`(ms), `x`, `y`, `width`, `height` |
@@ -107,7 +117,7 @@ Props listed are common examples, not exhaustive — most `set` shortcut propert
 
 | Format | Types & props |
 |--------|--------------|
-| Word | `paragraph`(text,font,size,bold,style,alignment,keepNext,keepLines,...), `run`(text,font,size,bold,italic,superscript,subscript,...), `table`(rows,cols), `row`(cols,c1,c2,...), `cell`(text,width), `picture`(path,width,height,alt,...), `equation`(formula,mode), `comment`(text,author,...), `section`(type,orientation,...), `footnote`(text), `endnote`(text), `toc`(levels,title,...), `style`(name,id,font,size,bold,...) |
+| Word | `paragraph`(text,font,size,bold,style,alignment,keepNext,keepLines,...), `run`(text,font,size,bold,italic,superscript,subscript,...), `table`(rows,cols), `row`(cols,c1,c2,...), `cell`(text,width), `picture`(path,width,height,alt,...), `chart`(chartType,title,categories,data/series1..N,legend,colors,width,height), `equation`(formula,mode), `comment`(text,author,...), `section`(type,orientation,...), `footnote`(text), `endnote`(text), `toc`(levels,title,...), `style`(name,id,font,size,bold,...) |
 | Excel | `sheet`(name), `row`(cols), `cell`(ref,value,formula,...), `autofilter`(range), `databar`(sqref,min,max,color), `colorscale`(sqref,mincolor,maxcolor,midcolor), `iconset`(sqref,iconset,reverse), `formulacf`(sqref,formula,fill), `chart`(chartType,title,categories,data/series1..N,legend,...) |
 | PPT | `slide`(title,text,layout,background,...), `shape`(text,font,size,name,...), `chart`(chartType,title,categories,data/series1..N,legend,colors,...), `video`/`audio`(path,poster,volume,autoplay,trimStart,trimEnd,...), `connector`(preset,line,...), `group`(shapes=1,2,3), `picture`(path,width,height,x,y,...), `equation`(formula) |
 
@@ -146,7 +156,7 @@ officecli add-part <file> / --type header|footer   # Word only
 
 **PPT slides:** Read slide size first (`raw /presentation | grep sldSz`), add via L2, fill via `raw-set`.
 
-**Excel charts:** `add-part` → `raw-set` chart XML → `raw-set` drawing anchor.
+**Charts:** All three formats (PPTX, XLSX, DOCX) support full chart lifecycle via L2: `add --type chart`, `get /chart[N]`, `set /chart[N]`, `query chart`. Use `add-part` + `raw-set` only for unsupported chart features.
 
 ---
 

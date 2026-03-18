@@ -49,6 +49,23 @@ public partial class ExcelHandler
                     case "ref": dn.Text = value; break;
                     case "name": dn.Name = value; break;
                     case "comment": dn.Comment = value; break;
+                    case "scope":
+                        // Set scope like POI's XSSFName.setSheetIndex
+                        if (string.IsNullOrEmpty(value) || value.Equals("workbook", StringComparison.OrdinalIgnoreCase))
+                        {
+                            dn.LocalSheetId = null; // workbook-global scope
+                        }
+                        else
+                        {
+                            var nrSheets = workbook.GetFirstChild<Sheets>()?.Elements<Sheet>().ToList();
+                            var nrSheetIdx = nrSheets?.FindIndex(s =>
+                                s.Name?.Value?.Equals(value, StringComparison.OrdinalIgnoreCase) == true);
+                            if (nrSheetIdx >= 0)
+                                dn.LocalSheetId = (uint)nrSheetIdx;
+                            else
+                                throw new ArgumentException($"Sheet '{value}' not found for scope");
+                        }
+                        break;
                     default: nrUnsupported.Add(key); break;
                 }
             }
@@ -118,6 +135,20 @@ public partial class ExcelHandler
                         break;
                     case "formula2":
                         dv.Formula2 = new Formula2(value);
+                        break;
+                    case "operator":
+                        dv.Operator = value.ToLowerInvariant() switch
+                        {
+                            "between" => DataValidationOperatorValues.Between,
+                            "notbetween" => DataValidationOperatorValues.NotBetween,
+                            "equal" => DataValidationOperatorValues.Equal,
+                            "notequal" => DataValidationOperatorValues.NotEqual,
+                            "lessthan" => DataValidationOperatorValues.LessThan,
+                            "lessthanorequal" => DataValidationOperatorValues.LessThanOrEqual,
+                            "greaterthan" => DataValidationOperatorValues.GreaterThan,
+                            "greaterthanorequal" => DataValidationOperatorValues.GreaterThanOrEqual,
+                            _ => throw new ArgumentException($"Unknown operator: {value}")
+                        };
                         break;
                     case "allowblank":
                         dv.AllowBlank = IsTruthy(value);
@@ -231,6 +262,8 @@ public partial class ExcelHandler
                 {
                     case "name": table.Name = value; break;
                     case "displayname": table.DisplayName = value; break;
+                    case "headerrow": table.HeaderRowCount = IsTruthy(value) ? 1u : 0u; break;
+                    case "totalrow": table.TotalsRowCount = IsTruthy(value) ? 1u : 0u; break;
                     case "style":
                         var styleInfo = table.GetFirstChild<TableStyleInfo>();
                         if (styleInfo != null) styleInfo.Name = value;
@@ -279,6 +312,10 @@ public partial class ExcelHandler
                                 new Text(value) { Space = SpaceProcessingModeValues.Preserve }
                             )
                         );
+                        break;
+                    case "ref":
+                        // Update cell reference (like POI's XSSFComment.setAddress)
+                        cmtElement.Reference = value.ToUpperInvariant();
                         break;
                     case "author":
                         var authors = commentsPart.Comments.GetFirstChild<Authors>()!;
@@ -463,6 +500,7 @@ public partial class ExcelHandler
             {
                 case "value":
                     cell.CellValue = new CellValue(value);
+                    cell.CellFormula = null; // Clear formula when explicit value is set
                     // Auto-detect type: number, boolean, or string
                     if (double.TryParse(value, out _))
                         cell.DataType = null; // Number is default
@@ -616,6 +654,33 @@ public partial class ExcelHandler
                         .FirstOrDefault(m => m.Reference?.Value?.Equals(rangeRef, StringComparison.OrdinalIgnoreCase) == true);
                     if (existing == null)
                         mergeCells.AppendChild(new MergeCell { Reference = rangeRef });
+                    break;
+                }
+                case "autofilter":
+                {
+                    // Set or remove AutoFilter (like POI's XSSFSheet.setAutoFilter)
+                    var existingAf = ws.GetFirstChild<AutoFilter>();
+                    if (string.IsNullOrEmpty(value) || value.Equals("none", StringComparison.OrdinalIgnoreCase)
+                        || value.Equals("false", StringComparison.OrdinalIgnoreCase))
+                    {
+                        existingAf?.Remove();
+                    }
+                    else
+                    {
+                        if (existingAf != null)
+                        {
+                            existingAf.Reference = value.ToUpperInvariant();
+                        }
+                        else
+                        {
+                            var af = new AutoFilter { Reference = value.ToUpperInvariant() };
+                            var sheetData = ws.GetFirstChild<SheetData>();
+                            if (sheetData != null)
+                                sheetData.InsertAfterSelf(af);
+                            else
+                                ws.AppendChild(af);
+                        }
+                    }
                     break;
                 }
                 default:

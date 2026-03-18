@@ -202,8 +202,19 @@ public partial class WordHandler
             var pProps = para.ParagraphProperties;
             if (pProps != null)
             {
+                if (pProps.ParagraphStyleId?.Val?.Value != null)
+                    node.Format["style"] = pProps.ParagraphStyleId.Val.Value;
                 if (pProps.Justification?.Val?.Value != null)
                     node.Format["alignment"] = pProps.Justification.Val.Value.ToString();
+                if (pProps.SpacingBetweenLines != null)
+                {
+                    if (pProps.SpacingBetweenLines.Before?.Value != null)
+                        node.Format["spacebefore"] = pProps.SpacingBetweenLines.Before.Value;
+                    if (pProps.SpacingBetweenLines.After?.Value != null)
+                        node.Format["spaceafter"] = pProps.SpacingBetweenLines.After.Value;
+                    if (pProps.SpacingBetweenLines.Line?.Value != null)
+                        node.Format["linespacing"] = pProps.SpacingBetweenLines.Line.Value;
+                }
                 if (pProps.Indentation?.FirstLine?.Value != null)
                     node.Format["firstLineIndent"] = pProps.Indentation.FirstLine.Value;
                 if (pProps.Indentation?.Left?.Value != null)
@@ -260,6 +271,20 @@ public partial class WordHandler
             if (size != null) node.Format["size"] = size;
             if (run.RunProperties?.Bold != null) node.Format["bold"] = true;
             if (run.RunProperties?.Italic != null) node.Format["italic"] = true;
+            if (run.RunProperties?.Color?.Val?.Value != null) node.Format["color"] = run.RunProperties.Color.Val.Value;
+            if (run.RunProperties?.Underline?.Val != null) node.Format["underline"] = run.RunProperties.Underline.Val.InnerText;
+            if (run.RunProperties?.Strike != null) node.Format["strike"] = true;
+            if (run.RunProperties?.Highlight?.Val != null) node.Format["highlight"] = run.RunProperties.Highlight.Val.InnerText;
+            if (run.RunProperties?.Caps != null) node.Format["caps"] = true;
+            if (run.RunProperties?.SmallCaps != null) node.Format["smallCaps"] = true;
+            if (run.RunProperties?.DoubleStrike != null) node.Format["dstrike"] = true;
+            if (run.RunProperties?.Vanish != null) node.Format["vanish"] = true;
+            if (run.RunProperties?.Outline != null) node.Format["outline"] = true;
+            if (run.RunProperties?.Shadow != null) node.Format["shadow"] = true;
+            if (run.RunProperties?.Emboss != null) node.Format["emboss"] = true;
+            if (run.RunProperties?.Imprint != null) node.Format["imprint"] = true;
+            if (run.RunProperties?.NoProof != null) node.Format["noproof"] = true;
+            if (run.RunProperties?.RightToLeftText != null) node.Format["rtl"] = true;
             if (run.RunProperties?.VerticalTextAlignment?.Val?.Value == VerticalPositionValues.Superscript)
                 node.Format["superscript"] = true;
             if (run.RunProperties?.VerticalTextAlignment?.Val?.Value == VerticalPositionValues.Subscript)
@@ -288,6 +313,57 @@ public partial class WordHandler
             var firstRow = table.Elements<TableRow>().FirstOrDefault();
             node.Format["cols"] = firstRow?.Elements<TableCell>().Count() ?? 0;
 
+            var tp = table.GetFirstChild<TableProperties>();
+            if (tp != null)
+            {
+                // Table borders
+                var tblBorders = tp.TableBorders;
+                if (tblBorders != null)
+                {
+                    ReadBorder(tblBorders.TopBorder, "border.top", node);
+                    ReadBorder(tblBorders.BottomBorder, "border.bottom", node);
+                    ReadBorder(tblBorders.LeftBorder, "border.left", node);
+                    ReadBorder(tblBorders.RightBorder, "border.right", node);
+                    ReadBorder(tblBorders.InsideHorizontalBorder, "border.insideH", node);
+                    ReadBorder(tblBorders.InsideVerticalBorder, "border.insideV", node);
+                }
+                // Table width
+                if (tp.TableWidth?.Width?.Value != null)
+                {
+                    var wType = tp.TableWidth.Type?.Value;
+                    node.Format["width"] = wType == TableWidthUnitValues.Pct
+                        ? (int.Parse(tp.TableWidth.Width.Value) / 50) + "%"
+                        : tp.TableWidth.Width.Value;
+                }
+                // Alignment
+                if (tp.TableJustification?.Val?.Value != null)
+                    node.Format["alignment"] = tp.TableJustification.Val.InnerText;
+                // Indent
+                if (tp.TableIndentation?.Width?.Value != null)
+                    node.Format["indent"] = tp.TableIndentation.Width.Value;
+                // Cell spacing
+                if (tp.TableCellSpacing?.Width?.Value != null)
+                    node.Format["cellSpacing"] = tp.TableCellSpacing.Width.Value;
+                // Layout
+                if (tp.TableLayout?.Type?.Value != null)
+                    node.Format["layout"] = tp.TableLayout.Type.Value == TableLayoutValues.Fixed ? "fixed" : "auto";
+                // Default cell margin (padding)
+                var dcm = tp.TableCellMarginDefault;
+                if (dcm?.TopMargin?.Width?.Value != null)
+                    node.Format["padding.top"] = dcm.TopMargin.Width.Value;
+                if (dcm?.BottomMargin?.Width?.Value != null)
+                    node.Format["padding.bottom"] = dcm.BottomMargin.Width.Value;
+                if (dcm?.TableCellLeftMargin?.Width?.Value != null)
+                    node.Format["padding.left"] = dcm.TableCellLeftMargin.Width.Value;
+                if (dcm?.TableCellRightMargin?.Width?.Value != null)
+                    node.Format["padding.right"] = dcm.TableCellRightMargin.Width.Value;
+            }
+
+            // Column widths from grid
+            var gridCols = table.GetFirstChild<TableGrid>()?.Elements<GridColumn>().ToList();
+            if (gridCols != null && gridCols.Count > 0)
+                node.Format["colWidths"] = string.Join(",", gridCols.Select(g => g.Width?.Value ?? "0"));
+
             if (depth > 0)
             {
                 int rowIdx = 0;
@@ -299,6 +375,7 @@ public partial class WordHandler
                         Type = "row",
                         ChildCount = row.Elements<TableCell>().Count()
                     };
+                    ReadRowProps(row, rowNode);
                     if (depth > 1)
                     {
                         int cellIdx = 0;
@@ -311,6 +388,7 @@ public partial class WordHandler
                                 Text = string.Join("", cell.Descendants<Text>().Select(t => t.Text)),
                                 ChildCount = cell.Elements<Paragraph>().Count()
                             };
+                            ReadCellProps(cell, cellNode);
                             if (depth > 2)
                             {
                                 int pIdx = 0;
@@ -328,6 +406,28 @@ public partial class WordHandler
                     rowIdx++;
                 }
             }
+        }
+        else if (element is TableCell directCell)
+        {
+            node.Type = "cell";
+            node.Text = string.Join("", directCell.Descendants<Text>().Select(t => t.Text));
+            node.ChildCount = directCell.Elements<Paragraph>().Count();
+            ReadCellProps(directCell, node);
+            if (depth > 0)
+            {
+                int pIdx = 0;
+                foreach (var cellPara in directCell.Elements<Paragraph>())
+                {
+                    node.Children.Add(ElementToNode(cellPara, $"{path}/p[{pIdx + 1}]", depth - 1));
+                    pIdx++;
+                }
+            }
+        }
+        else if (element is TableRow directRow)
+        {
+            node.Type = "row";
+            node.ChildCount = directRow.Elements<TableCell>().Count();
+            ReadRowProps(directRow, node);
         }
         else
         {
@@ -373,5 +473,87 @@ public partial class WordHandler
         }
 
         return node;
+    }
+
+    private static void ReadRowProps(TableRow row, DocumentNode node)
+    {
+        var trPr = row.TableRowProperties;
+        if (trPr == null) return;
+        var rh = trPr.GetFirstChild<TableRowHeight>();
+        if (rh?.Val?.Value != null)
+        {
+            node.Format["height"] = rh.Val.Value;
+            if (rh.HeightType?.Value == HeightRuleValues.Exact)
+                node.Format["height.rule"] = "exact";
+        }
+        if (trPr.GetFirstChild<TableHeader>() != null)
+            node.Format["header"] = true;
+    }
+
+    private static void ReadCellProps(TableCell cell, DocumentNode node)
+    {
+        var tcPr = cell.TableCellProperties;
+        if (tcPr != null)
+        {
+            // Borders
+            var cb = tcPr.TableCellBorders;
+            if (cb != null)
+            {
+                ReadBorder(cb.TopBorder, "border.top", node);
+                ReadBorder(cb.BottomBorder, "border.bottom", node);
+                ReadBorder(cb.LeftBorder, "border.left", node);
+                ReadBorder(cb.RightBorder, "border.right", node);
+            }
+            // Shading
+            var shd = tcPr.Shading;
+            if (shd?.Fill?.Value != null)
+                node.Format["shd"] = shd.Fill.Value;
+            // Width
+            if (tcPr.TableCellWidth?.Width?.Value != null)
+                node.Format["width"] = tcPr.TableCellWidth.Width.Value;
+            // Vertical alignment
+            if (tcPr.TableCellVerticalAlignment?.Val?.Value != null)
+                node.Format["valign"] = tcPr.TableCellVerticalAlignment.Val.InnerText;
+            // Vertical merge
+            if (tcPr.VerticalMerge != null)
+                node.Format["vmerge"] = tcPr.VerticalMerge.Val?.Value == MergedCellValues.Restart ? "restart" : "continue";
+            // Grid span
+            if (tcPr.GridSpan?.Val?.Value != null && tcPr.GridSpan.Val.Value > 1)
+                node.Format["gridspan"] = tcPr.GridSpan.Val.Value;
+            // Cell padding/margins
+            var mar = tcPr.TableCellMargin;
+            if (mar != null)
+            {
+                if (mar.TopMargin?.Width?.Value != null) node.Format["padding.top"] = mar.TopMargin.Width.Value;
+                if (mar.BottomMargin?.Width?.Value != null) node.Format["padding.bottom"] = mar.BottomMargin.Width.Value;
+                if (mar.LeftMargin?.Width?.Value != null) node.Format["padding.left"] = mar.LeftMargin.Width.Value;
+                if (mar.RightMargin?.Width?.Value != null) node.Format["padding.right"] = mar.RightMargin.Width.Value;
+            }
+            // Text direction
+            if (tcPr.TextDirection?.Val?.Value != null)
+                node.Format["textDirection"] = tcPr.TextDirection.Val.InnerText;
+            // No wrap
+            if (tcPr.NoWrap != null)
+                node.Format["nowrap"] = true;
+        }
+        // Alignment from first paragraph
+        var firstPara = cell.Elements<Paragraph>().FirstOrDefault();
+        var just = firstPara?.ParagraphProperties?.Justification?.Val;
+        if (just != null)
+            node.Format["alignment"] = just.InnerText;
+    }
+
+    private static void ReadBorder(BorderType? border, string key, DocumentNode node)
+    {
+        if (border?.Val == null) return;
+        var style = border.Val.InnerText;
+        var size = border.Size?.Value ?? 0u;
+        var color = border.Color?.Value;
+        var space = border.Space?.Value ?? 0u;
+        var parts = new List<string> { style };
+        if (size > 0 || color != null || space > 0) parts.Add(size.ToString());
+        if (color != null || space > 0) parts.Add(color ?? "auto");
+        if (space > 0) parts.Add(space.ToString());
+        node.Format[key] = string.Join(";", parts);
     }
 }

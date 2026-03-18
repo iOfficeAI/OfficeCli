@@ -512,9 +512,7 @@ public partial class PowerPointHandler
                     {
                         var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
                         rProps.RemoveAllChildren<Drawing.SolidFill>();
-                        var sf = new Drawing.SolidFill();
-                        sf.Append(new Drawing.RgbColorModelHex { Val = value.ToUpperInvariant() });
-                        rProps.AppendChild(sf);
+                        rProps.AppendChild(BuildSolidFill(value));
                     }
                     break;
                 case "fill":
@@ -533,9 +531,7 @@ public partial class PowerPointHandler
                     }
                     else
                     {
-                        var sf = new Drawing.SolidFill();
-                        sf.Append(new Drawing.RgbColorModelHex { Val = value.TrimStart('#').ToUpperInvariant() });
-                        tcPr.Append(sf);
+                        tcPr.Append(BuildSolidFill(value));
                     }
                     break;
                 }
@@ -561,6 +557,51 @@ public partial class PowerPointHandler
                 case "hmerge":
                     cell.HorizontalMerge = new DocumentFormat.OpenXml.BooleanValue(IsTruthy(value));
                     break;
+                case "underline":
+                    foreach (var run in cell.Descendants<Drawing.Run>())
+                    {
+                        var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
+                        rProps.Underline = value.Equals("none", StringComparison.OrdinalIgnoreCase)
+                            ? Drawing.TextUnderlineValues.None
+                            : new Drawing.TextUnderlineValues(value);
+                    }
+                    break;
+                case "strikethrough" or "strike":
+                    foreach (var run in cell.Descendants<Drawing.Run>())
+                    {
+                        var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
+                        rProps.Strike = value.Equals("none", StringComparison.OrdinalIgnoreCase) || !IsTruthy(value)
+                            ? Drawing.TextStrikeValues.NoStrike
+                            : new Drawing.TextStrikeValues(value == "true" ? "sngStrike" : value);
+                    }
+                    break;
+                case var k when k.StartsWith("border"):
+                {
+                    var tcPr = cell.TableCellProperties ?? cell.GetFirstChild<Drawing.TableCellProperties>();
+                    if (tcPr == null)
+                    {
+                        tcPr = new Drawing.TableCellProperties();
+                        cell.Append(tcPr);
+                    }
+                    var borderColor = value.TrimStart('#').ToUpperInvariant();
+                    var solidLine = new Drawing.Outline(BuildSolidFill(borderColor));
+                    if (k is "border.all" or "border")
+                    {
+                        tcPr.LeftBorderLineProperties = new Drawing.LeftBorderLineProperties(BuildSolidFill(borderColor));
+                        tcPr.RightBorderLineProperties = new Drawing.RightBorderLineProperties(BuildSolidFill(borderColor));
+                        tcPr.TopBorderLineProperties = new Drawing.TopBorderLineProperties(BuildSolidFill(borderColor));
+                        tcPr.BottomBorderLineProperties = new Drawing.BottomBorderLineProperties(BuildSolidFill(borderColor));
+                    }
+                    else if (k == "border.left")
+                        tcPr.LeftBorderLineProperties = new Drawing.LeftBorderLineProperties(BuildSolidFill(borderColor));
+                    else if (k == "border.right")
+                        tcPr.RightBorderLineProperties = new Drawing.RightBorderLineProperties(BuildSolidFill(borderColor));
+                    else if (k == "border.top")
+                        tcPr.TopBorderLineProperties = new Drawing.TopBorderLineProperties(BuildSolidFill(borderColor));
+                    else if (k == "border.bottom")
+                        tcPr.BottomBorderLineProperties = new Drawing.BottomBorderLineProperties(BuildSolidFill(borderColor));
+                    break;
+                }
                 default:
                     if (!GenericXmlQuery.SetGenericAttribute(cell, key, value))
                         unsupported.Add(key);

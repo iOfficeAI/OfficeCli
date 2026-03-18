@@ -130,11 +130,13 @@ public static class FormulaParser
                     var sty = rPr.ChildElements.FirstOrDefault(e => e.LocalName == "sty");
                     var styVal = sty?.GetAttribute("val", "http://schemas.openxmlformats.org/officeDocument/2006/math").Value;
                     var hasNor = rPr.ChildElements.Any(e => e.LocalName == "nor");
+                    if (hasNor)
+                        return $"\\text{{{EscapeLatex(text)}}}";
                     if (styVal == "b")
                         return $"\\mathbf{{{EscapeLatex(text)}}}";
                     if (styVal == "bi")
                         return $"\\boldsymbol{{{EscapeLatex(text)}}}";
-                    if (styVal == "p" && !hasNor)
+                    if (styVal == "p")
                         return $"\\mathrm{{{EscapeLatex(text)}}}";
                 }
                 return EscapeLatex(text);
@@ -1307,6 +1309,8 @@ public static class FormulaParser
     {
         "∑" => "\\sum",
         "∫" => "\\int",
+        "∬" => "\\iint",
+        "∭" => "\\iiint",
         "∏" => "\\prod",
         "∐" => "\\coprod",
         "⋃" => "\\bigcup",

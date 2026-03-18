@@ -321,9 +321,9 @@ public partial class PowerPointHandler
                 node.Format["reflection"] = "true";
         }
 
-        // Rotation
+        // Rotation (plain number in degrees, no suffix, so Set can consume the value directly)
         if (xfrm?.Rotation != null && xfrm.Rotation.Value != 0)
-            node.Format["rotation"] = $"{xfrm.Rotation.Value / 60000.0}°";
+            node.Format["rotation"] = $"{xfrm.Rotation.Value / 60000.0}";
 
         // Text margin
         var bodyPr = shape.TextBody?.Elements<Drawing.BodyProperties>().FirstOrDefault();
