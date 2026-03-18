@@ -439,7 +439,8 @@ public partial class WordHandler
                 or "equation" or "math" or "formula"
                 or "bookmark"
                 or "chart"
-                or "comment";
+                or "comment"
+                or "table" or "tbl";
         if (!isKnownType && parsed.ChildSelector == null)
         {
             var root = _doc.MainDocumentPart?.Document;
@@ -545,6 +546,26 @@ public partial class WordHandler
                             Format = { ["mode"] = "display" }
                         });
                     }
+                }
+                continue;
+            }
+
+            if (element is DocumentFormat.OpenXml.Wordprocessing.Table tbl)
+            {
+                bool isTableSelector = parsed.ChildSelector == null &&
+                    (parsed.Element is "table" or "tbl");
+                if (isTableSelector)
+                {
+                    var tblIdx = body.Elements<DocumentFormat.OpenXml.Wordprocessing.Table>()
+                        .TakeWhile(t => t != tbl).Count();
+                    var node = ElementToNode(tbl, $"/body/tbl[{tblIdx + 1}]", 0);
+                    if (parsed.ContainsText != null)
+                    {
+                        var tblText = string.Concat(tbl.Descendants<Text>().Select(t => t.Text));
+                        if (!tblText.Contains(parsed.ContainsText, StringComparison.OrdinalIgnoreCase))
+                            continue;
+                    }
+                    results.Add(node);
                 }
                 continue;
             }

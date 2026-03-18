@@ -30,7 +30,7 @@ public partial class PowerPointHandler
                 break;
             }
 
-            sb.AppendLine($"=== Slide {slideNum} ===");
+            sb.AppendLine($"=== /slide[{slideNum}] ===");
             var shapes = GetSlide(slidePart).CommonSlideData?.ShapeTree?.Elements<Shape>() ?? Enumerable.Empty<Shape>();
 
             foreach (var shape in shapes)
@@ -63,7 +63,7 @@ public partial class PowerPointHandler
                 break;
             }
 
-            sb.AppendLine($"[Slide {slideNum}]");
+            sb.AppendLine($"[/slide[{slideNum}]]");
             var shapes = GetSlide(slidePart).CommonSlideData?.ShapeTree?.ChildElements ?? Enumerable.Empty<OpenXmlElement>();
 
             int shapeIdx = 0;

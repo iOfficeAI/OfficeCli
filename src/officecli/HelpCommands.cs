@@ -118,8 +118,8 @@ Word (.docx) — view
 ====================
 
 Modes:
-  text (t)       Plain text with line numbers. Use --start/--end/--max-lines to paginate.
-  annotated (a)  Text with formatting details (font, size, bold, style, LaTeX formulas).
+  text (t)       Plain text with element paths (e.g. /body/p[1]). Use --start/--end/--max-lines to paginate.
+  annotated (a)  Text with element paths and formatting details (font, size, bold, style, LaTeX formulas).
   outline (o)    Hierarchical structure by heading styles.
   stats (s)      Statistics: paragraph/table/image/equation counts, style inheritance.
   issues (i)     Formatting/content/structure problems. Filter with --type and --limit.
@@ -826,8 +826,8 @@ PowerPoint (.pptx) — view
 ==========================
 
 Modes:
-  text (t)       Plain text from all shapes, slide by slide.
-  annotated (a)  Shape details: type, text, font, size, pictures with alt text, equations.
+  text (t)       Plain text from all shapes with slide paths (e.g. /slide[1]).
+  annotated (a)  Shape details with paths: type, text, font, size, pictures with alt text, equations.
   outline (o)    Slide-by-slide outline with titles and content summary.
   stats (s)      Slide/shape counts, text boxes, pictures, missing titles, font usage.
   issues (i)     Missing titles, inconsistent fonts, missing alt text on pictures.

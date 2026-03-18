@@ -49,7 +49,7 @@ officecli query <file> 'paragraph[style=Normal] > run[font!=宋体]'
 
 **get** supports any XML path via element localName: `/body/tbl[1]/tblPr`, `/Sheet1/sheetViews/sheetView[1]`, `/slide[1]/cSld/spTree/sp[1]/nvSpPr`. Use `--depth N` to expand children. Word also supports: `/` (core properties), `/footnote[N]`, `/endnote[N]`, `/toc[N]`, `/section[N]`, `/styles/StyleId`, `/chart[N]` (N = id returned by add). Excel also supports: `/SheetName/chart[N]`.
 
-**view modes:** `outline` (structure), `stats` (statistics with style inheritance), `issues` (`--type format|content|structure`, `--limit N`), `text` (plain with line numbers), `annotated` (with formatting)
+**view modes:** `outline` (structure), `stats` (statistics with style inheritance), `issues` (`--type format|content|structure`, `--limit N`), `text` (plain with element paths), `annotated` (with element paths and formatting)
 
 **query selectors:** `[attr=value]`, `[attr!=value]`, `:contains("text")`, `:empty`, `:has(formula)`, `:no-alt`. Built-in types: `paragraph`, `run`, `picture`, `equation`, `cell`, `table`, `chart`, `bookmark`. Falls back to generic XML element name (e.g. `wsp`, `a:ln`, `srgbClr[val=0070C0]`).
 

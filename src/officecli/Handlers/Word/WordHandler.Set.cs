@@ -7,6 +7,7 @@ using DocumentFormat.OpenXml.Wordprocessing;
 using OfficeCli.Core;
 using A = DocumentFormat.OpenXml.Drawing;
 using DW = DocumentFormat.OpenXml.Drawing.Wordprocessing;
+using M = DocumentFormat.OpenXml.Math;
 
 namespace OfficeCli.Handlers;
 
@@ -619,6 +620,16 @@ public partial class WordHandler
                         }
                         break;
                     }
+                    case "formula":
+                    {
+                        // Replace this run with an inline oMath in the same position
+                        var mathContent = FormulaParser.Parse(value);
+                        M.OfficeMath oMath = mathContent is M.OfficeMath dm
+                            ? dm : new M.OfficeMath(mathContent.CloneNode(true));
+                        run.InsertAfterSelf(oMath);
+                        run.Remove();
+                        break;
+                    }
                     default:
                         if (!GenericXmlQuery.TryCreateTypedChild(EnsureRunProperties(run), key, value))
                             unsupported.Add(key);
@@ -638,6 +649,18 @@ public partial class WordHandler
                 }
                 else switch (k)
                 {
+                    case "formula":
+                    {
+                        // Replace paragraph content with OMML equation in-place
+                        foreach (var child in para.ChildElements
+                            .Where(c => c is not ParagraphProperties).ToList())
+                            child.Remove();
+                        var mathContent = FormulaParser.Parse(value);
+                        M.OfficeMath oMath = mathContent is M.OfficeMath dm
+                            ? dm : new M.OfficeMath(mathContent.CloneNode(true));
+                        para.AppendChild(new M.Paragraph(oMath));
+                        break;
+                    }
                     case "liststyle":
                         ApplyListStyle(para, value);
                         break;

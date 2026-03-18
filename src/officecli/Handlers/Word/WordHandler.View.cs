@@ -20,6 +20,7 @@ public partial class WordHandler
 
         var sb = new StringBuilder();
         int lineNum = 0;
+        int pIdx = 0, tblIdx = 0, eqIdx = 0;
         int emitted = 0;
         var bodyElements = GetBodyElements(body).ToList();
         int totalElements = bodyElements.Count;
@@ -27,6 +28,33 @@ public partial class WordHandler
         foreach (var element in bodyElements)
         {
             lineNum++;
+            string path;
+
+            if (element.LocalName == "oMathPara" || element is M.Paragraph)
+            {
+                eqIdx++;
+                path = $"/body/oMathPara[{eqIdx}]";
+            }
+            else if (element is Paragraph)
+            {
+                pIdx++;
+                path = $"/body/p[{pIdx}]";
+            }
+            else if (element is Table)
+            {
+                tblIdx++;
+                path = $"/body/tbl[{tblIdx}]";
+            }
+            else if (IsStructuralElement(element))
+            {
+                path = $"/body/{element.LocalName}";
+            }
+            else
+            {
+                // Skip non-content elements
+                continue;
+            }
+
             if (startLine.HasValue && lineNum < startLine.Value) continue;
             if (endLine.HasValue && lineNum > endLine.Value) break;
 
@@ -43,7 +71,7 @@ public partial class WordHandler
                 if (oMathParaChild != null)
                 {
                     var mathText = FormulaParser.ToReadableText(oMathParaChild);
-                    sb.AppendLine($"[{lineNum}] [Equation] {mathText}");
+                    sb.AppendLine($"[{path}] [Equation] {mathText}");
                 }
                 else
                 {
@@ -52,40 +80,34 @@ public partial class WordHandler
                     if (mathElements.Count > 0 && string.IsNullOrWhiteSpace(GetParagraphText(para)))
                     {
                         var mathText = string.Concat(mathElements.Select(FormulaParser.ToReadableText));
-                        sb.AppendLine($"[{lineNum}] [Equation] {mathText}");
+                        sb.AppendLine($"[{path}] [Equation] {mathText}");
                     }
                     else if (mathElements.Count > 0)
                     {
                         var text = GetParagraphTextWithMath(para);
                         var listPrefix = GetListPrefix(para);
-                        sb.AppendLine($"[{lineNum}] {listPrefix}{text}");
+                        sb.AppendLine($"[{path}] {listPrefix}{text}");
                     }
                     else
                     {
                         var text = GetParagraphText(para);
                         var listPrefix = GetListPrefix(para);
-                        sb.AppendLine($"[{lineNum}] {listPrefix}{text}");
+                        sb.AppendLine($"[{path}] {listPrefix}{text}");
                     }
                 }
             }
             else if (element.LocalName == "oMathPara" || element is M.Paragraph)
             {
                 var mathText = FormulaParser.ToReadableText(element);
-                sb.AppendLine($"[{lineNum}] [Equation] {mathText}");
+                sb.AppendLine($"[{path}] [Equation] {mathText}");
             }
             else if (element is Table table)
             {
-                sb.AppendLine($"[{lineNum}] [Table: {table.Elements<TableRow>().Count()} rows]");
+                sb.AppendLine($"[{path}] [Table: {table.Elements<TableRow>().Count()} rows]");
             }
             else if (IsStructuralElement(element))
             {
-                sb.AppendLine($"[{lineNum}] [{element.LocalName}]");
-            }
-            else
-            {
-                // Skip non-content elements (bookmarkStart, bookmarkEnd, proofErr, etc.)
-                lineNum--;
-                continue;
+                sb.AppendLine($"[{path}] [{element.LocalName}]");
             }
             emitted++;
         }
@@ -100,6 +122,7 @@ public partial class WordHandler
 
         var sb = new StringBuilder();
         int lineNum = 0;
+        int pIdx = 0, tblIdx = 0, eqIdx = 0;
         int emitted = 0;
         var bodyElements = GetBodyElements(body).ToList();
         int totalElements = bodyElements.Count;
@@ -107,6 +130,28 @@ public partial class WordHandler
         foreach (var element in bodyElements)
         {
             lineNum++;
+            string path;
+
+            if (element.LocalName == "oMathPara" || element is M.Paragraph)
+            {
+                eqIdx++;
+                path = $"/body/oMathPara[{eqIdx}]";
+            }
+            else if (element is Paragraph)
+            {
+                pIdx++;
+                path = $"/body/p[{pIdx}]";
+            }
+            else if (element is Table)
+            {
+                tblIdx++;
+                path = $"/body/tbl[{tblIdx}]";
+            }
+            else
+            {
+                path = $"/body/?[{lineNum}]";
+            }
+
             if (startLine.HasValue && lineNum < startLine.Value) continue;
             if (endLine.HasValue && lineNum > endLine.Value) break;
 
@@ -119,7 +164,7 @@ public partial class WordHandler
             if (element.LocalName == "oMathPara" || element is M.Paragraph)
             {
                 var latex = FormulaParser.ToLatex(element);
-                sb.AppendLine($"[{lineNum}] [Equation: \"{latex}\"] ← display");
+                sb.AppendLine($"[{path}] [Equation: \"{latex}\"] ← display");
             }
             else if (element is Paragraph para)
             {
@@ -128,7 +173,7 @@ public partial class WordHandler
                 if (oMathParaChild != null)
                 {
                     var latex = FormulaParser.ToLatex(oMathParaChild);
-                    sb.AppendLine($"[{lineNum}] [Equation: \"{latex}\"] ← display");
+                    sb.AppendLine($"[{path}] [Equation: \"{latex}\"] ← display");
                     emitted++;
                     continue;
                 }
@@ -141,14 +186,14 @@ public partial class WordHandler
                 if (inlineMath.Count > 0 && runs.Count == 0)
                 {
                     var latex = string.Concat(inlineMath.Select(FormulaParser.ToLatex));
-                    sb.AppendLine($"[{lineNum}] [Equation: \"{latex}\"] ← {styleName} | inline");
+                    sb.AppendLine($"[{path}] [Equation: \"{latex}\"] ← {styleName} | inline");
                     emitted++;
                     continue;
                 }
 
                 if (runs.Count == 0 && inlineMath.Count == 0)
                 {
-                    sb.AppendLine($"[{lineNum}] [] <- {styleName} | empty paragraph");
+                    sb.AppendLine($"[{path}] [] <- {styleName} | empty paragraph");
                     emitted++;
                     continue;
                 }
@@ -162,7 +207,7 @@ public partial class WordHandler
                     if (drawing != null)
                     {
                         var imgInfo = GetDrawingInfo(drawing);
-                        sb.AppendLine($"[{lineNum}] {listPrefix}[Image: {imgInfo}] ← {styleName}");
+                        sb.AppendLine($"[{path}] {listPrefix}[Image: {imgInfo}] ← {styleName}");
                         continue;
                     }
 
@@ -170,14 +215,14 @@ public partial class WordHandler
                     var fmt = GetRunFormatDescription(run, para);
                     var warn = "";
 
-                    sb.AppendLine($"[{lineNum}] {listPrefix}「{text}」 ← {styleName} | {fmt}{warn}");
+                    sb.AppendLine($"[{path}] {listPrefix}「{text}」 ← {styleName} | {fmt}{warn}");
                 }
 
                 // Show inline math elements
                 foreach (var math in inlineMath)
                 {
                     var latex = FormulaParser.ToLatex(math);
-                    sb.AppendLine($"[{lineNum}] {listPrefix}[Equation: \"{latex}\"] ← {styleName} | inline");
+                    sb.AppendLine($"[{path}] {listPrefix}[Equation: \"{latex}\"] ← {styleName} | inline");
                 }
             }
             else if (element is Table table)
@@ -185,7 +230,7 @@ public partial class WordHandler
                 var rows = table.Elements<TableRow>().Count();
                 var colCount = table.Elements<TableRow>().FirstOrDefault()
                     ?.Elements<TableCell>().Count() ?? 0;
-                sb.AppendLine($"[{lineNum}] [Table: {rows}×{colCount}]");
+                sb.AppendLine($"[{path}] [Table: {rows}×{colCount}]");
             }
             emitted++;
         }

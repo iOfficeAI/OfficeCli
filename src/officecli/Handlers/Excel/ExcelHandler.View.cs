@@ -44,7 +44,8 @@ public partial class ExcelHandler
                 if (cols != null)
                     cellElements = cellElements.Where(c => cols.Contains(ParseCellReference(c.CellReference?.Value ?? "A1").Column));
                 var cells = cellElements.Select(c => GetCellDisplayValue(c)).ToArray();
-                sb.AppendLine($"[{lineNum}] {string.Join("\t", cells)}");
+                var rowRef = row.RowIndex?.Value ?? (uint)lineNum;
+                sb.AppendLine($"[/{sheetName}/row[{rowRef}]] {string.Join("\t", cells)}");
                 emitted++;
             }
 

@@ -83,6 +83,25 @@ public partial class WordHandler
         if (props.Created != null) node.Format["created"] = props.Created.Value.ToString("o");
         if (props.Modified != null) node.Format["modified"] = props.Modified.Value.ToString("o");
 
+        // Page size from last section properties (document default)
+        var sectPr = mainPart?.Document?.Body?.GetFirstChild<SectionProperties>()
+            ?? mainPart?.Document?.Body?.Descendants<SectionProperties>().LastOrDefault();
+        if (sectPr != null)
+        {
+            var pageSize = sectPr.GetFirstChild<PageSize>();
+            if (pageSize?.Width?.Value != null) node.Format["pageWidth"] = pageSize.Width.Value;
+            if (pageSize?.Height?.Value != null) node.Format["pageHeight"] = pageSize.Height.Value;
+            if (pageSize?.Orient?.Value != null) node.Format["orientation"] = pageSize.Orient.InnerText;
+            var margins = sectPr.GetFirstChild<PageMargin>();
+            if (margins != null)
+            {
+                if (margins.Top?.Value != null) node.Format["marginTop"] = margins.Top.Value;
+                if (margins.Bottom?.Value != null) node.Format["marginBottom"] = margins.Bottom.Value;
+                if (margins.Left?.Value != null) node.Format["marginLeft"] = margins.Left.Value;
+                if (margins.Right?.Value != null) node.Format["marginRight"] = margins.Right.Value;
+            }
+        }
+
         node.Children = children;
         node.ChildCount = children.Count;
         return node;

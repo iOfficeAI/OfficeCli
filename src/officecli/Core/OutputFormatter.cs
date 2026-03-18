@@ -43,6 +43,10 @@ public class IssuesResult
 [JsonSerializable(typeof(Dictionary<string, object?>))]
 [JsonSerializable(typeof(bool))]
 [JsonSerializable(typeof(int))]
+[JsonSerializable(typeof(long))]
+[JsonSerializable(typeof(short))]
+[JsonSerializable(typeof(uint))]
+[JsonSerializable(typeof(double))]
 [JsonSerializable(typeof(string))]
 internal partial class AppJsonContext : JsonSerializerContext;
 
