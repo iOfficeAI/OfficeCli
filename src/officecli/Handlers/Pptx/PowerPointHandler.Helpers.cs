@@ -60,9 +60,9 @@ public partial class PowerPointHandler
         var parts = new List<string>();
         if (!string.IsNullOrEmpty(wAttr.Value) && long.TryParse(wAttr.Value, out var wEmu2) && wEmu2 > 0)
             parts.Add(FormatEmu(wEmu2));
-        if (dash?.Val?.HasValue == true) parts.Add(dash.Val.InnerText);
+        if (dash?.Val?.HasValue == true) parts.Add(dash.Val.InnerText!);
         else parts.Add("solid");
-        if (color != null) parts.Add(color);
+        if (color is not null) parts.Add(color);
         if (parts.Count > 0) node.Format[prefix] = string.Join(" ", parts);
     }
 

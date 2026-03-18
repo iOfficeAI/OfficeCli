@@ -592,13 +592,13 @@ public partial class WordHandler
     private static void ReadBorder(BorderType? border, string key, DocumentNode node)
     {
         if (border?.Val == null) return;
-        var style = border.Val.InnerText;
+        var style = border.Val?.InnerText ?? "none";
         var size = border.Size?.Value ?? 0u;
         var color = border.Color?.Value;
         var space = border.Space?.Value ?? 0u;
         var parts = new List<string> { style };
         if (size > 0 || color != null || space > 0) parts.Add(size.ToString());
-        if (color != null || space > 0) parts.Add(color ?? "auto");
+        if (color != null || space > 0) parts.Add(color is not null ? color : "auto");
         if (space > 0) parts.Add(space.ToString());
         node.Format[key] = string.Join(";", parts);
     }

@@ -622,8 +622,7 @@ public partial class PowerPointHandler
                         if (borderWidth.HasValue)
                         {
                             var wAttr = lineProps.GetAttributes().FirstOrDefault(a => a.LocalName == "w");
-                            if (wAttr.LocalName != null) lineProps.SetAttribute(new OpenXmlAttribute("", "w", null, borderWidth.Value.ToString()));
-                            else lineProps.SetAttribute(new OpenXmlAttribute("", "w", null, borderWidth.Value.ToString()));
+                            lineProps.SetAttribute(new OpenXmlAttribute("", "w", null!, borderWidth.Value.ToString()));
                         }
                         // Set color
                         if (borderColor != null)
