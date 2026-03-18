@@ -89,7 +89,7 @@ public class ExcelStyleManager
         // --- numFmt ---
         uint numFmtId = baseXf.NumberFormatId?.Value ?? 0;
         bool applyNumFmt = baseXf.ApplyNumberFormat?.Value ?? false;
-        if (styleProps.TryGetValue("numfmt", out var numFmtStr))
+        if (styleProps.TryGetValue("numfmt", out var numFmtStr) || styleProps.TryGetValue("numberformat", out numFmtStr))
         {
             numFmtId = GetOrCreateNumFmt(stylesheet, numFmtStr);
             applyNumFmt = true;
@@ -140,6 +140,9 @@ public class ExcelStyleManager
         var alignProps = styleProps
             .Where(kv => kv.Key.StartsWith("alignment.", StringComparison.OrdinalIgnoreCase))
             .ToDictionary(kv => kv.Key[10..].ToLowerInvariant(), kv => kv.Value);
+        // Handle "wrap" shorthand → "wraptext"
+        if (styleProps.TryGetValue("wrap", out var wrapVal))
+            alignProps["wraptext"] = wrapVal;
         if (alignProps.Count > 0)
         {
             alignment ??= new Alignment();
@@ -178,6 +181,7 @@ public class ExcelStyleManager
         var lower = key.ToLowerInvariant();
         return lower is "numfmt" or "fill" or "bgcolor"
             or "bold" or "italic" or "strike" or "underline"
+            or "wrap" or "numberformat"
             || lower.StartsWith("font.")
             || lower.StartsWith("alignment.")
             || lower.StartsWith("border.");

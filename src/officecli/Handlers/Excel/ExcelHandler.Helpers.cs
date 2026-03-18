@@ -273,6 +273,30 @@ public partial class ExcelHandler
                             }
                         }
                     }
+
+                    // Alignment + wrap readback (like POI XSSFCellStyle.getWrapText)
+                    var alignment = xf.Alignment;
+                    if (alignment != null)
+                    {
+                        if (alignment.WrapText?.Value == true)
+                            node.Format["wrap"] = true;
+                        if (alignment.Horizontal?.HasValue == true)
+                            node.Format["alignment.horizontal"] = alignment.Horizontal.InnerText;
+                        if (alignment.Vertical?.HasValue == true)
+                            node.Format["alignment.vertical"] = alignment.Vertical.InnerText;
+                    }
+
+                    // Number format readback
+                    var numFmtId = xf.NumberFormatId?.Value ?? 0;
+                    if (numFmtId > 0)
+                    {
+                        node.Format["numFmtId"] = numFmtId;
+                        var numFmts = wbStylesPart.Stylesheet.NumberingFormats;
+                        var customFmt = numFmts?.Elements<NumberingFormat>()
+                            .FirstOrDefault(nf => nf.NumberFormatId?.Value == numFmtId);
+                        if (customFmt?.FormatCode?.Value != null)
+                            node.Format["numberformat"] = customFmt.FormatCode.Value;
+                    }
                 }
             }
 

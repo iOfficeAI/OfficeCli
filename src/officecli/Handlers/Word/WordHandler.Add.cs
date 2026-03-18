@@ -102,13 +102,13 @@ public partial class WordHandler
                     if (shdParts.Length == 1)
                     {
                         shd.Val = ShadingPatternValues.Clear;
-                        shd.Fill = shdParts[0];
+                        shd.Fill = shdParts[0].TrimStart('#').ToUpperInvariant();
                     }
                     else if (shdParts.Length >= 2)
                     {
                         shd.Val = new ShadingPatternValues(shdParts[0]);
-                        shd.Fill = shdParts[1];
-                        if (shdParts.Length >= 3) shd.Color = shdParts[2];
+                        shd.Fill = shdParts[1].TrimStart('#').ToUpperInvariant();
+                        if (shdParts.Length >= 3) shd.Color = shdParts[2].TrimStart('#').ToUpperInvariant();
                     }
                     pProps.Shading = shd;
                 }
@@ -126,6 +126,11 @@ public partial class WordHandler
                 {
                     var ind = pProps.Indentation ?? (pProps.Indentation = new Indentation());
                     ind.Hanging = addHI;
+                }
+                if (properties.TryGetValue("firstlineindent", out var addFLI))
+                {
+                    var ind = pProps.Indentation ?? (pProps.Indentation = new Indentation());
+                    ind.FirstLine = addFLI;
                 }
                 if (properties.TryGetValue("keepnext", out var addKN) && IsTruthy(addKN))
                     pProps.KeepNext = new KeepNext();
@@ -186,13 +191,13 @@ public partial class WordHandler
                         if (shdParts.Length == 1)
                         {
                             shd.Val = ShadingPatternValues.Clear;
-                            shd.Fill = shdParts[0];
+                            shd.Fill = shdParts[0].TrimStart('#').ToUpperInvariant();
                         }
                         else if (shdParts.Length >= 2)
                         {
                             shd.Val = new ShadingPatternValues(shdParts[0]);
-                            shd.Fill = shdParts[1];
-                            if (shdParts.Length >= 3) shd.Color = shdParts[2];
+                            shd.Fill = shdParts[1].TrimStart('#').ToUpperInvariant();
+                            if (shdParts.Length >= 3) shd.Color = shdParts[2].TrimStart('#').ToUpperInvariant();
                         }
                         rProps.Shading = shd;
                     }
@@ -292,7 +297,7 @@ public partial class WordHandler
                 if (properties.TryGetValue("italic", out var rItalic) && IsTruthy(rItalic))
                     newRProps.Italic = new Italic();
                 if (properties.TryGetValue("color", out var rColor))
-                    newRProps.Color = new Color { Val = rColor.ToUpperInvariant() };
+                    newRProps.Color = new Color { Val = rColor.TrimStart('#').ToUpperInvariant() };
                 if (properties.TryGetValue("underline", out var rUnderline))
                     newRProps.Underline = new Underline { Val = new UnderlineValues(rUnderline) };
                 if (properties.TryGetValue("strike", out var rStrike) && IsTruthy(rStrike))
@@ -303,6 +308,22 @@ public partial class WordHandler
                     newRProps.Caps = new Caps();
                 if (properties.TryGetValue("smallcaps", out var rSmallCaps) && IsTruthy(rSmallCaps))
                     newRProps.SmallCaps = new SmallCaps();
+                if (properties.TryGetValue("dstrike", out var rDstrike) && IsTruthy(rDstrike))
+                    newRProps.DoubleStrike = new DoubleStrike();
+                if (properties.TryGetValue("vanish", out var rVanish) && IsTruthy(rVanish))
+                    newRProps.Vanish = new Vanish();
+                if (properties.TryGetValue("outline", out var rOutline) && IsTruthy(rOutline))
+                    newRProps.Outline = new Outline();
+                if (properties.TryGetValue("shadow", out var rShadow) && IsTruthy(rShadow))
+                    newRProps.Shadow = new Shadow();
+                if (properties.TryGetValue("emboss", out var rEmboss) && IsTruthy(rEmboss))
+                    newRProps.Emboss = new Emboss();
+                if (properties.TryGetValue("imprint", out var rImprint) && IsTruthy(rImprint))
+                    newRProps.Imprint = new Imprint();
+                if (properties.TryGetValue("noproof", out var rNoProof) && IsTruthy(rNoProof))
+                    newRProps.NoProof = new NoProof();
+                if (properties.TryGetValue("rtl", out var rRtl) && IsTruthy(rRtl))
+                    newRProps.RightToLeftText = new RightToLeftText();
                 if (properties.TryGetValue("superscript", out var rSup) && IsTruthy(rSup))
                     newRProps.VerticalTextAlignment = new VerticalTextAlignment { Val = VerticalPositionValues.Superscript };
                 if (properties.TryGetValue("subscript", out var rSub) && IsTruthy(rSub))
@@ -314,13 +335,13 @@ public partial class WordHandler
                     if (shdParts.Length == 1)
                     {
                         shd.Val = ShadingPatternValues.Clear;
-                        shd.Fill = shdParts[0];
+                        shd.Fill = shdParts[0].TrimStart('#').ToUpperInvariant();
                     }
                     else if (shdParts.Length >= 2)
                     {
                         shd.Val = new ShadingPatternValues(shdParts[0]);
-                        shd.Fill = shdParts[1];
-                        if (shdParts.Length >= 3) shd.Color = shdParts[2];
+                        shd.Fill = shdParts[1].TrimStart('#').ToUpperInvariant();
+                        if (shdParts.Length >= 3) shd.Color = shdParts[2].TrimStart('#').ToUpperInvariant();
                     }
                     newRProps.Shading = shd;
                 }
@@ -359,21 +380,91 @@ public partial class WordHandler
                 );
                 table.AppendChild(tblProps);
 
+                // Apply border properties from Add parameters
+                foreach (var (bk, bv) in properties)
+                {
+                    if (bk.StartsWith("border", StringComparison.OrdinalIgnoreCase))
+                        ApplyTableBorders(tblProps, bk, bv);
+                }
+
                 int rows = properties.TryGetValue("rows", out var rowsStr) ? int.Parse(rowsStr) : 1;
                 int cols = properties.TryGetValue("cols", out var colsStr) ? int.Parse(colsStr) : 1;
+
+                // Parse per-column widths: colWidths="3000,2000,5000"
+                int[]? colWidthArr = null;
+                if (properties.TryGetValue("colwidths", out var cwStr))
+                    colWidthArr = cwStr.Split(',').Select(s => int.Parse(s.Trim())).ToArray();
 
                 // Add table grid
                 var tblGrid = new TableGrid();
                 for (int gc = 0; gc < cols; gc++)
-                    tblGrid.AppendChild(new GridColumn { Width = "2400" });
+                {
+                    var w = colWidthArr != null && gc < colWidthArr.Length ? colWidthArr[gc].ToString() : "2400";
+                    tblGrid.AppendChild(new GridColumn { Width = w });
+                }
                 table.AppendChild(tblGrid);
+
+                // Apply table-level properties from Add parameters
+                foreach (var (tk, tv) in properties)
+                {
+                    var tkl = tk.ToLowerInvariant();
+                    if (tkl is "rows" or "cols" or "colwidths" || tkl.StartsWith("border")) continue;
+                    switch (tkl)
+                    {
+                        case "alignment":
+                            tblProps.TableJustification = new TableJustification
+                            {
+                                Val = tv.ToLowerInvariant() switch
+                                {
+                                    "center" => TableRowAlignmentValues.Center,
+                                    "right" => TableRowAlignmentValues.Right,
+                                    _ => TableRowAlignmentValues.Left
+                                }
+                            };
+                            break;
+                        case "width":
+                            if (tv.EndsWith('%'))
+                            {
+                                var pct = int.Parse(tv.TrimEnd('%')) * 50;
+                                tblProps.TableWidth = new TableWidth { Width = pct.ToString(), Type = TableWidthUnitValues.Pct };
+                            }
+                            else
+                            {
+                                tblProps.TableWidth = new TableWidth { Width = tv, Type = TableWidthUnitValues.Dxa };
+                            }
+                            break;
+                        case "indent":
+                            tblProps.TableIndentation = new TableIndentation { Width = int.Parse(tv), Type = TableWidthUnitValues.Dxa };
+                            break;
+                        case "cellspacing":
+                            tblProps.TableCellSpacing = new TableCellSpacing { Width = tv, Type = TableWidthUnitValues.Dxa };
+                            break;
+                        case "layout":
+                            tblProps.TableLayout = new TableLayout
+                            {
+                                Type = tv.ToLowerInvariant() == "fixed" ? TableLayoutValues.Fixed : TableLayoutValues.Autofit
+                            };
+                            break;
+                        case "padding":
+                            var cm = tblProps.TableCellMarginDefault ?? tblProps.AppendChild(new TableCellMarginDefault());
+                            cm.TopMargin = new TopMargin { Width = tv, Type = TableWidthUnitValues.Dxa };
+                            cm.TableCellLeftMargin = new TableCellLeftMargin { Width = short.Parse(tv), Type = TableWidthValues.Dxa };
+                            cm.BottomMargin = new BottomMargin { Width = tv, Type = TableWidthUnitValues.Dxa };
+                            cm.TableCellRightMargin = new TableCellRightMargin { Width = short.Parse(tv), Type = TableWidthValues.Dxa };
+                            break;
+                    }
+                }
 
                 for (int r = 0; r < rows; r++)
                 {
                     var row = new TableRow();
                     for (int c = 0; c < cols; c++)
                     {
-                        var cell = new TableCell(new Paragraph());
+                        var cellPara = new Paragraph(new ParagraphProperties(
+                            new SpacingBetweenLines { After = "0", Line = "240", LineRule = LineSpacingRuleValues.Auto }));
+                        var cell = new TableCell(cellPara);
+                        if (colWidthArr != null && c < colWidthArr.Length)
+                            cell.PrependChild(new TableCellProperties(new TableCellWidth { Width = colWidthArr[c].ToString(), Type = TableWidthUnitValues.Dxa }));
                         row.AppendChild(cell);
                     }
                     table.AppendChild(row);
@@ -494,7 +585,7 @@ public partial class WordHandler
                 var chartRelId = chartMainPart.GetIdOfPart(chartPart);
 
                 // Dimensions (default: 15cm x 10cm)
-                long chartCx = properties.TryGetValue("width", out var cwStr) ? ParseEmu(cwStr) : 5400000;
+                long chartCx = properties.TryGetValue("width", out var chartWStr) ? ParseEmu(chartWStr) : 5400000;
                 long chartCy = properties.TryGetValue("height", out var chStr) ? ParseEmu(chStr) : 3600000;
 
                 var docPropId = NextImageId();
@@ -715,12 +806,19 @@ public partial class WordHandler
                 var hlRelId = mainDocPart.AddHyperlinkRelationship(new Uri(hlUrl), isExternal: true).Id;
 
                 var hlRProps = new RunProperties();
-                hlRProps.Color = new Color { Val = "0563C1" };
+                if (properties.TryGetValue("color", out var hlColor))
+                    hlRProps.Color = new Color { Val = hlColor.TrimStart('#').ToUpperInvariant() };
+                else
+                    hlRProps.Color = new Color { Val = "0563C1" };
                 hlRProps.Underline = new Underline { Val = UnderlineValues.Single };
                 if (properties.TryGetValue("font", out var hlFont))
                     hlRProps.RunFonts = new RunFonts { Ascii = hlFont, HighAnsi = hlFont };
                 if (properties.TryGetValue("size", out var hlSize))
                     hlRProps.FontSize = new FontSize { Val = ((int)(ParseFontSize(hlSize) * 2)).ToString() };
+                if (properties.TryGetValue("bold", out var hlBold) && IsTruthy(hlBold))
+                    hlRProps.Bold = new Bold();
+                if (properties.TryGetValue("italic", out var hlItalic) && IsTruthy(hlItalic))
+                    hlRProps.Italic = new Italic();
 
                 var hlRun = new Run(hlRProps);
                 var hlText = properties.GetValueOrDefault("text", hlUrl);
@@ -1041,7 +1139,7 @@ public partial class WordHandler
                 }
                 if (properties.TryGetValue("color", out var sColor))
                 {
-                    styleRPr.Color = new Color { Val = sColor.ToUpperInvariant() };
+                    styleRPr.Color = new Color { Val = sColor.TrimStart('#').ToUpperInvariant() };
                     hasRPr = true;
                 }
                 if (hasRPr) newStyle.AppendChild(styleRPr);
@@ -1088,7 +1186,7 @@ public partial class WordHandler
                     if (properties.TryGetValue("italic", out var hItalic) && IsTruthy(hItalic))
                         hRProps.Italic = new Italic();
                     if (properties.TryGetValue("color", out var hColor))
-                        hRProps.Color = new Color { Val = hColor.ToUpperInvariant() };
+                        hRProps.Color = new Color { Val = hColor.TrimStart('#').ToUpperInvariant() };
                     hRun.AppendChild(hRProps);
                     hRun.AppendChild(new Text(hText) { Space = SpaceProcessingModeValues.Preserve });
                     hPara.AppendChild(hRun);
@@ -1168,7 +1266,7 @@ public partial class WordHandler
                     if (properties.TryGetValue("italic", out var fItalic) && IsTruthy(fItalic))
                         fRProps.Italic = new Italic();
                     if (properties.TryGetValue("color", out var fColor))
-                        fRProps.Color = new Color { Val = fColor.ToUpperInvariant() };
+                        fRProps.Color = new Color { Val = fColor.TrimStart('#').ToUpperInvariant() };
                     fRun.AppendChild(fRProps);
                     fRun.AppendChild(new Text(fText) { Space = SpaceProcessingModeValues.Preserve });
                     fPara.AppendChild(fRun);

@@ -158,8 +158,7 @@ public partial class PowerPointHandler
                     {
                         var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
                         rProps.RemoveAllChildren<Drawing.SolidFill>();
-                        var solidFill = new Drawing.SolidFill();
-                        solidFill.Append(new Drawing.RgbColorModelHex { Val = colorVal.ToUpperInvariant() });
+                        var solidFill = BuildSolidFill(colorVal);
                         if (rProps is OpenXmlCompositeElement composite)
                         {
                             if (!composite.AddChild(solidFill, throwOnError: false))
@@ -290,6 +289,22 @@ public partial class PowerPointHandler
                     ApplyShapeFill(newShape.ShapeProperties!, fillVal);
                 }
 
+                // Opacity (alpha on fill) — like POI XSLFColor uses <a:alpha val="N"/>
+                if (properties.TryGetValue("opacity", out var opacityVal))
+                {
+                    var solidFill = newShape.ShapeProperties?.GetFirstChild<Drawing.SolidFill>();
+                    if (solidFill != null)
+                    {
+                        var colorEl = solidFill.GetFirstChild<Drawing.RgbColorModelHex>() as OpenXmlElement
+                            ?? solidFill.GetFirstChild<Drawing.SchemeColor>();
+                        if (colorEl != null && double.TryParse(opacityVal, System.Globalization.CultureInfo.InvariantCulture, out var alphaNum))
+                        {
+                            colorEl.RemoveAllChildren<Drawing.Alpha>();
+                            colorEl.AppendChild(new Drawing.Alpha { Val = (int)(alphaNum * 100000) });
+                        }
+                    }
+                }
+
                 // Gradient fill
                 if (properties.TryGetValue("gradient", out var gradVal))
                 {
@@ -303,7 +318,7 @@ public partial class PowerPointHandler
                     if (lineColor.Equals("none", StringComparison.OrdinalIgnoreCase))
                         outline.AppendChild(new Drawing.NoFill());
                     else
-                        outline.AppendChild(new Drawing.SolidFill(new Drawing.RgbColorModelHex { Val = lineColor.TrimStart('#').ToUpperInvariant() }));
+                        outline.AppendChild(BuildSolidFill(lineColor));
                 }
                 if (properties.TryGetValue("linewidth", out var lwStr) || properties.TryGetValue("line.width", out lwStr))
                 {

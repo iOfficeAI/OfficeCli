@@ -486,6 +486,432 @@ public class WordFunctionalTests : IDisposable
         _handler.Get("/body/tbl[1]/tr[1]/tc[3]").Text.Should().Be("C");
     }
 
+    // ==================== Table Border Lifecycle ====================
+
+    [Fact]
+    public void TableBorder_Add_WithBorders_FullLifecycle()
+    {
+        // 1. Create table with border properties via Add
+        _handler.Add("/body", "table", null, new()
+        {
+            ["rows"] = "2", ["cols"] = "2",
+            ["border.all"] = "double;6;FF0000"
+        });
+
+        // 2. Get table + verify borders
+        var tbl = _handler.Get("/body/tbl[1]");
+        tbl.Format["border.top"].Should().Be("double;6;FF0000");
+        tbl.Format["border.bottom"].Should().Be("double;6;FF0000");
+        tbl.Format["border.left"].Should().Be("double;6;FF0000");
+        tbl.Format["border.right"].Should().Be("double;6;FF0000");
+        tbl.Format["border.insideH"].Should().Be("double;6;FF0000");
+        tbl.Format["border.insideV"].Should().Be("double;6;FF0000");
+
+        // 3. Set — change table borders
+        _handler.Set("/body/tbl[1]", new() { ["border.top"] = "thick;12;0000FF", ["border.insideV"] = "none" });
+
+        // 4. Get + Verify updated
+        tbl = _handler.Get("/body/tbl[1]");
+        tbl.Format["border.top"].Should().Be("thick;12;0000FF");
+        tbl.Format["border.insideV"].Should().Be("nil");
+
+        // 5. Persistence
+        Reopen();
+        tbl = _handler.Get("/body/tbl[1]");
+        tbl.Format["border.top"].Should().Be("thick;12;0000FF");
+        tbl.Format["border.bottom"].Should().Be("double;6;FF0000");
+    }
+
+    [Fact]
+    public void CellBorder_Set_FullLifecycle()
+    {
+        // 1. Create table
+        _handler.Add("/body", "table", null, new() { ["rows"] = "2", ["cols"] = "2" });
+
+        // 2. Set cell border
+        _handler.Set("/body/tbl[1]/tr[1]/tc[1]", new()
+        {
+            ["text"] = "Bordered",
+            ["border.all"] = "dashed;4;00FF00"
+        });
+
+        // 3. Get cell + verify borders
+        var cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
+        cell.Text.Should().Be("Bordered");
+        cell.Format["border.top"].Should().Be("dashed;4;00FF00");
+        cell.Format["border.bottom"].Should().Be("dashed;4;00FF00");
+        cell.Format["border.left"].Should().Be("dashed;4;00FF00");
+        cell.Format["border.right"].Should().Be("dashed;4;00FF00");
+
+        // 4. Modify single side
+        _handler.Set("/body/tbl[1]/tr[1]/tc[1]", new() { ["border.bottom"] = "thick;12;FF0000" });
+
+        // 5. Get + Verify
+        cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
+        cell.Format["border.top"].Should().Be("dashed;4;00FF00");
+        cell.Format["border.bottom"].Should().Be("thick;12;FF0000");
+
+        // 6. Persistence
+        Reopen();
+        cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
+        cell.Format["border.bottom"].Should().Be("thick;12;FF0000");
+        cell.Format["border.top"].Should().Be("dashed;4;00FF00");
+    }
+
+    [Fact]
+    public void TableBorder_ThreeLine_FullLifecycle()
+    {
+        // Academic three-line table: top thick, header-bottom single, bottom thick, no vertical lines
+        _handler.Add("/body", "table", null, new()
+        {
+            ["rows"] = "3", ["cols"] = "3",
+            ["border.all"] = "none",
+            ["border.top"] = "thick;12;000000",
+            ["border.bottom"] = "thick;12;000000"
+        });
+
+        // Verify table-level borders
+        var tbl = _handler.Get("/body/tbl[1]");
+        tbl.Format["border.top"].Should().Be("thick;12;000000");
+        tbl.Format["border.bottom"].Should().Be("thick;12;000000");
+        tbl.Format["border.insideV"].Should().Be("nil");
+
+        // Set header row cells with bottom border (the middle line)
+        _handler.Set("/body/tbl[1]/tr[1]/tc[1]", new() { ["text"] = "Col A", ["border.bottom"] = "single;6;000000" });
+        _handler.Set("/body/tbl[1]/tr[1]/tc[2]", new() { ["text"] = "Col B", ["border.bottom"] = "single;6;000000" });
+        _handler.Set("/body/tbl[1]/tr[1]/tc[3]", new() { ["text"] = "Col C", ["border.bottom"] = "single;6;000000" });
+
+        // Verify cell borders
+        var headerCell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
+        headerCell.Format["border.bottom"].Should().Be("single;6;000000");
+        headerCell.Text.Should().Be("Col A");
+
+        // Persistence
+        Reopen();
+        tbl = _handler.Get("/body/tbl[1]");
+        tbl.Format["border.top"].Should().Be("thick;12;000000");
+        headerCell = _handler.Get("/body/tbl[1]/tr[1]/tc[2]");
+        headerCell.Format["border.bottom"].Should().Be("single;6;000000");
+    }
+
+    [Fact]
+    public void TableBorder_FancyStyles_FullLifecycle()
+    {
+        // Test various border styles: wave, 3d, thinThick, etc.
+        _handler.Add("/body", "table", null, new() { ["rows"] = "1", ["cols"] = "1" });
+
+        // Set wave border
+        _handler.Set("/body/tbl[1]/tr[1]/tc[1]", new() { ["border.all"] = "wave;6;FF0000" });
+        var cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
+        cell.Format["border.top"].Should().Be("wave;6;FF0000");
+
+        // Change to 3D emboss
+        _handler.Set("/body/tbl[1]/tr[1]/tc[1]", new() { ["border.all"] = "3dEmboss;12;808080" });
+        cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
+        ((string)cell.Format["border.top"]).Should().Contain("Emboss");
+
+        // Change to thinThickSmallGap
+        _handler.Set("/body/tbl[1]/tr[1]/tc[1]", new() { ["border.all"] = "thinThickSmallGap;12;2F5496" });
+        cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
+        ((string)cell.Format["border.top"]).Should().Contain("thinThickSmallGap");
+
+        // Persistence
+        Reopen();
+        cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
+        ((string)cell.Format["border.top"]).Should().Contain("thinThickSmallGap");
+    }
+
+    // ==================== Cell Padding Lifecycle ====================
+
+    [Fact]
+    public void CellPadding_Set_FullLifecycle()
+    {
+        // 1. Create table
+        _handler.Add("/body", "table", null, new() { ["rows"] = "1", ["cols"] = "2" });
+
+        // 2. Set all-sides padding
+        _handler.Set("/body/tbl[1]/tr[1]/tc[1]", new() { ["text"] = "Padded", ["padding"] = "200" });
+
+        // 3. Get + Verify
+        var cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
+        cell.Text.Should().Be("Padded");
+        cell.Format["padding.top"].Should().Be("200");
+        cell.Format["padding.bottom"].Should().Be("200");
+        cell.Format["padding.left"].Should().Be("200");
+        cell.Format["padding.right"].Should().Be("200");
+
+        // 4. Modify single side
+        _handler.Set("/body/tbl[1]/tr[1]/tc[1]", new() { ["padding.left"] = "400" });
+        cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
+        cell.Format["padding.left"].Should().Be("400");
+        cell.Format["padding.top"].Should().Be("200");
+
+        // 5. Persistence
+        Reopen();
+        cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
+        cell.Format["padding.left"].Should().Be("400");
+        cell.Format["padding.top"].Should().Be("200");
+    }
+
+    // ==================== Column Width Lifecycle ====================
+
+    [Fact]
+    public void ColWidths_Add_FullLifecycle()
+    {
+        // 1. Create table with custom column widths
+        _handler.Add("/body", "table", null, new()
+        {
+            ["rows"] = "2", ["cols"] = "3",
+            ["colwidths"] = "1500,3000,4500"
+        });
+
+        // 2. Get table + verify colWidths
+        var tbl = _handler.Get("/body/tbl[1]");
+        tbl.Format["colWidths"].Should().Be("1500,3000,4500");
+
+        // 3. Verify cell widths are also set
+        var cell1 = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
+        cell1.Format["width"].Should().Be("1500");
+        var cell2 = _handler.Get("/body/tbl[1]/tr[1]/tc[2]");
+        cell2.Format["width"].Should().Be("3000");
+        var cell3 = _handler.Get("/body/tbl[1]/tr[1]/tc[3]");
+        cell3.Format["width"].Should().Be("4500");
+
+        // 4. Persistence
+        Reopen();
+        tbl = _handler.Get("/body/tbl[1]");
+        tbl.Format["colWidths"].Should().Be("1500,3000,4500");
+    }
+
+    // ==================== Table Properties Lifecycle ====================
+
+    [Fact]
+    public void TableProperties_IndentCellSpacingLayout_FullLifecycle()
+    {
+        // 1. Create table with properties via Add
+        _handler.Add("/body", "table", null, new()
+        {
+            ["rows"] = "2", ["cols"] = "2",
+            ["indent"] = "720",
+            ["cellspacing"] = "20",
+            ["layout"] = "fixed"
+        });
+
+        // 2. Get + Verify
+        var tbl = _handler.Get("/body/tbl[1]");
+        tbl.Format["indent"].Should().Be(720);
+        tbl.Format["cellSpacing"].Should().Be("20");
+        tbl.Format["layout"].Should().Be("fixed");
+
+        // 3. Set — modify via Set
+        _handler.Set("/body/tbl[1]", new() { ["indent"] = "1440", ["layout"] = "auto" });
+
+        // 4. Get + Verify
+        tbl = _handler.Get("/body/tbl[1]");
+        tbl.Format["indent"].Should().Be(1440);
+        tbl.Format["layout"].Should().Be("auto");
+
+        // 5. Persistence
+        Reopen();
+        tbl = _handler.Get("/body/tbl[1]");
+        tbl.Format["indent"].Should().Be(1440);
+        tbl.Format["layout"].Should().Be("auto");
+        tbl.Format["cellSpacing"].Should().Be("20");
+    }
+
+    [Fact]
+    public void TableWidth_Percentage_FullLifecycle()
+    {
+        // 1. Create table with percentage width
+        _handler.Add("/body", "table", null, new()
+        {
+            ["rows"] = "1", ["cols"] = "2", ["width"] = "100%"
+        });
+
+        // 2. Get + Verify
+        var tbl = _handler.Get("/body/tbl[1]");
+        tbl.Format["width"].Should().Be("100%");
+
+        // 3. Set — change to 50%
+        _handler.Set("/body/tbl[1]", new() { ["width"] = "50%" });
+        tbl = _handler.Get("/body/tbl[1]");
+        tbl.Format["width"].Should().Be("50%");
+
+        // 4. Persistence
+        Reopen();
+        tbl = _handler.Get("/body/tbl[1]");
+        tbl.Format["width"].Should().Be("50%");
+    }
+
+    [Fact]
+    public void TableDefaultPadding_FullLifecycle()
+    {
+        // 1. Create table with default padding
+        _handler.Add("/body", "table", null, new()
+        {
+            ["rows"] = "1", ["cols"] = "1", ["padding"] = "150"
+        });
+
+        // 2. Get + Verify
+        var tbl = _handler.Get("/body/tbl[1]");
+        tbl.Format["padding.top"].Should().Be("150");
+        tbl.Format["padding.bottom"].Should().Be("150");
+
+        // 3. Set — change default padding
+        _handler.Set("/body/tbl[1]", new() { ["padding"] = "300" });
+        tbl = _handler.Get("/body/tbl[1]");
+        tbl.Format["padding.top"].Should().Be("300");
+
+        // 4. Persistence
+        Reopen();
+        tbl = _handler.Get("/body/tbl[1]");
+        tbl.Format["padding.top"].Should().Be("300");
+    }
+
+    // ==================== Row Height Exact Lifecycle ====================
+
+    [Fact]
+    public void RowHeightExact_Set_FullLifecycle()
+    {
+        // 1. Create table
+        _handler.Add("/body", "table", null, new() { ["rows"] = "2", ["cols"] = "1" });
+
+        // 2. Set exact row height
+        _handler.Set("/body/tbl[1]/tr[1]", new() { ["height.exact"] = "500" });
+
+        // 3. Get + Verify
+        var row = _handler.Get("/body/tbl[1]/tr[1]");
+        row.Format["height"].Should().Be(500u);
+        row.Format["height.rule"].Should().Be("exact");
+
+        // 4. Set at-least height on another row
+        _handler.Set("/body/tbl[1]/tr[2]", new() { ["height"] = "400" });
+        var row2 = _handler.Get("/body/tbl[1]/tr[2]");
+        row2.Format["height"].Should().Be(400u);
+        row2.Format.Should().NotContainKey("height.rule");
+
+        // 5. Persistence
+        Reopen();
+        row = _handler.Get("/body/tbl[1]/tr[1]");
+        row.Format["height"].Should().Be(500u);
+        row.Format["height.rule"].Should().Be("exact");
+    }
+
+    [Fact]
+    public void RowHeader_Set_FullLifecycle()
+    {
+        _handler.Add("/body", "table", null, new() { ["rows"] = "2", ["cols"] = "1" });
+        _handler.Set("/body/tbl[1]/tr[1]", new() { ["header"] = "true" });
+
+        var row = _handler.Get("/body/tbl[1]/tr[1]");
+        row.Format["header"].Should().Be(true);
+
+        Reopen();
+        row = _handler.Get("/body/tbl[1]/tr[1]");
+        row.Format["header"].Should().Be(true);
+    }
+
+    // ==================== Text Direction Lifecycle ====================
+
+    [Fact]
+    public void TextDirection_Set_FullLifecycle()
+    {
+        // 1. Create table
+        _handler.Add("/body", "table", null, new() { ["rows"] = "1", ["cols"] = "2" });
+
+        // 2. Set vertical text direction
+        _handler.Set("/body/tbl[1]/tr[1]/tc[1]", new() { ["text"] = "竖排", ["textDirection"] = "btlr" });
+
+        // 3. Get + Verify
+        var cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
+        cell.Text.Should().Be("竖排");
+        cell.Format.Should().ContainKey("textDirection");
+
+        // 4. Change direction
+        _handler.Set("/body/tbl[1]/tr[1]/tc[1]", new() { ["textDirection"] = "tbrl" });
+        cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
+        cell.Format.Should().ContainKey("textDirection");
+
+        // 5. Persistence
+        Reopen();
+        cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
+        cell.Format.Should().ContainKey("textDirection");
+    }
+
+    [Fact]
+    public void NoWrap_Set_FullLifecycle()
+    {
+        _handler.Add("/body", "table", null, new() { ["rows"] = "1", ["cols"] = "1" });
+        _handler.Set("/body/tbl[1]/tr[1]/tc[1]", new() { ["nowrap"] = "true" });
+
+        var cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
+        cell.Format["nowrap"].Should().Be(true);
+
+        Reopen();
+        cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
+        cell.Format["nowrap"].Should().Be(true);
+    }
+
+    // ==================== Get Enriched Info Lifecycle ====================
+
+    [Fact]
+    public void CellGet_ReturnsAllProperties()
+    {
+        // 1. Create table
+        _handler.Add("/body", "table", null, new() { ["rows"] = "2", ["cols"] = "2" });
+
+        // 2. Set various cell properties
+        _handler.Set("/body/tbl[1]/tr[1]/tc[1]", new()
+        {
+            ["text"] = "Full",
+            ["shd"] = "FF0000",
+            ["alignment"] = "center",
+            ["valign"] = "center",
+            ["bold"] = "true"
+        });
+
+        // 3. Get + Verify all properties returned
+        var cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
+        cell.Text.Should().Be("Full");
+        cell.Format["shd"].Should().Be("FF0000");
+        cell.Format["alignment"].Should().Be("center");
+        cell.Format["valign"].Should().Be("center");
+
+        // 4. Set vmerge and gridspan
+        _handler.Set("/body/tbl[1]/tr[1]/tc[1]", new() { ["vmerge"] = "restart" });
+        _handler.Set("/body/tbl[1]/tr[2]/tc[1]", new() { ["vmerge"] = "continue" });
+
+        cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
+        cell.Format["vmerge"].Should().Be("restart");
+
+        var cell2 = _handler.Get("/body/tbl[1]/tr[2]/tc[1]");
+        cell2.Format["vmerge"].Should().Be("continue");
+
+        // 5. Persistence
+        Reopen();
+        cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
+        cell.Format["shd"].Should().Be("FF0000");
+        cell.Format["vmerge"].Should().Be("restart");
+    }
+
+    [Fact]
+    public void TableGet_ReturnsAlignmentAndWidth()
+    {
+        _handler.Add("/body", "table", null, new()
+        {
+            ["rows"] = "1", ["cols"] = "2",
+            ["alignment"] = "center", ["width"] = "8000"
+        });
+
+        var tbl = _handler.Get("/body/tbl[1]");
+        tbl.Format["alignment"].Should().Be("center");
+        tbl.Format["width"].Should().Be("8000");
+
+        Reopen();
+        tbl = _handler.Get("/body/tbl[1]");
+        tbl.Format["alignment"].Should().Be("center");
+    }
+
     // ==================== Document Core Properties Lifecycle ====================
 
     [Fact]

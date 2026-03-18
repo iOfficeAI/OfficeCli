@@ -226,13 +226,24 @@ Paragraph properties (/body/p[N]):
 
 Table cell properties (/body/tbl[N]/tr[R]/tc[C]):
   text, font, size, bold, italic, color, shd, alignment,
-  valign (top|center|bottom), width, vmerge (restart|continue), gridspan
+  valign (top|center|bottom), width, vmerge (restart|continue), gridspan,
+  padding (all sides, twips), padding.top, padding.bottom, padding.left, padding.right,
+  textDirection (btlr|tbrl|lrtb|horizontal|vertical|vertical-rl), nowrap (bool),
+  border.all, border.top, border.bottom, border.left, border.right
+    Border format: style[;size[;color[;space]]]
+    Styles: none,single,thick,double,dotted,dashed,dotDash,triple,wave,doubleWave,
+            thinThickSmallGap,thickThinSmallGap,thinThickThinSmallGap,
+            thinThickMediumGap,thickThinMediumGap,3dEmboss,3dEngrave
 
 Table row properties (/body/tbl[N]/tr[R]):
-  height, header (bool)
+  height (twips, at-least), height.exact (twips, exact), header (bool)
 
 Table properties (/body/tbl[N]):
-  alignment (left|center|right), width
+  alignment (left|center|right), width (twips or "100%"),
+  indent (twips), cellSpacing (twips), layout (fixed|auto),
+  padding (default cell margin, twips),
+  border.all, border.top, border.bottom, border.left, border.right,
+  border.insideH, border.insideV (same format as cell borders)
 
 Document root (/):
   defaultFont, pageBackground, pageWidth, pageHeight,
@@ -322,7 +333,10 @@ Types and properties:
     caps, smallCaps, superscript, subscript, shd
 
   table (tbl)  -- parent: /body
-    rows (int), cols (int)
+    rows (int), cols (int), colWidths (comma-separated twips, e.g. "3000,2000,5000"),
+    alignment (left|center|right), width (twips or "100%"),
+    indent (twips), cellSpacing (twips), layout (fixed|auto), padding (twips),
+    border.* (same as Set)
 
   row (tr)  -- parent: /body/tbl[N]
     cols (int, default: match existing), height (twips),

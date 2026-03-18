@@ -51,7 +51,7 @@ public partial class PowerPointHandler
             Alignment     = Drawing.RectangleAlignmentValues.TopLeft,
             RotateWithShape = false
         };
-        var clr = new Drawing.RgbColorModelHex { Val = colorHex };
+        var clr = BuildColorElement(parts[0]);
         clr.AppendChild(new Drawing.Alpha { Val = (int)(opacity * 1000) });
         shadow.AppendChild(clr);
         effectList.AppendChild(shadow);
@@ -84,9 +84,9 @@ public partial class PowerPointHandler
             throw new ArgumentException($"Invalid glow opacity value: '{parts[2]}'. Expected a number.");
 
         var glow = new Drawing.Glow { Radius = (long)(radiusPt * 12700) };
-        var clr = new Drawing.RgbColorModelHex { Val = colorHex };
-        clr.AppendChild(new Drawing.Alpha { Val = (int)(opacity * 1000) });
-        glow.AppendChild(clr);
+        var glowClr = BuildColorElement(parts[0]);
+        glowClr.AppendChild(new Drawing.Alpha { Val = (int)(opacity * 1000) });
+        glow.AppendChild(glowClr);
         effectList.AppendChild(glow);
     }
 
