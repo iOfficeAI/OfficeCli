@@ -19,6 +19,16 @@ public partial class WordHandler
     private static bool IsTruthy(string value) =>
         ParseHelpers.IsTruthy(value);
 
+    private static JustificationValues ParseJustification(string value) =>
+        value.ToLowerInvariant() switch
+        {
+            "left" => JustificationValues.Left,
+            "center" => JustificationValues.Center,
+            "right" => JustificationValues.Right,
+            "justify" or "both" => JustificationValues.Both,
+            _ => throw new ArgumentException($"Invalid alignment value: '{value}'. Valid values: left, center, right, justify.")
+        };
+
     /// <summary>
     /// Sanitize a hex color for Word OOXML (ST_HexColorRGB = exactly 6-char RGB).
     /// Strips # prefix, uppercases, and handles 8-char AARRGGBB by extracting RGB portion.

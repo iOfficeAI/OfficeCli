@@ -53,16 +53,7 @@ public partial class WordHandler
                 if (properties.TryGetValue("style", out var style))
                     pProps.ParagraphStyleId = new ParagraphStyleId { Val = style };
                 if (properties.TryGetValue("alignment", out var alignment))
-                    pProps.Justification = new Justification
-                    {
-                        Val = alignment.ToLowerInvariant() switch
-                        {
-                            "center" => JustificationValues.Center,
-                            "right" => JustificationValues.Right,
-                            "justify" or "both" => JustificationValues.Both,
-                            _ => JustificationValues.Left
-                        }
-                    };
+                    pProps.Justification = new Justification { Val = ParseJustification(alignment) };
                 if (properties.TryGetValue("firstlineindent", out var indent))
                 {
                     // Validate range — OOXML stores as StringValue but must fit within reasonable twip range
@@ -1176,16 +1167,7 @@ public partial class WordHandler
                 bool hasPPr = false;
                 if (properties.TryGetValue("alignment", out var sAlign))
                 {
-                    stylePPr.Justification = new Justification
-                    {
-                        Val = sAlign.ToLowerInvariant() switch
-                        {
-                            "center" => JustificationValues.Center,
-                            "right" => JustificationValues.Right,
-                            "justify" or "both" => JustificationValues.Both,
-                            _ => JustificationValues.Left
-                        }
-                    };
+                    stylePPr.Justification = new Justification { Val = ParseJustification(sAlign) };
                     hasPPr = true;
                 }
                 if (properties.TryGetValue("spacebefore", out var sSBefore))
@@ -1249,16 +1231,7 @@ public partial class WordHandler
                 var hPProps = new ParagraphProperties();
 
                 if (properties.TryGetValue("alignment", out var hAlign))
-                    hPProps.Justification = new Justification
-                    {
-                        Val = hAlign.ToLowerInvariant() switch
-                        {
-                            "center" => JustificationValues.Center,
-                            "right" => JustificationValues.Right,
-                            "justify" or "both" => JustificationValues.Both,
-                            _ => JustificationValues.Left
-                        }
-                    };
+                    hPProps.Justification = new Justification { Val = ParseJustification(hAlign) };
                 hPara.AppendChild(hPProps);
 
                 if (properties.TryGetValue("text", out var hText))
@@ -1329,16 +1302,7 @@ public partial class WordHandler
                 var fPProps = new ParagraphProperties();
 
                 if (properties.TryGetValue("alignment", out var fAlign))
-                    fPProps.Justification = new Justification
-                    {
-                        Val = fAlign.ToLowerInvariant() switch
-                        {
-                            "center" => JustificationValues.Center,
-                            "right" => JustificationValues.Right,
-                            "justify" or "both" => JustificationValues.Both,
-                            _ => JustificationValues.Left
-                        }
-                    };
+                    fPProps.Justification = new Justification { Val = ParseJustification(fAlign) };
                 fPara.AppendChild(fPProps);
 
                 if (properties.TryGetValue("text", out var fText))
@@ -1466,16 +1430,7 @@ public partial class WordHandler
                     var fNewPara = new Paragraph();
                     var fPProps = new ParagraphProperties();
                     if (properties.TryGetValue("alignment", out var fAlign))
-                        fPProps.Justification = new Justification
-                        {
-                            Val = fAlign.ToLowerInvariant() switch
-                            {
-                                "center" => JustificationValues.Center,
-                                "right" => JustificationValues.Right,
-                                "justify" => JustificationValues.Both,
-                                _ => JustificationValues.Left
-                            }
-                        };
+                        fPProps.Justification = new Justification { Val = ParseJustification(fAlign) };
                     fNewPara.AppendChild(fPProps);
                     fNewPara.AppendChild(fieldRunBegin);
                     fNewPara.AppendChild(fieldRunInstr);

@@ -489,16 +489,7 @@ public partial class WordHandler
                         break;
                     case "alignment":
                         var pPr = style.StyleParagraphProperties ?? style.AppendChild(new StyleParagraphProperties());
-                        pPr.Justification = new Justification
-                        {
-                            Val = value.ToLowerInvariant() switch
-                            {
-                                "center" => JustificationValues.Center,
-                                "right" => JustificationValues.Right,
-                                "justify" or "both" => JustificationValues.Both,
-                                _ => JustificationValues.Left
-                            }
-                        };
+                        pPr.Justification = new Justification { Val = ParseJustification(value) };
                         break;
                     case "spacebefore":
                         var pPr2 = style.StyleParagraphProperties ?? style.AppendChild(new StyleParagraphProperties());
@@ -1117,13 +1108,7 @@ public partial class WordHandler
                         }
                         break;
                     case "alignment":
-                        var alignVal = value.ToLowerInvariant() switch
-                        {
-                            "center" => JustificationValues.Center,
-                            "right" => JustificationValues.Right,
-                            "justify" or "both" => JustificationValues.Both,
-                            _ => JustificationValues.Left
-                        };
+                        var alignVal = ParseJustification(value);
                         // Apply alignment to ALL paragraphs in the cell, not just the first
                         foreach (var cellAlignPara in cell.Elements<Paragraph>())
                         {
@@ -1546,16 +1531,7 @@ public partial class WordHandler
                 pProps.ParagraphStyleId = new ParagraphStyleId { Val = value };
                 return true;
             case "alignment":
-                pProps.Justification = new Justification
-                {
-                    Val = value.ToLowerInvariant() switch
-                    {
-                        "center" => JustificationValues.Center,
-                        "right" => JustificationValues.Right,
-                        "justify" or "both" => JustificationValues.Both,
-                        _ => JustificationValues.Left
-                    }
-                };
+                pProps.Justification = new Justification { Val = ParseJustification(value) };
                 return true;
             case "firstlineindent":
                 var indent = pProps.Indentation ?? (pProps.Indentation = new Indentation());
