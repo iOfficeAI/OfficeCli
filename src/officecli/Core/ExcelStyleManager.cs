@@ -118,7 +118,15 @@ public class ExcelStyleManager
         bool applyFill = baseXf.ApplyFill?.Value ?? false;
         if (styleProps.TryGetValue("fill", out var fillColor) || styleProps.TryGetValue("bgcolor", out fillColor))
         {
-            fillId = GetOrCreateFill(stylesheet, fillColor);
+            if (fillColor.Contains('-'))
+            {
+                // Gradient fill: "FF0000-0000FF" or "FF0000-0000FF-90" or "radial:FF0000-0000FF"
+                fillId = GetOrCreateGradientFill(stylesheet, fillColor);
+            }
+            else
+            {
+                fillId = GetOrCreateFill(stylesheet, fillColor);
+            }
             applyFill = true;
         }
 
@@ -143,10 +151,18 @@ public class ExcelStyleManager
         // Handle shorthands: "wrap" → "wraptext", "halign" → "horizontal", "valign" → "vertical"
         if (styleProps.TryGetValue("wrap", out var wrapVal))
             alignProps["wraptext"] = wrapVal;
+        if (styleProps.TryGetValue("wraptext", out var wrapVal2))
+            alignProps["wraptext"] = wrapVal2;
         if (styleProps.TryGetValue("halign", out var halignVal))
             alignProps["horizontal"] = halignVal;
         if (styleProps.TryGetValue("valign", out var valignVal))
             alignProps["vertical"] = valignVal;
+        if (styleProps.TryGetValue("rotation", out var rotVal))
+            alignProps["rotation"] = rotVal;
+        if (styleProps.TryGetValue("indent", out var indVal))
+            alignProps["indent"] = indVal;
+        if (styleProps.TryGetValue("shrinktofit", out var shrinkVal))
+            alignProps["shrinktofit"] = shrinkVal;
         if (alignProps.Count > 0)
         {
             alignment ??= new Alignment();
@@ -162,6 +178,15 @@ public class ExcelStyleManager
                         break;
                     case "wraptext":
                         alignment.WrapText = IsTruthy(value);
+                        break;
+                    case "rotation" or "textrotation":
+                        alignment.TextRotation = uint.Parse(value);
+                        break;
+                    case "indent":
+                        alignment.Indent = uint.Parse(value);
+                        break;
+                    case "shrinktofit" or "shrink":
+                        alignment.ShrinkToFit = IsTruthy(value);
                         break;
                 }
             }
@@ -185,7 +210,8 @@ public class ExcelStyleManager
         var lower = key.ToLowerInvariant();
         return lower is "numfmt" or "fill" or "bgcolor"
             or "bold" or "italic" or "strike" or "underline"
-            or "wrap" or "numberformat" or "halign" or "valign"
+            or "wrap" or "wraptext" or "numberformat" or "halign" or "valign"
+            or "rotation" or "indent" or "shrinktofit"
             || lower.StartsWith("font.")
             || lower.StartsWith("alignment.")
             || lower.StartsWith("border.");
@@ -266,7 +292,7 @@ public class ExcelStyleManager
         bool strike = fontProps.TryGetValue("strike", out var sVal)
             ? IsTruthy(sVal) : baseFont.Strike != null;
         string? underline = fontProps.TryGetValue("underline", out var uVal)
-            ? (uVal.ToLowerInvariant() is "double" ? "double" : (IsTruthy(uVal) ? "single" : null))
+            ? (uVal.ToLowerInvariant() is "double" ? "double" : (IsTruthy(uVal) || uVal.ToLowerInvariant() == "single" ? "single" : null))
             : (baseFont.Underline != null ? (baseFont.Underline.Val?.InnerText == "double" ? "double" : "single") : null);
         double size = fontProps.TryGetValue("size", out var szVal) && double.TryParse(szVal, out var sz)
             ? sz : baseFont.FontSize?.Val?.Value ?? 11;
@@ -370,6 +396,97 @@ public class ExcelStyleManager
         ) { PatternType = PatternValues.Solid }));
         fills.Count = (uint)fills.Elements<Fill>().Count();
 
+        return (uint)(fills.Elements<Fill>().Count() - 1);
+    }
+
+    /// <summary>
+    /// Create or find a gradient fill entry in the stylesheet.
+    /// Format: "C1-C2[-angle]" (linear) or "radial:C1-C2" (radial).
+    /// Reuses same parsing logic as PPTX gradient but outputs Spreadsheet.GradientFill.
+    /// </summary>
+    private static uint GetOrCreateGradientFill(Stylesheet stylesheet, string value)
+    {
+        var fills = stylesheet.Fills;
+        if (fills == null)
+        {
+            fills = new Fills(
+                new Fill(new PatternFill { PatternType = PatternValues.None }),
+                new Fill(new PatternFill { PatternType = PatternValues.Gray125 })
+            ) { Count = 2 };
+            var fonts = stylesheet.Fonts;
+            if (fonts != null) fonts.InsertAfterSelf(fills);
+            else stylesheet.Append(fills);
+        }
+
+        // Parse gradient spec
+        string gradType = "linear";
+        string colorSpec = value;
+        if (value.StartsWith("radial:", StringComparison.OrdinalIgnoreCase))
+        {
+            gradType = "path";
+            colorSpec = value[7..];
+        }
+
+        var parts = colorSpec.Split('-');
+        var colors = parts.ToList();
+        double degree = 90; // default top-to-bottom
+
+        if (gradType == "linear" && colors.Count >= 2 &&
+            double.TryParse(colors.Last(), System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var angleDeg) &&
+            colors.Last().Length <= 3)
+        {
+            degree = angleDeg;
+            colors.RemoveAt(colors.Count - 1);
+        }
+
+        if (colors.Count < 2) colors.Add(colors[0]);
+
+        // Normalize colors
+        for (int i = 0; i < colors.Count; i++)
+            colors[i] = NormalizeColor(colors[i]);
+
+        // Search for existing match
+        int idx = 0;
+        foreach (var existingFill in fills.Elements<Fill>())
+        {
+            var gf = existingFill.GetFirstChild<GradientFill>();
+            if (gf != null)
+            {
+                var stops = gf.Elements<GradientStop>().ToList();
+                if (stops.Count == colors.Count)
+                {
+                    bool match = true;
+                    for (int i = 0; i < stops.Count; i++)
+                    {
+                        var stopColor = stops[i].Color?.Rgb?.Value;
+                        if (!string.Equals(stopColor, colors[i], StringComparison.OrdinalIgnoreCase))
+                        { match = false; break; }
+                    }
+                    if (match && Math.Abs((gf.Degree?.Value ?? 0) - degree) < 0.1)
+                        return (uint)idx;
+                }
+            }
+            idx++;
+        }
+
+        // Create new gradient fill
+        var gradFill = new GradientFill();
+        if (gradType == "path")
+            gradFill.Type = GradientValues.Path;
+        else
+            gradFill.Degree = degree;
+
+        for (int i = 0; i < colors.Count; i++)
+        {
+            double pos = colors.Count == 1 ? 0 : (double)i / (colors.Count - 1);
+            gradFill.Append(new GradientStop(
+                new Color { Rgb = new HexBinaryValue(colors[i]) }
+            ) { Position = pos });
+        }
+
+        fills.Append(new Fill(gradFill));
+        fills.Count = (uint)fills.Elements<Fill>().Count();
         return (uint)(fills.Elements<Fill>().Count() - 1);
     }
 
@@ -584,7 +701,10 @@ public class ExcelStyleManager
         if (a == null || b == null) return false;
         return a.Horizontal?.Value == b.Horizontal?.Value &&
                a.Vertical?.Value == b.Vertical?.Value &&
-               (a.WrapText?.Value ?? false) == (b.WrapText?.Value ?? false);
+               (a.WrapText?.Value ?? false) == (b.WrapText?.Value ?? false) &&
+               (a.TextRotation?.Value ?? 0) == (b.TextRotation?.Value ?? 0) &&
+               (a.Indent?.Value ?? 0) == (b.Indent?.Value ?? 0) &&
+               (a.ShrinkToFit?.Value ?? false) == (b.ShrinkToFit?.Value ?? false);
     }
 
     // ==================== Helpers ====================

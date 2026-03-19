@@ -62,6 +62,13 @@ public partial class PowerPointHandler
         var containsMatch = Regex.Match(selector, @":contains\(['""]?(.+?)['""]?\)");
         if (containsMatch.Success) textContains = containsMatch.Groups[1].Value;
 
+        // Shorthand: "shape:text" → treat as :contains(text)
+        if (textContains == null)
+        {
+            var shorthandMatch = Regex.Match(selector, @"^(?:\w+)?:(?!contains|empty|no-alt|has)(.+)$");
+            if (shorthandMatch.Success) textContains = shorthandMatch.Groups[1].Value;
+        }
+
         // Element type shortcuts
         if (elementType == "title") isTitle = true;
 

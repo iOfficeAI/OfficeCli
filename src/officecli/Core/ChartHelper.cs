@@ -35,6 +35,9 @@ internal static class ChartHelper
             "doughnut" or "donut" => "doughnut",
             "area" => "area",
             "scatter" or "xy" => "scatter",
+            "bubble" => "bubble",
+            "radar" or "spider" => "radar",
+            "stock" or "ohlc" => "stock",
             _ => ct
         };
 
@@ -157,6 +160,19 @@ internal static class ChartHelper
             case "scatter":
                 chartElement = BuildScatterChart(categories, seriesData, catAxisId, valAxisId);
                 break;
+            case "bubble":
+                chartElement = BuildBubbleChart(categories, seriesData, catAxisId, valAxisId, colors);
+                break;
+            case "radar":
+            {
+                var radarStyle = properties.GetValueOrDefault("radarStyle", "marker");
+                chartElement = BuildRadarChart(radarStyle, categories, seriesData, catAxisId, valAxisId, colors);
+                break;
+            }
+            case "stock":
+                chartElement = BuildStockChart(categories, seriesData, catAxisId, valAxisId);
+                needsAxes = true;
+                break;
             case "combo":
             {
                 int splitAt = 1;
@@ -204,7 +220,7 @@ internal static class ChartHelper
             }
             default:
                 throw new ArgumentException(
-                    $"Unknown chart type: '{kind}'. Supported: column, bar, line, pie, doughnut, area, scatter, combo. " +
+                    $"Unknown chart type: '{kind}'. Supported: column, bar, line, pie, doughnut, area, scatter, bubble, radar, stock, combo. " +
                     "Add 'stacked' or 'percentstacked' suffix for variants (e.g. columnstacked).");
         }
 
@@ -258,11 +274,18 @@ internal static class ChartHelper
     /// </summary>
     internal static readonly HashSet<string> DeferredAddKeys = new(StringComparer.OrdinalIgnoreCase)
     {
-        "datalabels", "labels",
+        "datalabels", "labels", "labelpos", "labelposition", "labelfont",
         "axistitle", "vtitle", "cattitle", "htitle",
         "axismin", "min", "axismax", "max",
         "majorunit", "minorunit",
-        "axisnumfmt", "axisnumberformat"
+        "axisnumfmt", "axisnumberformat",
+        "gridlines", "majorgridlines", "minorgridlines",
+        "plotareafill", "plotfill", "chartareafill", "chartfill",
+        "linewidth", "linedash", "dash", "marker", "markers", "markersize",
+        "style", "styleid",
+        "transparency", "opacity", "alpha",
+        "gradient", "gradients",
+        "secondaryaxis", "secondary"
     };
 
     // ==================== Chart Type Builders ====================
@@ -393,6 +416,121 @@ internal static class ChartHelper
         scatterChart.AppendChild(new C.AxisId { Val = catAxisId });
         scatterChart.AppendChild(new C.AxisId { Val = valAxisId });
         return scatterChart;
+    }
+
+    // ==================== Bubble Chart ====================
+
+    internal static C.BubbleChart BuildBubbleChart(
+        string[]? categories, List<(string name, double[] values)> seriesData,
+        uint catAxisId, uint valAxisId, string[]? colors = null)
+    {
+        var bubbleChart = new C.BubbleChart(new C.VaryColors { Val = false });
+
+        double[]? xValues = null;
+        if (categories != null)
+            xValues = categories.Select(c => double.TryParse(c, out var v) ? v : 0).ToArray();
+
+        for (int i = 0; i < seriesData.Count; i++)
+        {
+            var color = colors != null && i < colors.Length ? colors[i] : DefaultSeriesColors[i % DefaultSeriesColors.Length];
+            var (name, values) = seriesData[i];
+            var series = new C.BubbleChartSeries(
+                new C.Index { Val = (uint)i },
+                new C.Order { Val = (uint)i },
+                new C.SeriesText(new C.NumericValue(name))
+            );
+            ApplySeriesColor(series, color);
+
+            if (xValues != null)
+            {
+                var xLit = new C.NumberLiteral(new C.PointCount { Val = (uint)xValues.Length });
+                for (int j = 0; j < xValues.Length; j++)
+                    xLit.AppendChild(new C.NumericPoint(new C.NumericValue(xValues[j].ToString("G"))) { Index = (uint)j });
+                series.AppendChild(new C.XValues(xLit));
+            }
+
+            var yLit = new C.NumberLiteral(new C.PointCount { Val = (uint)values.Length });
+            for (int j = 0; j < values.Length; j++)
+                yLit.AppendChild(new C.NumericPoint(new C.NumericValue(values[j].ToString("G"))) { Index = (uint)j });
+            series.AppendChild(new C.YValues(yLit));
+
+            // Bubble sizes — use the values as sizes by default, or a third series if provided
+            var sizeLit = new C.NumberLiteral(new C.PointCount { Val = (uint)values.Length });
+            for (int j = 0; j < values.Length; j++)
+                sizeLit.AppendChild(new C.NumericPoint(new C.NumericValue(values[j].ToString("G"))) { Index = (uint)j });
+            series.AppendChild(new C.BubbleSize(sizeLit));
+
+            bubbleChart.AppendChild(series);
+        }
+
+        bubbleChart.AppendChild(new C.AxisId { Val = catAxisId });
+        bubbleChart.AppendChild(new C.AxisId { Val = valAxisId });
+        return bubbleChart;
+    }
+
+    // ==================== Radar Chart ====================
+
+    internal static C.RadarChart BuildRadarChart(
+        string radarStyle,
+        string[]? categories, List<(string name, double[] values)> seriesData,
+        uint catAxisId, uint valAxisId, string[]? colors = null)
+    {
+        var style = radarStyle.ToLowerInvariant() switch
+        {
+            "filled" or "fill" => C.RadarStyleValues.Filled,
+            "marker" => C.RadarStyleValues.Marker,
+            _ => C.RadarStyleValues.Standard
+        };
+
+        var radarChart = new C.RadarChart(
+            new C.RadarStyle { Val = style },
+            new C.VaryColors { Val = false }
+        );
+
+        for (int i = 0; i < seriesData.Count; i++)
+        {
+            var color = colors != null && i < colors.Length ? colors[i] : DefaultSeriesColors[i % DefaultSeriesColors.Length];
+            var series = new C.RadarChartSeries(
+                new C.Index { Val = (uint)i },
+                new C.Order { Val = (uint)i },
+                new C.SeriesText(new C.NumericValue(seriesData[i].name))
+            );
+            ApplySeriesColor(series, color);
+            if (categories != null) series.AppendChild(BuildCategoryData(categories));
+            series.AppendChild(BuildValues(seriesData[i].values));
+            radarChart.AppendChild(series);
+        }
+
+        radarChart.AppendChild(new C.AxisId { Val = catAxisId });
+        radarChart.AppendChild(new C.AxisId { Val = valAxisId });
+        return radarChart;
+    }
+
+    // ==================== Stock Chart ====================
+
+    internal static C.StockChart BuildStockChart(
+        string[]? categories, List<(string name, double[] values)> seriesData,
+        uint catAxisId, uint valAxisId)
+    {
+        // Stock chart expects series in High-Low-Close order (minimum 3 series)
+        // or Open-High-Low-Close order (4 series)
+        var stockChart = new C.StockChart();
+
+        for (int i = 0; i < seriesData.Count; i++)
+        {
+            var series = new C.LineChartSeries(
+                new C.Index { Val = (uint)i },
+                new C.Order { Val = (uint)i },
+                new C.SeriesText(new C.NumericValue(seriesData[i].name))
+            );
+            if (categories != null) series.AppendChild(BuildCategoryData(categories));
+            series.AppendChild(BuildValues(seriesData[i].values));
+            stockChart.AppendChild(series);
+        }
+
+        stockChart.AppendChild(new C.AxisId { Val = catAxisId });
+        stockChart.AppendChild(new C.AxisId { Val = valAxisId });
+        return stockChart;
     }
 
     // ==================== Default Series Colors ====================
@@ -640,7 +778,31 @@ internal static class ChartHelper
             if (dataLabels.GetFirstChild<C.ShowSeriesName>()?.Val?.Value == true) parts.Add("series");
             if (dataLabels.GetFirstChild<C.ShowPercent>()?.Val?.Value == true) parts.Add("percent");
             if (parts.Count > 0) node.Format["dataLabels"] = string.Join(",", parts);
+            var dlPos = dataLabels.GetFirstChild<C.DataLabelPosition>()?.Val;
+            if (dlPos?.HasValue == true) node.Format["labelPos"] = dlPos.InnerText;
         }
+
+        // Chart style
+        var style = chart.Parent?.GetFirstChild<C.Style>();
+        if (style?.Val?.HasValue == true) node.Format["style"] = style.Val.Value;
+
+        // Plot area fill (plotArea uses C.ShapeProperties, not C.ChartShapeProperties)
+        var plotSpPr = plotArea.GetFirstChild<C.ShapeProperties>();
+        var plotFill = plotSpPr?.GetFirstChild<Drawing.SolidFill>();
+        if (plotFill != null)
+        {
+            var pColor = ReadColorFromFill(plotFill);
+            if (pColor != null) node.Format["plotFill"] = pColor;
+        }
+
+        // Gridlines
+        var valAxisForGrid = plotArea.GetFirstChild<C.ValueAxis>();
+        if (valAxisForGrid?.GetFirstChild<C.MajorGridlines>() != null) node.Format["gridlines"] = "true";
+        if (valAxisForGrid?.GetFirstChild<C.MinorGridlines>() != null) node.Format["minorGridlines"] = "true";
+
+        // Secondary axis
+        var valAxes = plotArea.Elements<C.ValueAxis>().ToList();
+        if (valAxes.Count > 1) node.Format["secondaryAxis"] = "true";
 
         // Axis titles
         var valAxis = plotArea.GetFirstChild<C.ValueAxis>();
@@ -688,13 +850,36 @@ internal static class ChartHelper
                 seriesNode.Format["values"] = string.Join(",", sValues.Select(v => v.ToString("G")));
                 var serEl = plotArea.Descendants<OpenXmlCompositeElement>()
                     .Where(e => e.LocalName == "ser").ElementAtOrDefault(i);
-                var serColor = serEl?.GetFirstChild<C.ChartShapeProperties>()
-                    ?.GetFirstChild<Drawing.SolidFill>();
+                var serSpPr = serEl?.GetFirstChild<C.ChartShapeProperties>();
+                var serColor = serSpPr?.GetFirstChild<Drawing.SolidFill>();
                 if (serColor != null)
                 {
                     var colorVal = ReadColorFromFill(serColor);
                     if (colorVal != null) seriesNode.Format["color"] = colorVal;
+                    // Alpha/transparency
+                    var alphaEl = serColor.Descendants<Drawing.Alpha>().FirstOrDefault();
+                    if (alphaEl?.Val?.HasValue == true)
+                        seriesNode.Format["alpha"] = alphaEl.Val.Value;
                 }
+                // Gradient
+                var gradFill = serSpPr?.GetFirstChild<Drawing.GradientFill>();
+                if (gradFill != null) seriesNode.Format["gradient"] = "true";
+                // Line width
+                var outline = serSpPr?.GetFirstChild<Drawing.Outline>();
+                if (outline?.Width?.HasValue == true)
+                    seriesNode.Format["lineWidth"] = Math.Round(outline.Width.Value / 12700.0, 2);
+                // Line dash
+                var prstDash = outline?.GetFirstChild<Drawing.PresetDash>();
+                if (prstDash?.Val?.HasValue == true)
+                    seriesNode.Format["lineDash"] = prstDash.Val.InnerText;
+                // Marker
+                var marker = serEl?.GetFirstChild<C.Marker>();
+                var markerSymbol = marker?.GetFirstChild<C.Symbol>()?.Val;
+                if (markerSymbol?.HasValue == true)
+                    seriesNode.Format["marker"] = markerSymbol.InnerText;
+                var markerSize = marker?.GetFirstChild<C.Size>()?.Val;
+                if (markerSize?.HasValue == true)
+                    seriesNode.Format["markerSize"] = markerSize.Value;
                 node.Children.Add(seriesNode);
             }
             node.ChildCount = seriesList.Count;
@@ -709,7 +894,8 @@ internal static class ChartHelper
     {
         var chartTypeCount = plotArea.ChildElements
             .Count(e => e is C.BarChart or C.LineChart or C.PieChart or C.AreaChart
-                or C.ScatterChart or C.DoughnutChart or C.Bar3DChart or C.Line3DChart or C.Pie3DChart);
+                or C.ScatterChart or C.DoughnutChart or C.Bar3DChart or C.Line3DChart or C.Pie3DChart
+                or C.BubbleChart or C.RadarChart or C.StockChart);
         if (chartTypeCount > 1) return "combo";
 
         if (plotArea.GetFirstChild<C.BarChart>() is C.BarChart bar)
@@ -726,6 +912,9 @@ internal static class ChartHelper
         if (plotArea.GetFirstChild<C.DoughnutChart>() != null) return "doughnut";
         if (plotArea.GetFirstChild<C.AreaChart>() != null) return "area";
         if (plotArea.GetFirstChild<C.ScatterChart>() != null) return "scatter";
+        if (plotArea.GetFirstChild<C.BubbleChart>() != null) return "bubble";
+        if (plotArea.GetFirstChild<C.RadarChart>() != null) return "radar";
+        if (plotArea.GetFirstChild<C.StockChart>() != null) return "stock";
         if (plotArea.GetFirstChild<C.Bar3DChart>() != null) return "bar3d";
         if (plotArea.GetFirstChild<C.Line3DChart>() != null) return "line3d";
         if (plotArea.GetFirstChild<C.Pie3DChart>() != null) return "pie3d";
@@ -908,15 +1097,76 @@ internal static class ChartHelper
                             dl.AppendChild(new C.ShowCategoryName { Val = parts.Contains("category") || parts.Contains("all") });
                             dl.AppendChild(new C.ShowSeriesName { Val = parts.Contains("series") || parts.Contains("all") });
                             dl.AppendChild(new C.ShowPercent { Val = parts.Contains("percent") || parts.Contains("all") });
-                            // Insert dLbls before gapWidth/overlap/axId per schema order
+                            // Insert dLbls before gapWidth/overlap/showMarker/holeSize/axId per schema order
                             var dlInsertBefore = chartTypeEl.GetFirstChild<C.GapWidth>() as OpenXmlElement
                                 ?? chartTypeEl.GetFirstChild<C.Overlap>() as OpenXmlElement
+                                ?? chartTypeEl.GetFirstChild<C.ShowMarker>() as OpenXmlElement
+                                ?? chartTypeEl.GetFirstChild<C.HoleSize>() as OpenXmlElement
+                                ?? chartTypeEl.GetFirstChild<C.FirstSliceAngle>() as OpenXmlElement
                                 ?? chartTypeEl.GetFirstChild<C.AxisId>();
                             if (dlInsertBefore != null)
                                 chartTypeEl.InsertBefore(dl, dlInsertBefore);
                             else
                                 chartTypeEl.AppendChild(dl);
                         }
+                    }
+                    break;
+                }
+
+                case "labelpos" or "labelposition":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+
+                    // Doughnut does NOT support dLblPos at all — skip entirely
+                    if (plotArea2.GetFirstChild<C.DoughnutChart>() != null) break;
+
+                    // Pie only supports: bestFit, center, insideEnd, insideBase
+                    var isPie = plotArea2.GetFirstChild<C.PieChart>() != null
+                        || plotArea2.GetFirstChild<C.Pie3DChart>() != null;
+
+                    var dlblPos = value.ToLowerInvariant() switch
+                    {
+                        "center" or "ctr" => C.DataLabelPositionValues.Center,
+                        "insideend" or "inside" => C.DataLabelPositionValues.InsideEnd,
+                        "insidebase" or "base" => C.DataLabelPositionValues.InsideBase,
+                        "outsideend" or "outside" => isPie
+                            ? C.DataLabelPositionValues.BestFit
+                            : C.DataLabelPositionValues.OutsideEnd,
+                        "bestfit" or "best" or "auto" => C.DataLabelPositionValues.BestFit,
+                        "top" or "t" => isPie
+                            ? C.DataLabelPositionValues.BestFit
+                            : C.DataLabelPositionValues.Top,
+                        "bottom" or "b" => isPie
+                            ? C.DataLabelPositionValues.BestFit
+                            : C.DataLabelPositionValues.Bottom,
+                        "left" or "l" => isPie
+                            ? C.DataLabelPositionValues.BestFit
+                            : C.DataLabelPositionValues.Left,
+                        "right" or "r" => isPie
+                            ? C.DataLabelPositionValues.BestFit
+                            : C.DataLabelPositionValues.Right,
+                        _ => isPie
+                            ? C.DataLabelPositionValues.BestFit
+                            : C.DataLabelPositionValues.OutsideEnd
+                    };
+                    foreach (var dl in plotArea2.Descendants<C.DataLabels>())
+                    {
+                        dl.RemoveAllChildren<C.DataLabelPosition>();
+                        dl.PrependChild(new C.DataLabelPosition { Val = dlblPos });
+                    }
+                    break;
+                }
+
+                case "labelfont":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    foreach (var dl in plotArea2.Descendants<C.DataLabels>())
+                    {
+                        dl.RemoveAllChildren<C.TextProperties>();
+                        var tp = BuildLabelTextProperties(value);
+                        dl.PrependChild(tp);
                     }
                     break;
                 }
@@ -1047,6 +1297,181 @@ internal static class ChartHelper
                     break;
                 }
 
+                // ---- #2 Gridline styles ----
+                case "gridlines" or "majorgridlines":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    var valAxis = plotArea2?.GetFirstChild<C.ValueAxis>();
+                    if (valAxis == null) { unsupported.Add(key); break; }
+                    valAxis.RemoveAllChildren<C.MajorGridlines>();
+                    if (!value.Equals("none", StringComparison.OrdinalIgnoreCase) &&
+                        !value.Equals("false", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var gl = new C.MajorGridlines();
+                        if (!value.Equals("true", StringComparison.OrdinalIgnoreCase))
+                            gl.AppendChild(BuildLineShapeProperties(value));
+                        valAxis.InsertAfter(gl, valAxis.GetFirstChild<C.AxisPosition>());
+                    }
+                    break;
+                }
+
+                case "minorgridlines":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    var valAxis = plotArea2?.GetFirstChild<C.ValueAxis>();
+                    if (valAxis == null) { unsupported.Add(key); break; }
+                    valAxis.RemoveAllChildren<C.MinorGridlines>();
+                    if (!value.Equals("none", StringComparison.OrdinalIgnoreCase) &&
+                        !value.Equals("false", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var gl = new C.MinorGridlines();
+                        if (!value.Equals("true", StringComparison.OrdinalIgnoreCase))
+                            gl.AppendChild(BuildLineShapeProperties(value));
+                        var afterEl = (OpenXmlElement?)valAxis.GetFirstChild<C.MajorGridlines>()
+                            ?? valAxis.GetFirstChild<C.AxisPosition>();
+                        if (afterEl != null) valAxis.InsertAfter(gl, afterEl);
+                    }
+                    break;
+                }
+
+                case "plotareafill" or "plotfill":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    // plotArea uses C.ShapeProperties (not C.ChartShapeProperties)
+                    plotArea2.RemoveAllChildren<C.ShapeProperties>();
+                    var spPr = new C.ShapeProperties();
+                    var solidFill = new Drawing.SolidFill();
+                    solidFill.AppendChild(BuildChartColorElement(value));
+                    spPr.AppendChild(solidFill);
+                    // Schema order: layout, charts, axes, dTable, spPr, extLst
+                    var extLst = plotArea2.GetFirstChild<C.ExtensionList>();
+                    if (extLst != null)
+                        plotArea2.InsertBefore(spPr, extLst);
+                    else
+                        plotArea2.AppendChild(spPr);
+                    break;
+                }
+
+                case "chartareafill" or "chartfill":
+                {
+                    chartSpace!.RemoveAllChildren<C.ChartShapeProperties>();
+                    var spPr = new C.ChartShapeProperties();
+                    var solidFill = new Drawing.SolidFill();
+                    solidFill.AppendChild(BuildChartColorElement(value));
+                    spPr.AppendChild(solidFill);
+                    chartSpace.InsertBefore(spPr, chart);
+                    break;
+                }
+
+                // ---- #3 Per-series styling ----
+                case "linewidth":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    var widthEmu = (int)(double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) * 12700);
+                    foreach (var ser in plotArea2.Descendants<OpenXmlCompositeElement>().Where(e => e.LocalName == "ser"))
+                        ApplySeriesLineWidth(ser, widthEmu);
+                    break;
+                }
+
+                case "linedash" or "dash":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    foreach (var ser in plotArea2.Descendants<OpenXmlCompositeElement>().Where(e => e.LocalName == "ser"))
+                        ApplySeriesLineDash(ser, value);
+                    break;
+                }
+
+                case "marker" or "markers":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    foreach (var ser in plotArea2.Descendants<OpenXmlCompositeElement>().Where(e => e.LocalName == "ser"))
+                        ApplySeriesMarker(ser, value);
+                    break;
+                }
+
+                case "markersize":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    var mSize = byte.Parse(value);
+                    foreach (var ser in plotArea2.Descendants<OpenXmlCompositeElement>().Where(e => e.LocalName == "ser"))
+                    {
+                        var marker = ser.GetFirstChild<C.Marker>();
+                        if (marker == null) { marker = new C.Marker(); ser.AppendChild(marker); }
+                        marker.RemoveAllChildren<C.Size>();
+                        marker.AppendChild(new C.Size { Val = mSize });
+                    }
+                    break;
+                }
+
+                // ---- #4 Chart style ID ----
+                case "style" or "styleid":
+                {
+                    chartSpace!.RemoveAllChildren<C.Style>();
+                    if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
+                        chartSpace.InsertBefore(new C.Style { Val = (byte)int.Parse(value) }, chart);
+                    break;
+                }
+
+                // ---- #5 Fill transparency ----
+                case "transparency" or "opacity" or "alpha":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    var alphaPercent = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
+                    // If key is "transparency", convert to opacity (e.g. 30% transparency = 70% opacity)
+                    if (key.Equals("transparency", StringComparison.OrdinalIgnoreCase))
+                        alphaPercent = 100.0 - alphaPercent;
+                    var alphaVal = (int)(alphaPercent * 1000); // OOXML uses 1/1000th percent
+                    foreach (var ser in plotArea2.Descendants<OpenXmlCompositeElement>().Where(e => e.LocalName == "ser"))
+                        ApplySeriesAlpha(ser, alphaVal);
+                    break;
+                }
+
+                // ---- #6 Gradient fill ----
+                case "gradient":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    // Format: "color1-color2" or "color1-color2-color3" with optional ":angle"
+                    // e.g. "FF0000-0000FF" or "FF0000-00FF00-0000FF:90"
+                    var allSer = plotArea2.Descendants<OpenXmlCompositeElement>()
+                        .Where(e => e.LocalName == "ser").ToList();
+                    for (int si = 0; si < allSer.Count; si++)
+                        ApplySeriesGradient(allSer[si], value);
+                    break;
+                }
+
+                case "gradients":
+                {
+                    // Per-series gradients: "FF0000-0000FF,00FF00-FFFF00" (comma-separated, one per series)
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    var gradList = value.Split(';').Select(g => g.Trim()).ToArray();
+                    var allSer = plotArea2.Descendants<OpenXmlCompositeElement>()
+                        .Where(e => e.LocalName == "ser").ToList();
+                    for (int si = 0; si < Math.Min(gradList.Length, allSer.Count); si++)
+                        ApplySeriesGradient(allSer[si], gradList[si]);
+                    break;
+                }
+
+                // ---- #7 Secondary axis ----
+                case "secondaryaxis" or "secondary":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    // value = series indices on secondary axis, e.g. "2,3" (1-based)
+                    var secondaryIndices = value.Split(',')
+                        .Select(s => int.TryParse(s.Trim(), out var v) ? v : -1)
+                        .Where(v => v > 0).ToHashSet();
+                    ApplySecondaryAxis(plotArea2, secondaryIndices);
+                    break;
+                }
+
                 default:
                     if (key.StartsWith("series", StringComparison.OrdinalIgnoreCase) &&
                         int.TryParse(key[6..], out var seriesIdx))
@@ -1106,5 +1531,335 @@ internal static class ChartHelper
 
         chartSpace!.Save();
         return unsupported;
+    }
+
+    // ==================== #1 Data Label Helpers ====================
+
+    /// <summary>
+    /// Build text properties for data labels: "size:color:bold" e.g. "10:FF0000:true" or just "10"
+    /// </summary>
+    private static C.TextProperties BuildLabelTextProperties(string spec)
+    {
+        var parts = spec.Split(':');
+        var fontSize = parts.Length > 0 && int.TryParse(parts[0], out var fs) ? fs * 100 : 1000;
+        var color = parts.Length > 1 ? parts[1] : null;
+        var bold = parts.Length > 2 && parts[2].Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        var defRp = new Drawing.DefaultRunProperties { FontSize = fontSize, Bold = bold };
+        if (!string.IsNullOrEmpty(color))
+        {
+            var solidFill = new Drawing.SolidFill();
+            solidFill.AppendChild(BuildChartColorElement(color));
+            defRp.AppendChild(solidFill);
+        }
+
+        return new C.TextProperties(
+            new Drawing.BodyProperties(),
+            new Drawing.ListStyle(),
+            new Drawing.Paragraph(new Drawing.ParagraphProperties(defRp))
+        );
+    }
+
+    // ==================== #2 Gridline / Shape Property Helpers ====================
+
+    /// <summary>
+    /// Build shape properties for gridlines/outlines. Format: "color" or "color:widthPt" or "color:widthPt:dash"
+    /// e.g. "CCCCCC", "CCCCCC:0.5", "CCCCCC:1:dash"
+    /// </summary>
+    private static C.ChartShapeProperties BuildLineShapeProperties(string spec)
+    {
+        var parts = spec.Split(':');
+        var color = parts[0].Trim();
+        var widthPt = parts.Length > 1 && double.TryParse(parts[1], System.Globalization.CultureInfo.InvariantCulture, out var w) ? w : 0.5;
+        var dash = parts.Length > 2 ? parts[2].Trim() : null;
+
+        var outline = new Drawing.Outline { Width = (int)(widthPt * 12700) };
+        var solidFill = new Drawing.SolidFill();
+        solidFill.AppendChild(BuildChartColorElement(color));
+        outline.AppendChild(solidFill);
+
+        if (!string.IsNullOrEmpty(dash))
+        {
+            var dashVal = ParseDashStyle(dash);
+            outline.AppendChild(new Drawing.PresetDash { Val = dashVal });
+        }
+
+        var spPr = new C.ChartShapeProperties();
+        spPr.AppendChild(outline);
+        return spPr;
+    }
+
+    private static Drawing.PresetLineDashValues ParseDashStyle(string dash)
+    {
+        return dash.ToLowerInvariant() switch
+        {
+            "solid" => Drawing.PresetLineDashValues.Solid,
+            "dot" or "sysdot" => Drawing.PresetLineDashValues.SystemDot,
+            "dash" or "sysdash" => Drawing.PresetLineDashValues.SystemDash,
+            "dashdot" or "sysdash_dot" => Drawing.PresetLineDashValues.SystemDashDot,
+            "longdash" => Drawing.PresetLineDashValues.LargeDash,
+            "longdashdot" => Drawing.PresetLineDashValues.LargeDashDot,
+            "longdashdotdot" => Drawing.PresetLineDashValues.LargeDashDotDot,
+            _ => Drawing.PresetLineDashValues.Solid
+        };
+    }
+
+    // ==================== #3 Per-Series Style Helpers ====================
+
+    private static C.ChartShapeProperties GetOrCreateSeriesShapeProperties(OpenXmlCompositeElement series)
+    {
+        var spPr = series.GetFirstChild<C.ChartShapeProperties>();
+        if (spPr != null) return spPr;
+        spPr = new C.ChartShapeProperties();
+        var serText = series.GetFirstChild<C.SeriesText>();
+        if (serText != null) serText.InsertAfterSelf(spPr);
+        else series.PrependChild(spPr);
+        return spPr;
+    }
+
+    internal static void ApplySeriesLineWidth(OpenXmlCompositeElement series, int widthEmu)
+    {
+        var spPr = GetOrCreateSeriesShapeProperties(series);
+        var outline = spPr.GetFirstChild<Drawing.Outline>();
+        if (outline == null) { outline = new Drawing.Outline(); spPr.AppendChild(outline); }
+        outline.Width = widthEmu;
+    }
+
+    internal static void ApplySeriesLineDash(OpenXmlCompositeElement series, string dashStyle)
+    {
+        var spPr = GetOrCreateSeriesShapeProperties(series);
+        var outline = spPr.GetFirstChild<Drawing.Outline>();
+        if (outline == null) { outline = new Drawing.Outline(); spPr.AppendChild(outline); }
+        outline.RemoveAllChildren<Drawing.PresetDash>();
+        outline.AppendChild(new Drawing.PresetDash { Val = ParseDashStyle(dashStyle) });
+    }
+
+    internal static void ApplySeriesMarker(OpenXmlCompositeElement series, string markerSpec)
+    {
+        // Format: "style" or "style:size" or "style:size:color", e.g. "circle", "diamond:8", "square:6:FF0000"
+        var parts = markerSpec.Split(':');
+        var style = parts[0].Trim().ToLowerInvariant() switch
+        {
+            "circle" => C.MarkerStyleValues.Circle,
+            "diamond" => C.MarkerStyleValues.Diamond,
+            "square" => C.MarkerStyleValues.Square,
+            "triangle" => C.MarkerStyleValues.Triangle,
+            "star" => C.MarkerStyleValues.Star,
+            "x" => C.MarkerStyleValues.X,
+            "plus" => C.MarkerStyleValues.Plus,
+            "dash" => C.MarkerStyleValues.Dash,
+            "dot" => C.MarkerStyleValues.Dot,
+            "none" => C.MarkerStyleValues.None,
+            _ => C.MarkerStyleValues.Circle
+        };
+
+        series.RemoveAllChildren<C.Marker>();
+        var marker = new C.Marker();
+        marker.AppendChild(new C.Symbol { Val = style });
+        if (parts.Length > 1 && byte.TryParse(parts[1], out var size))
+            marker.AppendChild(new C.Size { Val = size });
+        if (parts.Length > 2)
+        {
+            var mSpPr = new C.ChartShapeProperties();
+            var fill = new Drawing.SolidFill();
+            fill.AppendChild(BuildChartColorElement(parts[2]));
+            mSpPr.AppendChild(fill);
+            marker.AppendChild(mSpPr);
+        }
+
+        // Insert marker after spPr or seriesText
+        var afterEl = (OpenXmlElement?)series.GetFirstChild<C.ChartShapeProperties>()
+            ?? series.GetFirstChild<C.SeriesText>();
+        if (afterEl != null) afterEl.InsertAfterSelf(marker);
+        else series.PrependChild(marker);
+    }
+
+    // ==================== #5 Transparency Helper ====================
+
+    internal static void ApplySeriesAlpha(OpenXmlCompositeElement series, int alphaVal)
+    {
+        var spPr = GetOrCreateSeriesShapeProperties(series);
+        var solidFill = spPr.GetFirstChild<Drawing.SolidFill>();
+        if (solidFill == null) return;
+
+        var colorEl = solidFill.FirstChild;
+        if (colorEl == null) return;
+        // Remove existing alpha
+        foreach (var existing in colorEl.Elements<Drawing.Alpha>().ToList())
+            existing.Remove();
+        colorEl.AppendChild(new Drawing.Alpha { Val = alphaVal });
+    }
+
+    // ==================== #6 Gradient Fill Helper ====================
+
+    internal static void ApplySeriesGradient(OpenXmlCompositeElement series, string gradientSpec)
+    {
+        // Format: "color1-color2" or "color1-color2-color3" optionally ":angle"
+        // e.g. "FF0000-0000FF", "FF0000-00FF00-0000FF:90"
+        var anglePart = 0;
+        var colorsPart = gradientSpec;
+        var colonIdx = gradientSpec.LastIndexOf(':');
+        if (colonIdx > 0 && int.TryParse(gradientSpec[(colonIdx + 1)..], out var angle))
+        {
+            anglePart = angle;
+            colorsPart = gradientSpec[..colonIdx];
+        }
+
+        var colors = colorsPart.Split('-').Select(c => c.Trim()).ToArray();
+        if (colors.Length < 2) return;
+
+        var gradFill = new Drawing.GradientFill();
+        var gsLst = new Drawing.GradientStopList();
+
+        for (int i = 0; i < colors.Length; i++)
+        {
+            var pos = colors.Length == 1 ? 0 : (int)(i * 100000.0 / (colors.Length - 1));
+            var gs = new Drawing.GradientStop { Position = pos };
+            gs.AppendChild(BuildChartColorElement(colors[i]));
+            gsLst.AppendChild(gs);
+        }
+        gradFill.AppendChild(gsLst);
+        gradFill.AppendChild(new Drawing.LinearGradientFill
+        {
+            Angle = anglePart * 60000, // degrees to 60000ths
+            Scaled = true
+        });
+
+        var spPr = GetOrCreateSeriesShapeProperties(series);
+        spPr.RemoveAllChildren<Drawing.SolidFill>();
+        spPr.RemoveAllChildren<Drawing.GradientFill>();
+        // Insert gradient before outline
+        var outlineEl = spPr.GetFirstChild<Drawing.Outline>();
+        if (outlineEl != null) spPr.InsertBefore(gradFill, outlineEl);
+        else spPr.PrependChild(gradFill);
+    }
+
+    // ==================== #7 Secondary Axis Helper ====================
+
+    internal static void ApplySecondaryAxis(C.PlotArea plotArea, HashSet<int> secondarySeriesIndices)
+    {
+        // Find existing axis IDs
+        var existingAxes = plotArea.Elements<C.ValueAxis>().ToList();
+        var existingCatAxes = plotArea.Elements<C.CategoryAxis>().ToList();
+
+        uint primaryCatAxisId = existingCatAxes.FirstOrDefault()?.GetFirstChild<C.AxisId>()?.Val?.Value ?? 1u;
+        uint primaryValAxisId = existingAxes.FirstOrDefault()?.GetFirstChild<C.AxisId>()?.Val?.Value ?? 2u;
+        uint secondaryCatAxisId = 3u;
+        uint secondaryValAxisId = 4u;
+
+        // Collect series that should be on secondary axis
+        var allChartTypes = plotArea.ChildElements
+            .Where(e => e.LocalName.Contains("Chart") || e.LocalName.Contains("chart"))
+            .OfType<OpenXmlCompositeElement>().ToList();
+
+        var seriesToMove = new List<OpenXmlElement>();
+        int globalIdx = 0;
+        foreach (var ct in allChartTypes)
+        {
+            foreach (var ser in ct.ChildElements.Where(e => e.LocalName == "ser").ToList())
+            {
+                globalIdx++;
+                if (secondarySeriesIndices.Contains(globalIdx))
+                    seriesToMove.Add(ser);
+            }
+        }
+
+        if (seriesToMove.Count == 0) return;
+
+        // Detect type of first moved series' parent chart
+        var sourceChartType = seriesToMove[0].Parent;
+        if (sourceChartType == null) return;
+
+        // Create a new chart element of the same type for secondary axis
+        OpenXmlCompositeElement secondaryChart;
+        var localName = sourceChartType.LocalName;
+        if (localName.StartsWith("line", StringComparison.OrdinalIgnoreCase))
+        {
+            secondaryChart = new C.LineChart(
+                new C.Grouping { Val = C.GroupingValues.Standard },
+                new C.VaryColors { Val = false }
+            );
+        }
+        else if (localName.StartsWith("bar", StringComparison.OrdinalIgnoreCase))
+        {
+            var origDir = sourceChartType.GetFirstChild<C.BarDirection>()?.Val?.Value ?? C.BarDirectionValues.Column;
+            secondaryChart = new C.BarChart(
+                new C.BarDirection { Val = origDir },
+                new C.BarGrouping { Val = C.BarGroupingValues.Clustered },
+                new C.VaryColors { Val = false }
+            );
+        }
+        else if (localName.StartsWith("area", StringComparison.OrdinalIgnoreCase))
+        {
+            secondaryChart = new C.AreaChart(
+                new C.Grouping { Val = C.GroupingValues.Standard },
+                new C.VaryColors { Val = false }
+            );
+        }
+        else
+        {
+            // Default to line for secondary axis
+            secondaryChart = new C.LineChart(
+                new C.Grouping { Val = C.GroupingValues.Standard },
+                new C.VaryColors { Val = false }
+            );
+        }
+
+        // Move series to secondary chart
+        foreach (var ser in seriesToMove)
+        {
+            ser.Remove();
+            secondaryChart.AppendChild(ser.CloneNode(true));
+        }
+
+        secondaryChart.AppendChild(new C.AxisId { Val = secondaryCatAxisId });
+        secondaryChart.AppendChild(new C.AxisId { Val = secondaryValAxisId });
+
+        // Insert secondary chart into plot area (before axes)
+        var firstAxis = plotArea.Elements<C.CategoryAxis>().FirstOrDefault() as OpenXmlElement
+            ?? plotArea.Elements<C.ValueAxis>().FirstOrDefault();
+        if (firstAxis != null)
+            plotArea.InsertBefore(secondaryChart, firstAxis);
+        else
+            plotArea.AppendChild(secondaryChart);
+
+        // Remove existing secondary axes if any
+        foreach (var ax in plotArea.Elements<C.CategoryAxis>()
+            .Where(a => a.GetFirstChild<C.AxisId>()?.Val?.Value == secondaryCatAxisId).ToList())
+            ax.Remove();
+        foreach (var ax in plotArea.Elements<C.ValueAxis>()
+            .Where(a => a.GetFirstChild<C.AxisId>()?.Val?.Value == secondaryValAxisId).ToList())
+            ax.Remove();
+
+        // Add secondary category axis (hidden) — insert after existing axes
+        var secCatAxis = new C.CategoryAxis(
+            new C.AxisId { Val = secondaryCatAxisId },
+            new C.Scaling(new C.Orientation { Val = C.OrientationValues.MinMax }),
+            new C.Delete { Val = true }, // hidden
+            new C.AxisPosition { Val = C.AxisPositionValues.Bottom },
+            new C.MajorTickMark { Val = C.TickMarkValues.None },
+            new C.MinorTickMark { Val = C.TickMarkValues.None },
+            new C.TickLabelPosition { Val = C.TickLabelPositionValues.None },
+            new C.CrossingAxis { Val = secondaryValAxisId },
+            new C.Crosses { Val = C.CrossesValues.AutoZero }
+        );
+
+        // Add secondary value axis (visible, on the right)
+        var secValAxis = BuildValueAxis(secondaryValAxisId, secondaryCatAxisId, C.AxisPositionValues.Right);
+        secValAxis.RemoveAllChildren<C.MajorGridlines>(); // secondary axis typically has no gridlines
+
+        // Insert after the last existing axis to maintain schema order
+        var lastAxis = plotArea.Elements<C.ValueAxis>().LastOrDefault() as OpenXmlElement
+            ?? plotArea.Elements<C.CategoryAxis>().LastOrDefault() as OpenXmlElement;
+        if (lastAxis != null)
+        {
+            lastAxis.InsertAfterSelf(secCatAxis);
+            secCatAxis.InsertAfterSelf(secValAxis);
+        }
+        else
+        {
+            plotArea.AppendChild(secCatAxis);
+            plotArea.AppendChild(secValAxis);
+        }
     }
 }

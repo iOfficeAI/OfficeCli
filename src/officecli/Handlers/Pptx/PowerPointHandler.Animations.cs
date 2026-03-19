@@ -108,8 +108,84 @@ public partial class PowerPointHandler
             "conveyor" => new DocumentFormat.OpenXml.Office2010.PowerPoint.ConveyorTransition(),
             "pan" => new DocumentFormat.OpenXml.Office2010.PowerPoint.PanTransition { Direction = ParseSlideDir(direction ?? "left") },
             "reveal" => new DocumentFormat.OpenXml.Office2010.PowerPoint.RevealTransition(),
+            "morph" => null, // handled specially below
             _ => null
         };
+
+        // Morph transition: requires mc:AlternateContent wrapper with p159 namespace
+        // PowerPoint ignores bare p159:morph without the mc:Choice/Fallback structure
+        if (typeName == "morph")
+        {
+            var morphOption = direction switch
+            {
+                "byword" or "word" => "byWord",
+                "bychar" or "char" or "character" => "byChar",
+                _ => "byObject"
+            };
+
+            var mcNs = "http://schemas.openxmlformats.org/markup-compatibility/2006";
+            var pNs = "http://schemas.openxmlformats.org/presentationml/2006/main";
+            var p159Ns = "http://schemas.microsoft.com/office/powerpoint/2015/09/main";
+
+            // Build speed/duration attributes
+            var spdAttr = speed.HasValue ? $" spd=\"{speed.Value.ToString().ToLowerInvariant()}\"" : "";
+            var durAttr = durationMs != null ? $" dur=\"{durationMs}\"" : "";
+
+            // mc:AlternateContent > mc:Choice[Requires=p159] > p:transition > p159:morph
+            var acElement = new OpenXmlUnknownElement("mc", "AlternateContent", mcNs);
+            var choiceElement = new OpenXmlUnknownElement("mc", "Choice", mcNs);
+            choiceElement.SetAttribute(new OpenXmlAttribute("", "Requires", null!, "p159"));
+
+            var morphTrans = new OpenXmlUnknownElement("p", "transition", pNs);
+            morphTrans.AddNamespaceDeclaration("p159", p159Ns);
+            if (speed.HasValue)
+                morphTrans.SetAttribute(new OpenXmlAttribute("", "spd", null!, speed.Value.ToString().ToLowerInvariant()));
+            if (durationMs != null)
+                morphTrans.SetAttribute(new OpenXmlAttribute("", "dur", null!, durationMs));
+            var morphElem = new OpenXmlUnknownElement("p159", "morph", p159Ns);
+            morphElem.SetAttribute(new OpenXmlAttribute("", "option", null!, morphOption));
+            morphTrans.AppendChild(morphElem);
+            choiceElement.AppendChild(morphTrans);
+
+            // mc:Fallback > p:transition > p:fade (graceful degradation for older PPT)
+            var fallbackElement = new OpenXmlUnknownElement("mc", "Fallback", mcNs);
+            var fallbackTrans = new OpenXmlUnknownElement("p", "transition", pNs);
+            if (speed.HasValue)
+                fallbackTrans.SetAttribute(new OpenXmlAttribute("", "spd", null!, speed.Value.ToString().ToLowerInvariant()));
+            fallbackTrans.AppendChild(new OpenXmlUnknownElement("p", "fade", pNs));
+            fallbackElement.AppendChild(fallbackTrans);
+
+            acElement.AppendChild(choiceElement);
+            acElement.AppendChild(fallbackElement);
+
+            // Remove existing transition or AlternateContent with transition
+            foreach (var existing in slide.ChildElements
+                .Where(c => c.LocalName == "transition" || c.LocalName == "AlternateContent")
+                .ToList())
+                existing.Remove();
+
+            // Insert after cSld (and after any existing clrMapOvr)
+            var insertAfter = slide.GetFirstChild<ColorMapOverride>() as OpenXmlElement
+                ?? slide.CommonSlideData as OpenXmlElement;
+            if (insertAfter != null)
+                insertAfter.InsertAfterSelf(acElement);
+            else
+                slide.AppendChild(acElement);
+
+            // Declare namespaces and mc:Ignorable on slide root
+            // mc:Ignorable="p159" tells PowerPoint to process p159 via AlternateContent
+            try { slide.AddNamespaceDeclaration("p159", p159Ns); } catch { }
+            try { slide.AddNamespaceDeclaration("mc", mcNs); } catch { }
+            var ignorable = slide.MCAttributes?.Ignorable?.Value;
+            if (ignorable == null || !ignorable.Contains("p159"))
+            {
+                slide.MCAttributes ??= new MarkupCompatibilityAttributes();
+                slide.MCAttributes.Ignorable = string.IsNullOrEmpty(ignorable) ? "p159" : $"{ignorable} p159";
+            }
+
+            slide.Save();
+            return;
+        }
 
         if (transElem != null) trans.Append(transElem);
 
@@ -912,5 +988,87 @@ public partial class PowerPointHandler
             mediaNode = new Audio(cMediaNode) { IsNarration = false };
 
         rootChildList.AppendChild(mediaNode);
+    }
+
+    /// <summary>
+    /// Auto-add "!!" prefix to all named shapes on the current slide and the previous slide.
+    /// This ensures morph matches shapes even when their text content differs.
+    /// Skips shapes that already have "!!" prefix or have default names like "TextBox N".
+    /// </summary>
+    private void AutoPrefixMorphNames(DocumentFormat.OpenXml.Packaging.SlidePart currentSlidePart)
+    {
+        var slideParts = GetSlideParts().ToList();
+        var currentIdx = slideParts.IndexOf(currentSlidePart);
+        if (currentIdx < 0) return;
+
+        // Process current slide + previous slide
+        // Morph on slide N means transition from slide N-1 → slide N
+        var slidesToProcess = new List<DocumentFormat.OpenXml.Packaging.SlidePart> { currentSlidePart };
+        if (currentIdx > 0) slidesToProcess.Add(slideParts[currentIdx - 1]);
+
+        foreach (var sp in slidesToProcess)
+        {
+            var shapeTree = GetSlide(sp).CommonSlideData?.ShapeTree;
+            if (shapeTree == null) continue;
+
+            foreach (var shape in shapeTree.Elements<Shape>())
+            {
+                var nvPr = shape.NonVisualShapeProperties?.NonVisualDrawingProperties;
+                if (nvPr?.Name == null) continue;
+
+                var name = nvPr.Name.Value;
+                if (string.IsNullOrEmpty(name)) continue;
+                if (name.StartsWith("!!")) continue; // already prefixed
+                // Skip auto-generated default names (TextBox N, etc.)
+                if (name.StartsWith("TextBox ") || name.StartsWith("Content ") || name == "") continue;
+
+                nvPr.Name = "!!" + name;
+            }
+
+            GetSlide(sp).Save();
+        }
+    }
+
+    /// <summary>
+    /// Remove "!!" prefix from shape names when morph is removed.
+    /// Only strips prefix from current slide + previous slide.
+    /// </summary>
+    private void AutoUnprefixMorphNames(DocumentFormat.OpenXml.Packaging.SlidePart currentSlidePart)
+    {
+        var slideParts = GetSlideParts().ToList();
+        var currentIdx = slideParts.IndexOf(currentSlidePart);
+        if (currentIdx < 0) return;
+
+        var slidesToProcess = new List<DocumentFormat.OpenXml.Packaging.SlidePart> { currentSlidePart };
+        if (currentIdx > 0) slidesToProcess.Add(slideParts[currentIdx - 1]);
+
+        foreach (var sp in slidesToProcess)
+        {
+            // Don't strip if this slide still has morph from another direction
+            // (e.g. slide 3 has morph, user removes morph from slide 2 — don't strip slide 2
+            //  if slide 3 still morphs from slide 2)
+            var nextIdx = slideParts.IndexOf(sp) + 1;
+            if (nextIdx < slideParts.Count)
+            {
+                var nextSlide = GetSlide(slideParts[nextIdx]);
+                var hasMorphNext = nextSlide.ChildElements.Any(c =>
+                    c.LocalName == "AlternateContent" && c.InnerXml.Contains("morph"));
+                if (hasMorphNext) continue;
+            }
+
+            var shapeTree = GetSlide(sp).CommonSlideData?.ShapeTree;
+            if (shapeTree == null) continue;
+
+            foreach (var shape in shapeTree.Elements<Shape>())
+            {
+                var nvPr = shape.NonVisualShapeProperties?.NonVisualDrawingProperties;
+                if (nvPr?.Name == null) continue;
+                var name = nvPr.Name.Value;
+                if (name != null && name.StartsWith("!!"))
+                    nvPr.Name = name[2..];
+            }
+
+            GetSlide(sp).Save();
+        }
     }
 }

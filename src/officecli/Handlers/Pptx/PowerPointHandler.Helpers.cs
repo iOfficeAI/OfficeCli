@@ -28,6 +28,8 @@ public partial class PowerPointHandler
         ReadBorderLine(tcPr.RightBorderLineProperties, "border.right", node);
         ReadBorderLine(tcPr.TopBorderLineProperties, "border.top", node);
         ReadBorderLine(tcPr.BottomBorderLineProperties, "border.bottom", node);
+        ReadBorderLine(tcPr.TopLeftToBottomRightBorderLineProperties, "border.tl2br", node);
+        ReadBorderLine(tcPr.BottomLeftToTopRightBorderLineProperties, "border.tr2bl", node);
     }
 
     /// <summary>
@@ -215,4 +217,216 @@ public partial class PowerPointHandler
     private static long ParseEmu(string value) => Core.EmuConverter.ParseEmu(value);
 
     private static string FormatEmu(long emu) => Core.EmuConverter.FormatEmu(emu);
+
+    /// <summary>
+    /// Read a GradientFill element and return a string representation (C1-C2[-angle] or radial:C1-C2[-focus]).
+    /// </summary>
+    internal static string ReadGradientString(Drawing.GradientFill gradFill)
+    {
+        var stops = gradFill.GradientStopList?.Elements<Drawing.GradientStop>()
+            .Select(gs => gs.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value ?? "?")
+            .ToList();
+        if (stops == null || stops.Count == 0) return "gradient";
+
+        var pathGrad = gradFill.GetFirstChild<Drawing.PathGradientFill>();
+        if (pathGrad != null)
+        {
+            var fillRect = pathGrad.GetFirstChild<Drawing.FillToRectangle>();
+            var focus = "center";
+            if (fillRect != null)
+            {
+                var fl = fillRect.Left?.Value ?? 50000;
+                var ft = fillRect.Top?.Value ?? 50000;
+                focus = (fl, ft) switch
+                {
+                    (0, 0) => "tl",
+                    ( >= 100000, 0) => "tr",
+                    (0, >= 100000) => "bl",
+                    ( >= 100000, >= 100000) => "br",
+                    _ => "center"
+                };
+            }
+            return $"radial:{string.Join("-", stops)}-{focus}";
+        }
+
+        var gradStr = string.Join("-", stops);
+        var linear = gradFill.GetFirstChild<Drawing.LinearGradientFill>();
+        if (linear?.Angle?.HasValue == true)
+            gradStr += $"-{linear.Angle.Value / 60000}";
+        return gradStr;
+    }
+
+    /// <summary>
+    /// Parse SVG-like path syntax into a Drawing.CustomGeometry element.
+    /// Format: "M x,y L x,y C x1,y1 x2,y2 x,y Q x1,y1 x,y Z"
+    ///   M = moveTo, L = lineTo, C = cubicBezTo, Q = quadBezTo, A = arcTo, Z = close
+    /// Coordinates are integers (EMU-scale, typically matching the shape's width/height).
+    /// Example: "M 0,0 L 100,0 L 100,100 L 0,100 Z" (rectangle in 100x100 space)
+    /// </summary>
+    private static Drawing.CustomGeometry ParseCustomGeometry(string value)
+    {
+        var path = new Drawing.Path();
+
+        // Parse SVG-like commands
+        var tokens = value.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        long maxX = 0, maxY = 0;
+        int i = 0;
+
+        while (i < tokens.Length)
+        {
+            var cmd = tokens[i].ToUpperInvariant();
+            i++;
+
+            switch (cmd)
+            {
+                case "M":
+                {
+                    var (x, y) = ParsePointToken(tokens[i++]);
+                    path.AppendChild(new Drawing.MoveTo(new Drawing.Point { X = x.ToString(), Y = y.ToString() }));
+                    TrackMax(ref maxX, ref maxY, x, y);
+                    break;
+                }
+                case "L":
+                {
+                    var (x, y) = ParsePointToken(tokens[i++]);
+                    path.AppendChild(new Drawing.LineTo(new Drawing.Point { X = x.ToString(), Y = y.ToString() }));
+                    TrackMax(ref maxX, ref maxY, x, y);
+                    break;
+                }
+                case "C":
+                {
+                    // Cubic bezier: 3 points (control1, control2, end)
+                    var (x1, y1) = ParsePointToken(tokens[i++]);
+                    var (x2, y2) = ParsePointToken(tokens[i++]);
+                    var (x3, y3) = ParsePointToken(tokens[i++]);
+                    path.AppendChild(new Drawing.CubicBezierCurveTo(
+                        new Drawing.Point { X = x1.ToString(), Y = y1.ToString() },
+                        new Drawing.Point { X = x2.ToString(), Y = y2.ToString() },
+                        new Drawing.Point { X = x3.ToString(), Y = y3.ToString() }
+                    ));
+                    TrackMax(ref maxX, ref maxY, x3, y3);
+                    break;
+                }
+                case "Q":
+                {
+                    // Quadratic bezier: 2 points (control, end)
+                    var (x1, y1) = ParsePointToken(tokens[i++]);
+                    var (x2, y2) = ParsePointToken(tokens[i++]);
+                    path.AppendChild(new Drawing.QuadraticBezierCurveTo(
+                        new Drawing.Point { X = x1.ToString(), Y = y1.ToString() },
+                        new Drawing.Point { X = x2.ToString(), Y = y2.ToString() }
+                    ));
+                    TrackMax(ref maxX, ref maxY, x2, y2);
+                    break;
+                }
+                case "Z":
+                    path.AppendChild(new Drawing.CloseShapePath());
+                    break;
+                default:
+                    // Skip unknown tokens
+                    break;
+            }
+        }
+
+        // Set path dimensions to bounding box
+        if (maxX > 0) path.Width = maxX;
+        if (maxY > 0) path.Height = maxY;
+
+        return new Drawing.CustomGeometry(
+            new Drawing.AdjustValueList(),
+            new Drawing.ShapeGuideList(),
+            new Drawing.AdjustHandleList(),
+            new Drawing.ConnectionSiteList(),
+            new Drawing.Rectangle { Left = "0", Top = "0", Right = "r", Bottom = "b" },
+            new Drawing.PathList(path)
+        );
+    }
+
+    private static (long x, long y) ParsePointToken(string token)
+    {
+        var parts = token.Split(',');
+        return (long.Parse(parts[0].Trim()), long.Parse(parts[1].Trim()));
+    }
+
+    private static void TrackMax(ref long maxX, ref long maxY, long x, long y)
+    {
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+    }
+
+    /// <summary>
+    /// Change the z-order of a shape within the ShapeTree.
+    /// Values: "front" (topmost), "back" (bottommost), "forward" (+1), "backward" (-1),
+    ///         or an integer for absolute position (1-based, 1 = back, N = front).
+    /// </summary>
+    private static void ApplyZOrder(DocumentFormat.OpenXml.Packaging.SlidePart slidePart, Shape shape, string value)
+    {
+        var shapeTree = shape.Parent as ShapeTree
+            ?? throw new InvalidOperationException("Shape is not in a ShapeTree");
+
+        // Get all content elements (Shape, Picture, GraphicFrame, GroupShape, ConnectionShape)
+        // that participate in z-order (skip structural elements like nvGrpSpPr, grpSpPr)
+        var contentElements = shapeTree.ChildElements
+            .Where(e => e is Shape or Picture or GraphicFrame or GroupShape or ConnectionShape)
+            .ToList();
+        var currentIndex = contentElements.IndexOf(shape);
+        if (currentIndex < 0) return;
+
+        int targetIndex;
+        switch (value.ToLowerInvariant())
+        {
+            case "front" or "top" or "bringtofront":
+                targetIndex = contentElements.Count - 1;
+                break;
+            case "back" or "bottom" or "sendtoback":
+                targetIndex = 0;
+                break;
+            case "forward" or "bringforward" or "+1":
+                targetIndex = Math.Min(currentIndex + 1, contentElements.Count - 1);
+                break;
+            case "backward" or "sendbackward" or "-1":
+                targetIndex = Math.Max(currentIndex - 1, 0);
+                break;
+            default:
+                // Absolute position (1-based: 1 = back, N = front)
+                if (int.TryParse(value, out var pos))
+                    targetIndex = Math.Clamp(pos - 1, 0, contentElements.Count - 1);
+                else
+                    throw new ArgumentException($"Invalid z-order value: {value}. Use front/back/forward/backward or a number.");
+                break;
+        }
+
+        if (targetIndex == currentIndex) return;
+
+        // Remove shape from its current position
+        shape.Remove();
+
+        // Insert at new position
+        if (targetIndex >= contentElements.Count - 1)
+        {
+            // Front: append after last content element (or at end of tree)
+            shapeTree.AppendChild(shape);
+        }
+        else if (targetIndex <= 0)
+        {
+            // Back: insert before the first content element
+            var firstContent = shapeTree.ChildElements
+                .FirstOrDefault(e => e is Shape or Picture or GraphicFrame or GroupShape or ConnectionShape);
+            if (firstContent != null)
+                firstContent.InsertBeforeSelf(shape);
+            else
+                shapeTree.AppendChild(shape);
+        }
+        else
+        {
+            // Refresh content list after removal
+            var updatedContent = shapeTree.ChildElements
+                .Where(e => e is Shape or Picture or GraphicFrame or GroupShape or ConnectionShape)
+                .ToList();
+            if (targetIndex < updatedContent.Count)
+                updatedContent[targetIndex].InsertBeforeSelf(shape);
+            else
+                shapeTree.AppendChild(shape);
+        }
+    }
 }

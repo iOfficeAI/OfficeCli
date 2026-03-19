@@ -127,8 +127,11 @@ public partial class PowerPointHandler
                 Type = "paragraph",
                 Text = paraText
             };
-            var align = para.ParagraphProperties?.Alignment;
-            if (align != null && align.HasValue) paraNode.Format["align"] = align.InnerText;
+            var qParaPProps = para.ParagraphProperties;
+            if (qParaPProps?.Alignment?.HasValue == true) paraNode.Format["align"] = qParaPProps.Alignment.InnerText;
+            if (qParaPProps?.Indent?.HasValue == true) paraNode.Format["indent"] = FormatEmu(qParaPProps.Indent.Value);
+            if (qParaPProps?.LeftMargin?.HasValue == true) paraNode.Format["marginLeft"] = FormatEmu(qParaPProps.LeftMargin.Value);
+            if (qParaPProps?.RightMargin?.HasValue == true) paraNode.Format["marginRight"] = FormatEmu(qParaPProps.RightMargin.Value);
 
             var runs = para.Elements<Drawing.Run>().ToList();
             paraNode.ChildCount = runs.Count;
@@ -235,10 +238,32 @@ public partial class PowerPointHandler
                 Text = cellText
             };
 
-            // Cell fill
+            // Cell fill (blip, gradient, or solid)
             var tcPr = cell.TableCellProperties ?? cell.GetFirstChild<Drawing.TableCellProperties>();
-            var cellFillHex = tcPr?.GetFirstChild<Drawing.SolidFill>()?.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
-            if (cellFillHex != null) cellNode.Format["fill"] = cellFillHex;
+            var cellBlipFill = tcPr?.GetFirstChild<Drawing.BlipFill>();
+            if (cellBlipFill != null)
+            {
+                var blipEmbed = cellBlipFill.GetFirstChild<Drawing.Blip>()?.Embed?.Value;
+                cellNode.Format["fill"] = "image";
+                if (blipEmbed != null) cellNode.Format["image.relId"] = blipEmbed;
+            }
+            else if (tcPr?.GetFirstChild<Drawing.GradientFill>() is { } gradFill)
+            {
+                var stops = gradFill.GradientStopList?.Elements<Drawing.GradientStop>().ToList();
+                if (stops != null && stops.Count >= 2)
+                {
+                    var gc1 = stops[0].GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value ?? "";
+                    var gc2 = stops[^1].GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value ?? "";
+                    var lin = gradFill.GetFirstChild<Drawing.LinearGradientFill>();
+                    int deg = lin?.Angle?.Value != null ? lin.Angle.Value / 60000 : 0;
+                    cellNode.Format["fill"] = $"gradient;{gc1};{gc2};{deg}";
+                }
+            }
+            else
+            {
+                var cellFillHex = tcPr?.GetFirstChild<Drawing.SolidFill>()?.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
+                if (cellFillHex != null) cellNode.Format["fill"] = cellFillHex;
+            }
 
             // Cell borders — following POI's getBorderWidth/getBorderColor pattern
             if (tcPr != null)
@@ -435,9 +460,11 @@ public partial class PowerPointHandler
         // Scheme B: generic XML fallback for unrecognized element types
         // Check if selector has a type that ParseShapeSelector didn't recognize
         // Extract raw element type for generic XML fallback check
-        // Strip pseudo-selectors (:contains, :empty, :no-alt) and attribute filters before checking
+        // Strip pseudo-selectors (:contains, :empty, :no-alt) and shorthand :text before checking
         var selectorForType = Regex.Replace(selector, @":(contains\([^)]*\)|empty|no-alt)", "");
-        var typeMatch = Regex.Match(selectorForType.Contains(']') ? selectorForType.Split(']').Last() : selectorForType, @"^(?:slide\[\d+\]\s*>?\s*)?([\w:]+)");
+        // Also strip shorthand ":text" syntax so "shape:Find me" → "shape"
+        selectorForType = Regex.Replace(selectorForType, @":(?![\[\(]).*$", "");
+        var typeMatch = Regex.Match(selectorForType.Contains(']') ? selectorForType.Split(']').Last() : selectorForType, @"^(?:slide\[\d+\]\s*>?\s*)?([\w]+)");
         var rawType = typeMatch.Success ? typeMatch.Groups[1].Value.ToLowerInvariant() : "";
         bool isKnownType = string.IsNullOrEmpty(rawType)
             || rawType is "shape" or "textbox" or "title" or "picture" or "pic"

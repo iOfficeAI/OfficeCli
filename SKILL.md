@@ -101,7 +101,10 @@ officecli set doc.pptx '/slide[1]/cSld/spTree/sp[1]/txBody/p[1]/r[1]/rPr[1]/soli
 | Excel sheet | `/Sheet1` | `freeze`(cell ref, e.g. A2) |
 | Excel autofilter | `/Sheet1/autofilter` | `range`(e.g. A1:F100) |
 | Excel chart | `/Sheet1/chart[N]` | `title`, `legend`, `categories`, `data`, `series1..N`, `colors`, `dataLabels`, `axisTitle`, `catTitle`, `axisMin`, `axisMax`, `majorUnit`, `axisNumFmt` |
-| PPT shape | `/slide[1]/shape[1]` | `text`, `font`, `size`, `bold`, `italic`, `color`, `fill`, `gradient`(linear/radial), `image`(blipFill), `line`, `lineWidth`, `lineDash`, `lineOpacity`, `opacity`, `shadow`, `glow`, `reflection`, ... |
+| PPT shape | `/slide[1]/shape[1]` | `name`(rename shape, use `!!` prefix for morph matching), `text`, `font`, `size`, `bold`, `italic`, `color`, `fill`, `gradient`(linear/radial), `image`(blipFill), `line`, `lineWidth`, `lineDash`, `lineOpacity`, `opacity`, `shadow`, `glow`, `reflection`, `softEdge`(pt), `textFill`(gradient on text, e.g. FF0000-0000FF-90), `spacing`(char spacing pt), `indent`(para indent), `marginLeft`/`marginRight`, `baseline`(superscript/subscript %), `superscript`/`subscript`(bool), `flipH`/`flipV`(bool), `zorder`(front/back/forward/backward/N), `rot3d`(rotX,rotY,rotZ degrees), `bevel`/`bevelBottom`(preset-w-h), `depth`(extrusion pt), `material`, `lighting`, `geometry`(SVG-like: "M x,y L x,y C x1,y1 x2,y2 x,y Z"), ... |
+| PPT slide | `/slide[N]` | `background`, `transition`(fade\|push\|wipe\|morph\|morph-byWord\|morph-byChar\|...), `advanceTime`(ms), `advanceClick`(bool), `notes`. **Morph:** matches shapes by `name` across slides. When `transition=morph` is set, shape names on the current and previous slide are automatically prefixed with `!!` to force matching even when text changes. No manual `!!` needed. |
+| PPT paragraph | `/slide[1]/shape[1]/paragraph[1]` | `align`, `indent`, `marginLeft`, `marginRight`, `lineSpacing`, `spaceBefore`, `spaceAfter`, plus run-level props |
+| PPT run | `/slide[1]/shape[1]/paragraph[1]/run[1]` | `text`, `font`, `size`, `bold`, `italic`, `color`, `spacing`, `baseline`, `textFill` |
 | PPT chart | `/slide[1]/chart[1]` | `title`, `legend`, `categories`, `data`, `series1..N`, `colors`, `dataLabels`, `axisTitle`, `catTitle`, `axisMin`, `axisMax`, `majorUnit`, `axisNumFmt` |
 | PPT video/audio | `/slide[1]/video[1]` | `volume`(0-100), `autoplay`(bool), `trimStart`(ms), `trimEnd`(ms), `x`, `y`, `width`, `height` |
 | PPT picture | `/slide[1]/picture[1]` | `alt`, `path`(replace image), `crop`, `cropLeft/Top/Right/Bottom`, `x`, `y`, `width`, `height` |
@@ -120,11 +123,13 @@ Props listed are common examples, not exhaustive — most `set` shortcut propert
 |--------|--------------|
 | Word | `paragraph`(text,font,size,bold,style,alignment,keepNext,keepLines,...), `run`(text,font,size,bold,italic,superscript,subscript,...), `table`(rows,cols), `row`(cols,c1,c2,...), `cell`(text,width), `picture`(path,width,height,alt,...), `chart`(chartType,title,categories,data/series1..N,legend,colors,width,height), `equation`(formula,mode), `comment`(text,author,...), `section`(type,orientation,...), `footnote`(text), `endnote`(text), `toc`(levels,title,...), `style`(name,id,font,size,bold,...) |
 | Excel | `sheet`(name), `row`(cols), `cell`(ref,value,formula,...), `autofilter`(range), `databar`(sqref,min,max,color), `colorscale`(sqref,mincolor,maxcolor,midcolor), `iconset`(sqref,iconset,reverse), `formulacf`(sqref,formula,fill), `chart`(chartType,title,categories,data/series1..N,legend,...) |
-| PPT | `slide`(title,text,layout,background,...), `shape`(text,font,size,name,...), `chart`(chartType,title,categories,data/series1..N,legend,colors,...), `video`/`audio`(path,poster,volume,autoplay,trimStart,trimEnd,...), `connector`(preset,line,...), `group`(shapes=1,2,3), `picture`(path,width,height,x,y,...), `equation`(formula) |
+| PPT | `slide`(title,text,layout,background,...), `shape`(text,font,size,name,fill,gradient,preset,geometry,textFill,spacing,indent,softEdge,bevel,depth,rot3d,...), `paragraph`(text,align,indent,marginLeft,bold,color,...), `run`(text,font,size,bold,italic,color,spacing,baseline/superscript/subscript,textFill,...), `chart`(chartType,title,categories,data/series1..N,legend,colors,...), `video`/`audio`(path,poster,volume,autoplay,trimStart,trimEnd,...), `connector`(preset,line,...), `group`(shapes=1,2,3), `picture`(path,width,height,x,y,...), `equation`(formula) |
 
 Dimensions: raw EMU or suffixed `cm`/`in`/`pt`/`px`. Equation formula: LaTeX subset (`\frac{}{}`, `\sqrt{}`, `^{}`, `_{}`, `\sum`, Greek letters). Mode: `display`(default) or `inline`. Comment parent can be a paragraph (`/body/p[N]`) or a specific run (`/body/p[N]/r[M]`) for precise marking.
 
 **Copy from existing element:** `officecli add <file> <parent> --from <path> [--index N]` — clones the element at `<path>` into `<parent>`. Cross-part relationships (e.g., images across slides) are handled automatically. Either `--type` or `--from` is required, not both.
+
+**Clone entire slide:** `officecli add <file> / --from /slide[1] [--index 0]` — deep-clones the slide with all shapes, images, charts, media, background, layout, and notes. Use `--index` to insert at a specific position.
 
 ### move — `officecli move <file> <path> [--to <parent>] [--index N]`
 

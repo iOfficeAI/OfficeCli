@@ -202,6 +202,9 @@ Examples:
   officecli query doc.docx 'bookmark:contains("important")'
   officecli query doc.docx 'chart'
   officecli query doc.docx 'chart:contains("Sales")'
+  officecli query doc.docx 'field'
+  officecli query doc.docx 'field:contains("PAGE")'
+  officecli query doc.docx 'field[fieldType=date]'
 """;
 
     const string DocxSet = """
@@ -215,7 +218,8 @@ Run properties (/body/p[N]/r[M]):
   caps, smallCaps, superscript, subscript, dstrike, vanish, outline,
   shadow, emboss, imprint, noProof, rtl,
   shd (format: "fill" or "pattern;fill" or "pattern;fill;color")
-  For images in runs: alt, width, height (cm/in/pt/px or raw EMU)
+  For images in runs: alt, width, height (cm/in/pt/px or raw EMU),
+    path/src (replace image file, removes old image part to avoid bloat)
 
 Paragraph properties (/body/p[N]):
   style, alignment (left|center|right|justify),
@@ -249,7 +253,13 @@ Document root (/):
   defaultFont, pageBackground, pageWidth, pageHeight,
   marginTop, marginBottom, marginLeft, marginRight,
   title, author, subject, keywords, description, category,
-  lastModifiedBy, revision
+  lastModifiedBy, revision,
+  find + replace (text search & replace across document),
+    scope (all|body|headers|footers, default: all)
+
+Batch Set (selector path):
+  Use a query selector as path to set properties on all matching elements.
+  E.g.: set doc.docx 'paragraph[style=Heading1]' --prop font=Arial
 
 Footnote (/footnote[N]):
   text
@@ -257,13 +267,25 @@ Footnote (/footnote[N]):
 Endnote (/endnote[N]):
   text
 
+Field (/field[N]):
+  instruction (field code, e.g. " PAGE ", " DATE \\@ \"yyyy-MM-dd\" ")
+  text/result (cached display text), dirty (bool, force recalc on open)
+  Get returns: instruction, fieldType, dirty, text (cached result)
+
 TOC (/toc[N]):
   levels (e.g. "1-3"), hyperlinks (bool), pagenumbers (bool)
 
 Section (/section[N]):
   type (nextPage|continuous|evenPage|oddPage),
   pagewidth, pageheight (twips), orientation (portrait|landscape),
-  margintop, marginbottom, marginleft, marginright (twips)
+  margintop, marginbottom, marginleft, marginright (twips),
+  columns (equal-width: "3" or "3,720" for count,space),
+  colWidths (custom: "3000,720,2000,720,3000" alternating width,space),
+  separator (bool, draw line between columns)
+
+SDT / Content Control (/body/sdt[N] or /body/p[N]/sdt[N]):
+  alias (display name), tag (identifier), lock (unlocked|content|sdt|both),
+  text (replace content text)
 
 Header (/header[N]):
   text, font, size, bold, italic, color, alignment
@@ -290,7 +312,12 @@ Examples:
   officecli set doc.docx '/body/tbl[1]/tr[1]/tc[1]' --prop text="Hello" --prop shd=4472C4
   officecli set doc.docx '/body/tbl[1]/tr[1]/tc[1]' --prop valign=center --prop gridspan=2
   officecli set doc.docx / --prop defaultFont=Arial --prop title="My Doc" --prop author="John"
+  officecli set doc.docx / --prop find="甲方" --prop replace="乙方"
+  officecli set doc.docx / --prop find="OldCo" --prop replace="NewCo" --prop scope=body
+  officecli set doc.docx 'paragraph[style=Heading1]' --prop font=Arial --prop size=18
+  officecli set doc.docx 'run[bold=true]' --prop color=FF0000
   officecli set doc.docx '/footnote[1]' --prop text="Updated footnote"
+  officecli set doc.docx '/field[1]' --prop instruction=" DATE \\@ \"yyyy/MM/dd\" " --prop dirty=true
   officecli set doc.docx '/toc[1]' --prop levels="1-2" --prop pagenumbers=false
   officecli set doc.docx '/section[1]' --prop orientation=landscape --prop margintop=720
   officecli set doc.docx '/styles/Heading1' --prop font=Arial --prop size=16 --prop bold=true
@@ -308,11 +335,26 @@ Chart (/chart[N]):
   series1..N   Update individual series: "NewName:1,2,3" or just "1,2,3"
   colors       Series colors (comma-separated hex): "FF0000,00FF00,0000FF"
   dataLabels   Data labels: value, category, series, percent, all, none
+  labelPos     Data label position: center, insideEnd, insideBase, outsideEnd, top, bottom, left, right
+  labelFont    Data label font: "size:color:bold" (e.g. "10:FF0000:true")
   axisTitle    Value axis title (alias: vtitle)
   catTitle     Category axis title (alias: htitle)
   axisMin, axisMax  Value axis scale bounds
   majorUnit, minorUnit  Tick mark spacing
   axisNumFmt   Value axis number format (e.g. "0.0", "$#,##0")
+  gridlines    Major gridlines: true/none or "color:widthPt:dash" (e.g. "CCCCCC:0.5:dash")
+  minorGridlines  Minor gridlines: true/none or "color:widthPt:dash"
+  plotFill     Plot area background color (hex)
+  chartFill    Chart area background color (hex)
+  lineWidth    Series line width in pt (e.g. "2.5")
+  lineDash     Series line dash: solid, dot, dash, dashdot, longdash
+  marker       Series marker: "style:size:color" (e.g. "circle:8:FF0000"), styles: circle, diamond, square, triangle, star, x, plus, none
+  markerSize   Marker size (2-72)
+  style        Chart style ID (1-48, built-in Excel/PowerPoint styles)
+  transparency Series fill transparency (0-100, %)
+  gradient     Series gradient fill: "color1-color2:angle" (e.g. "FF0000-0000FF:90")
+  gradients    Per-series gradients (semicolon-separated): "FF0000-0000FF;00FF00-FFFF00"
+  secondary    Secondary axis: series indices (e.g. "2,3")
 """;
 
     const string DocxAdd = """
@@ -355,7 +397,7 @@ Types and properties:
       vrelative (margin|page|paragraph|line), behindText (bool)
 
   chart  -- parent: /body
-    chartType (column|bar|line|pie|doughnut|area|scatter|combo, default: column)
+    chartType (column|bar|line|pie|doughnut|area|scatter|bubble|radar|stock|combo, default: column)
     title, categories ("Q1,Q2,Q3"), data ("S1:1,2,3;S2:4,5,6")
     series1..N ("Revenue:100,200"), colors ("FF0000,00FF00"), legend (top|bottom|left|right|none)
     width, height (cm/in/pt/EMU, default: 15cm x 10cm)
@@ -390,6 +432,22 @@ Types and properties:
 
   footer  -- parent: /
     text, type (default|first|even), font, size, bold, italic, color, alignment
+
+  field (pagenum, pagenumber, numpages, date)  -- parent: /body/p[N] or /body
+    instruction (field code, e.g. " PAGE ", " NUMPAGES ", " DATE \\@ \"yyyy-MM-dd\" ")
+    text (placeholder value), font, size, bold, color, alignment (body-level)
+
+  pagebreak (break)  -- parent: /body/p[N] or /body
+    type (page|column|textwrapping, default: page)
+
+  columnbreak  -- parent: /body/p[N] or /body
+    (shorthand for break with type=column)
+
+  sdt (contentcontrol)  -- parent: /body or /body/p[N]
+    sdtType (text|richtext|dropdown|combobox|date, default: text)
+    alias (display name), tag (identifier), lock (unlocked|content|sdt|both)
+    text (content), items (comma-separated, for dropdown/combobox)
+    format (date format, e.g. "yyyy-MM-dd", for date type)
 
   bookmark  -- parent: /body/p[N]
     name (required), text (optional, creates run between start/end)
@@ -433,6 +491,14 @@ Examples:
   officecli add doc.docx / --type footer --prop text="Page Footer" --prop alignment=center
   officecli add doc.docx '/body/p[1]' --type bookmark --prop name=MyBookmark --prop text="marked text"
   officecli add doc.docx /body --from '/body/p[1]' --index 5
+  officecli add doc.docx '/footer[1]/p[1]' --type pagenum
+  officecli add doc.docx '/body/p[5]' --type pagebreak
+  officecli add doc.docx '/body/p[5]' --type columnbreak
+  officecli add doc.docx /body --type field --prop instruction=" NUMPAGES "
+  officecli add doc.docx /body --type sdt --prop sdtType=dropdown --prop alias="Status" --prop items="Draft,Review,Final"
+  officecli add doc.docx '/body/p[1]' --type sdt --prop sdtType=text --prop alias="Name" --prop text="Enter name"
+  officecli set doc.docx '/section[1]' --prop columns=2 --prop separator=true
+  officecli set doc.docx '/section[1]' --prop colWidths="3000,720,5000"
 """;
 
     const string DocxRaw = """
@@ -604,6 +670,9 @@ Cell style properties (/SheetName/A1):
   fill (hex RGB), numFmt (format string)
   alignment.horizontal (left|center|right|justify)
   alignment.vertical (top|center|bottom), alignment.wrapText (bool)
+  rotation       Text rotation angle (0-180, or 255 for vertical)
+  indent         Text indent level (0-15)
+  shrinkToFit    Shrink text to fit cell (bool)
   border.all (thin|medium|thick|double|dashed|dotted|none)
   border.left, border.right, border.top, border.bottom (style)
   border.color (hex), border.left.color, ... (per-side color)
@@ -613,12 +682,16 @@ Merge/Unmerge (/SheetName/A1:D1):
 
 Column properties (/SheetName/col[A]):
   width          Column width (number), hidden (bool)
+  outline        Outline/group level (0-7), collapsed (bool)
 
 Row properties (/SheetName/row[1]):
   height         Row height in points, hidden (bool)
+  outline        Outline/group level (0-7), collapsed (bool)
 
 Sheet properties (/SheetName):
   freeze         Freeze panes (e.g. "A2" = freeze row 1, "B2" = freeze row 1 + col A)
+  zoom           Zoom scale percentage (10-400, default 100)
+  tabColor       Sheet tab color (hex RGB, or "none" to remove)
 
 AutoFilter (/SheetName/autofilter):
   range          Update filter range (e.g. A1:F100)
@@ -630,6 +703,9 @@ Data validation (/SheetName/validation[N]):
 
 Picture (/SheetName/picture[N]):
   x, y (col/row offset), width, height (col/row span), alt
+  rotation       Rotation angle in degrees (e.g. "45", "90")
+  shadow         Shadow effect: "color:blur:dist:dir" (e.g. "000000:4:3:45") or "true"/"none"
+  glow           Glow effect: "color:radius" (e.g. "4472C4:6") or "none"
 
 Table (/SheetName/table[N]):
   name, displayName, style, ref
@@ -648,11 +724,30 @@ Chart (/SheetName/chart[N]):
   series1..N   Update individual series: "NewName:1,2,3" or just "1,2,3"
   colors       Series colors (comma-separated hex): "FF0000,00FF00,0000FF"
   dataLabels   Data labels: value, category, series, percent, all, none
+  labelPos     Data label position: center, insideEnd, insideBase, outsideEnd, top, bottom, left, right
+  labelFont    Data label font: "size:color:bold" (e.g. "10:FF0000:true")
   axisTitle    Value axis title (alias: vtitle)
   catTitle     Category axis title (alias: htitle)
   axisMin, axisMax  Value axis scale bounds
   majorUnit, minorUnit  Tick mark spacing
   axisNumFmt   Value axis number format (e.g. "0.0", "$#,##0")
+  gridlines    Major gridlines: true/none or "color:widthPt:dash" (e.g. "CCCCCC:0.5:dash")
+  minorGridlines  Minor gridlines: true/none or "color:widthPt:dash"
+  plotFill     Plot area background color (hex)
+  chartFill    Chart area background color (hex)
+  lineWidth    Series line width in pt (e.g. "2.5")
+  lineDash     Series line dash: solid, dot, dash, dashdot, longdash
+  marker       Series marker: "style:size:color" (e.g. "circle:8:FF0000")
+  markerSize   Marker size (2-72)
+  style        Chart style ID (1-48)
+  transparency Series fill transparency (0-100, %)
+  gradient     Series gradient: "color1-color2:angle" (e.g. "FF0000-0000FF:90")
+  gradients    Per-series gradients (semicolon-separated): "FF0000-0000FF;00FF00-FFFF00"
+  secondary    Secondary axis: series indices (e.g. "2,3")
+
+PivotTable (/SheetName/pivottable[N]):
+  name         Pivot table name
+  style        Style name (e.g. "PivotStyleMedium9")
 
 Examples:
   officecli set data.xlsx '/Sheet1/A1' --prop value=100 --prop font.bold=true
@@ -725,10 +820,21 @@ Types and properties:
     name (required), ref (e.g. Sheet1!$A$1:$D$10), scope (sheet name), comment
 
   chart  -- parent: /SheetName
-    chartType (column|bar|line|pie|doughnut|area|scatter)
+    chartType (column|bar|line|pie|doughnut|area|scatter|bubble|radar|stock)
     title, categories (comma-separated), legend (top|bottom|left|right|none)
     data ("Series1:1,2,3;Series2:4,5,6") or series1/series2/... ("Name:1,2,3")
     x, y (col/row offset), width, height (col/row span)
+
+  pivottable (pivot)  -- parent: /SheetName
+    source (required): "Sheet1!A1:D100" or "A1:D100" (same sheet)
+    position: anchor cell for pivot table (e.g. "F1"), auto-placed if omitted
+    rows: row fields (comma-separated header names or 0-based indices)
+    cols: column fields
+    values: data fields with aggregation ("Sales:sum,Qty:count")
+      Functions: sum, count, average, max, min, product, stddev, var
+    filters: page/filter fields
+    name: pivot table name (auto-generated if omitted)
+    style: style name (default: PivotStyleLight16)
 
 --index is 0-based. --from clones an existing element.
 
@@ -903,7 +1009,7 @@ Format keys returned by Get:
     animation              "effectName-class-durationMs" (e.g. "fade-entrance-500")
 
   Chart (/slide[N]/chart[M]):
-    chartType              column, bar, line, pie, doughnut, area, scatter
+    chartType              column, bar, line, pie, doughnut, area, scatter, bubble, radar, stock
     title                  Chart title text
     legend                 Legend position (t/b/l/r)
     seriesCount            Number of data series
@@ -996,6 +1102,11 @@ Shape properties (/slide[N]/shape[M]) -- applies to all runs:
   lineDash   Border dash style: solid/dot/dash/dashdot/longdash (alias: line.dash)
   lineOpacity  Border opacity 0.0-1.0 (alias: line.opacity)
   preset     Shape geometry (e.g. roundRect, ellipse, rightArrow, diamond, star5)
+  geometry   Custom freeform path: SVG-like syntax "M x,y L x,y C x1,y1 x2,y2 x,y Z"
+             M=moveTo, L=lineTo, C=cubicBezier, Q=quadBezier, Z=close
+             Example: "M 0,100 L 50,0 L 100,100 Z" (triangle in 100x100 space)
+  textFill   Text gradient fill (same format as gradient): C1-C2[-angle], radial:C1-C2[-focus]
+             Example: "FF0000-0000FF-90" (red to blue horizontal gradient on text)
   margin     Text padding inside shape (e.g. 0.5cm or left,top,right,bottom: 0.5cm,0.3cm,0.5cm,0.3cm)
   align      Text horizontal alignment: left (l), center (c), right (r), justify (j) — applies to all paragraphs
   valign     Text vertical alignment: top (t), center/middle (c/m), bottom (b)
@@ -1005,6 +1116,10 @@ Shape properties (/slide[N]/shape[M]) -- applies to all runs:
   gradient   Linear: C1-C2[-angle], Radial: radial:C1-C2[-focus] (focus: tl/tr/bl/br/center)
   image      Shape image fill (path to image file, e.g. /tmp/bg.png)
   list       List style: bullet/numbered/alpha/roman/none or a custom character (e.g. ✓)
+  spacing    Character spacing in points (e.g. 2 for +2pt, -1 for condensed) (alias: charSpacing, letterSpacing)
+  indent     Paragraph first-line indent (EMU or cm/pt, negative for hanging indent)
+  marginLeft Paragraph left margin (EMU or cm/pt) (alias: marL)
+  marginRight Paragraph right margin (EMU or cm/pt) (alias: marR)
   rotation   Rotation angle in degrees (e.g. 45) (alias: rotate)
   opacity    Fill opacity 0.0-1.0 (e.g. 0.5 for 50%)
   textWarp   WordArt text effect (alias: wordart): textWave1, textChevron, textArchUp, etc. or "none"
@@ -1013,6 +1128,21 @@ Shape properties (/slide[N]/shape[M]) -- applies to all runs:
   y          Vertical position (EMU or cm/in/pt/px, e.g. 3cm)
   width      Shape width (EMU or cm/in/pt/px, e.g. 10cm)
   height     Shape height (EMU or cm/in/pt/px, e.g. 2cm)
+  flipH      Horizontal flip (true/false)
+  flipV      Vertical flip (true/false)
+
+3D effects (/slide[N]/shape[M]):
+  rot3d      3D rotation: "rotX,rotY,rotZ" in degrees (e.g. "45,30,0") or "none" (alias: rotation3d)
+  rotX       X-axis rotation in degrees
+  rotY       Y-axis rotation in degrees
+  rotZ       Z-axis rotation in degrees
+  bevel      Top bevel: preset or preset-width-height in pt (e.g. "circle", "circle-6-6") (alias: bevelTop)
+  bevelBottom  Bottom bevel (same format as bevel)
+             Presets: circle, relaxedInset, cross, coolSlant, angle, softRound, convex, slope, divot, riblet, hardEdge, artDeco
+  depth      3D extrusion depth in points (e.g. "10") or "none" (alias: extrusion)
+  material   3D material: plastic, metal, warmMatte, matte, flat, clear, softMetal, powder, translucentPowder, darkEdge
+  lighting   Light rig: threePt, balanced, soft, harsh, flood, contrasting, morning, sunrise, sunset, flat, glow, brightRoom (alias: lightRig)
+  softEdge   Soft edge blur radius in points (e.g. "5") or "none"
 
 Chart properties (/slide[N]/chart[M]):
   title        Chart title text (or "none" to remove)
@@ -1022,11 +1152,26 @@ Chart properties (/slide[N]/chart[M]):
   series1..N   Update individual series: "NewName:1,2,3" or just "1,2,3"
   colors       Series colors (comma-separated hex/theme): "FF0000,00FF00,accent3"
   dataLabels   Data labels: value, category, series, percent, all, none
+  labelPos     Data label position: center, insideEnd, outsideEnd, top, bottom, left, right
+  labelFont    Data label font: "size:color:bold" (e.g. "10:FF0000:true")
   axisTitle    Value axis title (alias: vtitle)
   catTitle     Category axis title (alias: htitle)
   axisMin, axisMax  Value axis scale bounds
   majorUnit, minorUnit  Tick mark spacing
   axisNumFmt   Value axis number format (e.g. "0.0", "$#,##0")
+  gridlines    Major gridlines: true/none or "color:widthPt:dash"
+  minorGridlines  Minor gridlines: true/none or "color:widthPt:dash"
+  plotFill     Plot area background color (hex)
+  chartFill    Chart area background color (hex)
+  lineWidth    Series line width in pt (e.g. "2.5")
+  lineDash     Series line dash: solid, dot, dash, dashdot, longdash
+  marker       Series marker: "style:size:color" (e.g. "circle:8:FF0000")
+  markerSize   Marker size (2-72)
+  style        Chart style ID (1-48)
+  transparency Series fill transparency (0-100, %)
+  gradient     Series gradient: "color1-color2:angle" (e.g. "FF0000-0000FF:90")
+  gradients    Per-series gradients (semicolon-separated)
+  secondary    Secondary axis: series indices (e.g. "2,3")
   x, y, width, height  Chart position and size (EMU or cm/in/pt/px)
   name         Chart name
 
@@ -1064,8 +1209,14 @@ Slide properties (/slide[N]):
   background   Solid color (RRGGBB), gradient (C1-C2 or C1-C2-angle or C1-C2-C3),
                image fill (image:/path/to/file.png), or "none" to remove
                Examples: FF0000  |  FF0000-0000FF  |  FF0000-0000FF-45  |  image:/tmp/bg.png
-  transition   Slide transition: fade, push, wipe, split, reveal, random, cover, uncover, zoom, none
+  transition   Slide transition: fade, push, wipe, split, reveal, random, cover, uncover, zoom, morph, none
                Suffix with speed: fade-fast, push-slow (slow=1200ms, fast=300ms, default=700ms)
+               Morph options: morph (default byObject), morph-byWord, morph-byChar
+               Morph matches shapes by name across slides. When text content changes between
+               slides, add "!!" prefix to the shape name to force matching (e.g. name="!!Card1").
+               Without "!!", shapes with different text will not morph — they will just cut.
+               Example: slide 1 has shape "!!Tag1" with text ".docx", slide 2 has "!!Tag1" with text "0"
+               → the shape smoothly morphs (moves, resizes) despite the text change.
   advanceTime  Auto-advance after time: "3000" (ms) to advance 3 s after last animation
   advanceClick true/false — advance on click (default true)
 
@@ -1099,10 +1250,21 @@ Placeholder properties (/slide[N]/placeholder[M] or /slide[N]/placeholder[type])
 
 Paragraph properties (/slide[N]/shape[M]/paragraph[P]):
   align      left (l), center (c), right (r), justify (j)
+  indent     First-line indent (EMU or cm/pt, negative for hanging)
+  marginLeft Left margin (alias: marL)
+  marginRight Right margin (alias: marR)
+  lineSpacing, spaceBefore, spaceAfter
   Plus all run-level properties above
 
 Run properties (/slide[N]/shape[M]/run[K] or /slide[N]/shape[M]/paragraph[P]/run[K]):
-  text, font, size, bold, italic, color
+  text, font, size, bold, italic, color, spacing,
+  baseline    Baseline offset in percent (30 = superscript, -25 = subscript) or "super"/"sub"/"none"
+  superscript true/false shorthand (baseline +30%)
+  subscript   true/false shorthand (baseline -25%)
+
+Shape z-order (/slide[N]/shape[M]):
+  zorder     Z-order: front, back, forward (+1), backward (-1), or absolute position (1=back, N=front)
+             Aliases: z-order, order
 
 Any XML attribute is settable via element path (find paths with get --depth N):
   Color:     /slide[1]/cSld/spTree/sp[1]/txBody/p[1]/r[1]/rPr[1]/solidFill[1]/srgbClr[1]  -> val
@@ -1156,7 +1318,7 @@ Types and properties:
     x, y, width, height (EMU or cm/in/pt/px, default: full-width text box)
 
   chart  -- parent: /slide[N]
-    chartType (column|bar|line|pie|doughnut|area|scatter|combo), title, legend (top|bottom|left|right|none),
+    chartType (column|bar|line|pie|doughnut|area|scatter|bubble|radar|stock|combo), title, legend (top|bottom|left|right|none),
     colors (comma-separated series colors, e.g. "FF0000,00FF00,0000FF"),
     comboSplit (for combo: how many series are columns, default 1),
     categories (comma-separated labels, e.g. "Q1,Q2,Q3,Q4"),
@@ -1202,6 +1364,16 @@ Types and properties:
   equation (formula, math)  -- parent: /slide[N]
     formula (required, LaTeX subset), name
 
+  paragraph (para)  -- parent: /slide[N]/shape[M]
+    text, font, size, bold, italic, color, spacing,
+    align, indent (EMU/cm/pt), marginLeft (marL), marginRight (marR),
+    list (bullet/numbered)
+
+  run  -- parent: /slide[N]/shape[M] or /slide[N]/shape[M]/paragraph[P]
+    text, font, size, bold, italic, underline, strike, color, spacing
+    When parent is a shape, appends to the last paragraph.
+    Use to create rich text with mixed formatting within a single text box.
+
 --index is 0-based. --from clones existing elements (cross-slide relationships handled).
 
 Examples:
@@ -1220,6 +1392,9 @@ Examples:
   officecli add pres.pptx '/slide[1]/table[1]/tr[1]' --type cell --prop text="Extra"
   officecli add pres.pptx '/slide[1]' --type picture --prop path=photo.jpg --prop width=8cm --prop alt="Team photo"
   officecli add pres.pptx '/slide[1]' --type equation --prop formula="\frac{-b \pm \sqrt{b^2-4ac}}{2a}"
+  officecli add pres.pptx '/slide[1]/shape[1]' --type paragraph --prop text="New para" --prop bold=true
+  officecli add pres.pptx '/slide[1]/shape[1]/paragraph[1]' --type run --prop text=" bold red" --prop bold=true --prop color=FF0000
+  officecli add pres.pptx '/slide[1]/shape[1]' --type run --prop text=" (appended)" --prop italic=true
   officecli add pres.pptx / --from '/slide[1]' --index 0
   officecli add pres.pptx '/slide[2]' --from '/slide[1]/shape[2]'
   officecli add pres.pptx '/slide[1]' --type notes --prop text="Key talking points\nRemember to pause here"

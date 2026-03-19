@@ -400,6 +400,139 @@ public partial class WordHandler
     }
 
     /// <summary>
+    /// Find and replace text across the document. Returns the number of replacements made.
+    /// Handles text split across multiple runs within a paragraph.
+    /// </summary>
+    private int FindAndReplace(string find, string replace, string scope = "all")
+    {
+        if (string.IsNullOrEmpty(find)) return 0;
+        int totalCount = 0;
+
+        // Collect all paragraphs to process based on scope
+        var paragraphs = new List<Paragraph>();
+        var mainPart = _doc.MainDocumentPart;
+
+        if (scope is "all" or "body" or "")
+        {
+            if (mainPart?.Document?.Body != null)
+                paragraphs.AddRange(mainPart.Document.Body.Descendants<Paragraph>());
+        }
+        if (scope is "all" or "headers")
+        {
+            foreach (var hp in mainPart?.HeaderParts ?? Enumerable.Empty<DocumentFormat.OpenXml.Packaging.HeaderPart>())
+                if (hp.Header != null) paragraphs.AddRange(hp.Header.Descendants<Paragraph>());
+        }
+        if (scope is "all" or "footers")
+        {
+            foreach (var fp in mainPart?.FooterParts ?? Enumerable.Empty<DocumentFormat.OpenXml.Packaging.FooterPart>())
+                if (fp.Footer != null) paragraphs.AddRange(fp.Footer.Descendants<Paragraph>());
+        }
+
+        foreach (var para in paragraphs)
+        {
+            totalCount += ReplaceInParagraph(para, find, replace);
+        }
+
+        return totalCount;
+    }
+
+    /// <summary>
+    /// Replace text within a paragraph, handling text split across multiple runs.
+    /// </summary>
+    private static int ReplaceInParagraph(Paragraph para, string find, string replace)
+    {
+        var runs = para.Elements<Run>().ToList();
+        if (runs.Count == 0) return 0;
+
+        // Build concatenated text with run boundaries
+        var runTexts = new List<(Run Run, Text TextElement, int Start, int End)>();
+        int pos = 0;
+        foreach (var run in runs)
+        {
+            foreach (var text in run.Elements<Text>())
+            {
+                var len = text.Text?.Length ?? 0;
+                if (len > 0)
+                    runTexts.Add((run, text, pos, pos + len));
+                pos += len;
+            }
+        }
+
+        if (runTexts.Count == 0) return 0;
+        var fullText = string.Concat(runTexts.Select(rt => rt.TextElement.Text));
+
+        // Find all occurrences
+        var indices = new List<int>();
+        int idx = 0;
+        while ((idx = fullText.IndexOf(find, idx, StringComparison.Ordinal)) >= 0)
+        {
+            indices.Add(idx);
+            idx += find.Length;
+        }
+
+        if (indices.Count == 0) return 0;
+
+        // Process replacements from end to start to preserve positions
+        for (int i = indices.Count - 1; i >= 0; i--)
+        {
+            var matchStart = indices[i];
+            var matchEnd = matchStart + find.Length;
+
+            // Find which run-texts are affected
+            bool first = true;
+            foreach (var rt in runTexts)
+            {
+                if (rt.End <= matchStart || rt.Start >= matchEnd)
+                    continue; // not affected
+
+                var textStr = rt.TextElement.Text ?? "";
+                var localStart = Math.Max(0, matchStart - rt.Start);
+                var localEnd = Math.Min(textStr.Length, matchEnd - rt.Start);
+
+                if (first)
+                {
+                    // First affected run: replace the matched portion with replacement text
+                    rt.TextElement.Text = textStr[..localStart] + replace + textStr[localEnd..];
+                    rt.TextElement.Space = SpaceProcessingModeValues.Preserve;
+                    first = false;
+                }
+                else
+                {
+                    // Subsequent runs: just remove the matched portion
+                    rt.TextElement.Text = textStr[..Math.Max(0, matchStart - rt.Start)] + textStr[localEnd..];
+                    rt.TextElement.Space = SpaceProcessingModeValues.Preserve;
+                }
+            }
+        }
+
+        return indices.Count;
+    }
+
+    /// <summary>
+    /// Ensure Columns exists in SectionProperties in correct schema order.
+    /// Schema order: ..., PageMargin, ..., Columns, ...
+    /// </summary>
+    private static Columns EnsureColumns(SectionProperties sectPr)
+    {
+        var existing = sectPr.GetFirstChild<Columns>();
+        if (existing != null) return existing;
+
+        var cols = new Columns();
+        var pm = sectPr.GetFirstChild<PageMargin>();
+        if (pm != null)
+            pm.InsertAfterSelf(cols);
+        else
+        {
+            var pgSz = sectPr.GetFirstChild<PageSize>();
+            if (pgSz != null)
+                pgSz.InsertAfterSelf(cols);
+            else
+                sectPr.PrependChild(cols);
+        }
+        return cols;
+    }
+
+    /// <summary>
     /// Ensure PageSize exists in SectionProperties in correct schema order.
     /// Schema order: SectionType, PageSize, PageMargin, ...
     /// </summary>

@@ -105,6 +105,7 @@ public partial class PowerPointHandler
                     {
                         var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
                         rProps.RemoveAllChildren<Drawing.SolidFill>();
+                        rProps.RemoveAllChildren<Drawing.GradientFill>();
                         var colorFill = BuildSolidFill(value);
                         if (rProps is OpenXmlCompositeElement composite)
                         {
@@ -117,6 +118,27 @@ public partial class PowerPointHandler
                         }
                     }
                     break;
+
+                case "textfill" or "textgradient":
+                {
+                    // Text gradient fill: same format as shape gradient (C1-C2[-angle], radial:C1-C2[-focus])
+                    foreach (var run in runs)
+                    {
+                        var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
+                        rProps.RemoveAllChildren<Drawing.SolidFill>();
+                        rProps.RemoveAllChildren<Drawing.GradientFill>();
+                        rProps.RemoveAllChildren<Drawing.NoFill>();
+                        if (value.Equals("none", StringComparison.OrdinalIgnoreCase))
+                        {
+                            rProps.AppendChild(new Drawing.NoFill());
+                        }
+                        else
+                        {
+                            rProps.AppendChild(BuildGradientFill(value));
+                        }
+                    }
+                    break;
+                }
 
                 case "underline":
                     foreach (var run in runs)
@@ -149,6 +171,35 @@ public partial class PowerPointHandler
                         };
                     }
                     break;
+
+                case "baseline" or "superscript" or "subscript":
+                {
+                    // Baseline offset: positive = superscript, negative = subscript
+                    // Value in percent (e.g. "30" = 30% superscript, "-25" = 25% subscript)
+                    // OOXML stores as 1/1000ths of percent (30000 = 30%)
+                    // Shortcuts: "super"/"true" = 30%, "sub" = -25%, "none"/"false" = 0
+                    int baselineVal;
+                    if (key.ToLowerInvariant() == "superscript")
+                        baselineVal = IsTruthy(value) ? 30000 : 0;
+                    else if (key.ToLowerInvariant() == "subscript")
+                        baselineVal = IsTruthy(value) ? -25000 : 0;
+                    else
+                    {
+                        baselineVal = value.ToLowerInvariant() switch
+                        {
+                            "super" or "true" => 30000,
+                            "sub" => -25000,
+                            "none" or "false" or "0" => 0,
+                            _ => (int)(double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) * 1000)
+                        };
+                    }
+                    foreach (var run in runs)
+                    {
+                        var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
+                        rProps.Baseline = baselineVal;
+                    }
+                    break;
+                }
 
                 case "fill":
                 {
@@ -213,11 +264,28 @@ public partial class PowerPointHandler
                 {
                     var spPr = shape.ShapeProperties;
                     if (spPr == null) { unsupported.Add(key); break; }
+                    // Remove any existing geometry (preset or custom) before setting new one
+                    spPr.RemoveAllChildren<Drawing.CustomGeometry>();
                     var existingGeom = spPr.GetFirstChild<Drawing.PresetGeometry>();
                     if (existingGeom != null)
                         existingGeom.Preset = ParsePresetShape(value);
                     else
                         spPr.AppendChild(new Drawing.PresetGeometry(new Drawing.AdjustValueList()) { Preset = ParsePresetShape(value) });
+                    break;
+                }
+
+                case "geometry" or "path" when key.ToLowerInvariant() != "path" || shape.ShapeProperties != null:
+                {
+                    // Custom geometry path:
+                    // Format: "M x,y L x,y L x,y C x1,y1 x2,y2 x,y Z" (SVG-like path syntax)
+                    // M = moveTo, L = lineTo, C = cubicBezTo (3 control points), Z = close
+                    // Coordinates are in EMU or use the shape's coordinate space
+                    // Example: "M 0,100 L 50,0 L 100,100 Z" (triangle)
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    spPr.RemoveAllChildren<Drawing.PresetGeometry>();
+                    spPr.RemoveAllChildren<Drawing.CustomGeometry>();
+                    spPr.AppendChild(ParseCustomGeometry(value));
                     break;
                 }
 
@@ -314,6 +382,52 @@ public partial class PowerPointHandler
                     var spPr = shape.ShapeProperties;
                     if (spPr == null || part is not SlidePart slidePart) { unsupported.Add(key); break; }
                     ApplyShapeImageFill(spPr, value, slidePart);
+                    break;
+                }
+
+                case "spacing" or "charspacing" or "letterspacing":
+                {
+                    // Character spacing in points (e.g. "2" = +2pt, "-1" = -1pt)
+                    // Stored as 1/100th of a point in OOXML (POI: setSpc((int)(100*spc)))
+                    var spcVal = (int)(double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) * 100);
+                    foreach (var run in runs)
+                    {
+                        var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
+                        rProps.Spacing = spcVal;
+                    }
+                    break;
+                }
+
+                case "indent":
+                {
+                    var indentEmu = (int)ParseEmu(value);
+                    foreach (var para in shape.TextBody?.Elements<Drawing.Paragraph>() ?? Enumerable.Empty<Drawing.Paragraph>())
+                    {
+                        var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                        pProps.Indent = indentEmu;
+                    }
+                    break;
+                }
+
+                case "marginleft" or "marl":
+                {
+                    var mlEmu = (int)ParseEmu(value);
+                    foreach (var para in shape.TextBody?.Elements<Drawing.Paragraph>() ?? Enumerable.Empty<Drawing.Paragraph>())
+                    {
+                        var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                        pProps.LeftMargin = mlEmu;
+                    }
+                    break;
+                }
+
+                case "marginright" or "marr":
+                {
+                    var mrEmu = (int)ParseEmu(value);
+                    foreach (var para in shape.TextBody?.Elements<Drawing.Paragraph>() ?? Enumerable.Empty<Drawing.Paragraph>())
+                    {
+                        var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                        pProps.RightMargin = mrEmu;
+                    }
                     break;
                 }
 
@@ -424,6 +538,112 @@ public partial class PowerPointHandler
                     break;
                 }
 
+                case "softedge":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    ApplySoftEdge(spPr, value);
+                    break;
+                }
+
+                case "fliph":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    var xfrm = spPr.Transform2D ?? (spPr.Transform2D = new Drawing.Transform2D());
+                    xfrm.HorizontalFlip = IsTruthy(value);
+                    break;
+                }
+
+                case "flipv":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    var xfrm = spPr.Transform2D ?? (spPr.Transform2D = new Drawing.Transform2D());
+                    xfrm.VerticalFlip = IsTruthy(value);
+                    break;
+                }
+
+                case "rot3d" or "rotation3d":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    Apply3DRotation(spPr, value);
+                    break;
+                }
+
+                case "rotx":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    Apply3DRotationAxis(spPr, "x", value);
+                    break;
+                }
+
+                case "roty":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    Apply3DRotationAxis(spPr, "y", value);
+                    break;
+                }
+
+                case "rotz":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    Apply3DRotationAxis(spPr, "z", value);
+                    break;
+                }
+
+                case "bevel" or "beveltop":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    ApplyBevel(spPr, value, top: true);
+                    break;
+                }
+
+                case "bevelbottom":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    ApplyBevel(spPr, value, top: false);
+                    break;
+                }
+
+                case "depth" or "extrusion":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    Apply3DDepth(spPr, value);
+                    break;
+                }
+
+                case "material":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    Apply3DMaterial(spPr, value);
+                    break;
+                }
+
+                case "lighting" or "lightrig":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    ApplyLightRig(spPr, value);
+                    break;
+                }
+
+                case "name":
+                {
+                    var nvPr = shape.NonVisualShapeProperties?.NonVisualDrawingProperties;
+                    if (nvPr != null) nvPr.Name = value;
+                    else unsupported.Add(key);
+                    break;
+                }
+
                 default:
                     if (!GenericXmlQuery.SetGenericAttribute(shape, key, value))
                         unsupported.Add(key);
@@ -525,9 +745,40 @@ public partial class PowerPointHandler
                     }
                     tcPr.RemoveAllChildren<Drawing.SolidFill>();
                     tcPr.RemoveAllChildren<Drawing.NoFill>();
+                    tcPr.RemoveAllChildren<Drawing.GradientFill>();
+                    tcPr.RemoveAllChildren<Drawing.BlipFill>();
                     if (value.Equals("none", StringComparison.OrdinalIgnoreCase))
                     {
                         tcPr.Append(new Drawing.NoFill());
+                    }
+                    else if (value.Contains('-'))
+                    {
+                        // Gradient fill: "FF0000-0000FF" or "FF0000-0000FF-90"
+                        var gradParts = value.Split('-');
+                        var colors = gradParts.ToList();
+                        double degree = 0;
+                        if (colors.Count >= 2 && double.TryParse(colors.Last(),
+                            System.Globalization.NumberStyles.Any,
+                            System.Globalization.CultureInfo.InvariantCulture, out var angleDeg)
+                            && colors.Last().Length <= 3)
+                        {
+                            degree = angleDeg;
+                            colors.RemoveAt(colors.Count - 1);
+                        }
+                        if (colors.Count < 2) colors.Add(colors[0]);
+
+                        var gradFill = new Drawing.GradientFill();
+                        var gsList = new Drawing.GradientStopList();
+                        for (int gi = 0; gi < colors.Count; gi++)
+                        {
+                            var pos = colors.Count == 1 ? 0 : gi * 100000 / (colors.Count - 1);
+                            gsList.Append(new Drawing.GradientStop(
+                                new Drawing.RgbColorModelHex { Val = colors[gi].TrimStart('#').ToUpperInvariant() }
+                            ) { Position = pos });
+                        }
+                        gradFill.Append(gsList);
+                        gradFill.Append(new Drawing.LinearGradientFill { Angle = (int)(degree * 60000), Scaled = true });
+                        tcPr.Append(gradFill);
                     }
                     else
                     {
@@ -657,6 +908,8 @@ public partial class PowerPointHandler
                         "border.right" => new[] { "right" },
                         "border.top" => new[] { "top" },
                         "border.bottom" => new[] { "bottom" },
+                        "border.tl2br" => new[] { "tl2br" },
+                        "border.tr2bl" => new[] { "tr2bl" },
                         _ => new[] { "left", "right", "top", "bottom" }  // "border" or "border.all"
                     };
 
@@ -680,8 +933,54 @@ public partial class PowerPointHandler
                                 var lnB = tcPr.BottomBorderLineProperties ?? (tcPr.BottomBorderLineProperties = new Drawing.BottomBorderLineProperties());
                                 ApplyBorderLine(lnB);
                                 break;
+                            case "tl2br":
+                                var lnTl = tcPr.TopLeftToBottomRightBorderLineProperties ?? (tcPr.TopLeftToBottomRightBorderLineProperties = new Drawing.TopLeftToBottomRightBorderLineProperties());
+                                ApplyBorderLine(lnTl);
+                                break;
+                            case "tr2bl":
+                                var lnTr = tcPr.BottomLeftToTopRightBorderLineProperties ?? (tcPr.BottomLeftToTopRightBorderLineProperties = new Drawing.BottomLeftToTopRightBorderLineProperties());
+                                ApplyBorderLine(lnTr);
+                                break;
                         }
                     }
+                    break;
+                }
+                case "image":
+                {
+                    // Image fill on table cell (like POI CTBlipFillProperties on CTTableCellProperties)
+                    var tcPr = cell.TableCellProperties ?? cell.GetFirstChild<Drawing.TableCellProperties>();
+                    if (tcPr == null) { tcPr = new Drawing.TableCellProperties(); cell.Append(tcPr); }
+                    tcPr.RemoveAllChildren<Drawing.SolidFill>();
+                    tcPr.RemoveAllChildren<Drawing.NoFill>();
+                    tcPr.RemoveAllChildren<Drawing.GradientFill>();
+                    tcPr.RemoveAllChildren<Drawing.BlipFill>();
+
+                    if (!File.Exists(value))
+                        throw new FileNotFoundException($"Image file not found: {value}");
+                    var imgExt = Path.GetExtension(value).ToLowerInvariant();
+                    var imgType = imgExt switch
+                    {
+                        ".png" => ImagePartType.Png,
+                        ".jpg" or ".jpeg" => ImagePartType.Jpeg,
+                        ".gif" => ImagePartType.Gif,
+                        _ => ImagePartType.Png
+                    };
+                    // Find the SlidePart — the method is called from Set which has the slidePart context
+                    // We pass it via the part parameter if available, or traverse to root element
+                    var rootElement = cell.Ancestors<OpenXmlElement>().LastOrDefault() ?? cell;
+                    var ownerPart = rootElement is DocumentFormat.OpenXml.Presentation.Slide slide
+                        ? slide.SlidePart : null;
+                    if (ownerPart == null) { unsupported.Add(key); break; }
+
+                    var imgPart = ownerPart.AddImagePart(imgType);
+                    using (var stream = File.OpenRead(value))
+                        imgPart.FeedData(stream);
+                    var relId = ownerPart.GetIdOfPart(imgPart);
+
+                    tcPr.Append(new Drawing.BlipFill(
+                        new Drawing.Blip { Embed = relId },
+                        new Drawing.Stretch(new Drawing.FillRectangle())
+                    ));
                     break;
                 }
                 default:

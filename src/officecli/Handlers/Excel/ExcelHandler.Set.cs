@@ -6,6 +6,7 @@ using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using OfficeCli.Core;
+using Drawing = DocumentFormat.OpenXml.Drawing;
 using XDR = DocumentFormat.OpenXml.Drawing.Spreadsheet;
 
 
@@ -233,6 +234,83 @@ public partial class ExcelHandler
                         var nvProps = anchor.Descendants<XDR.NonVisualDrawingProperties>().FirstOrDefault();
                         if (nvProps != null) nvProps.Description = value;
                         break;
+                    case "rotation" or "rot":
+                    {
+                        var spPr = anchor.Descendants<XDR.ShapeProperties>().FirstOrDefault();
+                        if (spPr != null)
+                        {
+                            var xfrm = spPr.GetFirstChild<Drawing.Transform2D>();
+                            if (xfrm == null)
+                            {
+                                xfrm = new Drawing.Transform2D(
+                                    new Drawing.Offset { X = 0, Y = 0 },
+                                    new Drawing.Extents { Cx = 0, Cy = 0 }
+                                );
+                                spPr.InsertAt(xfrm, 0);
+                            }
+                            // Rotation in degrees -> 60000ths of a degree
+                            var degrees = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
+                            xfrm.Rotation = (int)(degrees * 60000);
+                        }
+                        break;
+                    }
+                    case "shadow":
+                    {
+                        var spPr = anchor.Descendants<XDR.ShapeProperties>().FirstOrDefault();
+                        if (spPr != null)
+                        {
+                            spPr.RemoveAllChildren<Drawing.EffectList>();
+                            if (!value.Equals("none", StringComparison.OrdinalIgnoreCase) &&
+                                !value.Equals("false", StringComparison.OrdinalIgnoreCase))
+                            {
+                                // Format: "color:blur:dist:dir" e.g. "000000:4:3:45" or just "true"
+                                var parts = value.Split(':');
+                                var sColor = parts.Length > 0 && parts[0] != "true" ? parts[0] : "000000";
+                                var sBlur = parts.Length > 1 && int.TryParse(parts[1], out var b) ? b : 4;
+                                var sDist = parts.Length > 2 && int.TryParse(parts[2], out var d) ? d : 3;
+                                var sDir = parts.Length > 3 && int.TryParse(parts[3], out var dr) ? dr : 45;
+
+                                var shadow = new Drawing.OuterShadow
+                                {
+                                    BlurRadius = (long)(sBlur * 12700),
+                                    Distance = (long)(sDist * 12700),
+                                    Direction = sDir * 60000,
+                                    Alignment = Drawing.RectangleAlignmentValues.BottomRight,
+                                    RotateWithShape = false
+                                };
+                                shadow.AppendChild(new Drawing.RgbColorModelHex { Val = sColor.TrimStart('#').ToUpperInvariant() });
+
+                                var effectList = new Drawing.EffectList();
+                                effectList.AppendChild(shadow);
+                                spPr.AppendChild(effectList);
+                            }
+                        }
+                        break;
+                    }
+                    case "glow":
+                    {
+                        var spPr = anchor.Descendants<XDR.ShapeProperties>().FirstOrDefault();
+                        if (spPr != null)
+                        {
+                            var effectList = spPr.GetFirstChild<Drawing.EffectList>();
+                            if (effectList == null) { effectList = new Drawing.EffectList(); spPr.AppendChild(effectList); }
+                            effectList.RemoveAllChildren<Drawing.Glow>();
+
+                            if (!value.Equals("none", StringComparison.OrdinalIgnoreCase) &&
+                                !value.Equals("false", StringComparison.OrdinalIgnoreCase))
+                            {
+                                // Format: "color:radius" e.g. "4472C4:6" or just "color"
+                                var parts = value.Split(':');
+                                var gColor = parts[0].TrimStart('#').ToUpperInvariant();
+                                var gRadius = parts.Length > 1 && int.TryParse(parts[1], out var r) ? r : 6;
+
+                                var glow = new Drawing.Glow { Radius = (long)(gRadius * 12700) };
+                                glow.AppendChild(new Drawing.RgbColorModelHex { Val = gColor });
+                                effectList.AppendChild(glow);
+                            }
+                        }
+                        break;
+                    }
                     default:
                         picUnsupported.Add(key);
                         break;
@@ -443,6 +521,17 @@ public partial class ExcelHandler
             var unsup = ChartHelper.SetChartProperties(chartPart, properties);
             chartPart.ChartSpace?.Save();
             return unsup;
+        }
+
+        // Handle /SheetName/pivottable[N]
+        var pivotSetMatch = Regex.Match(cellRef, @"^pivottable\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (pivotSetMatch.Success)
+        {
+            var ptIdx = int.Parse(pivotSetMatch.Groups[1].Value);
+            var pivotParts = worksheet.PivotTableParts.ToList();
+            if (ptIdx < 1 || ptIdx > pivotParts.Count)
+                throw new ArgumentException($"PivotTable {ptIdx} not found");
+            return PivotTableHelper.SetPivotTableProperties(pivotParts[ptIdx - 1], properties);
         }
 
         // Handle /SheetName/A1:D1 (range — merge/unmerge)
@@ -682,6 +771,42 @@ public partial class ExcelHandler
                     }
                     break;
                 }
+                case "zoom" or "zoomscale":
+                {
+                    var sheetViews = ws.GetFirstChild<SheetViews>();
+                    if (sheetViews == null)
+                    {
+                        sheetViews = new SheetViews();
+                        ws.InsertAt(sheetViews, 0);
+                    }
+                    var sheetView = sheetViews.GetFirstChild<SheetView>();
+                    if (sheetView == null)
+                    {
+                        sheetView = new SheetView { WorkbookViewId = 0 };
+                        sheetViews.AppendChild(sheetView);
+                    }
+                    sheetView.ZoomScale = uint.Parse(value);
+                    break;
+                }
+
+                case "tabcolor" or "tab_color":
+                {
+                    var sheetPr = ws.GetFirstChild<SheetProperties>();
+                    if (sheetPr == null)
+                    {
+                        sheetPr = new SheetProperties();
+                        ws.InsertAt(sheetPr, 0);
+                    }
+                    sheetPr.RemoveAllChildren<TabColor>();
+                    if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var colorHex = value.TrimStart('#').ToUpperInvariant();
+                        if (colorHex.Length == 6) colorHex = "FF" + colorHex; // RRGGBB -> FFRRGGBB
+                        sheetPr.AppendChild(new TabColor { Rgb = new HexBinaryValue(colorHex) });
+                    }
+                    break;
+                }
+
                 default:
                     unsupported.Add(key);
                     break;
@@ -796,6 +921,13 @@ public partial class ExcelHandler
                     col.Hidden = value.Equals("true", StringComparison.OrdinalIgnoreCase)
                         || value == "1" || value.Equals("yes", StringComparison.OrdinalIgnoreCase);
                     break;
+                case "outline" or "outlinelevel" or "group":
+                    col.OutlineLevel = byte.Parse(value);
+                    break;
+                case "collapsed":
+                    col.Collapsed = value.Equals("true", StringComparison.OrdinalIgnoreCase)
+                        || value == "1" || value.Equals("yes", StringComparison.OrdinalIgnoreCase);
+                    break;
                 default:
                     unsupported.Add(key);
                     break;
@@ -838,6 +970,13 @@ public partial class ExcelHandler
                     break;
                 case "hidden":
                     row.Hidden = value.Equals("true", StringComparison.OrdinalIgnoreCase)
+                        || value == "1" || value.Equals("yes", StringComparison.OrdinalIgnoreCase);
+                    break;
+                case "outline" or "outlinelevel" or "group":
+                    row.OutlineLevel = byte.Parse(value);
+                    break;
+                case "collapsed":
+                    row.Collapsed = value.Equals("true", StringComparison.OrdinalIgnoreCase)
                         || value == "1" || value.Equals("yes", StringComparison.OrdinalIgnoreCase);
                     break;
                 default:

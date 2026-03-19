@@ -230,9 +230,16 @@ public partial class ExcelHandler
                             if (font.Italic != null) node.Format["font.italic"] = true;
                             if (font.Strike != null) node.Format["font.strike"] = true;
                             if (font.Underline != null)
-                                node.Format["underline"] = font.Underline.Val?.InnerText == "double" ? "double" : "single";
-                            if (font.Color?.Rgb?.Value != null) node.Format["font.color"] = font.Color.Rgb.Value;
-                            if (font.FontSize?.Val?.Value != null) node.Format["font.size"] = $"{font.FontSize.Val.Value:0.##}pt";
+                                node.Format["font.underline"] = font.Underline.Val?.InnerText == "double" ? "double" : "single";
+                            if (font.Color?.Rgb?.Value != null)
+                            {
+                                var rgbVal = font.Color.Rgb.Value;
+                                // Strip ARGB alpha prefix (e.g. "FFFF0000" → "FF0000") for consistency with Word/PPTX
+                                if (rgbVal.Length == 8 && rgbVal.StartsWith("FF", StringComparison.OrdinalIgnoreCase))
+                                    rgbVal = rgbVal[2..];
+                                node.Format["font.color"] = rgbVal;
+                            }
+                            if (font.FontSize?.Val?.Value != null) node.Format["font.size"] = $"{font.FontSize.Val.Value:0.##}";
                             if (font.FontName?.Val?.Value != null) node.Format["font.name"] = font.FontName.Val.Value;
                         }
                     }
@@ -245,9 +252,33 @@ public partial class ExcelHandler
                         if (fills != null && fillId < (uint)fills.Elements<Fill>().Count())
                         {
                             var fill = fills.Elements<Fill>().ElementAt((int)fillId);
-                            var pf = fill.PatternFill;
-                            if (pf?.ForegroundColor?.Rgb?.Value != null)
-                                node.Format["bgcolor"] = pf.ForegroundColor.Rgb.Value;
+                            // Check gradient fill first
+                            var gf = fill.GetFirstChild<GradientFill>();
+                            if (gf != null)
+                            {
+                                var stops = gf.Elements<GradientStop>().ToList();
+                                if (stops.Count >= 2)
+                                {
+                                    var c1 = stops[0].Color?.Rgb?.Value ?? "";
+                                    var c2 = stops[^1].Color?.Rgb?.Value ?? "";
+                                    // Strip FF alpha prefix
+                                    if (c1.Length == 8 && c1.StartsWith("FF", StringComparison.OrdinalIgnoreCase)) c1 = c1[2..];
+                                    if (c2.Length == 8 && c2.StartsWith("FF", StringComparison.OrdinalIgnoreCase)) c2 = c2[2..];
+                                    int deg = (int)(gf.Degree?.Value ?? 0);
+                                    node.Format["fill"] = $"gradient;{c1};{c2};{deg}";
+                                }
+                            }
+                            else
+                            {
+                                var pf = fill.PatternFill;
+                                if (pf?.ForegroundColor?.Rgb?.Value != null)
+                                {
+                                    var fillRgb = pf.ForegroundColor.Rgb.Value;
+                                    if (fillRgb.Length == 8 && fillRgb.StartsWith("FF", StringComparison.OrdinalIgnoreCase))
+                                        fillRgb = fillRgb[2..];
+                                    node.Format["fill"] = fillRgb;
+                                }
+                            }
                         }
                     }
 
@@ -271,6 +302,18 @@ public partial class ExcelHandler
                                         node.Format[$"border.{side}.color"] = b.Color.Rgb.Value;
                                 }
                             }
+                            // Diagonal border readback
+                            var diag = border.DiagonalBorder;
+                            if (diag?.Style?.Value != null && diag.Style.Value != BorderStyleValues.None)
+                            {
+                                node.Format["border.diagonal"] = diag.Style.InnerText;
+                                if (diag.Color?.Rgb?.Value != null)
+                                    node.Format["border.diagonal.color"] = diag.Color.Rgb.Value;
+                            }
+                            if (border.DiagonalUp?.Value == true)
+                                node.Format["border.diagonalUp"] = true;
+                            if (border.DiagonalDown?.Value == true)
+                                node.Format["border.diagonalDown"] = true;
                         }
                     }
 
@@ -279,7 +322,7 @@ public partial class ExcelHandler
                     if (alignment != null)
                     {
                         if (alignment.WrapText?.Value == true)
-                            node.Format["wrap"] = true;
+                            node.Format["alignment.wrapText"] = true;
                         if (alignment.Horizontal?.HasValue == true)
                         {
                             node.Format["alignment.horizontal"] = alignment.Horizontal.InnerText;
@@ -300,7 +343,41 @@ public partial class ExcelHandler
                         if (customFmt?.FormatCode?.Value != null)
                             node.Format["numberformat"] = customFmt.FormatCode.Value;
                         else
-                            node.Format["numberformat"] = numFmtId;
+                        {
+                            // Resolve built-in number format IDs to their format strings
+                            // See ECMA-376 Part 1, 18.8.30 (numFmt) for built-in IDs
+                            node.Format["numberformat"] = numFmtId switch
+                            {
+                                1 => "0",
+                                2 => "0.00",
+                                3 => "#,##0",
+                                4 => "#,##0.00",
+                                9 => "0%",
+                                10 => "0.00%",
+                                11 => "0.00E+00",
+                                12 => "# ?/?",
+                                13 => "# ??/??",
+                                14 => "m/d/yy",
+                                15 => "d-mmm-yy",
+                                16 => "d-mmm",
+                                17 => "mmm-yy",
+                                18 => "h:mm AM/PM",
+                                19 => "h:mm:ss AM/PM",
+                                20 => "h:mm",
+                                21 => "h:mm:ss",
+                                22 => "m/d/yy h:mm",
+                                37 => "#,##0 ;(#,##0)",
+                                38 => "#,##0 ;[Red](#,##0)",
+                                39 => "#,##0.00;(#,##0.00)",
+                                40 => "#,##0.00;[Red](#,##0.00)",
+                                45 => "mm:ss",
+                                46 => "[h]:mm:ss",
+                                47 => "mmss.0",
+                                48 => "##0.0E+0",
+                                49 => "@",
+                                _ => numFmtId // fallback to ID for truly unknown formats
+                            };
+                        }
                     }
                 }
             }
@@ -537,9 +614,9 @@ public partial class ExcelHandler
         node.Format["sqref"] = sqref;
 
         if (dv.Type?.HasValue == true)
-            node.Format["type"] = dv.Type.Value.ToString();
+            node.Format["type"] = dv.Type.InnerText;
         if (dv.Operator?.HasValue == true)
-            node.Format["operator"] = dv.Operator.Value.ToString();
+            node.Format["operator"] = dv.Operator.InnerText;
 
         if (dv.Formula1 != null)
         {

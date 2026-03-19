@@ -4,6 +4,7 @@
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Wordprocessing;
 using OfficeCli.Core;
+using DW = DocumentFormat.OpenXml.Drawing.Wordprocessing;
 
 namespace OfficeCli.Handlers;
 
@@ -183,6 +184,8 @@ public partial class WordHandler
                     "tbl" => current.Elements<Table>().Cast<OpenXmlElement>(),
                     "tr" => current.Elements<TableRow>().Cast<OpenXmlElement>(),
                     "tc" => current.Elements<TableCell>().Cast<OpenXmlElement>(),
+                    "sdt" => current.ChildElements
+                        .Where(e => e is SdtBlock || e is SdtRun).Cast<OpenXmlElement>(),
                     _ => current.ChildElements.Where(e => e.LocalName == seg.Name).Cast<OpenXmlElement>()
                 };
             }
@@ -224,7 +227,10 @@ public partial class WordHandler
                 if (pProps.ParagraphStyleId?.Val?.Value != null)
                     node.Format["style"] = pProps.ParagraphStyleId.Val.Value;
                 if (pProps.Justification?.Val != null)
-                    node.Format["alignment"] = pProps.Justification.Val.InnerText;
+                {
+                    var alignText = pProps.Justification.Val.InnerText;
+                    node.Format["alignment"] = alignText == "both" ? "justify" : alignText;
+                }
                 if (pProps.SpacingBetweenLines != null)
                 {
                     if (pProps.SpacingBetweenLines.Before?.Value != null)
@@ -251,17 +257,17 @@ public partial class WordHandler
                 if (pProps.WidowControl != null)
                     node.Format["widowcontrol"] = true;
                 if (pProps.Shading != null)
-                    node.Format["shading"] = pProps.Shading.Fill?.Value ?? pProps.Shading.Color?.Value ?? "";
+                    node.Format["shd"] = pProps.Shading.Fill?.Value ?? pProps.Shading.Color?.Value ?? "";
 
                 var pBdr = pProps.ParagraphBorders;
                 if (pBdr != null)
                 {
-                    ReadBorder(pBdr.TopBorder, "pBdr.top", node);
-                    ReadBorder(pBdr.BottomBorder, "pBdr.bottom", node);
-                    ReadBorder(pBdr.LeftBorder, "pBdr.left", node);
-                    ReadBorder(pBdr.RightBorder, "pBdr.right", node);
-                    ReadBorder(pBdr.BetweenBorder, "pBdr.between", node);
-                    ReadBorder(pBdr.BarBorder, "pBdr.bar", node);
+                    ReadBorder(pBdr.TopBorder, "pbdr.top", node);
+                    ReadBorder(pBdr.BottomBorder, "pbdr.bottom", node);
+                    ReadBorder(pBdr.LeftBorder, "pbdr.left", node);
+                    ReadBorder(pBdr.RightBorder, "pbdr.right", node);
+                    ReadBorder(pBdr.BetweenBorder, "pbdr.between", node);
+                    ReadBorder(pBdr.BarBorder, "pbdr.bar", node);
                 }
 
                 var numProps = pProps.NumberingProperties;
@@ -323,6 +329,17 @@ public partial class WordHandler
                 node.Format["subscript"] = true;
             if (run.RunProperties?.Shading?.Fill?.Value != null)
                 node.Format["shading"] = run.RunProperties.Shading.Fill.Value;
+            // Image properties if run contains a Drawing
+            var runDrawing = run.GetFirstChild<Drawing>();
+            if (runDrawing != null)
+            {
+                node.Type = "picture";
+                var docProps = runDrawing.Descendants<DW.DocProperties>().FirstOrDefault();
+                if (docProps?.Description?.Value != null) node.Format["alt"] = docProps.Description.Value;
+                var extent = runDrawing.Descendants<DW.Extent>().FirstOrDefault();
+                if (extent?.Cx != null) node.Format["width"] = $"{extent.Cx.Value / 360000.0:F1}cm";
+                if (extent?.Cy != null) node.Format["height"] = $"{extent.Cy.Value / 360000.0:F1}cm";
+            }
             if (run.Parent is Hyperlink hlParent && hlParent.Id?.Value != null)
             {
                 try
@@ -354,7 +371,9 @@ public partial class WordHandler
             node.Type = "table";
             node.ChildCount = table.Elements<TableRow>().Count();
             var firstRow = table.Elements<TableRow>().FirstOrDefault();
-            node.Format["cols"] = firstRow?.Elements<TableCell>().Count() ?? 0;
+            // Use grid column count (from TableGrid) instead of cell count for accurate column reporting
+            var gridColCount = table.GetFirstChild<TableGrid>()?.Elements<GridColumn>().Count();
+            node.Format["cols"] = gridColCount ?? firstRow?.Elements<TableCell>().Count() ?? 0;
 
             var tp = table.GetFirstChild<TableProperties>();
             if (tp != null)
@@ -475,6 +494,74 @@ public partial class WordHandler
             node.ChildCount = directRow.Elements<TableCell>().Count();
             ReadRowProps(directRow, node);
         }
+        else if (element is SdtBlock sdtBlockNode)
+        {
+            node.Type = "sdt";
+            var sdtProps = sdtBlockNode.SdtProperties;
+            if (sdtProps != null)
+            {
+                var alias = sdtProps.GetFirstChild<SdtAlias>();
+                if (alias?.Val?.Value != null) node.Format["alias"] = alias.Val.Value;
+                var tagEl = sdtProps.GetFirstChild<Tag>();
+                if (tagEl?.Val?.Value != null) node.Format["tag"] = tagEl.Val.Value;
+                var lockEl = sdtProps.GetFirstChild<DocumentFormat.OpenXml.Wordprocessing.Lock>();
+                if (lockEl?.Val?.Value != null) node.Format["lock"] = lockEl.Val.InnerText;
+                var sdtId = sdtProps.GetFirstChild<SdtId>();
+                if (sdtId?.Val?.Value != null) node.Format["id"] = sdtId.Val.Value;
+
+                // Determine SDT type (check specific types first, text last as fallback)
+                if (sdtProps.GetFirstChild<SdtContentDropDownList>() != null) node.Format["sdtType"] = "dropdown";
+                else if (sdtProps.GetFirstChild<SdtContentComboBox>() != null) node.Format["sdtType"] = "combobox";
+                else if (sdtProps.GetFirstChild<SdtContentDate>() != null) node.Format["sdtType"] = "date";
+                else if (sdtProps.GetFirstChild<SdtContentText>() != null) node.Format["sdtType"] = "text";
+                else node.Format["sdtType"] = "richtext";
+
+                // Read dropdown/combobox items
+                var ddl = sdtProps.GetFirstChild<SdtContentDropDownList>();
+                var combo = sdtProps.GetFirstChild<SdtContentComboBox>();
+                var listItems = ddl?.Elements<ListItem>() ?? combo?.Elements<ListItem>();
+                if (listItems != null)
+                {
+                    var items = listItems.Select(li => li.DisplayText?.Value ?? li.Value?.Value ?? "").ToList();
+                    if (items.Count > 0) node.Format["items"] = string.Join(",", items);
+                }
+            }
+            node.Text = string.Concat(sdtBlockNode.Descendants<Text>().Select(t => t.Text));
+            var sdtContent = sdtBlockNode.SdtContentBlock;
+            node.ChildCount = sdtContent?.ChildElements.Count ?? 0;
+        }
+        else if (element is SdtRun sdtRunNode)
+        {
+            node.Type = "sdt";
+            var sdtProps = sdtRunNode.SdtProperties;
+            if (sdtProps != null)
+            {
+                var alias = sdtProps.GetFirstChild<SdtAlias>();
+                if (alias?.Val?.Value != null) node.Format["alias"] = alias.Val.Value;
+                var tagEl = sdtProps.GetFirstChild<Tag>();
+                if (tagEl?.Val?.Value != null) node.Format["tag"] = tagEl.Val.Value;
+                var lockEl = sdtProps.GetFirstChild<DocumentFormat.OpenXml.Wordprocessing.Lock>();
+                if (lockEl?.Val?.Value != null) node.Format["lock"] = lockEl.Val.InnerText;
+                var sdtId = sdtProps.GetFirstChild<SdtId>();
+                if (sdtId?.Val?.Value != null) node.Format["id"] = sdtId.Val.Value;
+
+                if (sdtProps.GetFirstChild<SdtContentText>() != null) node.Format["sdtType"] = "text";
+                else if (sdtProps.GetFirstChild<SdtContentDropDownList>() != null) node.Format["sdtType"] = "dropdown";
+                else if (sdtProps.GetFirstChild<SdtContentComboBox>() != null) node.Format["sdtType"] = "combobox";
+                else if (sdtProps.GetFirstChild<SdtContentDate>() != null) node.Format["sdtType"] = "date";
+                else node.Format["sdtType"] = "richtext";
+
+                var ddl = sdtProps.GetFirstChild<SdtContentDropDownList>();
+                var combo = sdtProps.GetFirstChild<SdtContentComboBox>();
+                var listItems = ddl?.Elements<ListItem>() ?? combo?.Elements<ListItem>();
+                if (listItems != null)
+                {
+                    var items = listItems.Select(li => li.DisplayText?.Value ?? li.Value?.Value ?? "").ToList();
+                    if (items.Count > 0) node.Format["items"] = string.Join(",", items);
+                }
+            }
+            node.Text = string.Concat(sdtRunNode.Descendants<Text>().Select(t => t.Text));
+        }
         else
         {
             // Generic fallback: collect XML attributes and child val patterns
@@ -541,7 +628,7 @@ public partial class WordHandler
         var tcPr = cell.TableCellProperties;
         if (tcPr != null)
         {
-            // Borders
+            // Borders (including diagonal — like POI CTTcBorders)
             var cb = tcPr.TableCellBorders;
             if (cb != null)
             {
@@ -549,11 +636,36 @@ public partial class WordHandler
                 ReadBorder(cb.BottomBorder, "border.bottom", node);
                 ReadBorder(cb.LeftBorder, "border.left", node);
                 ReadBorder(cb.RightBorder, "border.right", node);
+                ReadBorder(cb.TopLeftToBottomRightCellBorder, "border.tl2br", node);
+                ReadBorder(cb.TopRightToBottomLeftCellBorder, "border.tr2bl", node);
             }
-            // Shading
-            var shd = tcPr.Shading;
-            if (shd?.Fill?.Value != null)
-                node.Format["shd"] = shd.Fill.Value;
+            // Shading — check for gradient (w14:gradFill in mc:AlternateContent) first
+            var mcNs = "http://schemas.openxmlformats.org/markup-compatibility/2006";
+            var gradAc = tcPr.ChildElements
+                .FirstOrDefault(e => e.LocalName == "AlternateContent" && e.NamespaceUri == mcNs);
+            if (gradAc != null && gradAc.InnerXml.Contains("gradFill"))
+            {
+                // Parse gradient colors and angle from w14:gradFill XML
+                var colors = new List<string>();
+                foreach (var match in System.Text.RegularExpressions.Regex.Matches(
+                    gradAc.InnerXml, @"val=""([0-9A-Fa-f]{6})"""))
+                {
+                    colors.Add(((System.Text.RegularExpressions.Match)match).Groups[1].Value);
+                }
+                var angleMatch = System.Text.RegularExpressions.Regex.Match(
+                    gradAc.InnerXml, @"ang=""(\d+)""");
+                var angle = angleMatch.Success ? int.Parse(angleMatch.Groups[1].Value) / 60000 : 0;
+                if (colors.Count >= 2)
+                    node.Format["shd"] = $"gradient;{colors[0]};{colors[1]};{angle}";
+                else if (colors.Count == 1)
+                    node.Format["shd"] = colors[0];
+            }
+            else
+            {
+                var shd = tcPr.Shading;
+                if (shd?.Fill?.Value != null)
+                    node.Format["shd"] = shd.Fill.Value;
+            }
             // Width
             if (tcPr.TableCellWidth?.Width?.Value != null)
                 node.Format["width"] = tcPr.TableCellWidth.Width.Value;

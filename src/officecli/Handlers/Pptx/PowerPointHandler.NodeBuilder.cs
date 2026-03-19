@@ -138,12 +138,34 @@ public partial class PowerPointHandler
                             Text = cellText
                         };
 
-                        // Cell fill
+                        // Cell fill (blip, gradient, or solid)
                         var tcPr = cell.TableCellProperties ?? cell.GetFirstChild<Drawing.TableCellProperties>();
-                        var cellFillHex = tcPr?.GetFirstChild<Drawing.SolidFill>()?.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
-                        if (cellFillHex != null) cellNode.Format["fill"] = cellFillHex;
+                        var cellBlipFill = tcPr?.GetFirstChild<Drawing.BlipFill>();
+                        if (cellBlipFill != null)
+                        {
+                            var blipEmbed = cellBlipFill.GetFirstChild<Drawing.Blip>()?.Embed?.Value;
+                            cellNode.Format["fill"] = "image";
+                            if (blipEmbed != null) cellNode.Format["image.relId"] = blipEmbed;
+                        }
+                        else if (tcPr?.GetFirstChild<Drawing.GradientFill>() is { } gradFill)
+                        {
+                            var stops = gradFill.GradientStopList?.Elements<Drawing.GradientStop>().ToList();
+                            if (stops != null && stops.Count >= 2)
+                            {
+                                var gc1 = stops[0].GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value ?? "";
+                                var gc2 = stops[^1].GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value ?? "";
+                                var lin = gradFill.GetFirstChild<Drawing.LinearGradientFill>();
+                                int deg = lin?.Angle?.Value != null ? lin.Angle.Value / 60000 : 0;
+                                cellNode.Format["fill"] = $"gradient;{gc1};{gc2};{deg}";
+                            }
+                        }
+                        else
+                        {
+                            var cellFillHex = tcPr?.GetFirstChild<Drawing.SolidFill>()?.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
+                            if (cellFillHex != null) cellNode.Format["fill"] = cellFillHex;
+                        }
 
-                        // Cell borders
+                        // Cell borders (including diagonal tl2br/tr2bl)
                         if (tcPr != null) ReadTableCellBorders(tcPr, cellNode);
 
                         rowNode.Children.Add(cellNode);
@@ -275,13 +297,33 @@ public partial class PowerPointHandler
             if (firstRun.RunProperties.Bold?.HasValue == true) node.Format["bold"] = firstRun.RunProperties.Bold.Value;
             if (firstRun.RunProperties.Italic?.HasValue == true) node.Format["italic"] = firstRun.RunProperties.Italic.Value;
             if (firstRun.RunProperties.Underline?.HasValue == true && firstRun.RunProperties.Underline.Value != Drawing.TextUnderlineValues.None)
-                node.Format["underline"] = firstRun.RunProperties.Underline.InnerText;
+            {
+                var ulInner = firstRun.RunProperties.Underline.InnerText;
+                node.Format["underline"] = ulInner switch
+                {
+                    "sng" => "single",
+                    "dbl" => "double",
+                    _ => ulInner
+                };
+            }
             if (firstRun.RunProperties.Strike?.HasValue == true && firstRun.RunProperties.Strike.Value != Drawing.TextStrikeValues.NoStrike)
-                node.Format["strike"] = true;
+            {
+                node.Format["strike"] = firstRun.RunProperties.Strike.Value == Drawing.TextStrikeValues.DoubleStrike ? "double" : "single";
+            }
 
-            // Text color (from first run)
+            // Character spacing on first run
+            if (firstRun.RunProperties.Spacing?.HasValue == true)
+                node.Format["spacing"] = $"{firstRun.RunProperties.Spacing.Value / 100.0:0.##}";
+            // Baseline (superscript/subscript)
+            if (firstRun.RunProperties.Baseline?.HasValue == true && firstRun.RunProperties.Baseline.Value != 0)
+                node.Format["baseline"] = $"{firstRun.RunProperties.Baseline.Value / 1000.0:0.##}";
+
+            // Text color (from first run) — solid or gradient
             var runColor = ReadColorFromFill(firstRun.RunProperties.GetFirstChild<Drawing.SolidFill>());
             if (runColor != null) node.Format["color"] = runColor;
+            var runGradFill = firstRun.RunProperties.GetFirstChild<Drawing.GradientFill>();
+            if (runGradFill != null)
+                node.Format["textFill"] = ReadGradientString(runGradFill);
 
             // Hyperlink on first run
             if (part != null)
@@ -315,17 +357,82 @@ public partial class PowerPointHandler
             var outerShadow = effectList.GetFirstChild<Drawing.OuterShadow>();
             if (outerShadow != null)
             {
+                // Read full params like POI XSLFShadow: color, blur(pt), angle(deg), dist(pt), opacity(%)
                 var shadowColor = ReadColorFromElement(outerShadow) ?? "000000";
-                node.Format["shadow"] = shadowColor;
+                var blurPt = outerShadow.BlurRadius?.HasValue == true ? $"{outerShadow.BlurRadius.Value / 12700.0:0.##}" : "4";
+                var angleDeg = outerShadow.Direction?.HasValue == true ? $"{outerShadow.Direction.Value / 60000.0:0.##}" : "45";
+                var distPt = outerShadow.Distance?.HasValue == true ? $"{outerShadow.Distance.Value / 12700.0:0.##}" : "3";
+                var alphaEl = outerShadow.Descendants<Drawing.Alpha>().FirstOrDefault();
+                var opacity = alphaEl?.Val?.HasValue == true ? $"{alphaEl.Val.Value / 1000.0:0.##}" : "40";
+                node.Format["shadow"] = $"{shadowColor}-{blurPt}-{angleDeg}-{distPt}-{opacity}";
             }
             var glow = effectList.GetFirstChild<Drawing.Glow>();
             if (glow != null)
             {
                 var glowColor = ReadColorFromElement(glow) ?? "000000";
-                node.Format["glow"] = glowColor;
+                var radiusPt = glow.Radius?.HasValue == true ? $"{glow.Radius.Value / 12700.0:0.##}" : "8";
+                var glowAlpha = glow.Descendants<Drawing.Alpha>().FirstOrDefault();
+                var glowOpacity = glowAlpha?.Val?.HasValue == true ? $"{glowAlpha.Val.Value / 1000.0:0.##}" : "75";
+                node.Format["glow"] = $"{glowColor}-{radiusPt}-{glowOpacity}";
             }
-            if (effectList.GetFirstChild<Drawing.Reflection>() != null)
-                node.Format["reflection"] = "true";
+            var reflEl = effectList.GetFirstChild<Drawing.Reflection>();
+            if (reflEl != null)
+            {
+                // Map endPosition back to type: tight=55000, half=90000, full=100000
+                var endPos = reflEl.EndPosition?.Value ?? 0;
+                if (endPos >= 95000) node.Format["reflection"] = "full";
+                else if (endPos >= 70000) node.Format["reflection"] = "half";
+                else node.Format["reflection"] = "tight";
+            }
+            var softEdge = effectList.GetFirstChild<Drawing.SoftEdge>();
+            if (softEdge?.Radius?.HasValue == true)
+                node.Format["softEdge"] = $"{softEdge.Radius.Value / 12700.0:0.##}";
+        }
+
+        // 3D rotation (scene3d)
+        var scene3d = shape.ShapeProperties?.GetFirstChild<Drawing.Scene3DType>();
+        if (scene3d != null)
+        {
+            var cam = scene3d.Camera;
+            var rot3d = cam?.Rotation;
+            if (rot3d != null)
+            {
+                var rx = rot3d.Latitude?.Value ?? 0;
+                var ry = rot3d.Longitude?.Value ?? 0;
+                var rz = rot3d.Revolution?.Value ?? 0;
+                if (rx != 0 || ry != 0 || rz != 0)
+                    node.Format["rot3d"] = $"{rx / 60000.0:0.##},{ry / 60000.0:0.##},{rz / 60000.0:0.##}";
+            }
+            var lightRig = scene3d.LightRig;
+            if (lightRig?.Rig?.HasValue == true) node.Format["lighting"] = lightRig.Rig.InnerText;
+        }
+
+        // 3D format (sp3d)
+        var sp3d = shape.ShapeProperties?.GetFirstChild<Drawing.Shape3DType>();
+        if (sp3d != null)
+        {
+            if (sp3d.ExtrusionHeight?.HasValue == true && sp3d.ExtrusionHeight.Value != 0)
+                node.Format["depth"] = $"{sp3d.ExtrusionHeight.Value / 12700.0:0.##}";
+            if (sp3d.PresetMaterial?.HasValue == true)
+                node.Format["material"] = sp3d.PresetMaterial.InnerText;
+            var bevelT = sp3d.BevelTop;
+            if (bevelT != null) node.Format["bevel"] = FormatBevel(bevelT);
+            var bevelB = sp3d.BevelBottom;
+            if (bevelB != null) node.Format["bevelBottom"] = FormatBevel(bevelB);
+        }
+
+        // Flip
+        if (xfrm?.HorizontalFlip?.Value == true) node.Format["flipH"] = true;
+        if (xfrm?.VerticalFlip?.Value == true) node.Format["flipV"] = true;
+
+        // Z-order (1-based position among content elements: 1 = back, N = front)
+        if (shape.Parent is ShapeTree zTree)
+        {
+            var contentEls = zTree.ChildElements
+                .Where(e => e is Shape or Picture or GraphicFrame or GroupShape or ConnectionShape)
+                .ToList();
+            var zIdx = contentEls.IndexOf(shape);
+            if (zIdx >= 0) node.Format["zorder"] = zIdx + 1;
         }
 
         // Rotation (plain number in degrees, no suffix, so Set can consume the value directly)
@@ -349,9 +456,18 @@ public partial class PowerPointHandler
                     node.Format["margin"] = $"{FormatEmu(lIns ?? 91440)},{FormatEmu(tIns ?? 45720)},{FormatEmu(rIns ?? 91440)},{FormatEmu(bIns ?? 45720)}";
             }
 
-            // Vertical alignment
+            // Vertical alignment — map XML enum to user-friendly name (like POI TextAlign)
             if (bodyPr.Anchor?.HasValue == true)
-                node.Format["valign"] = bodyPr.Anchor.InnerText;
+            {
+                var vaInner = bodyPr.Anchor.InnerText;
+                node.Format["valign"] = vaInner switch
+                {
+                    "t" => "top",
+                    "ctr" => "center",
+                    "b" => "bottom",
+                    _ => vaInner
+                };
+            }
 
             // TextWarp (WordArt)
             var prstTxWarp = bodyPr.GetFirstChild<Drawing.PresetTextWarp>();
@@ -367,9 +483,19 @@ public partial class PowerPointHandler
         // Text alignment (from first paragraph)
         var firstPara = shape.TextBody?.Elements<Drawing.Paragraph>().FirstOrDefault();
         if (firstPara?.ParagraphProperties?.Alignment?.HasValue == true)
-            node.Format["align"] = firstPara.ParagraphProperties.Alignment.InnerText;
+        {
+            var alInner = firstPara.ParagraphProperties.Alignment.InnerText;
+            node.Format["align"] = alInner switch
+            {
+                "l" => "left",
+                "ctr" => "center",
+                "r" => "right",
+                "just" => "justify",
+                _ => alInner
+            };
+        }
 
-        // Paragraph spacing (from first paragraph)
+        // Paragraph spacing and indent (from first paragraph)
         var pProps = firstPara?.ParagraphProperties;
         if (pProps != null)
         {
@@ -379,6 +505,9 @@ public partial class PowerPointHandler
             if (sb.HasValue) node.Format["spaceBefore"] = $"{sb.Value / 100.0:0.##}";
             var sa = pProps.GetFirstChild<Drawing.SpaceAfter>()?.GetFirstChild<Drawing.SpacingPoints>()?.Val?.Value;
             if (sa.HasValue) node.Format["spaceAfter"] = $"{sa.Value / 100.0:0.##}";
+            if (pProps.Indent?.HasValue == true) node.Format["indent"] = FormatEmu(pProps.Indent.Value);
+            if (pProps.LeftMargin?.HasValue == true) node.Format["marginLeft"] = FormatEmu(pProps.LeftMargin.Value);
+            if (pProps.RightMargin?.HasValue == true) node.Format["marginRight"] = FormatEmu(pProps.RightMargin.Value);
         }
 
         // Count paragraphs regardless of depth
@@ -405,9 +534,12 @@ public partial class PowerPointHandler
                         ChildCount = paraRuns.Count
                     };
 
-                    // Add alignment info
-                    var align = para.ParagraphProperties?.Alignment;
-                    if (align != null && align.HasValue) paraNode.Format["align"] = align.InnerText;
+                    // Add paragraph formatting info
+                    var paraPProps = para.ParagraphProperties;
+                    if (paraPProps?.Alignment?.HasValue == true) paraNode.Format["align"] = paraPProps.Alignment.InnerText;
+                    if (paraPProps?.Indent?.HasValue == true) paraNode.Format["indent"] = FormatEmu(paraPProps.Indent.Value);
+                    if (paraPProps?.LeftMargin?.HasValue == true) paraNode.Format["marginLeft"] = FormatEmu(paraPProps.LeftMargin.Value);
+                    if (paraPProps?.RightMargin?.HasValue == true) paraNode.Format["marginRight"] = FormatEmu(paraPProps.RightMargin.Value);
 
                     // Include runs at depth > 1
                     if (depth > 1)
@@ -452,9 +584,15 @@ public partial class PowerPointHandler
             if (fs.HasValue) node.Format["size"] = $"{fs.Value / 100.0:0.##}pt";
             if (run.RunProperties.Bold?.Value == true) node.Format["bold"] = true;
             if (run.RunProperties.Italic?.Value == true) node.Format["italic"] = true;
-            // Color
+            if (run.RunProperties.Spacing?.HasValue == true)
+                node.Format["spacing"] = $"{run.RunProperties.Spacing.Value / 100.0:0.##}";
+            if (run.RunProperties.Baseline?.HasValue == true && run.RunProperties.Baseline.Value != 0)
+                node.Format["baseline"] = $"{run.RunProperties.Baseline.Value / 1000.0:0.##}";
+            // Color (solid or gradient)
             var runFillColor = ReadColorFromFill(run.RunProperties.GetFirstChild<Drawing.SolidFill>());
             if (runFillColor != null) node.Format["color"] = runFillColor;
+            var runGrad = run.RunProperties.GetFirstChild<Drawing.GradientFill>();
+            if (runGrad != null) node.Format["textFill"] = ReadGradientString(runGrad);
             // Hyperlink
             if (part != null)
             {

@@ -64,6 +64,13 @@ public partial class ExcelHandler
         var containsMatch = Regex.Match(selector, @":contains\(['""]?(.+?)['""]?\)");
         if (containsMatch.Success) valueContains = containsMatch.Groups[1].Value;
 
+        // Shorthand: "cell:text" → treat as :contains(text)
+        if (valueContains == null)
+        {
+            var shorthandMatch = Regex.Match(selector, @"^(?:\w+)?:(?!contains|empty|has)(.+)$");
+            if (shorthandMatch.Success) valueContains = shorthandMatch.Groups[1].Value;
+        }
+
         // :empty pseudo-selector
         if (selector.Contains(":empty")) isEmpty = true;
 

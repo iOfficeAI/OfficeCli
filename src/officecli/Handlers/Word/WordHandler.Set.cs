@@ -17,9 +17,38 @@ public partial class WordHandler
     {
         var unsupported = new List<string>();
 
-        // Document-level properties
+        // Batch Set: if path looks like a selector (not starting with /), Query → Set each
+        if (!string.IsNullOrEmpty(path) && !path.StartsWith("/"))
+        {
+            var targets = Query(path);
+            if (targets.Count == 0)
+                throw new ArgumentException($"No elements matched selector: {path}");
+            foreach (var target in targets)
+            {
+                var targetUnsupported = Set(target.Path, properties);
+                foreach (var u in targetUnsupported)
+                    if (!unsupported.Contains(u)) unsupported.Add(u);
+            }
+            return unsupported;
+        }
+
+        // Document-level properties (including find/replace)
         if (path == "/" || path == "")
         {
+            // Find & Replace: special handling before document properties
+            if (properties.TryGetValue("find", out var findText) && properties.TryGetValue("replace", out var replaceText))
+            {
+                var count = FindAndReplace(findText, replaceText, properties.GetValueOrDefault("scope", "all"));
+                properties.Remove("find");
+                properties.Remove("replace");
+                properties.Remove("scope");
+                // If there are remaining properties, apply them as document properties
+                if (properties.Count > 0)
+                    SetDocumentProperties(properties);
+                _doc.MainDocumentPart?.Document?.Save();
+                return unsupported;
+            }
+
             SetDocumentProperties(properties);
             _doc.MainDocumentPart?.Document?.Save();
             return unsupported;
@@ -98,6 +127,57 @@ public partial class WordHandler
             if (chartIdx < 1 || chartIdx > chartParts.Count)
                 throw new ArgumentException($"Chart {chartIdx} not found (total: {chartParts.Count})");
             unsupported = Core.ChartHelper.SetChartProperties(chartParts[chartIdx - 1], properties);
+            _doc.MainDocumentPart?.Document?.Save();
+            return unsupported;
+        }
+
+        // Field paths: /field[N]
+        var fieldSetMatch = System.Text.RegularExpressions.Regex.Match(path, @"^/field\[(\d+)\]$");
+        if (fieldSetMatch.Success)
+        {
+            var fieldIdx = int.Parse(fieldSetMatch.Groups[1].Value);
+            var allFields = FindFields();
+            if (fieldIdx < 1 || fieldIdx > allFields.Count)
+                throw new ArgumentException($"Field {fieldIdx} not found (total: {allFields.Count})");
+
+            var field = allFields[fieldIdx - 1];
+
+            foreach (var (key, value) in properties)
+            {
+                switch (key.ToLowerInvariant())
+                {
+                    case "instruction" or "instr":
+                        field.InstrCode.Text = value.StartsWith(" ") ? value : $" {value} ";
+                        // Auto-mark dirty when instruction changes
+                        var beginCharI = field.BeginRun.GetFirstChild<FieldChar>();
+                        if (beginCharI != null) beginCharI.Dirty = true;
+                        break;
+                    case "text" or "result":
+                        // Replace result text (between separate and end)
+                        if (field.ResultRuns.Count > 0)
+                        {
+                            // Set text on first result run, clear the rest
+                            var firstResultText = field.ResultRuns[0].GetFirstChild<Text>();
+                            if (firstResultText != null)
+                                firstResultText.Text = value;
+                            else
+                                field.ResultRuns[0].AppendChild(new Text(value) { Space = SpaceProcessingModeValues.Preserve });
+                            for (int ri = 1; ri < field.ResultRuns.Count; ri++)
+                            {
+                                var t = field.ResultRuns[ri].GetFirstChild<Text>();
+                                if (t != null) t.Text = "";
+                            }
+                        }
+                        break;
+                    case "dirty":
+                        var beginCharD = field.BeginRun.GetFirstChild<FieldChar>();
+                        if (beginCharD != null) beginCharD.Dirty = IsTruthy(value);
+                        break;
+                    default:
+                        unsupported.Add(key);
+                        break;
+                }
+            }
             _doc.MainDocumentPart?.Document?.Save();
             return unsupported;
         }
@@ -308,6 +388,47 @@ public partial class WordHandler
                     case "marginright":
                         EnsureSectPrPageMargin(sectPr).Right = uint.Parse(value);
                         break;
+                    case "columns" or "cols" or "col":
+                    {
+                        // Equal-width columns: "3" or "3,720" (count,space in twips)
+                        var eqCols = EnsureColumns(sectPr);
+                        var colParts = value.Split(',');
+                        eqCols.ColumnCount = (Int16Value)short.Parse(colParts[0]);
+                        eqCols.EqualWidth = true;
+                        if (colParts.Length > 1)
+                            eqCols.Space = colParts[1];
+                        else
+                            eqCols.Space ??= "720"; // default ~1.27cm
+                        // Remove any individual column definitions for equal width
+                        eqCols.RemoveAllChildren<Column>();
+                        break;
+                    }
+                    case "colwidths":
+                    {
+                        // Custom column widths: "3000,720,2000,720,3000"
+                        // Alternating: width,space,width,space,...,width
+                        var cwCols = EnsureColumns(sectPr);
+                        cwCols.EqualWidth = false;
+                        cwCols.RemoveAllChildren<Column>();
+                        var vals = value.Split(',');
+                        int colCount = 0;
+                        for (int ci = 0; ci < vals.Length; ci += 2)
+                        {
+                            var col = new Column { Width = vals[ci] };
+                            if (ci + 1 < vals.Length)
+                                col.Space = vals[ci + 1];
+                            cwCols.AppendChild(col);
+                            colCount++;
+                        }
+                        cwCols.ColumnCount = (Int16Value)(short)colCount;
+                        break;
+                    }
+                    case "separator" or "sep":
+                    {
+                        var sepCols = EnsureColumns(sectPr);
+                        sepCols.Separator = IsTruthy(value);
+                        break;
+                    }
                     default:
                         unsupported.Add(key);
                         break;
@@ -372,7 +493,7 @@ public partial class WordHandler
                             {
                                 "center" => JustificationValues.Center,
                                 "right" => JustificationValues.Right,
-                                "justify" => JustificationValues.Both,
+                                "justify" or "both" => JustificationValues.Both,
                                 _ => JustificationValues.Left
                             }
                         };
@@ -439,6 +560,72 @@ public partial class WordHandler
                 }
             }
 
+            _doc.MainDocumentPart?.Document?.Save();
+            return unsupported;
+        }
+
+        // SDT (Content Control) handling — both SdtBlock and SdtRun
+        if (element is SdtBlock sdtBlock || element is SdtRun)
+        {
+            var sdtProps = element is SdtBlock sb
+                ? sb.SdtProperties
+                : ((SdtRun)element).SdtProperties;
+            sdtProps ??= element.PrependChild(new SdtProperties());
+
+            foreach (var (key, value) in properties)
+            {
+                switch (key.ToLowerInvariant())
+                {
+                    case "alias" or "name":
+                        var existingAlias = sdtProps.GetFirstChild<SdtAlias>();
+                        if (existingAlias != null) existingAlias.Val = value;
+                        else sdtProps.AppendChild(new SdtAlias { Val = value });
+                        break;
+                    case "tag":
+                        var existingTag = sdtProps.GetFirstChild<Tag>();
+                        if (existingTag != null) existingTag.Val = value;
+                        else sdtProps.AppendChild(new Tag { Val = value });
+                        break;
+                    case "lock":
+                        var existingLock = sdtProps.GetFirstChild<DocumentFormat.OpenXml.Wordprocessing.Lock>();
+                        var lockEnum = value.ToLowerInvariant() switch
+                        {
+                            "contentlocked" or "content" => LockingValues.ContentLocked,
+                            "sdtlocked" or "sdt" => LockingValues.SdtLocked,
+                            "sdtcontentlocked" or "both" => LockingValues.SdtContentLocked,
+                            _ => LockingValues.Unlocked
+                        };
+                        if (existingLock != null) existingLock.Val = lockEnum;
+                        else sdtProps.AppendChild(new DocumentFormat.OpenXml.Wordprocessing.Lock { Val = lockEnum });
+                        break;
+                    case "text":
+                        // Replace content text
+                        if (element is SdtBlock sdtB)
+                        {
+                            var content = sdtB.SdtContentBlock;
+                            if (content != null)
+                            {
+                                content.RemoveAllChildren();
+                                content.AppendChild(new Paragraph(
+                                    new Run(new Text(value) { Space = SpaceProcessingModeValues.Preserve })));
+                            }
+                        }
+                        else if (element is SdtRun sdtR)
+                        {
+                            var content = sdtR.SdtContentRun;
+                            if (content != null)
+                            {
+                                content.RemoveAllChildren();
+                                content.AppendChild(
+                                    new Run(new Text(value) { Space = SpaceProcessingModeValues.Preserve }));
+                            }
+                        }
+                        break;
+                    default:
+                        unsupported.Add(key);
+                        break;
+                }
+            }
             _doc.MainDocumentPart?.Document?.Save();
             return unsupported;
         }
@@ -586,6 +773,43 @@ public partial class WordHandler
                         }
                         else unsupported.Add(key);
                         break;
+                    case "path" or "src":
+                    {
+                        // Replace image source in a run containing a Drawing
+                        var drawingSrc = run.GetFirstChild<Drawing>();
+                        var blip = drawingSrc?.Descendants<A.Blip>().FirstOrDefault();
+                        if (blip == null) { unsupported.Add(key); break; }
+                        if (!File.Exists(value))
+                            throw new FileNotFoundException($"Image file not found: {value}");
+
+                        var mainPartImg = _doc.MainDocumentPart!;
+                        var imgExt = Path.GetExtension(value).ToLowerInvariant();
+                        var imgType = imgExt switch
+                        {
+                            ".png" => DocumentFormat.OpenXml.Packaging.ImagePartType.Png,
+                            ".jpg" or ".jpeg" => DocumentFormat.OpenXml.Packaging.ImagePartType.Jpeg,
+                            ".gif" => DocumentFormat.OpenXml.Packaging.ImagePartType.Gif,
+                            ".bmp" => DocumentFormat.OpenXml.Packaging.ImagePartType.Bmp,
+                            ".tif" or ".tiff" => DocumentFormat.OpenXml.Packaging.ImagePartType.Tiff,
+                            ".emf" => DocumentFormat.OpenXml.Packaging.ImagePartType.Emf,
+                            ".wmf" => DocumentFormat.OpenXml.Packaging.ImagePartType.Wmf,
+                            ".svg" => DocumentFormat.OpenXml.Packaging.ImagePartType.Svg,
+                            _ => DocumentFormat.OpenXml.Packaging.ImagePartType.Png
+                        };
+
+                        // Remove old image part to avoid storage bloat
+                        var oldEmbedId = blip.Embed?.Value;
+                        if (oldEmbedId != null)
+                        {
+                            try { mainPartImg.DeletePart(oldEmbedId); } catch { }
+                        }
+
+                        var newImgPart = mainPartImg.AddImagePart(imgType);
+                        using (var stream = File.OpenRead(value))
+                            newImgPart.FeedData(stream);
+                        blip.Embed = mainPartImg.GetIdOfPart(newImgPart);
+                        break;
+                    }
                     case "link":
                     {
                         var mainPart3 = _doc.MainDocumentPart!;
@@ -818,26 +1042,39 @@ public partial class WordHandler
                         break;
                     case "shd" or "shading":
                         var shdParts = value.Split(';');
-                        var shd = new Shading();
-                        if (shdParts.Length == 1)
+                        if (shdParts.Length >= 3 && shdParts[0].Equals("gradient", StringComparison.OrdinalIgnoreCase))
                         {
-                            shd.Val = ShadingPatternValues.Clear;
-                            shd.Fill = shdParts[0].TrimStart('#').ToUpperInvariant();
+                            // gradient;startColor;endColor[;angle]  e.g. gradient;FF0000;0000FF;90
+                            var startColor = shdParts[1].TrimStart('#').ToUpperInvariant();
+                            var endColor = shdParts[2].TrimStart('#').ToUpperInvariant();
+                            int angleDeg = shdParts.Length >= 4 && int.TryParse(shdParts[3], out var a) ? a : 180;
+                            ApplyCellGradient(tcPr, startColor, endColor, angleDeg);
                         }
-                        else if (shdParts.Length >= 2)
+                        else
                         {
-                            shd.Val = new ShadingPatternValues(shdParts[0]);
-                            shd.Fill = shdParts[1].TrimStart('#').ToUpperInvariant();
-                            if (shdParts.Length >= 3) shd.Color = shdParts[2].TrimStart('#').ToUpperInvariant();
+                            // Remove any existing gradient
+                            RemoveCellGradient(tcPr);
+                            var shd = new Shading();
+                            if (shdParts.Length == 1)
+                            {
+                                shd.Val = ShadingPatternValues.Clear;
+                                shd.Fill = shdParts[0].TrimStart('#').ToUpperInvariant();
+                            }
+                            else if (shdParts.Length >= 2)
+                            {
+                                shd.Val = new ShadingPatternValues(shdParts[0]);
+                                shd.Fill = shdParts[1].TrimStart('#').ToUpperInvariant();
+                                if (shdParts.Length >= 3) shd.Color = shdParts[2].TrimStart('#').ToUpperInvariant();
+                            }
+                            tcPr.Shading = shd;
                         }
-                        tcPr.Shading = shd;
                         break;
                     case "alignment":
                         var alignVal = value.ToLowerInvariant() switch
                         {
                             "center" => JustificationValues.Center,
                             "right" => JustificationValues.Right,
-                            "justify" => JustificationValues.Both,
+                            "justify" or "both" => JustificationValues.Both,
                             _ => JustificationValues.Left
                         };
                         // Apply alignment to ALL paragraphs in the cell, not just the first
@@ -1010,11 +1247,11 @@ public partial class WordHandler
                 {
                     case "height":
                         trPr.GetFirstChild<TableRowHeight>()?.Remove();
-                        trPr.AppendChild(new TableRowHeight { Val = uint.Parse(value), HeightType = HeightRuleValues.AtLeast });
+                        trPr.AppendChild(new TableRowHeight { Val = ParseTwips(value), HeightType = HeightRuleValues.AtLeast });
                         break;
                     case "height.exact":
                         trPr.GetFirstChild<TableRowHeight>()?.Remove();
-                        trPr.AppendChild(new TableRowHeight { Val = uint.Parse(value), HeightType = HeightRuleValues.Exact });
+                        trPr.AppendChild(new TableRowHeight { Val = ParseTwips(value), HeightType = HeightRuleValues.Exact });
                         break;
                     case "header":
                         if (IsTruthy(value))
@@ -1079,9 +1316,10 @@ public partial class WordHandler
                         var dxa = value;
                         var cm = tblPr.TableCellMarginDefault ?? tblPr.AppendChild(new TableCellMarginDefault());
                         cm.TopMargin = new TopMargin { Width = dxa, Type = TableWidthUnitValues.Dxa };
-                        cm.TableCellLeftMargin = new TableCellLeftMargin { Width = short.Parse(dxa), Type = TableWidthValues.Dxa };
+                        var paddingVal = int.Parse(dxa);
+                        cm.TableCellLeftMargin = new TableCellLeftMargin { Width = (short)Math.Min(paddingVal, short.MaxValue), Type = TableWidthValues.Dxa };
                         cm.BottomMargin = new BottomMargin { Width = dxa, Type = TableWidthUnitValues.Dxa };
-                        cm.TableCellRightMargin = new TableCellRightMargin { Width = short.Parse(dxa), Type = TableWidthValues.Dxa };
+                        cm.TableCellRightMargin = new TableCellRightMargin { Width = (short)Math.Min(paddingVal, short.MaxValue), Type = TableWidthValues.Dxa };
                         break;
                     }
                     case var k when k.StartsWith("border"):
@@ -1241,14 +1479,14 @@ public partial class WordHandler
                     {
                         "center" => JustificationValues.Center,
                         "right" => JustificationValues.Right,
-                        "justify" => JustificationValues.Both,
+                        "justify" or "both" => JustificationValues.Both,
                         _ => JustificationValues.Left
                     }
                 };
                 return true;
             case "firstlineindent":
                 var indent = pProps.Indentation ?? (pProps.Indentation = new Indentation());
-                indent.FirstLine = ((long)(double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) * 480)).ToString();
+                indent.FirstLine = value; // raw twips, consistent with Get and other indent properties
                 indent.Hanging = null;
                 return true;
             case "leftindent" or "indentleft":
@@ -1421,6 +1659,103 @@ public partial class WordHandler
             case "border.right":
                 borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space);
                 break;
+            case "border.tl2br":
+                borders.TopLeftToBottomRightCellBorder = MakeBorder<TopLeftToBottomRightCellBorder>(style, size, color, space);
+                break;
+            case "border.tr2bl":
+                borders.TopRightToBottomLeftCellBorder = MakeBorder<TopRightToBottomLeftCellBorder>(style, size, color, space);
+                break;
         }
+    }
+
+    /// <summary>
+    /// Apply gradient fill to a Word table cell using mc:AlternativeContent with w14:gradFill.
+    /// Fallback is a solid shading with the start color.
+    /// </summary>
+    private static void ApplyCellGradient(TableCellProperties tcPr, string startColor, string endColor, int angleDeg)
+    {
+        // Remove existing shading/gradient
+        RemoveCellGradient(tcPr);
+        tcPr.Shading?.Remove();
+
+        // Set fallback solid fill
+        tcPr.Shading = new Shading { Val = ShadingPatternValues.Clear, Fill = startColor };
+
+        // Build w14:gradFill XML via raw OpenXml
+        var w14Ns = "http://schemas.microsoft.com/office/word/2010/wordml";
+        var mcNs = "http://schemas.openxmlformats.org/markup-compatibility/2006";
+
+        // Convert angle to OOXML 60000ths of a degree
+        var angleOoxml = angleDeg * 60000;
+
+        var acXml = $@"<mc:AlternateContent xmlns:mc=""{mcNs}"" xmlns:w14=""{w14Ns}"">
+  <mc:Choice Requires=""w14"">
+    <w14:gradFill>
+      <w14:gsLst>
+        <w14:gs w14:pos=""0"">
+          <w14:srgbClr w14:val=""{startColor}""/>
+        </w14:gs>
+        <w14:gs w14:pos=""100000"">
+          <w14:srgbClr w14:val=""{endColor}""/>
+        </w14:gs>
+      </w14:gsLst>
+      <w14:lin w14:ang=""{angleOoxml}"" w14:scaled=""1""/>
+    </w14:gradFill>
+  </mc:Choice>
+</mc:AlternateContent>";
+
+        var acElement = new OpenXmlUnknownElement("mc", "AlternateContent", mcNs);
+        acElement.InnerXml = $@"<mc:Choice xmlns:mc=""{mcNs}"" xmlns:w14=""{w14Ns}"" Requires=""w14"">
+    <w14:gradFill>
+      <w14:gsLst>
+        <w14:gs w14:pos=""0"">
+          <w14:srgbClr w14:val=""{startColor}""/>
+        </w14:gs>
+        <w14:gs w14:pos=""100000"">
+          <w14:srgbClr w14:val=""{endColor}""/>
+        </w14:gs>
+      </w14:gsLst>
+      <w14:lin w14:ang=""{angleOoxml}"" w14:scaled=""1""/>
+    </w14:gradFill>
+  </mc:Choice>";
+
+        tcPr.AppendChild(acElement);
+    }
+
+    /// <summary>
+    /// Remove any existing gradient mc:AlternateContent from table cell properties.
+    /// </summary>
+    private static void RemoveCellGradient(TableCellProperties tcPr)
+    {
+        var mcNs = "http://schemas.openxmlformats.org/markup-compatibility/2006";
+        var existing = tcPr.ChildElements
+            .Where(e => e.LocalName == "AlternateContent" && e.NamespaceUri == mcNs)
+            .ToList();
+        foreach (var e in existing) e.Remove();
+    }
+
+    /// <summary>
+    /// Parse twips from a string with optional unit suffix: "1.5cm", "0.5in", "36pt", or raw twips.
+    /// 1 inch = 1440 twips, 1 cm = 567 twips, 1 pt = 20 twips.
+    /// </summary>
+    internal static uint ParseTwips(string value)
+    {
+        value = value.Trim();
+        if (value.EndsWith("cm", StringComparison.OrdinalIgnoreCase))
+        {
+            var num = double.Parse(value[..^2], System.Globalization.CultureInfo.InvariantCulture);
+            return (uint)Math.Round(num * 567);
+        }
+        if (value.EndsWith("in", StringComparison.OrdinalIgnoreCase))
+        {
+            var num = double.Parse(value[..^2], System.Globalization.CultureInfo.InvariantCulture);
+            return (uint)Math.Round(num * 1440);
+        }
+        if (value.EndsWith("pt", StringComparison.OrdinalIgnoreCase))
+        {
+            var num = double.Parse(value[..^2], System.Globalization.CultureInfo.InvariantCulture);
+            return (uint)Math.Round(num * 20);
+        }
+        return uint.Parse(value);
     }
 }

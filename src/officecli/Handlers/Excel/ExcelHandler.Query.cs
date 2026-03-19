@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using System.Text.RegularExpressions;
+using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using OfficeCli.Core;
 
@@ -113,6 +114,16 @@ public partial class ExcelHandler
                 sheetNode.Format["freeze"] = pane.TopLeftCell?.Value ?? "";
             }
 
+            // Include zoom
+            var sheetView = ws.GetFirstChild<SheetViews>()?.GetFirstChild<SheetView>();
+            if (sheetView?.ZoomScale?.HasValue == true && sheetView.ZoomScale.Value != 100)
+                sheetNode.Format["zoom"] = sheetView.ZoomScale.Value;
+
+            // Include tab color
+            var tabColor = ws.GetFirstChild<SheetProperties>()?.GetFirstChild<TabColor>();
+            if (tabColor?.Rgb?.HasValue == true)
+                sheetNode.Format["tabColor"] = tabColor.Rgb.Value;
+
             // Include autofilter info
             var autoFilter = ws.GetFirstChild<AutoFilter>();
             if (autoFilter?.Reference?.Value != null)
@@ -163,6 +174,9 @@ public partial class ExcelHandler
                     if (col.Width?.Value != null) colNode.Format["width"] = col.Width.Value;
                     if (col.Hidden?.Value == true) colNode.Format["hidden"] = true;
                     if (col.CustomWidth?.Value == true) colNode.Format["customWidth"] = true;
+                    if (col.OutlineLevel?.HasValue == true && col.OutlineLevel.Value > 0)
+                        colNode.Format["outlineLevel"] = col.OutlineLevel.Value;
+                    if (col.Collapsed?.Value == true) colNode.Format["collapsed"] = true;
                 }
             }
             return colNode;
@@ -182,6 +196,9 @@ public partial class ExcelHandler
             };
             if (row.Height?.Value != null) rowNode.Format["height"] = row.Height.Value;
             if (row.Hidden?.Value == true) rowNode.Format["hidden"] = true;
+            if (row.OutlineLevel?.HasValue == true && row.OutlineLevel.Value > 0)
+                rowNode.Format["outlineLevel"] = row.OutlineLevel.Value;
+            if (row.Collapsed?.Value == true) rowNode.Format["collapsed"] = true;
             if (depth > 0)
                 foreach (var c in row.Elements<Cell>())
                     rowNode.Children.Add(CellToNode(sheetNameFromPath, c, worksheet));
@@ -287,6 +304,22 @@ public partial class ExcelHandler
             return chartNode;
         }
 
+        // Pivot table path: /Sheet1/pivottable[N]
+        var pivotMatch = Regex.Match(cellRef, @"^pivottable\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (pivotMatch.Success)
+        {
+            var ptIdx = int.Parse(pivotMatch.Groups[1].Value);
+            var pivotParts = worksheet.PivotTableParts.ToList();
+            if (ptIdx < 1 || ptIdx > pivotParts.Count)
+                return new DocumentNode { Path = path, Type = "error", Text = $"PivotTable {ptIdx} not found" };
+
+            var pivotPart = pivotParts[ptIdx - 1];
+            var ptNode = new DocumentNode { Path = path, Type = "pivottable" };
+            if (pivotPart.PivotTableDefinition != null)
+                PivotTableHelper.ReadPivotTableProperties(pivotPart.PivotTableDefinition, ptNode);
+            return ptNode;
+        }
+
         // Comment path: /Sheet1/comment[N]
         var commentMatch = Regex.Match(cellRef, @"^comment\[(\d+)\]$", RegexOptions.IgnoreCase);
         if (commentMatch.Success)
@@ -357,7 +390,7 @@ public partial class ExcelHandler
         var elementMatch = Regex.Match(selector.Split('!').Last(), @"^(\w+)");
         var elementName = elementMatch.Success ? elementMatch.Groups[1].Value : "";
         bool isKnownType = string.IsNullOrEmpty(elementName)
-            || elementName is "cell" or "row" or "sheet" or "validation" or "comment" or "note" or "table" or "listobject" or "chart"
+            || elementName is "cell" or "row" or "sheet" or "validation" or "comment" or "note" or "table" or "listobject" or "chart" or "pivottable" or "pivot"
             || (elementName.Length <= 3 && Regex.IsMatch(elementName, @"^[A-Z]+$", RegexOptions.IgnoreCase));
         if (!isKnownType)
         {
@@ -451,6 +484,34 @@ public partial class ExcelHandler
                     {
                         var title = node.Format.TryGetValue("title", out var t) ? t?.ToString() : null;
                         if (title == null || !title.Contains(parsed.ValueContains, StringComparison.OrdinalIgnoreCase))
+                            continue;
+                    }
+                    results.Add(node);
+                }
+            }
+            return results;
+        }
+
+        // Handle pivottable queries
+        if (elementName == "pivottable" || elementName == "pivot")
+        {
+            foreach (var (sheetName, worksheetPart) in GetWorksheets())
+            {
+                if (parsed.Sheet != null && !sheetName.Equals(parsed.Sheet, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var pivotParts = worksheetPart.PivotTableParts.ToList();
+                for (int i = 0; i < pivotParts.Count; i++)
+                {
+                    var node = new DocumentNode { Path = $"/{sheetName}/pivottable[{i + 1}]", Type = "pivottable" };
+                    var pivotDef = pivotParts[i].PivotTableDefinition;
+                    if (pivotDef != null)
+                        PivotTableHelper.ReadPivotTableProperties(pivotDef, node);
+
+                    if (parsed.ValueContains != null)
+                    {
+                        var name = node.Format.TryGetValue("name", out var n) ? n?.ToString() : null;
+                        if (name == null || !name.Contains(parsed.ValueContains, StringComparison.OrdinalIgnoreCase))
                             continue;
                     }
                     results.Add(node);

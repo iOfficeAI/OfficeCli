@@ -244,6 +244,38 @@ public partial class PowerPointHandler
                     }
                 }
 
+                // Line spacing
+                if (properties.TryGetValue("lineSpacing", out var lsVal) || properties.TryGetValue("linespacing", out lsVal))
+                {
+                    foreach (var para in newShape.TextBody?.Elements<Drawing.Paragraph>() ?? Enumerable.Empty<Drawing.Paragraph>())
+                    {
+                        var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                        pProps.RemoveAllChildren<Drawing.LineSpacing>();
+                        pProps.AppendChild(new Drawing.LineSpacing(
+                            new Drawing.SpacingPercent { Val = (int)(double.Parse(lsVal, System.Globalization.CultureInfo.InvariantCulture) * 100000) }));
+                    }
+                }
+
+                // Space before/after
+                if (properties.TryGetValue("spaceBefore", out var sbVal) || properties.TryGetValue("spacebefore", out sbVal))
+                {
+                    foreach (var para in newShape.TextBody?.Elements<Drawing.Paragraph>() ?? Enumerable.Empty<Drawing.Paragraph>())
+                    {
+                        var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                        pProps.RemoveAllChildren<Drawing.SpaceBefore>();
+                        pProps.AppendChild(new Drawing.SpaceBefore(new Drawing.SpacingPoints { Val = (int)(double.Parse(sbVal, System.Globalization.CultureInfo.InvariantCulture) * 100) }));
+                    }
+                }
+                if (properties.TryGetValue("spaceAfter", out var saVal) || properties.TryGetValue("spaceafter", out saVal))
+                {
+                    foreach (var para in newShape.TextBody?.Elements<Drawing.Paragraph>() ?? Enumerable.Empty<Drawing.Paragraph>())
+                    {
+                        var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                        pProps.RemoveAllChildren<Drawing.SpaceAfter>();
+                        pProps.AppendChild(new Drawing.SpaceAfter(new Drawing.SpacingPoints { Val = (int)(double.Parse(saVal, System.Globalization.CultureInfo.InvariantCulture) * 100) }));
+                    }
+                }
+
                 // AutoFit
                 if (properties.TryGetValue("autofit", out var afVal))
                 {
@@ -320,7 +352,7 @@ public partial class PowerPointHandler
                     else
                         outline.AppendChild(BuildSolidFill(lineColor));
                 }
-                if (properties.TryGetValue("linewidth", out var lwStr) || properties.TryGetValue("line.width", out lwStr))
+                if (properties.TryGetValue("linewidth", out var lwStr) || properties.TryGetValue("lineWidth", out lwStr) || properties.TryGetValue("line.width", out lwStr))
                 {
                     var outline = newShape.ShapeProperties!.GetFirstChild<Drawing.Outline>() ?? newShape.ShapeProperties.AppendChild(new Drawing.Outline());
                     outline.Width = Core.EmuConverter.ParseEmuAsInt(lwStr);
@@ -342,9 +374,16 @@ public partial class PowerPointHandler
                 if (properties.TryGetValue("link", out var linkVal))
                     ApplyShapeHyperlink(slidePart, newShape, linkVal);
 
-                // lineDash, effects (shadow/glow/reflection) — delegate to SetRunOrShapeProperties
+                // lineDash, effects, 3D, flip — delegate to SetRunOrShapeProperties
                 var effectKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                    { "linedash", "line.dash", "shadow", "glow", "reflection" };
+                    { "linedash", "line.dash", "shadow", "glow", "reflection",
+                      "softedge", "fliph", "flipv", "rot3d", "rotation3d",
+                      "rotx", "roty", "rotz", "bevel", "beveltop", "bevelbottom",
+                      "depth", "extrusion", "material", "lighting", "lightrig",
+                      "spacing", "charspacing", "letterspacing",
+                      "indent", "marginleft", "marl", "marginright", "marr",
+                      "textfill", "textgradient", "geometry",
+                      "baseline", "superscript", "subscript" };
                 var effectProps = properties
                     .Where(kv => effectKeys.Contains(kv.Key))
                     .ToDictionary(kv => kv.Key, kv => kv.Value);
@@ -556,6 +595,28 @@ public partial class PowerPointHandler
                 // Build table
                 var table = new Drawing.Table();
                 var tblProps = new Drawing.TableProperties { FirstRow = true, BandRow = true };
+
+                // Apply table style if specified
+                if (properties.TryGetValue("style", out var tblStyleVal))
+                {
+                    var styleId = tblStyleVal.ToLowerInvariant() switch
+                    {
+                        "medium1" or "mediumstyle1" => "{073A0DAA-6AF3-43AB-8588-CEC1D06C72B9}",
+                        "medium2" or "mediumstyle2" => "{F5AB1C69-6EDB-4FF4-983F-18BD219EF322}",
+                        "medium3" or "mediumstyle3" => "{3B4B98B0-60AC-42C2-AFA5-B58CD77FA1E5}",
+                        "medium4" or "mediumstyle4" => "{D7AC3CCA-C797-4891-BE02-D94E43425B78}",
+                        "light1" or "lightstyle1" => "{9D7B26C5-4107-4FEC-AEDC-1716B250A1EF}",
+                        "light2" or "lightstyle2" => "{ED083AE6-46FA-4A59-8FB0-9F97EB10719F}",
+                        "light3" or "lightstyle3" => "{C083E6E3-FA7D-4D7B-A595-EF9225AFEA82}",
+                        "dark1" or "darkstyle1" => "{E8034E78-7F5D-4C2E-B375-FC64B27BC917}",
+                        "dark2" or "darkstyle2" => "{125E5076-3810-47DD-B79F-674D7AD40C01}",
+                        "none" => "{2D5ABB26-0587-4C30-8999-92F81FD0307C}",
+                        _ when tblStyleVal.StartsWith("{") => tblStyleVal,
+                        _ => tblStyleVal
+                    };
+                    tblProps.AppendChild(new Drawing.TableStyleId(styleId));
+                }
+
                 table.Append(tblProps);
 
                 var tableGrid = new Drawing.TableGrid();
@@ -1153,6 +1214,189 @@ public partial class PowerPointHandler
                 return $"{parentPath}/animation[{animCount}]";
             }
 
+            case "paragraph" or "para":
+            {
+                // Add a paragraph to an existing shape: /slide[N]/shape[M]
+                var paraParentMatch = Regex.Match(parentPath, @"^/slide\[(\d+)\]/shape\[(\d+)\]$");
+                if (!paraParentMatch.Success)
+                    throw new ArgumentException("Paragraphs must be added to a shape: /slide[N]/shape[M]");
+
+                var paraSlideIdx = int.Parse(paraParentMatch.Groups[1].Value);
+                var paraShapeIdx = int.Parse(paraParentMatch.Groups[2].Value);
+                var (paraSlidePart, paraShape) = ResolveShape(paraSlideIdx, paraShapeIdx);
+
+                var textBody = paraShape.TextBody
+                    ?? throw new InvalidOperationException("Shape has no text body");
+
+                var newPara = new Drawing.Paragraph();
+                var pProps = new Drawing.ParagraphProperties();
+
+                // Paragraph-level properties
+                if (properties.TryGetValue("align", out var pAlign))
+                    pProps.Alignment = ParseTextAlignment(pAlign);
+                if (properties.TryGetValue("indent", out var pIndent))
+                    pProps.Indent = (int)ParseEmu(pIndent);
+                if (properties.TryGetValue("marginLeft", out var pMarL) || properties.TryGetValue("marl", out pMarL))
+                    pProps.LeftMargin = (int)ParseEmu(pMarL);
+                if (properties.TryGetValue("marginRight", out var pMarR) || properties.TryGetValue("marr", out pMarR))
+                    pProps.RightMargin = (int)ParseEmu(pMarR);
+                if (properties.TryGetValue("list", out var pList) || properties.TryGetValue("liststyle", out pList))
+                    ApplyListStyle(pProps, pList);
+
+                newPara.ParagraphProperties = pProps;
+
+                // Create initial run with text and run-level properties
+                var paraText = properties.GetValueOrDefault("text", "");
+                var newRun = new Drawing.Run();
+                var rProps = new Drawing.RunProperties { Language = "en-US" };
+
+                if (properties.TryGetValue("font", out var pFont))
+                {
+                    rProps.Append(new Drawing.LatinFont { Typeface = pFont });
+                    rProps.Append(new Drawing.EastAsianFont { Typeface = pFont });
+                }
+                if (properties.TryGetValue("size", out var pSize))
+                    rProps.FontSize = (int)Math.Round(ParseFontSize(pSize) * 100);
+                if (properties.TryGetValue("bold", out var pBold))
+                    rProps.Bold = IsTruthy(pBold);
+                if (properties.TryGetValue("italic", out var pItalic))
+                    rProps.Italic = IsTruthy(pItalic);
+                if (properties.TryGetValue("color", out var pColor))
+                    rProps.AppendChild(BuildSolidFill(pColor));
+                if (properties.TryGetValue("spacing", out var pSpacing) || properties.TryGetValue("charspacing", out pSpacing))
+                    rProps.Spacing = (int)(double.Parse(pSpacing, System.Globalization.CultureInfo.InvariantCulture) * 100);
+                if (properties.TryGetValue("baseline", out var pBaseline))
+                {
+                    rProps.Baseline = pBaseline.ToLowerInvariant() switch
+                    {
+                        "super" or "true" => 30000,
+                        "sub" => -25000,
+                        _ => (int)(double.Parse(pBaseline, System.Globalization.CultureInfo.InvariantCulture) * 1000)
+                    };
+                }
+
+                newRun.RunProperties = rProps;
+                newRun.Text = new Drawing.Text(paraText.Replace("\\n", "\n"));
+                newPara.Append(newRun);
+
+                if (index.HasValue && index.Value >= 0)
+                {
+                    var existingParas = textBody.Elements<Drawing.Paragraph>().ToList();
+                    if (index.Value < existingParas.Count)
+                        textBody.InsertBefore(newPara, existingParas[index.Value]);
+                    else
+                        textBody.Append(newPara);
+                }
+                else
+                {
+                    textBody.Append(newPara);
+                }
+
+                var paraCount = textBody.Elements<Drawing.Paragraph>().Count();
+                GetSlide(paraSlidePart).Save();
+                return $"/slide[{paraSlideIdx}]/shape[{paraShapeIdx}]/paragraph[{paraCount}]";
+            }
+
+            case "run":
+            {
+                // Add a run to a paragraph: /slide[N]/shape[M]/paragraph[P] or /slide[N]/shape[M]
+                var runParaMatch = Regex.Match(parentPath, @"^/slide\[(\d+)\]/shape\[(\d+)\](?:/paragraph\[(\d+)\])?$");
+                if (!runParaMatch.Success)
+                    throw new ArgumentException("Runs must be added to a shape or paragraph: /slide[N]/shape[M] or /slide[N]/shape[M]/paragraph[P]");
+
+                var runSlideIdx = int.Parse(runParaMatch.Groups[1].Value);
+                var runShapeIdx = int.Parse(runParaMatch.Groups[2].Value);
+                var (runSlidePart, runShape) = ResolveShape(runSlideIdx, runShapeIdx);
+
+                var runTextBody = runShape.TextBody
+                    ?? throw new InvalidOperationException("Shape has no text body");
+
+                Drawing.Paragraph targetPara;
+                int targetParaIdx;
+                if (runParaMatch.Groups[3].Success)
+                {
+                    targetParaIdx = int.Parse(runParaMatch.Groups[3].Value);
+                    var paras = runTextBody.Elements<Drawing.Paragraph>().ToList();
+                    if (targetParaIdx < 1 || targetParaIdx > paras.Count)
+                        throw new ArgumentException($"Paragraph {targetParaIdx} not found");
+                    targetPara = paras[targetParaIdx - 1];
+                }
+                else
+                {
+                    // Append to last paragraph
+                    var paras = runTextBody.Elements<Drawing.Paragraph>().ToList();
+                    targetPara = paras.LastOrDefault()
+                        ?? throw new InvalidOperationException("Shape has no paragraphs");
+                    targetParaIdx = paras.Count;
+                }
+
+                var runText = properties.GetValueOrDefault("text", "");
+                var newRun = new Drawing.Run();
+                var rProps = new Drawing.RunProperties { Language = "en-US" };
+
+                if (properties.TryGetValue("font", out var rFont))
+                {
+                    rProps.Append(new Drawing.LatinFont { Typeface = rFont });
+                    rProps.Append(new Drawing.EastAsianFont { Typeface = rFont });
+                }
+                if (properties.TryGetValue("size", out var rSize))
+                    rProps.FontSize = (int)Math.Round(ParseFontSize(rSize) * 100);
+                if (properties.TryGetValue("bold", out var rBold))
+                    rProps.Bold = IsTruthy(rBold);
+                if (properties.TryGetValue("italic", out var rItalic))
+                    rProps.Italic = IsTruthy(rItalic);
+                if (properties.TryGetValue("underline", out var rUnderline))
+                    rProps.Underline = rUnderline.ToLowerInvariant() switch
+                    {
+                        "true" or "single" or "sng" => Drawing.TextUnderlineValues.Single,
+                        "double" or "dbl" => Drawing.TextUnderlineValues.Double,
+                        "heavy" => Drawing.TextUnderlineValues.Heavy,
+                        "dotted" => Drawing.TextUnderlineValues.Dotted,
+                        "dash" => Drawing.TextUnderlineValues.Dash,
+                        "wavy" => Drawing.TextUnderlineValues.Wavy,
+                        _ => Drawing.TextUnderlineValues.Single
+                    };
+                if (properties.TryGetValue("strikethrough", out var rStrike) || properties.TryGetValue("strike", out rStrike))
+                    rProps.Strike = rStrike.ToLowerInvariant() switch
+                    {
+                        "true" or "single" => Drawing.TextStrikeValues.SingleStrike,
+                        "double" => Drawing.TextStrikeValues.DoubleStrike,
+                        _ => Drawing.TextStrikeValues.SingleStrike
+                    };
+                if (properties.TryGetValue("color", out var rColor))
+                    rProps.AppendChild(BuildSolidFill(rColor));
+                if (properties.TryGetValue("spacing", out var rSpacing) || properties.TryGetValue("charspacing", out rSpacing))
+                    rProps.Spacing = (int)(double.Parse(rSpacing, System.Globalization.CultureInfo.InvariantCulture) * 100);
+                if (properties.TryGetValue("baseline", out var rBaseline))
+                {
+                    rProps.Baseline = rBaseline.ToLowerInvariant() switch
+                    {
+                        "super" or "true" => 30000,
+                        "sub" => -25000,
+                        "none" or "false" or "0" => 0,
+                        _ => (int)(double.Parse(rBaseline, System.Globalization.CultureInfo.InvariantCulture) * 1000)
+                    };
+                }
+                else if (properties.TryGetValue("superscript", out var rSuper))
+                    rProps.Baseline = IsTruthy(rSuper) ? 30000 : 0;
+                else if (properties.TryGetValue("subscript", out var rSub))
+                    rProps.Baseline = IsTruthy(rSub) ? -25000 : 0;
+
+                newRun.RunProperties = rProps;
+                newRun.Text = new Drawing.Text(runText.Replace("\\n", "\n"));
+
+                // Append run to paragraph (before EndParagraphRunProperties if present)
+                var endParaRun = targetPara.GetFirstChild<Drawing.EndParagraphRunProperties>();
+                if (endParaRun != null)
+                    targetPara.InsertBefore(newRun, endParaRun);
+                else
+                    targetPara.Append(newRun);
+
+                var runCount = targetPara.Elements<Drawing.Run>().Count();
+                GetSlide(runSlidePart).Save();
+                return $"/slide[{runSlideIdx}]/shape[{runShapeIdx}]/paragraph[{targetParaIdx}]/run[{runCount}]";
+            }
+
             default:
             {
                 // Try resolving logical paths (table/placeholder) first
@@ -1419,9 +1663,103 @@ public partial class PowerPointHandler
         return ComputeElementPath(effectiveParentPath, srcElement, tgtShapeTree);
     }
 
+    public (string NewPath1, string NewPath2) Swap(string path1, string path2)
+    {
+        var presentationPart = _doc.PresentationPart
+            ?? throw new InvalidOperationException("Presentation not found");
+        var slideParts = GetSlideParts().ToList();
+
+        // Case 1: Swap two slides
+        var slide1Match = Regex.Match(path1, @"^/slide\[(\d+)\]$");
+        var slide2Match = Regex.Match(path2, @"^/slide\[(\d+)\]$");
+        if (slide1Match.Success && slide2Match.Success)
+        {
+            var presentation = presentationPart.Presentation
+                ?? throw new InvalidOperationException("No presentation");
+            var slideIdList = presentation.GetFirstChild<SlideIdList>()
+                ?? throw new InvalidOperationException("No slides");
+            var slideIds = slideIdList.Elements<SlideId>().ToList();
+            var idx1 = int.Parse(slide1Match.Groups[1].Value);
+            var idx2 = int.Parse(slide2Match.Groups[1].Value);
+            if (idx1 < 1 || idx1 > slideIds.Count) throw new ArgumentException($"Slide {idx1} not found");
+            if (idx2 < 1 || idx2 > slideIds.Count) throw new ArgumentException($"Slide {idx2} not found");
+            if (idx1 == idx2) return (path1, path2);
+
+            SwapXmlElements(slideIds[idx1 - 1], slideIds[idx2 - 1]);
+            presentation.Save();
+            return ($"/slide[{idx2}]", $"/slide[{idx1}]");
+        }
+
+        // Case 2: Swap two elements within the same slide
+        var (slide1Part, elem1) = ResolveSlideElement(path1, slideParts);
+        var (slide2Part, elem2) = ResolveSlideElement(path2, slideParts);
+        if (slide1Part != slide2Part)
+            throw new ArgumentException("Cannot swap elements on different slides");
+
+        SwapXmlElements(elem1, elem2);
+        GetSlide(slide1Part).Save();
+
+        var slideIdx = slideParts.IndexOf(slide1Part) + 1;
+        var parentPath = $"/slide[{slideIdx}]";
+        var shapeTree = GetSlide(slide1Part).CommonSlideData?.ShapeTree
+            ?? throw new InvalidOperationException("Slide has no shape tree");
+        var newPath1 = ComputeElementPath(parentPath, elem1, shapeTree);
+        var newPath2 = ComputeElementPath(parentPath, elem2, shapeTree);
+        return (newPath1, newPath2);
+    }
+
+    internal static void SwapXmlElements(OpenXmlElement a, OpenXmlElement b)
+    {
+        if (a == b || a.Parent == null || b.Parent == null) return;
+        var parent = a.Parent;
+        var aNext = a.NextSibling();
+        var bNext = b.NextSibling();
+
+        a.Remove();
+        b.Remove();
+
+        if (aNext == b)
+        {
+            // A was directly before B: [... A B ...] → [... B A ...]
+            if (bNext != null)
+                bNext.InsertBeforeSelf(b);
+            else
+                parent.AppendChild(b);
+            b.InsertAfterSelf(a);
+        }
+        else if (bNext == a)
+        {
+            // B was directly before A: [... B A ...] → [... A B ...]
+            if (aNext != null)
+                aNext.InsertBeforeSelf(a);
+            else
+                parent.AppendChild(a);
+            a.InsertBeforeSelf(b);
+        }
+        else
+        {
+            // Non-adjacent: insert each where the other was
+            if (aNext != null)
+                aNext.InsertBeforeSelf(b);
+            else
+                parent.AppendChild(b);
+            if (bNext != null)
+                bNext.InsertBeforeSelf(a);
+            else
+                parent.AppendChild(a);
+        }
+    }
+
     public string CopyFrom(string sourcePath, string targetParentPath, int? index)
     {
         var slideParts = GetSlideParts().ToList();
+
+        // Whole-slide clone: --from /slide[N] to /
+        var slideCloneMatch = Regex.Match(sourcePath, @"^/slide\[(\d+)\]$");
+        if (slideCloneMatch.Success && (targetParentPath is "/" or "" or "/presentation"))
+        {
+            return CloneSlide(slideCloneMatch, slideParts, index);
+        }
 
         var (srcSlidePart, srcElement) = ResolveSlideElement(sourcePath, slideParts);
         var clone = srcElement.CloneNode(true);
@@ -1445,6 +1783,163 @@ public partial class PowerPointHandler
         GetSlide(tgtSlidePart).Save();
 
         return ComputeElementPath(targetParentPath, clone, tgtShapeTree);
+    }
+
+    /// <summary>
+    /// Clone an entire slide with all its content, relationships (images, charts, media),
+    /// layout link, background, notes, and transitions.
+    /// Pattern follows POI's createSlide(layout) + importContent(srcSlide).
+    /// </summary>
+    private string CloneSlide(Match slideMatch, List<SlidePart> slideParts, int? index)
+    {
+        var srcSlideIdx = int.Parse(slideMatch.Groups[1].Value);
+        if (srcSlideIdx < 1 || srcSlideIdx > slideParts.Count)
+            throw new ArgumentException($"Slide {srcSlideIdx} not found");
+
+        var srcSlidePart = slideParts[srcSlideIdx - 1];
+        var presentationPart = _doc.PresentationPart
+            ?? throw new InvalidOperationException("Presentation not found");
+        var presentation = presentationPart.Presentation
+            ?? throw new InvalidOperationException("No presentation");
+
+        // 1. Create new SlidePart
+        var newSlidePart = presentationPart.AddNewPart<SlidePart>();
+
+        // 2. Copy slide layout relationship (link to same layout as source)
+        var srcLayoutPart = srcSlidePart.SlideLayoutPart;
+        if (srcLayoutPart != null)
+            newSlidePart.AddPart(srcLayoutPart);
+
+        // 3. Deep-clone the Slide XML
+        var srcSlide = GetSlide(srcSlidePart);
+        newSlidePart.Slide = (Slide)srcSlide.CloneNode(true);
+
+        // 4. Copy all referenced parts (images, charts, embedded objects, media)
+        CopySlideParts(srcSlidePart, newSlidePart);
+
+        // 5. Copy notes slide if present
+        if (srcSlidePart.NotesSlidePart != null)
+        {
+            var srcNotesPart = srcSlidePart.NotesSlidePart;
+            var newNotesPart = newSlidePart.AddNewPart<NotesSlidePart>();
+            newNotesPart.NotesSlide = srcNotesPart.NotesSlide != null
+                ? (NotesSlide)srcNotesPart.NotesSlide.CloneNode(true)
+                : new NotesSlide();
+            // Link notes to the new slide
+            newNotesPart.AddPart(newSlidePart);
+        }
+
+        newSlidePart.Slide.Save();
+
+        // 6. Register in SlideIdList at the correct position
+        var slideIdList = presentation.GetFirstChild<SlideIdList>()
+            ?? presentation.AppendChild(new SlideIdList());
+        var maxId = slideIdList.Elements<SlideId>().Any()
+            ? slideIdList.Elements<SlideId>().Max(s => s.Id?.Value ?? 255) + 1
+            : 256;
+        var relId = presentationPart.GetIdOfPart(newSlidePart);
+        var newSlideId = new SlideId { Id = maxId, RelationshipId = relId };
+
+        if (index.HasValue && index.Value < slideIdList.Elements<SlideId>().Count())
+        {
+            var refSlide = slideIdList.Elements<SlideId>().ElementAtOrDefault(index.Value);
+            if (refSlide != null)
+                slideIdList.InsertBefore(newSlideId, refSlide);
+            else
+                slideIdList.AppendChild(newSlideId);
+        }
+        else
+        {
+            slideIdList.AppendChild(newSlideId);
+        }
+
+        presentation.Save();
+
+        var slideIds = slideIdList.Elements<SlideId>().ToList();
+        var insertedIdx = slideIds.FindIndex(s => s.RelationshipId?.Value == relId) + 1;
+        return $"/slide[{insertedIdx}]";
+    }
+
+    /// <summary>
+    /// Copy all sub-parts (images, charts, media, etc.) from source to target slide,
+    /// remapping relationship IDs in the cloned XML.
+    /// </summary>
+    private static void CopySlideParts(SlidePart source, SlidePart target)
+    {
+        // Build a map of old rId → new rId for all parts that need copying
+        var rIdMap = new Dictionary<string, string>();
+
+        foreach (var part in source.Parts)
+        {
+            // Skip SlideLayoutPart (already linked above)
+            if (part.OpenXmlPart is SlideLayoutPart) continue;
+            // Skip NotesSlidePart (handled separately)
+            if (part.OpenXmlPart is NotesSlidePart) continue;
+
+            try
+            {
+                // Try to add the same part (shares the underlying data)
+                var newRelId = target.CreateRelationshipToPart(part.OpenXmlPart);
+                if (newRelId != part.RelationshipId)
+                    rIdMap[part.RelationshipId] = newRelId;
+            }
+            catch
+            {
+                // If sharing fails, deep-copy the part data
+                try
+                {
+                    var newPart = target.AddNewPart<OpenXmlPart>(part.OpenXmlPart.ContentType, part.RelationshipId);
+                    using var stream = part.OpenXmlPart.GetStream();
+                    newPart.FeedData(stream);
+                }
+                catch { /* Best effort — some parts may not be copyable */ }
+            }
+        }
+
+        // Also copy external relationships (hyperlinks, media links)
+        foreach (var extRel in source.ExternalRelationships)
+        {
+            try
+            {
+                target.AddExternalRelationship(extRel.RelationshipType, extRel.Uri, extRel.Id);
+            }
+            catch { }
+        }
+        foreach (var hyperRel in source.HyperlinkRelationships)
+        {
+            try
+            {
+                target.AddHyperlinkRelationship(hyperRel.Uri, hyperRel.IsExternal, hyperRel.Id);
+            }
+            catch { }
+        }
+
+        // Remap any changed relationship IDs in the slide XML
+        if (rIdMap.Count > 0 && target.Slide != null)
+        {
+            RemapRelationshipIds(target.Slide, rIdMap);
+            target.Slide.Save();
+        }
+    }
+
+    /// <summary>
+    /// Update all r:id references in the XML tree when relationship IDs changed during copy.
+    /// </summary>
+    private static void RemapRelationshipIds(OpenXmlElement root, Dictionary<string, string> rIdMap)
+    {
+        var rNsUri = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+
+        foreach (var el in root.Descendants().Prepend(root).ToList())
+        {
+            foreach (var attr in el.GetAttributes().ToList())
+            {
+                if (attr.NamespaceUri != rNsUri || attr.Value == null) continue;
+                if (rIdMap.TryGetValue(attr.Value, out var newId))
+                {
+                    el.SetAttribute(new OpenXmlAttribute(attr.Prefix, attr.LocalName, attr.NamespaceUri, newId));
+                }
+            }
+        }
     }
 
     private (SlidePart slidePart, OpenXmlElement element) ResolveSlideElement(string path, List<SlidePart> slideParts)

@@ -128,6 +128,17 @@ public partial class WordHandler
             return tocNode;
         }
 
+        // Field paths: /field[N]
+        var fieldMatch = System.Text.RegularExpressions.Regex.Match(path, @"^/field\[(\d+)\]$");
+        if (fieldMatch.Success)
+        {
+            var fieldIdx = int.Parse(fieldMatch.Groups[1].Value);
+            var allFields = FindFields();
+            if (fieldIdx < 1 || fieldIdx > allFields.Count)
+                return new DocumentNode { Path = path, Type = "error", Text = $"Field {fieldIdx} not found (total: {allFields.Count})" };
+            return FieldToNode(allFields[fieldIdx - 1], path);
+        }
+
         // Chart paths: /chart[N]
         var chartGetMatch = System.Text.RegularExpressions.Regex.Match(path, @"^/chart\[(\d+)\]$");
         if (chartGetMatch.Success)
@@ -170,6 +181,24 @@ public partial class WordHandler
             if (margin?.Bottom?.Value != null) secNode.Format["marginbottom"] = margin.Bottom.Value;
             if (margin?.Left?.Value != null) secNode.Format["marginleft"] = margin.Left.Value;
             if (margin?.Right?.Value != null) secNode.Format["marginright"] = margin.Right.Value;
+
+            // Column properties
+            var cols = sectPr.GetFirstChild<Columns>();
+            if (cols != null)
+            {
+                secNode.Format["columns"] = cols.ColumnCount?.Value ?? 1;
+                if (cols.Space?.Value != null) secNode.Format["columnSpace"] = cols.Space.Value;
+                if (cols.EqualWidth?.Value != null) secNode.Format["equalWidth"] = cols.EqualWidth.Value;
+                if (cols.Separator?.Value == true) secNode.Format["separator"] = true;
+                var colDefs = cols.Elements<Column>().ToList();
+                if (colDefs.Count > 0)
+                {
+                    var widths = colDefs.Select(c => c.Width?.Value ?? "0");
+                    var spaces = colDefs.Select(c => c.Space?.Value ?? "0");
+                    secNode.Format["colWidths"] = string.Join(",", widths);
+                    secNode.Format["colSpaces"] = string.Join(",", spaces);
+                }
+            }
             return secNode;
         }
 
@@ -252,6 +281,106 @@ public partial class WordHandler
             result.Add(implicitSectPr);
         }
         return result;
+    }
+
+    /// <summary>
+    /// Represents a complex field (fldChar begin → instrText → separate → result → end).
+    /// </summary>
+    private record FieldInfo(Run BeginRun, FieldCode InstrCode, Run? SeparateRun, List<Run> ResultRuns, Run EndRun, OpenXmlElement Container);
+
+    /// <summary>Find all complex fields in the document body (and optionally headers/footers).</summary>
+    private List<FieldInfo> FindFields()
+    {
+        var fields = new List<FieldInfo>();
+        var body = _doc.MainDocumentPart?.Document?.Body;
+        if (body == null) return fields;
+
+        CollectFieldsFrom(body.Descendants<Run>(), fields, body);
+
+        // Also search headers and footers
+        foreach (var hp in _doc.MainDocumentPart?.HeaderParts ?? Enumerable.Empty<DocumentFormat.OpenXml.Packaging.HeaderPart>())
+            if (hp.Header != null) CollectFieldsFrom(hp.Header.Descendants<Run>(), fields, hp.Header);
+        foreach (var fp in _doc.MainDocumentPart?.FooterParts ?? Enumerable.Empty<DocumentFormat.OpenXml.Packaging.FooterPart>())
+            if (fp.Footer != null) CollectFieldsFrom(fp.Footer.Descendants<Run>(), fields, fp.Footer);
+
+        return fields;
+    }
+
+    private static void CollectFieldsFrom(IEnumerable<Run> runs, List<FieldInfo> fields, OpenXmlElement container)
+    {
+        Run? beginRun = null;
+        FieldCode? instrCode = null;
+        Run? separateRun = null;
+        var resultRuns = new List<Run>();
+        bool inResult = false;
+
+        foreach (var run in runs)
+        {
+            var fldChar = run.GetFirstChild<FieldChar>();
+            if (fldChar != null)
+            {
+                var charType = fldChar.FieldCharType?.Value;
+                if (charType == FieldCharValues.Begin)
+                {
+                    beginRun = run;
+                    instrCode = null;
+                    separateRun = null;
+                    resultRuns.Clear();
+                    inResult = false;
+                }
+                else if (charType == FieldCharValues.Separate)
+                {
+                    separateRun = run;
+                    inResult = true;
+                }
+                else if (charType == FieldCharValues.End)
+                {
+                    if (beginRun != null && instrCode != null)
+                    {
+                        fields.Add(new FieldInfo(beginRun, instrCode, separateRun,
+                            new List<Run>(resultRuns), run, container));
+                    }
+                    beginRun = null;
+                    instrCode = null;
+                    separateRun = null;
+                    resultRuns.Clear();
+                    inResult = false;
+                }
+            }
+            else if (beginRun != null && !inResult)
+            {
+                var fc = run.GetFirstChild<FieldCode>();
+                if (fc != null) instrCode = fc;
+            }
+            else if (inResult)
+            {
+                resultRuns.Add(run);
+            }
+        }
+    }
+
+    private static DocumentNode FieldToNode(FieldInfo field, string path)
+    {
+        var instr = field.InstrCode.Text?.Trim() ?? "";
+        var resultText = string.Join("", field.ResultRuns.SelectMany(r => r.Elements<Text>()).Select(t => t.Text));
+
+        // Determine field type from instruction
+        var fieldType = "field";
+        var instrUpper = instr.TrimStart().Split(' ', 2)[0].ToUpperInvariant();
+        if (!string.IsNullOrEmpty(instrUpper))
+            fieldType = instrUpper.ToLowerInvariant(); // e.g., "page", "numpages", "date", "toc", "author"
+
+        var node = new DocumentNode { Path = path, Type = "field" };
+        node.Text = resultText;
+        node.Format["instruction"] = instr;
+        node.Format["fieldType"] = fieldType;
+
+        // Check dirty flag
+        var beginChar = field.BeginRun.GetFirstChild<FieldChar>();
+        if (beginChar?.Dirty?.Value == true)
+            node.Format["dirty"] = true;
+
+        return node;
     }
 
     /// <summary>Find all paragraphs containing TOC field codes.</summary>
@@ -420,6 +549,36 @@ public partial class WordHandler
             return results;
         }
 
+        // Handle field selector
+        if (parsed.Element == "field")
+        {
+            var allFields = FindFields();
+            for (int fi = 0; fi < allFields.Count; fi++)
+            {
+                var fieldNode = FieldToNode(allFields[fi], $"/field[{fi + 1}]");
+                // Filter by :contains
+                if (parsed.ContainsText != null)
+                {
+                    var instr = fieldNode.Format.TryGetValue("instruction", out var instrObj) ? instrObj?.ToString() : "";
+                    if (instr == null || !instr.Contains(parsed.ContainsText, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                }
+                // Filter by attribute (e.g., field[fieldType=page])
+                bool matchAttrs = true;
+                foreach (var (attrKey, attrVal) in parsed.Attributes)
+                {
+                    if (fieldNode.Format.TryGetValue(attrKey, out var fmtVal))
+                    {
+                        if (!string.Equals(fmtVal?.ToString(), attrVal, StringComparison.OrdinalIgnoreCase))
+                        { matchAttrs = false; break; }
+                    }
+                    else { matchAttrs = false; break; }
+                }
+                if (matchAttrs) results.Add(fieldNode);
+            }
+            return results;
+        }
+
         // Determine if main selector targets runs directly (no > parent)
         bool isRunSelector = parsed.ChildSelector == null &&
             (parsed.Element == "r" || parsed.Element == "run");
@@ -440,6 +599,7 @@ public partial class WordHandler
                 or "bookmark"
                 or "chart"
                 or "comment"
+                or "field"
                 or "table" or "tbl";
         if (!isKnownType && parsed.ChildSelector == null)
         {

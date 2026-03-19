@@ -232,9 +232,51 @@ public partial class PowerPointHandler
                 switch (key.ToLowerInvariant())
                 {
                     case "align":
+                    {
                         var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
                         pProps.Alignment = ParseTextAlignment(value);
                         break;
+                    }
+                    case "indent":
+                    {
+                        var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                        pProps.Indent = (int)ParseEmu(value);
+                        break;
+                    }
+                    case "marginleft" or "marl":
+                    {
+                        var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                        pProps.LeftMargin = (int)ParseEmu(value);
+                        break;
+                    }
+                    case "marginright" or "marr":
+                    {
+                        var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                        pProps.RightMargin = (int)ParseEmu(value);
+                        break;
+                    }
+                    case "linespacing" or "line.spacing":
+                    {
+                        var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                        pProps.RemoveAllChildren<Drawing.LineSpacing>();
+                        pProps.AppendChild(new Drawing.LineSpacing(
+                            new Drawing.SpacingPercent { Val = (int)(double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) * 100000) }));
+                        break;
+                    }
+                    case "spacebefore" or "space.before":
+                    {
+                        var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                        pProps.RemoveAllChildren<Drawing.SpaceBefore>();
+                        pProps.AppendChild(new Drawing.SpaceBefore(new Drawing.SpacingPoints { Val = (int)(double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) * 100) }));
+                        break;
+                    }
+                    case "spaceafter" or "space.after":
+                    {
+                        var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                        pProps.RemoveAllChildren<Drawing.SpaceAfter>();
+                        pProps.AppendChild(new Drawing.SpaceAfter(new Drawing.SpacingPoints { Val = (int)(double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) * 100) }));
+                        break;
+                    }
                     default:
                         // Apply run-level properties to all runs in this paragraph
                         var runUnsup = SetRunOrShapeProperties(
@@ -706,6 +748,10 @@ public partial class PowerPointHandler
                         break;
                     case "transition":
                         ApplyTransition(slidePart2, value);
+                        if (value.StartsWith("morph", StringComparison.OrdinalIgnoreCase))
+                            AutoPrefixMorphNames(slidePart2);
+                        else
+                            AutoUnprefixMorphNames(slidePart2);
                         break;
                     case "advancetime" or "advanceaftertime":
                     {
@@ -743,16 +789,26 @@ public partial class PowerPointHandler
             var shapeIdx = int.Parse(match.Groups[2].Value);
 
             var (slidePart, shape) = ResolveShape(slideIdx, shapeIdx);
+
+            // Handle z-order first (changes shape position in tree)
+            var zOrderValue = properties.GetValueOrDefault("zorder")
+                ?? properties.GetValueOrDefault("z-order")
+                ?? properties.GetValueOrDefault("order");
+            if (zOrderValue != null)
+            {
+                ApplyZOrder(slidePart, shape, zOrderValue);
+            }
+
             var allRuns = shape.Descendants<Drawing.Run>().ToList();
 
-            // Separate animation and link (both need slidePart) from other shape properties
+            // Separate animation, link, and z-order from other shape properties
             var animValue = properties.GetValueOrDefault("animation")
                 ?? properties.GetValueOrDefault("animate");
             var linkValue = properties.GetValueOrDefault("link");
+            var excludeKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                { "animation", "animate", "link", "zorder", "z-order", "order" };
             var shapeProps = properties
-                .Where(kv => !kv.Key.Equals("animation", StringComparison.OrdinalIgnoreCase)
-                          && !kv.Key.Equals("animate", StringComparison.OrdinalIgnoreCase)
-                          && !kv.Key.Equals("link", StringComparison.OrdinalIgnoreCase))
+                .Where(kv => !excludeKeys.Contains(kv.Key))
                 .ToDictionary(kv => kv.Key, kv => kv.Value);
 
             var unsupported = SetRunOrShapeProperties(shapeProps, allRuns, shape, slidePart);

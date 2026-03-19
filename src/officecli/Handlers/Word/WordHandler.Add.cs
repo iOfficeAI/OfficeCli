@@ -59,18 +59,18 @@ public partial class WordHandler
                         {
                             "center" => JustificationValues.Center,
                             "right" => JustificationValues.Right,
-                            "justify" => JustificationValues.Both,
+                            "justify" or "both" => JustificationValues.Both,
                             _ => JustificationValues.Left
                         }
                     };
                 if (properties.TryGetValue("firstlineindent", out var indent))
                 {
-                    var indentVal = (long)(double.Parse(indent, System.Globalization.CultureInfo.InvariantCulture) * 480);
-                    if (indentVal < 0 || indentVal > int.MaxValue)
-                        throw new OverflowException($"First line indent value out of range: {indent}");
+                    // Validate range — OOXML stores as StringValue but must fit within reasonable twip range
+                    if (long.TryParse(indent, out var indentLong) && (indentLong < 0 || indentLong > 31680))
+                        throw new OverflowException($"First line indent value out of range (0-31680 twips): {indent}");
                     pProps.Indentation = new Indentation
                     {
-                        FirstLine = indentVal.ToString()
+                        FirstLine = indent  // raw twips, consistent with Set and Get
                     };
                 }
                 if (properties.TryGetValue("spacebefore", out var sb4))
@@ -128,11 +128,7 @@ public partial class WordHandler
                     var ind = pProps.Indentation ?? (pProps.Indentation = new Indentation());
                     ind.Hanging = addHI;
                 }
-                if (properties.TryGetValue("firstlineindent", out var addFLI))
-                {
-                    var ind = pProps.Indentation ?? (pProps.Indentation = new Indentation());
-                    ind.FirstLine = addFLI;
-                }
+                // firstlineindent already handled above (line ~66-74) with × 480 conversion
                 if (properties.TryGetValue("keepnext", out var addKN) && IsTruthy(addKN))
                     pProps.KeepNext = new KeepNext();
                 if ((properties.TryGetValue("keeplines", out var addKL) || properties.TryGetValue("keeptogether", out addKL)) && IsTruthy(addKL))
@@ -186,6 +182,8 @@ public partial class WordHandler
                         rProps.Caps = new Caps();
                     if (properties.TryGetValue("smallcaps", out var pSmallCaps) && IsTruthy(pSmallCaps))
                         rProps.SmallCaps = new SmallCaps();
+                    if (properties.TryGetValue("dstrike", out var pDstrike) && IsTruthy(pDstrike))
+                        rProps.DoubleStrike = new DoubleStrike();
                     if (properties.TryGetValue("superscript", out var pSup) && IsTruthy(pSup))
                         rProps.VerticalTextAlignment = new VerticalTextAlignment { Val = VerticalPositionValues.Superscript };
                     if (properties.TryGetValue("subscript", out var pSub) && IsTruthy(pSub))
@@ -471,6 +469,21 @@ public partial class WordHandler
                             cm.BottomMargin = new BottomMargin { Width = tv, Type = TableWidthUnitValues.Dxa };
                             cm.TableCellRightMargin = new TableCellRightMargin { Width = (short)Math.Min(paddingVal, short.MaxValue), Type = TableWidthValues.Dxa };
                             break;
+                        case "style":
+                            tblProps.TableStyle = new TableStyle { Val = tv };
+                            // Add TableLook so built-in styles apply banding correctly
+                            tblProps.RemoveAllChildren<TableLook>();
+                            tblProps.AppendChild(new TableLook
+                            {
+                                Val = "04A0",
+                                FirstRow = true,
+                                LastRow = false,
+                                FirstColumn = true,
+                                LastColumn = false,
+                                NoHorizontalBand = false,
+                                NoVerticalBand = true
+                            });
+                            break;
                     }
                 }
 
@@ -505,9 +518,23 @@ public partial class WordHandler
                 int newCols = properties.TryGetValue("cols", out var colsVal) ? int.Parse(colsVal) : existingCols;
 
                 var newRow = new TableRow();
+                TableRowProperties? newRowProps = null;
                 if (properties.TryGetValue("height", out var rowHeight))
-                    newRow.AppendChild(new TableRowProperties(
-                        new TableRowHeight { Val = uint.Parse(rowHeight) }));
+                {
+                    newRowProps ??= newRow.AppendChild(new TableRowProperties());
+                    newRowProps.AppendChild(new TableRowHeight { Val = ParseTwips(rowHeight), HeightType = HeightRuleValues.AtLeast });
+                }
+                if (properties.TryGetValue("height.exact", out var rowHeightExact))
+                {
+                    newRowProps ??= newRow.AppendChild(new TableRowProperties());
+                    newRowProps.GetFirstChild<TableRowHeight>()?.Remove();
+                    newRowProps.AppendChild(new TableRowHeight { Val = ParseTwips(rowHeightExact), HeightType = HeightRuleValues.Exact });
+                }
+                if (properties.TryGetValue("header", out var headerVal) && IsTruthy(headerVal))
+                {
+                    newRowProps ??= newRow.AppendChild(new TableRowProperties());
+                    newRowProps.AppendChild(new TableHeader());
+                }
 
                 for (int c = 0; c < newCols; c++)
                 {
@@ -712,6 +739,23 @@ public partial class WordHandler
                     imgPara = existingPara;
                     var imgRunCount = existingPara.Elements<Run>().Count();
                     resultPath = $"{parentPath}/r[{imgRunCount}]";
+                }
+                else if (parent is TableCell imgCell)
+                {
+                    // Insert image into existing first paragraph if empty, otherwise create new paragraph
+                    var firstCellPara = imgCell.Elements<Paragraph>().FirstOrDefault();
+                    if (firstCellPara != null && !firstCellPara.Elements<Run>().Any())
+                    {
+                        firstCellPara.AppendChild(imgRun);
+                        imgPara = firstCellPara;
+                    }
+                    else
+                    {
+                        imgPara = new Paragraph(imgRun);
+                        imgCell.AppendChild(imgPara);
+                    }
+                    var imgPIdx = imgCell.Elements<Paragraph>().ToList().IndexOf(imgPara) + 1;
+                    resultPath = $"{parentPath}/p[{imgPIdx}]";
                 }
                 else
                 {
@@ -1113,7 +1157,7 @@ public partial class WordHandler
                         {
                             "center" => JustificationValues.Center,
                             "right" => JustificationValues.Right,
-                            "justify" => JustificationValues.Both,
+                            "justify" or "both" => JustificationValues.Both,
                             _ => JustificationValues.Left
                         }
                     };
@@ -1186,7 +1230,7 @@ public partial class WordHandler
                         {
                             "center" => JustificationValues.Center,
                             "right" => JustificationValues.Right,
-                            "justify" => JustificationValues.Both,
+                            "justify" or "both" => JustificationValues.Both,
                             _ => JustificationValues.Left
                         }
                     };
@@ -1266,7 +1310,7 @@ public partial class WordHandler
                         {
                             "center" => JustificationValues.Center,
                             "right" => JustificationValues.Right,
-                            "justify" => JustificationValues.Both,
+                            "justify" or "both" => JustificationValues.Both,
                             _ => JustificationValues.Left
                         }
                     };
@@ -1329,6 +1373,319 @@ public partial class WordHandler
                 mainPartF.Document.Save();
                 var fIdx = mainPartF.FooterParts.ToList().IndexOf(footerPart);
                 return $"/footer[{fIdx + 1}]";
+            }
+
+            case "field" or "pagenum" or "pagenumber" or "numpages" or "date":
+            {
+                // Insert a field code (PAGE, NUMPAGES, DATE, etc.) as a run
+                // Determines field instruction from type or "field" property
+                var fieldInstr = type.ToLowerInvariant() switch
+                {
+                    "pagenum" or "pagenumber" => " PAGE ",
+                    "numpages" => " NUMPAGES ",
+                    "date" => " DATE \\@ \"yyyy-MM-dd\" ",
+                    _ => properties.GetValueOrDefault("instruction", " PAGE ")
+                };
+                // Allow override via property
+                if (properties.TryGetValue("instruction", out var instr))
+                    fieldInstr = instr.StartsWith(" ") ? instr : $" {instr} ";
+
+                var fieldPlaceholder = properties.GetValueOrDefault("text", "1");
+
+                // Build complex field: fldChar(begin) + instrText + fldChar(separate) + result + fldChar(end)
+                var fieldRunBegin = new Run(new FieldChar { FieldCharType = FieldCharValues.Begin });
+                var fieldRunInstr = new Run(new FieldCode(fieldInstr) { Space = SpaceProcessingModeValues.Preserve });
+                var fieldRunSep = new Run(new FieldChar { FieldCharType = FieldCharValues.Separate });
+                var fieldRunResult = new Run(new Text(fieldPlaceholder) { Space = SpaceProcessingModeValues.Preserve });
+                var fieldRunEnd = new Run(new FieldChar { FieldCharType = FieldCharValues.End });
+
+                // Apply optional run formatting to all runs
+                RunProperties? fieldRProps = null;
+                if (properties.TryGetValue("font", out var fFont) || properties.TryGetValue("size", out _) ||
+                    properties.TryGetValue("bold", out _) || properties.TryGetValue("color", out _))
+                {
+                    fieldRProps = new RunProperties();
+                    if (properties.TryGetValue("font", out var ff))
+                        fieldRProps.AppendChild(new RunFonts { Ascii = ff, HighAnsi = ff, EastAsia = ff });
+                    if (properties.TryGetValue("size", out var fs))
+                        fieldRProps.AppendChild(new FontSize { Val = ((int)(ParseFontSize(fs) * 2)).ToString() });
+                    if (properties.TryGetValue("bold", out var fb) && IsTruthy(fb))
+                        fieldRProps.AppendChild(new Bold());
+                    if (properties.TryGetValue("color", out var fc))
+                        fieldRProps.AppendChild(new Color { Val = fc.TrimStart('#').ToUpperInvariant() });
+                }
+
+                if (fieldRProps != null)
+                {
+                    fieldRunBegin.PrependChild(fieldRProps.CloneNode(true));
+                    fieldRunInstr.PrependChild(fieldRProps.CloneNode(true));
+                    fieldRunSep.PrependChild(fieldRProps.CloneNode(true));
+                    fieldRunResult.PrependChild(fieldRProps.CloneNode(true));
+                    fieldRunEnd.PrependChild(fieldRProps.CloneNode(true));
+                }
+
+                if (parent is Paragraph fieldPara)
+                {
+                    fieldPara.AppendChild(fieldRunBegin);
+                    fieldPara.AppendChild(fieldRunInstr);
+                    fieldPara.AppendChild(fieldRunSep);
+                    fieldPara.AppendChild(fieldRunResult);
+                    fieldPara.AppendChild(fieldRunEnd);
+                    newElement = fieldRunBegin;
+                    var fParaIdx = body.Elements<Paragraph>().TakeWhile(p => p != fieldPara).Count();
+                    resultPath = $"/body/p[{fParaIdx + 1}]/r[{GetAllRuns(fieldPara).Count - 4}]";
+                }
+                else
+                {
+                    // Create a new paragraph containing the field
+                    var fNewPara = new Paragraph();
+                    var fPProps = new ParagraphProperties();
+                    if (properties.TryGetValue("alignment", out var fAlign))
+                        fPProps.Justification = new Justification
+                        {
+                            Val = fAlign.ToLowerInvariant() switch
+                            {
+                                "center" => JustificationValues.Center,
+                                "right" => JustificationValues.Right,
+                                "justify" => JustificationValues.Both,
+                                _ => JustificationValues.Left
+                            }
+                        };
+                    fNewPara.AppendChild(fPProps);
+                    fNewPara.AppendChild(fieldRunBegin);
+                    fNewPara.AppendChild(fieldRunInstr);
+                    fNewPara.AppendChild(fieldRunSep);
+                    fNewPara.AppendChild(fieldRunResult);
+                    fNewPara.AppendChild(fieldRunEnd);
+                    AppendToParent(parent, fNewPara);
+                    newElement = fNewPara;
+                    var fIdx2 = body.Elements<Paragraph>().TakeWhile(p => p != fNewPara).Count();
+                    resultPath = $"/body/p[{fIdx2 + 1}]";
+                }
+                break;
+            }
+
+            case "pagebreak" or "columnbreak" or "break":
+            {
+                // Insert an explicit page break, column break, or line break
+                var breakType = type.ToLowerInvariant() switch
+                {
+                    "columnbreak" => BreakValues.Column,
+                    _ => BreakValues.Page
+                };
+                // Allow override via property
+                if (properties.TryGetValue("type", out var brType))
+                {
+                    breakType = brType.ToLowerInvariant() switch
+                    {
+                        "column" => BreakValues.Column,
+                        "textwrapping" or "line" => BreakValues.TextWrapping,
+                        _ => BreakValues.Page
+                    };
+                }
+
+                var brk = new Break { Type = breakType };
+                var brkRun = new Run(brk);
+
+                if (parent is Paragraph brkPara)
+                {
+                    brkPara.AppendChild(brkRun);
+                    newElement = brkRun;
+                    var brkParaIdx = body.Elements<Paragraph>().TakeWhile(p => p != brkPara).Count();
+                    resultPath = $"/body/p[{brkParaIdx + 1}]/r[{GetAllRuns(brkPara).Count}]";
+                }
+                else
+                {
+                    // Create a new empty paragraph with the break
+                    var brkNewPara = new Paragraph(brkRun);
+                    AppendToParent(parent, brkNewPara);
+                    newElement = brkNewPara;
+                    var brkIdx = body.Elements<Paragraph>().TakeWhile(p => p != brkNewPara).Count();
+                    resultPath = $"/body/p[{brkIdx + 1}]";
+                }
+                break;
+            }
+
+            case "sdt" or "contentcontrol":
+            {
+                // Add a Structured Document Tag (Content Control)
+                var sdtType = properties.GetValueOrDefault("sdttype", properties.GetValueOrDefault("controltype", "text")).ToLowerInvariant();
+                var alias = properties.GetValueOrDefault("alias", properties.GetValueOrDefault("name", ""));
+                var tag = properties.GetValueOrDefault("tag", "");
+                var lockVal = properties.GetValueOrDefault("lock", "");
+                var sdtText = properties.GetValueOrDefault("text", "");
+
+                // Determine block-level vs inline
+                bool isInline = parent is Paragraph;
+
+                if (isInline)
+                {
+                    // Inline SDT (SdtRun) inside a paragraph
+                    var sdtRun = new SdtRun();
+                    var sdtProps = new SdtProperties();
+
+                    // ID
+                    sdtProps.AppendChild(new SdtId { Val = (int)(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() % int.MaxValue) });
+
+                    if (!string.IsNullOrEmpty(alias))
+                        sdtProps.AppendChild(new SdtAlias { Val = alias });
+                    if (!string.IsNullOrEmpty(tag))
+                        sdtProps.AppendChild(new Tag { Val = tag });
+                    if (!string.IsNullOrEmpty(lockVal))
+                    {
+                        sdtProps.AppendChild(new DocumentFormat.OpenXml.Wordprocessing.Lock
+                        {
+                            Val = lockVal.ToLowerInvariant() switch
+                            {
+                                "contentlocked" or "content" => LockingValues.ContentLocked,
+                                "sdtlocked" or "sdt" => LockingValues.SdtLocked,
+                                "sdtcontentlocked" or "both" => LockingValues.SdtContentLocked,
+                                _ => LockingValues.Unlocked
+                            }
+                        });
+                    }
+
+                    // Content type definition
+                    switch (sdtType)
+                    {
+                        case "dropdown" or "dropdownlist":
+                        {
+                            var ddl = new SdtContentDropDownList();
+                            if (properties.TryGetValue("items", out var items))
+                            {
+                                foreach (var item in items.Split(','))
+                                {
+                                    var trimmed = item.Trim();
+                                    ddl.AppendChild(new ListItem { DisplayText = trimmed, Value = trimmed });
+                                }
+                            }
+                            sdtProps.AppendChild(ddl);
+                            break;
+                        }
+                        case "combobox" or "combo":
+                        {
+                            var cb = new SdtContentComboBox();
+                            if (properties.TryGetValue("items", out var items))
+                            {
+                                foreach (var item in items.Split(','))
+                                {
+                                    var trimmed = item.Trim();
+                                    cb.AppendChild(new ListItem { DisplayText = trimmed, Value = trimmed });
+                                }
+                            }
+                            sdtProps.AppendChild(cb);
+                            break;
+                        }
+                        case "date" or "datepicker":
+                            var datePr = new SdtContentDate();
+                            if (properties.TryGetValue("format", out var dateFmt))
+                                datePr.DateFormat = new DateFormat { Val = dateFmt };
+                            else
+                                datePr.DateFormat = new DateFormat { Val = "yyyy-MM-dd" };
+                            sdtProps.AppendChild(datePr);
+                            break;
+                        case "richtext" or "rich":
+                            // Rich text has no specific type element (absence of w:text means rich text)
+                            break;
+                        default: // "text" or "plaintext"
+                            sdtProps.AppendChild(new SdtContentText());
+                            break;
+                    }
+
+                    sdtRun.AppendChild(sdtProps);
+                    var sdtContent = new SdtContentRun();
+                    var contentRun = new Run(new Text(sdtText) { Space = SpaceProcessingModeValues.Preserve });
+                    sdtContent.AppendChild(contentRun);
+                    sdtRun.AppendChild(sdtContent);
+
+                    ((Paragraph)parent).AppendChild(sdtRun);
+                    newElement = sdtRun;
+                    var sdtParaIdx = body.Elements<Paragraph>().TakeWhile(p => p != parent).Count();
+                    resultPath = $"/body/p[{sdtParaIdx + 1}]/sdt[{((Paragraph)parent).Elements<SdtRun>().Count()}]";
+                }
+                else
+                {
+                    // Block-level SDT (SdtBlock)
+                    var sdtBlock = new SdtBlock();
+                    var sdtProps = new SdtProperties();
+
+                    sdtProps.AppendChild(new SdtId { Val = (int)(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() % int.MaxValue) });
+
+                    if (!string.IsNullOrEmpty(alias))
+                        sdtProps.AppendChild(new SdtAlias { Val = alias });
+                    if (!string.IsNullOrEmpty(tag))
+                        sdtProps.AppendChild(new Tag { Val = tag });
+                    if (!string.IsNullOrEmpty(lockVal))
+                    {
+                        sdtProps.AppendChild(new DocumentFormat.OpenXml.Wordprocessing.Lock
+                        {
+                            Val = lockVal.ToLowerInvariant() switch
+                            {
+                                "contentlocked" or "content" => LockingValues.ContentLocked,
+                                "sdtlocked" or "sdt" => LockingValues.SdtLocked,
+                                "sdtcontentlocked" or "both" => LockingValues.SdtContentLocked,
+                                _ => LockingValues.Unlocked
+                            }
+                        });
+                    }
+
+                    switch (sdtType)
+                    {
+                        case "dropdown" or "dropdownlist":
+                        {
+                            var ddl = new SdtContentDropDownList();
+                            if (properties.TryGetValue("items", out var items))
+                            {
+                                foreach (var item in items.Split(','))
+                                {
+                                    var trimmed = item.Trim();
+                                    ddl.AppendChild(new ListItem { DisplayText = trimmed, Value = trimmed });
+                                }
+                            }
+                            sdtProps.AppendChild(ddl);
+                            break;
+                        }
+                        case "combobox" or "combo":
+                        {
+                            var cb = new SdtContentComboBox();
+                            if (properties.TryGetValue("items", out var items))
+                            {
+                                foreach (var item in items.Split(','))
+                                {
+                                    var trimmed = item.Trim();
+                                    cb.AppendChild(new ListItem { DisplayText = trimmed, Value = trimmed });
+                                }
+                            }
+                            sdtProps.AppendChild(cb);
+                            break;
+                        }
+                        case "date" or "datepicker":
+                            var datePr = new SdtContentDate();
+                            if (properties.TryGetValue("format", out var dateFmt))
+                                datePr.DateFormat = new DateFormat { Val = dateFmt };
+                            else
+                                datePr.DateFormat = new DateFormat { Val = "yyyy-MM-dd" };
+                            sdtProps.AppendChild(datePr);
+                            break;
+                        case "richtext" or "rich":
+                            break;
+                        default:
+                            sdtProps.AppendChild(new SdtContentText());
+                            break;
+                    }
+
+                    sdtBlock.AppendChild(sdtProps);
+                    var sdtContent = new SdtContentBlock();
+                    var contentPara = new Paragraph(new Run(new Text(sdtText) { Space = SpaceProcessingModeValues.Preserve }));
+                    sdtContent.AppendChild(contentPara);
+                    sdtBlock.AppendChild(sdtContent);
+
+                    AppendToParent(parent, sdtBlock);
+                    newElement = sdtBlock;
+                    var sdtCount = body.Elements<SdtBlock>().Count();
+                    resultPath = $"/body/sdt[{sdtCount}]";
+                }
+                break;
             }
 
             case "watermark":
@@ -1550,7 +1907,7 @@ public partial class WordHandler
 
         element.Remove();
 
-        // Insert at the specified position among same-type siblings
+        // Insert at the specified position among same-type siblings (1-based index)
         if (index.HasValue)
         {
             var sameTypeSiblings = targetParent.ChildElements
@@ -1559,7 +1916,7 @@ public partial class WordHandler
             if (insertIdx >= 0 && insertIdx < sameTypeSiblings.Count)
                 sameTypeSiblings[insertIdx].InsertBeforeSelf(element);
             else
-                targetParent.AppendChild(element);
+                AppendToParent(targetParent, element);
         }
         else
         {
@@ -1571,6 +1928,33 @@ public partial class WordHandler
         var siblings = targetParent.ChildElements.Where(e => e.LocalName == element.LocalName).ToList();
         var newIdx = siblings.IndexOf(element) + 1;
         return $"{effectiveParentPath}/{element.LocalName}[{newIdx}]";
+    }
+
+    public (string NewPath1, string NewPath2) Swap(string path1, string path2)
+    {
+        var parts1 = ParsePath(path1);
+        var elem1 = NavigateToElement(parts1)
+            ?? throw new ArgumentException($"Element not found: {path1}");
+        var parts2 = ParsePath(path2);
+        var elem2 = NavigateToElement(parts2)
+            ?? throw new ArgumentException($"Element not found: {path2}");
+
+        if (elem1.Parent != elem2.Parent)
+            throw new ArgumentException("Cannot swap elements with different parents");
+
+        PowerPointHandler.SwapXmlElements(elem1, elem2);
+        _doc.MainDocumentPart?.Document?.Save();
+
+        // Recompute paths
+        var parent = elem1.Parent!;
+        var lastSlash = path1.LastIndexOf('/');
+        var parentPath = lastSlash > 0 ? path1[..lastSlash] : "/body";
+
+        var siblings1 = parent.ChildElements.Where(e => e.LocalName == elem1.LocalName).ToList();
+        var newIdx1 = siblings1.IndexOf(elem1) + 1;
+        var siblings2 = parent.ChildElements.Where(e => e.LocalName == elem2.LocalName).ToList();
+        var newIdx2 = siblings2.IndexOf(elem2) + 1;
+        return ($"{parentPath}/{elem1.LocalName}[{newIdx1}]", $"{parentPath}/{elem2.LocalName}[{newIdx2}]");
     }
 
     public string CopyFrom(string sourcePath, string targetParentPath, int? index)

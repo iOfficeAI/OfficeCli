@@ -279,20 +279,23 @@ public partial class ExcelHandler
                 if (properties.TryGetValue("formula2", out var dvFormula2))
                     dv.Formula2 = new Formula2(dvFormula2);
 
-                dv.AllowBlank = !properties.TryGetValue("allowBlank", out var dvAllowBlank)
+                // Build case-insensitive lookup for validation properties
+                var dvProps = new Dictionary<string, string>(properties, StringComparer.OrdinalIgnoreCase);
+
+                dv.AllowBlank = !dvProps.TryGetValue("allowBlank", out var dvAllowBlank)
                     || IsTruthy(dvAllowBlank);
-                dv.ShowErrorMessage = !properties.TryGetValue("showError", out var dvShowError)
+                dv.ShowErrorMessage = !dvProps.TryGetValue("showError", out var dvShowError)
                     || IsTruthy(dvShowError);
-                dv.ShowInputMessage = !properties.TryGetValue("showInput", out var dvShowInput)
+                dv.ShowInputMessage = !dvProps.TryGetValue("showInput", out var dvShowInput)
                     || IsTruthy(dvShowInput);
 
-                if (properties.TryGetValue("errorTitle", out var dvErrorTitle))
+                if (dvProps.TryGetValue("errorTitle", out var dvErrorTitle))
                     dv.ErrorTitle = dvErrorTitle;
-                if (properties.TryGetValue("error", out var dvError))
+                if (dvProps.TryGetValue("error", out var dvError))
                     dv.Error = dvError;
-                if (properties.TryGetValue("promptTitle", out var dvPromptTitle))
+                if (dvProps.TryGetValue("promptTitle", out var dvPromptTitle))
                     dv.PromptTitle = dvPromptTitle;
-                if (properties.TryGetValue("prompt", out var dvPrompt))
+                if (dvProps.TryGetValue("prompt", out var dvPrompt))
                     dv.Prompt = dvPrompt;
 
                 var wsEl = GetSheet(dvWorksheet);
@@ -927,6 +930,55 @@ public partial class ExcelHandler
                 return $"/{chartSheetName}/chart[{chartIdx}]";
             }
 
+            case "pivottable" or "pivot":
+            {
+                var ptSegments = parentPath.TrimStart('/').Split('/', 2);
+                var ptSheetName = ptSegments[0];
+                var ptWorksheet = FindWorksheet(ptSheetName)
+                    ?? throw new ArgumentException($"Sheet not found: {ptSheetName}");
+
+                // Source: "Sheet1!A1:D100" or "A1:D100" (same sheet)
+                var sourceSpec = properties.GetValueOrDefault("source", "")
+                    ?? properties.GetValueOrDefault("src", "")
+                    ?? throw new ArgumentException("pivottable requires 'source' property (e.g. source=Sheet1!A1:D100)");
+                if (string.IsNullOrEmpty(sourceSpec))
+                    throw new ArgumentException("pivottable requires 'source' property (e.g. source=Sheet1!A1:D100)");
+
+                string sourceSheetName;
+                string sourceRef;
+                if (sourceSpec.Contains('!'))
+                {
+                    var srcParts = sourceSpec.Split('!', 2);
+                    sourceSheetName = srcParts[0].Trim('\'', '"');
+                    sourceRef = srcParts[1];
+                }
+                else
+                {
+                    sourceSheetName = ptSheetName;
+                    sourceRef = sourceSpec;
+                }
+
+                var sourceWorksheet = FindWorksheet(sourceSheetName)
+                    ?? throw new ArgumentException($"Source sheet not found: {sourceSheetName}");
+
+                var position = properties.GetValueOrDefault("position", "")
+                    ?? properties.GetValueOrDefault("pos", "");
+                if (string.IsNullOrEmpty(position))
+                {
+                    // Auto-position: place after the source data range
+                    var rangeEnd = sourceRef.Split(':').Last();
+                    var colEndMatch = System.Text.RegularExpressions.Regex.Match(rangeEnd, @"([A-Za-z]+)");
+                    var nextCol = colEndMatch.Success ? IndexToColumnName(ColumnNameToIndex(colEndMatch.Value.ToUpperInvariant()) + 2) : "H";
+                    position = $"{nextCol}1";
+                }
+
+                var ptIdx = PivotTableHelper.CreatePivotTable(
+                    _doc.WorkbookPart!, ptWorksheet, sourceWorksheet,
+                    sourceSheetName, sourceRef, position, properties);
+
+                return $"/{ptSheetName}/pivottable[{ptIdx}]";
+            }
+
             default:
             {
                 // Generic fallback: create typed element via SDK schema validation
@@ -1113,6 +1165,65 @@ public partial class ExcelHandler
         }
 
         throw new ArgumentException($"Move not supported for: {elementRef}. Supported: row[N]");
+    }
+
+    public (string NewPath1, string NewPath2) Swap(string path1, string path2)
+    {
+        // Parse both paths: /SheetName/row[N]
+        var seg1 = path1.TrimStart('/').Split('/', 2);
+        var seg2 = path2.TrimStart('/').Split('/', 2);
+        if (seg1.Length < 2 || seg2.Length < 2)
+            throw new ArgumentException("Swap requires element paths (e.g. /Sheet1/row[1])");
+        if (seg1[0] != seg2[0])
+            throw new ArgumentException("Cannot swap elements across different sheets");
+
+        var sheetName = seg1[0];
+        var worksheet = FindWorksheet(sheetName)
+            ?? throw new ArgumentException($"Sheet not found: {sheetName}");
+        var sheetData = GetSheet(worksheet).GetFirstChild<SheetData>()
+            ?? throw new ArgumentException("Sheet has no data");
+
+        var rowMatch1 = Regex.Match(seg1[1], @"^row\[(\d+)\]$");
+        var rowMatch2 = Regex.Match(seg2[1], @"^row\[(\d+)\]$");
+        if (!rowMatch1.Success || !rowMatch2.Success)
+            throw new ArgumentException("Swap only supports row[N] elements in Excel");
+
+        var allRows = sheetData.Elements<Row>().ToList();
+        var idx1 = int.Parse(rowMatch1.Groups[1].Value);
+        var idx2 = int.Parse(rowMatch2.Groups[1].Value);
+        var row1 = (idx1 >= 1 && idx1 <= allRows.Count ? allRows[idx1 - 1] : null)
+            ?? throw new ArgumentException($"Row {idx1} not found");
+        var row2 = (idx2 >= 1 && idx2 <= allRows.Count ? allRows[idx2 - 1] : null)
+            ?? throw new ArgumentException($"Row {idx2} not found");
+
+        // Swap RowIndex values and cell references
+        var rowIndex1 = row1.RowIndex?.Value ?? (uint)idx1;
+        var rowIndex2 = row2.RowIndex?.Value ?? (uint)idx2;
+        row1.RowIndex = new DocumentFormat.OpenXml.UInt32Value(rowIndex2);
+        row2.RowIndex = new DocumentFormat.OpenXml.UInt32Value(rowIndex1);
+
+        // Update cell references (e.g. A1→A3, B1→B3)
+        foreach (var cell in row1.Elements<Cell>())
+        {
+            if (cell.CellReference?.Value != null)
+            {
+                var colRef = Regex.Match(cell.CellReference.Value, @"^([A-Z]+)").Groups[1].Value;
+                cell.CellReference = $"{colRef}{rowIndex2}";
+            }
+        }
+        foreach (var cell in row2.Elements<Cell>())
+        {
+            if (cell.CellReference?.Value != null)
+            {
+                var colRef = Regex.Match(cell.CellReference.Value, @"^([A-Z]+)").Groups[1].Value;
+                cell.CellReference = $"{colRef}{rowIndex1}";
+            }
+        }
+
+        PowerPointHandler.SwapXmlElements(row1, row2);
+        SaveWorksheet(worksheet);
+
+        return ($"/{sheetName}/row[{rowIndex2}]", $"/{sheetName}/row[{rowIndex1}]");
     }
 
     public string CopyFrom(string sourcePath, string targetParentPath, int? index)
