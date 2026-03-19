@@ -369,7 +369,13 @@ public partial class PowerPointHandler
     private static (long x, long y) ParsePointToken(string token)
     {
         var parts = token.Split(',');
-        return (long.Parse(parts[0].Trim()), long.Parse(parts[1].Trim()));
+        if (parts.Length < 2)
+            throw new ArgumentException($"Invalid coordinate '{token}'. Expected 'x,y' format (e.g. '100,200').");
+        if (!long.TryParse(parts[0].Trim(), out var x))
+            throw new ArgumentException($"Invalid x coordinate '{parts[0].Trim()}' in '{token}'. Expected a number.");
+        if (!long.TryParse(parts[1].Trim(), out var y))
+            throw new ArgumentException($"Invalid y coordinate '{parts[1].Trim()}' in '{token}'. Expected a number.");
+        return (x, y);
     }
 
     private static void TrackMax(ref long maxX, ref long maxY, long x, long y)
