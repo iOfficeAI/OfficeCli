@@ -28,8 +28,8 @@ public static class ParseHelpers
         var trimmed = value.Trim();
         if (trimmed.EndsWith("pt", StringComparison.OrdinalIgnoreCase))
             trimmed = trimmed[..^2].Trim();
-        if (!double.TryParse(trimmed, CultureInfo.InvariantCulture, out var result))
-            throw new ArgumentException($"Invalid font size: '{value}'. Expected a number (e.g., '12', '10.5', '14pt').");
+        if (!double.TryParse(trimmed, CultureInfo.InvariantCulture, out var result) || double.IsNaN(result) || double.IsInfinity(result))
+            throw new ArgumentException($"Invalid font size: '{value}'. Expected a finite number (e.g., '12', '10.5', '14pt').");
         return result;
     }
 
@@ -48,8 +48,8 @@ public static class ParseHelpers
     /// </summary>
     public static double SafeParseDouble(string value, string propertyName)
     {
-        if (!double.TryParse(value, CultureInfo.InvariantCulture, out var result))
-            throw new ArgumentException($"Invalid '{propertyName}' value '{value}'. Expected a number.");
+        if (!double.TryParse(value, CultureInfo.InvariantCulture, out var result) || double.IsNaN(result) || double.IsInfinity(result))
+            throw new ArgumentException($"Invalid '{propertyName}' value '{value}'. Expected a finite number.");
         return result;
     }
 
