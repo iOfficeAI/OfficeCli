@@ -1049,6 +1049,18 @@ public partial class ExcelHandler
                 if (!definedNames.HasChildren) definedNames.Remove();
             }
 
+            // Fix ActiveTab to prevent workbook corruption when deleting the last tab
+            var remainingCount = sheets!.Elements<Sheet>().Count();
+            var bookViews = workbook.GetFirstChild<BookViews>();
+            if (bookViews != null)
+            {
+                foreach (var bv in bookViews.Elements<WorkbookView>())
+                {
+                    if (bv.ActiveTab?.Value >= (uint)remainingCount)
+                        bv.ActiveTab = (uint)Math.Max(0, remainingCount - 1);
+                }
+            }
+
             workbook.Save();
             return;
         }
