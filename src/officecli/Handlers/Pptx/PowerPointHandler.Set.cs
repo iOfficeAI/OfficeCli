@@ -704,13 +704,13 @@ public partial class PowerPointHandler
                             var parts = value.Split(',');
                             if (parts.Length == 4)
                             {
+                                var cropVals = new double[4];
                                 for (int ci = 0; ci < 4; ci++)
-                                    if (!double.TryParse(parts[ci].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _))
-                                        throw new ArgumentException($"Invalid 'crop' value: '{value}'. Expected 1 or 4 comma-separated percentages (e.g. '10' or '5,10,5,10').");
-                                srcRect.Left = (int)(double.Parse(parts[0].Trim(), System.Globalization.CultureInfo.InvariantCulture) * 1000);
-                                srcRect.Top = (int)(double.Parse(parts[1].Trim(), System.Globalization.CultureInfo.InvariantCulture) * 1000);
-                                srcRect.Right = (int)(double.Parse(parts[2].Trim(), System.Globalization.CultureInfo.InvariantCulture) * 1000);
-                                srcRect.Bottom = (int)(double.Parse(parts[3].Trim(), System.Globalization.CultureInfo.InvariantCulture) * 1000);
+                                    cropVals[ci] = ParseHelpers.SafeParseDouble(parts[ci].Trim(), "crop");
+                                srcRect.Left = (int)(cropVals[0] * 1000);
+                                srcRect.Top = (int)(cropVals[1] * 1000);
+                                srcRect.Right = (int)(cropVals[2] * 1000);
+                                srcRect.Bottom = (int)(cropVals[3] * 1000);
                             }
                             else if (parts.Length == 1)
                             {
