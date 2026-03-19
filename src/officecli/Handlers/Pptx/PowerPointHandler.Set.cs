@@ -454,6 +454,20 @@ public partial class PowerPointHandler
                         }
                         break;
                     }
+                    case var k when k.StartsWith("border") || k is "text" or "bold" or "italic" or "size" or "font" or "color" or "underline" or "strike" or "valign" or "fill" or "baseline" or "charspacing":
+                    {
+                        // Apply cell-level properties to all cells in the table
+                        var table = gf.Descendants<Drawing.Table>().FirstOrDefault();
+                        if (table != null)
+                        {
+                            foreach (var cell in table.Descendants<Drawing.TableCell>())
+                            {
+                                var u = SetTableCellProperties(cell, new Dictionary<string, string> { { key, value } });
+                                foreach (var uk in u) { if (!unsupported.Contains(uk)) unsupported.Add(uk); }
+                            }
+                        }
+                        break;
+                    }
                     default:
                         if (!GenericXmlQuery.SetGenericAttribute(gf, key, value))
                             unsupported.Add(key);

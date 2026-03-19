@@ -638,10 +638,14 @@ public partial class ExcelHandler
                 if (string.IsNullOrEmpty(imgPath) || !File.Exists(imgPath))
                     throw new ArgumentException("picture requires a valid 'path' or 'src' property");
 
-                var px = int.TryParse(properties.GetValueOrDefault("x", "0"), out var xv) ? xv : 0;
-                var py = int.TryParse(properties.GetValueOrDefault("y", "0"), out var yv) ? yv : 0;
-                var pw = int.TryParse(properties.GetValueOrDefault("width", "5"), out var wv) ? wv : 5;
-                var ph = int.TryParse(properties.GetValueOrDefault("height", "5"), out var hv) ? hv : 5;
+                var pxStr = properties.GetValueOrDefault("x", "0") ?? "0";
+                var pyStr = properties.GetValueOrDefault("y", "0") ?? "0";
+                var pwStr = properties.GetValueOrDefault("width", "5") ?? "5";
+                var phStr = properties.GetValueOrDefault("height", "5") ?? "5";
+                var px = ParseHelpers.SafeParseInt(pxStr, "x");
+                var py = ParseHelpers.SafeParseInt(pyStr, "y");
+                var pw = ParseHelpers.SafeParseInt(pwStr, "width");
+                var ph = ParseHelpers.SafeParseInt(phStr, "height");
                 var alt = properties.GetValueOrDefault("alt", "");
 
                 var picDrawingsPart = picWorksheet.DrawingsPart

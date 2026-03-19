@@ -17,7 +17,9 @@ public partial class PowerPointHandler
 
     public DocumentNode Get(string path, int depth = 1)
     {
-        if (path == "/" || path == "")
+        if (string.IsNullOrEmpty(path))
+            throw new ArgumentException("Path cannot be empty.");
+        if (path == "/")
         {
             var node = new DocumentNode { Path = "/", Type = "presentation" };
 

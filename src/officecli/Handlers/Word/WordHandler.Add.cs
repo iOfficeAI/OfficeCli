@@ -67,17 +67,17 @@ public partial class WordHandler
                 if (properties.TryGetValue("spacebefore", out var sb4))
                 {
                     var spacing = pProps.SpacingBetweenLines ?? (pProps.SpacingBetweenLines = new SpacingBetweenLines());
-                    spacing.Before = sb4;
+                    spacing.Before = ParseHelpers.SafeParseUint(sb4, "spacebefore").ToString();
                 }
                 if (properties.TryGetValue("spaceafter", out var sa4))
                 {
                     var spacing = pProps.SpacingBetweenLines ?? (pProps.SpacingBetweenLines = new SpacingBetweenLines());
-                    spacing.After = sa4;
+                    spacing.After = ParseHelpers.SafeParseUint(sa4, "spaceafter").ToString();
                 }
                 if (properties.TryGetValue("linespacing", out var ls4))
                 {
                     var spacing = pProps.SpacingBetweenLines ?? (pProps.SpacingBetweenLines = new SpacingBetweenLines());
-                    spacing.Line = ls4;
+                    spacing.Line = ParseHelpers.SafeParseUint(ls4, "linespacing").ToString();
                     spacing.LineRule = LineSpacingRuleValues.Auto;
                 }
                 if (properties.TryGetValue("numid", out var numId))
@@ -469,14 +469,14 @@ public partial class WordHandler
                             }
                             else
                             {
-                                tblProps.TableWidth = new TableWidth { Width = tv, Type = TableWidthUnitValues.Dxa };
+                                tblProps.TableWidth = new TableWidth { Width = ParseHelpers.SafeParseUint(tv, "width").ToString(), Type = TableWidthUnitValues.Dxa };
                             }
                             break;
                         case "indent":
                             tblProps.TableIndentation = new TableIndentation { Width = ParseHelpers.SafeParseInt(tv, "indent"), Type = TableWidthUnitValues.Dxa };
                             break;
                         case "cellspacing":
-                            tblProps.TableCellSpacing = new TableCellSpacing { Width = tv, Type = TableWidthUnitValues.Dxa };
+                            tblProps.TableCellSpacing = new TableCellSpacing { Width = ParseHelpers.SafeParseUint(tv, "cellspacing").ToString(), Type = TableWidthUnitValues.Dxa };
                             break;
                         case "layout":
                             tblProps.TableLayout = new TableLayout
@@ -1181,13 +1181,13 @@ public partial class WordHandler
                 if (properties.TryGetValue("spacebefore", out var sSBefore))
                 {
                     var sp = stylePPr.SpacingBetweenLines ?? (stylePPr.SpacingBetweenLines = new SpacingBetweenLines());
-                    sp.Before = sSBefore;
+                    sp.Before = ParseHelpers.SafeParseUint(sSBefore, "spacebefore").ToString();
                     hasPPr = true;
                 }
                 if (properties.TryGetValue("spaceafter", out var sSAfter))
                 {
                     var sp = stylePPr.SpacingBetweenLines ?? (stylePPr.SpacingBetweenLines = new SpacingBetweenLines());
-                    sp.After = sSAfter;
+                    sp.After = ParseHelpers.SafeParseUint(sSAfter, "spaceafter").ToString();
                     hasPPr = true;
                 }
                 if (hasPPr) newStyle.AppendChild(stylePPr);

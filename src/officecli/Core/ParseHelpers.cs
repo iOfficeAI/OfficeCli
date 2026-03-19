@@ -28,6 +28,8 @@ public static class ParseHelpers
         var trimmed = value.Trim();
         if (trimmed.EndsWith("pt", StringComparison.OrdinalIgnoreCase))
             trimmed = trimmed[..^2].Trim();
+        if (trimmed.Contains(','))
+            throw new ArgumentException($"Invalid font size: '{value}'. Comma is not allowed — use '.' as decimal separator (e.g., '10.5').");
         if (!double.TryParse(trimmed, CultureInfo.InvariantCulture, out var result) || double.IsNaN(result) || double.IsInfinity(result))
             throw new ArgumentException($"Invalid font size: '{value}'. Expected a finite number (e.g., '12', '10.5', '14pt').");
         return result;

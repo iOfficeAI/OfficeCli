@@ -495,12 +495,12 @@ public partial class WordHandler
                     case "spacebefore":
                         var pPr2 = style.StyleParagraphProperties ?? style.AppendChild(new StyleParagraphProperties());
                         var sp2 = pPr2.SpacingBetweenLines ?? (pPr2.SpacingBetweenLines = new SpacingBetweenLines());
-                        sp2.Before = value;
+                        sp2.Before = ParseHelpers.SafeParseUint(value, "spacebefore").ToString();
                         break;
                     case "spaceafter":
                         var pPr3 = style.StyleParagraphProperties ?? style.AppendChild(new StyleParagraphProperties());
                         var sp3 = pPr3.SpacingBetweenLines ?? (pPr3.SpacingBetweenLines = new SpacingBetweenLines());
-                        sp3.After = value;
+                        sp3.After = ParseHelpers.SafeParseUint(value, "spaceafter").ToString();
                         break;
                     default:
                         unsupported.Add(key);
@@ -1134,11 +1134,11 @@ public partial class WordHandler
                         };
                         break;
                     case "width":
-                        tcPr.TableCellWidth = new TableCellWidth { Width = value, Type = TableWidthUnitValues.Dxa };
+                        tcPr.TableCellWidth = new TableCellWidth { Width = ParseHelpers.SafeParseUint(value, "width").ToString(), Type = TableWidthUnitValues.Dxa };
                         break;
                     case "padding":
                     {
-                        var dxa = value;
+                        var dxa = ParseHelpers.SafeParseUint(value, "padding").ToString();
                         var mar = tcPr.TableCellMargin ?? (tcPr.TableCellMargin = new TableCellMargin());
                         mar.TopMargin = new TopMargin { Width = dxa, Type = TableWidthUnitValues.Dxa };
                         mar.BottomMargin = new BottomMargin { Width = dxa, Type = TableWidthUnitValues.Dxa };
@@ -1335,14 +1335,14 @@ public partial class WordHandler
                         }
                         else
                         {
-                            tblPr.TableWidth = new TableWidth { Width = value, Type = TableWidthUnitValues.Dxa };
+                            tblPr.TableWidth = new TableWidth { Width = ParseHelpers.SafeParseUint(value, "width").ToString(), Type = TableWidthUnitValues.Dxa };
                         }
                         break;
                     case "indent":
                         tblPr.TableIndentation = new TableIndentation { Width = ParseHelpers.SafeParseInt(value, "indent"), Type = TableWidthUnitValues.Dxa };
                         break;
                     case "cellspacing":
-                        tblPr.TableCellSpacing = new TableCellSpacing { Width = value, Type = TableWidthUnitValues.Dxa };
+                        tblPr.TableCellSpacing = new TableCellSpacing { Width = ParseHelpers.SafeParseUint(value, "cellspacing").ToString(), Type = TableWidthUnitValues.Dxa };
                         break;
                     case "layout":
                         tblPr.TableLayout = new TableLayout
@@ -1579,15 +1579,15 @@ public partial class WordHandler
                 return true;
             case "spacebefore":
                 var spacingBefore = pProps.SpacingBetweenLines ?? (pProps.SpacingBetweenLines = new SpacingBetweenLines());
-                spacingBefore.Before = value;
+                spacingBefore.Before = ParseHelpers.SafeParseUint(value, "spacebefore").ToString();
                 return true;
             case "spaceafter":
                 var spacingAfter = pProps.SpacingBetweenLines ?? (pProps.SpacingBetweenLines = new SpacingBetweenLines());
-                spacingAfter.After = value;
+                spacingAfter.After = ParseHelpers.SafeParseUint(value, "spaceafter").ToString();
                 return true;
             case "linespacing":
                 var spacingLine = pProps.SpacingBetweenLines ?? (pProps.SpacingBetweenLines = new SpacingBetweenLines());
-                spacingLine.Line = value;
+                spacingLine.Line = ParseHelpers.SafeParseUint(value, "linespacing").ToString();
                 spacingLine.LineRule = LineSpacingRuleValues.Auto;
                 return true;
             case "numid":

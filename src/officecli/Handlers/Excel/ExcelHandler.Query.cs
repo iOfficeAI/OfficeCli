@@ -14,7 +14,9 @@ public partial class ExcelHandler
 
     public DocumentNode Get(string path, int depth = 1)
     {
-        if (path == "/" || path == "")
+        if (string.IsNullOrEmpty(path))
+            throw new ArgumentException("Path cannot be empty.");
+        if (path == "/")
         {
             var node = new DocumentNode { Path = "/", Type = "workbook" };
             foreach (var (name, part) in GetWorksheets())
@@ -359,6 +361,10 @@ public partial class ExcelHandler
                 return GetPictureNode(sheetNameFromPath, worksheet, picIndex, path);
             }
 
+            // If it looks like it could be a malformed cell reference (digits only, etc.), reject it
+            if (Regex.IsMatch(cellRef, @"^\d+$"))
+                throw new ArgumentException($"Invalid cell reference: '{cellRef}'. Expected format like 'A1', 'B2'.");
+
             // Generic XML fallback: navigate worksheet XML tree
             var xmlSegments = GenericXmlQuery.ParsePathSegments(cellRef);
             var target = GenericXmlQuery.NavigateByPath(GetSheet(worksheet), xmlSegments);
@@ -369,12 +375,16 @@ public partial class ExcelHandler
 
         if (cellRef.Contains(':'))
         {
-            // Range
+            // Range — validate both endpoints
+            var rangeParts = cellRef.Split(':');
+            ParseCellReference(rangeParts[0]);
+            if (rangeParts.Length > 1) ParseCellReference(rangeParts[1]);
             return GetCellRange(sheetNameFromPath, data, cellRef, depth);
         }
         else
         {
-            // Single cell
+            // Single cell — validate cell reference
+            ParseCellReference(cellRef);
             var cell = FindCell(data, cellRef);
             if (cell == null)
                 return new DocumentNode { Path = path, Type = "cell", Text = "(empty)", Preview = cellRef };

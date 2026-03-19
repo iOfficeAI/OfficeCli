@@ -194,7 +194,7 @@ public partial class PowerPointHandler
                             "super" or "true" => 30000,
                             "sub" => -25000,
                             "none" or "false" or "0" => 0,
-                            _ => double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var blVal)
+                            _ => double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var blVal) && !double.IsNaN(blVal) && !double.IsInfinity(blVal)
                                 ? (int)(blVal * 1000)
                                 : throw new ArgumentException($"Invalid 'baseline' value: '{value}'. Expected 'super', 'sub', 'none', or a percentage (e.g. 30 for superscript 30%).")
                         };
@@ -902,23 +902,53 @@ public partial class PowerPointHandler
                     bool isNone = value.Equals("none", StringComparison.OrdinalIgnoreCase)
                         || value.Equals("false", StringComparison.OrdinalIgnoreCase);
 
-                    // Parse value: "FF0000", "1pt solid FF0000", "2pt dash 0000FF"
-                    var borderParts = value.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    // Parse value: "FF0000", "1pt solid FF0000", "2pt dash 0000FF", or "style;width;color;dash"
                     string? borderColor = null;
                     long? borderWidth = null;
                     string? borderDash = null;
                     if (!isNone)
                     {
-                        foreach (var bp in borderParts)
+                        if (value.Contains(';'))
                         {
-                            if (bp.EndsWith("pt", StringComparison.OrdinalIgnoreCase) ||
-                                bp.EndsWith("cm", StringComparison.OrdinalIgnoreCase) ||
-                                bp.EndsWith("px", StringComparison.OrdinalIgnoreCase))
-                                borderWidth = Core.EmuConverter.ParseEmu(bp);
-                            else if (bp is "solid" or "dot" or "dash" or "lgDash" or "dashDot" or "sysDot" or "sysDash")
-                                borderDash = bp;
-                            else if (bp.Length >= 3 && !bp.Equals("none", StringComparison.OrdinalIgnoreCase))
-                                borderColor = bp.TrimStart('#').ToUpperInvariant();
+                            // Semicolon format: style;width;color[;dash]
+                            var scParts = value.Split(';');
+                            // Part 0: style (ignored for table border — used for Word only)
+                            // Part 1: width (in pt/EMU)
+                            if (scParts.Length > 1 && !string.IsNullOrEmpty(scParts[1]))
+                            {
+                                var wStr = scParts[1];
+                                if (!wStr.EndsWith("pt", StringComparison.OrdinalIgnoreCase))
+                                    wStr += "pt";
+                                borderWidth = Core.EmuConverter.ParseEmu(wStr);
+                            }
+                            // Part 2: color
+                            if (scParts.Length > 2 && !string.IsNullOrEmpty(scParts[2]))
+                                borderColor = scParts[2].TrimStart('#').ToUpperInvariant();
+                            // Part 3: dash style
+                            if (scParts.Length > 3)
+                            {
+                                var d = scParts[3].ToLowerInvariant();
+                                if (d is "solid" or "dot" or "dash" or "lgdash" or "dashdot" or "sysdot" or "sysdash")
+                                    borderDash = d;
+                                else
+                                    throw new ArgumentException($"Invalid border dash value: '{scParts[3]}'. Valid values: solid, dot, dash, lgDash, dashDot, sysDot, sysDash.");
+                            }
+                        }
+                        else
+                        {
+                            // Space-separated format: "2pt dash FF0000"
+                            var borderParts = value.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                            foreach (var bp in borderParts)
+                            {
+                                if (bp.EndsWith("pt", StringComparison.OrdinalIgnoreCase) ||
+                                    bp.EndsWith("cm", StringComparison.OrdinalIgnoreCase) ||
+                                    bp.EndsWith("px", StringComparison.OrdinalIgnoreCase))
+                                    borderWidth = Core.EmuConverter.ParseEmu(bp);
+                                else if (bp.ToLowerInvariant() is "solid" or "dot" or "dash" or "lgdash" or "dashdot" or "sysdot" or "sysdash")
+                                    borderDash = bp.ToLowerInvariant();
+                                else if (bp.Length >= 3 && !bp.Equals("none", StringComparison.OrdinalIgnoreCase))
+                                    borderColor = bp.TrimStart('#').ToUpperInvariant();
+                            }
                         }
                     }
 
@@ -956,14 +986,14 @@ public partial class PowerPointHandler
                             lineProps.RemoveAllChildren<Drawing.PresetDash>();
                             lineProps.AppendChild(new Drawing.PresetDash
                             {
-                                Val = borderDash switch
+                                Val = borderDash.ToLowerInvariant() switch
                                 {
                                     "dot" => Drawing.PresetLineDashValues.Dot,
                                     "dash" => Drawing.PresetLineDashValues.Dash,
-                                    "lgDash" => Drawing.PresetLineDashValues.LargeDash,
-                                    "dashDot" => Drawing.PresetLineDashValues.DashDot,
-                                    "sysDot" => Drawing.PresetLineDashValues.SystemDot,
-                                    "sysDash" => Drawing.PresetLineDashValues.SystemDash,
+                                    "lgdash" => Drawing.PresetLineDashValues.LargeDash,
+                                    "dashdot" => Drawing.PresetLineDashValues.DashDot,
+                                    "sysdot" => Drawing.PresetLineDashValues.SystemDot,
+                                    "sysdash" => Drawing.PresetLineDashValues.SystemDash,
                                     "solid" => Drawing.PresetLineDashValues.Solid,
                                     _ => throw new ArgumentException($"Invalid border dash value: '{borderDash}'. Valid values: solid, dot, dash, lgDash, dashDot, sysDot, sysDash.")
                                 }

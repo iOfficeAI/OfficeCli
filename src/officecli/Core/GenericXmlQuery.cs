@@ -230,6 +230,8 @@ public static class GenericXmlQuery
                 var indexStr = part[(bracketIdx + 1)..^1];
                 if (!int.TryParse(indexStr, out var idx))
                     throw new ArgumentException($"Invalid path index '{indexStr}' in segment '{part}'. Expected a numeric index.");
+                if (idx < 1)
+                    throw new ArgumentException($"Invalid path index '{idx}' in segment '{part}'. Index must be >= 1.");
                 segments.Add((name, idx));
             }
             else
