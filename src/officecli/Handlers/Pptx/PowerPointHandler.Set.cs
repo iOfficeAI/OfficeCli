@@ -204,7 +204,12 @@ public partial class PowerPointHandler
                 throw new ArgumentException($"Run {runIdx} not found (paragraph has {paraRuns.Count} runs)");
 
             var targetRun = paraRuns[runIdx - 1];
-            var unsupported = SetRunOrShapeProperties(properties, new List<Drawing.Run> { targetRun }, shape, slidePart);
+            var linkVal = properties.GetValueOrDefault("link");
+            var runOnlyProps = properties
+                .Where(kv => !kv.Key.Equals("link", StringComparison.OrdinalIgnoreCase))
+                .ToDictionary(kv => kv.Key, kv => kv.Value);
+            var unsupported = SetRunOrShapeProperties(runOnlyProps, new List<Drawing.Run> { targetRun }, shape, slidePart);
+            if (linkVal != null) ApplyRunHyperlink(slidePart, targetRun, linkVal);
             GetSlide(slidePart).Save();
             return unsupported;
         }
@@ -277,6 +282,10 @@ public partial class PowerPointHandler
                         pProps.AppendChild(new Drawing.SpaceAfter(new Drawing.SpacingPoints { Val = (int)(ParseHelpers.SafeParseDouble(value, "spaceAfter") * 100) }));
                         break;
                     }
+                    case "link":
+                        foreach (var r in paraRuns)
+                            ApplyRunHyperlink(slidePart, r, value);
+                        break;
                     default:
                         // Apply run-level properties to all runs in this paragraph
                         var runUnsup = SetRunOrShapeProperties(
