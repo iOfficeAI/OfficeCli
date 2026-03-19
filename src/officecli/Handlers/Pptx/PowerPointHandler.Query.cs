@@ -447,6 +447,23 @@ public partial class PowerPointHandler
                 throw new ArgumentException($"Connector {elementIdx} not found (total: {connectors.Count})");
             return ConnectorToNode(connectors[elementIdx - 1], slideIdx, elementIdx);
         }
+        else if (elementType == "group")
+        {
+            var groups = shapeTreeEl.Elements<GroupShape>().ToList();
+            if (elementIdx < 1 || elementIdx > groups.Count)
+                throw new ArgumentException($"Group {elementIdx} not found (total: {groups.Count})");
+            var grp = groups[elementIdx - 1];
+            var grpName = grp.NonVisualGroupShapeProperties?.NonVisualDrawingProperties?.Name?.Value ?? "Group";
+            var grpNode = new DocumentNode
+            {
+                Path = $"/slide[{slideIdx}]/group[{elementIdx}]",
+                Type = "group",
+                Preview = grpName,
+                ChildCount = grp.Elements<Shape>().Count() + grp.Elements<Picture>().Count()
+            };
+            grpNode.Format["name"] = grpName;
+            return grpNode;
+        }
 
         // Generic fallback for unknown element types
         {
@@ -478,7 +495,8 @@ public partial class PowerPointHandler
                 or "video" or "audio"
                 or "equation" or "math" or "formula"
                 or "table" or "chart" or "placeholder" or "notes"
-                or "connector" or "connection";
+                or "connector" or "connection"
+                or "group";
         if (!isKnownType)
         {
             var genericParsed = GenericXmlQuery.ParseSelector(selector);
@@ -630,6 +648,29 @@ public partial class PowerPointHandler
                         var cxnNode = ConnectorToNode(cxn, slideNum, cxnIdx);
                         if (MatchesGenericAttributes(cxnNode, parsed.Attributes))
                             results.Add(cxnNode);
+                    }
+                }
+            }
+
+            if (parsed.ElementType == "group" || (parsed.ElementType == null && !isEquationSelector))
+            {
+                int grpIdx = 0;
+                foreach (var grp in shapeTree.Elements<GroupShape>())
+                {
+                    grpIdx++;
+                    if (parsed.ElementType == "group" || parsed.ElementType == null)
+                    {
+                        var grpName = grp.NonVisualGroupShapeProperties?.NonVisualDrawingProperties?.Name?.Value ?? "Group";
+                        var grpNode = new DocumentNode
+                        {
+                            Path = $"/slide[{slideNum}]/group[{grpIdx}]",
+                            Type = "group",
+                            Preview = grpName,
+                            ChildCount = grp.Elements<Shape>().Count() + grp.Elements<Picture>().Count()
+                        };
+                        grpNode.Format["name"] = grpName;
+                        if (MatchesGenericAttributes(grpNode, parsed.Attributes))
+                            results.Add(grpNode);
                     }
                 }
             }
