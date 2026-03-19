@@ -90,7 +90,8 @@ public partial class PowerPointHandler
     private static bool MatchesShapeSelector(Shape shape, ShapeSelector selector)
     {
         // Element type filter
-        if (selector.ElementType is "picture" or "pic" or "video" or "audio" or "table" or "chart" or "placeholder")
+        if (selector.ElementType is "picture" or "pic" or "video" or "audio" or "table" or "chart"
+            or "placeholder" or "connector" or "connection" or "group" or "notes")
             return false;
 
         // Title filter
