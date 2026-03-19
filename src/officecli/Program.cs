@@ -634,6 +634,8 @@ batchCommand.SetAction(result => SafeRun(() =>
             if (!success && stopOnError) break;
         }
         PrintBatchResults(results, json);
+        if (results.Any(r => !r.Success))
+            throw new InvalidOperationException($"Batch completed with {results.Count(r => !r.Success)} error(s)");
         return;
     }
 
@@ -654,6 +656,8 @@ batchCommand.SetAction(result => SafeRun(() =>
         }
     }
     PrintBatchResults(batchResults, json);
+    if (batchResults.Any(r => !r.Success))
+        throw new InvalidOperationException($"Batch completed with {batchResults.Count(r => !r.Success)} error(s)");
 }));
 
 rootCommand.Add(batchCommand);
