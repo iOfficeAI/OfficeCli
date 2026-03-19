@@ -912,7 +912,9 @@ public partial class WordHandler
                     throw new ArgumentException("Hyperlinks can only be added to paragraphs: /body/p[N]");
 
                 var mainDocPart = _doc.MainDocumentPart!;
-                var hlRelId = mainDocPart.AddHyperlinkRelationship(new Uri(hlUrl), isExternal: true).Id;
+                if (!Uri.TryCreate(hlUrl, UriKind.Absolute, out var hlUri))
+                    throw new ArgumentException($"Invalid hyperlink URL '{hlUrl}'. Expected a valid absolute URI (e.g. 'https://example.com').");
+                var hlRelId = mainDocPart.AddHyperlinkRelationship(hlUri, isExternal: true).Id;
 
                 var hlRProps = new RunProperties();
                 if (properties.TryGetValue("color", out var hlColor))

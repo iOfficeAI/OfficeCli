@@ -26,7 +26,9 @@ public partial class PowerPointHandler
             return;
         }
 
-        var rel = slidePart.AddHyperlinkRelationship(new Uri(url), isExternal: true);
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            throw new ArgumentException($"Invalid hyperlink URL '{url}'. Expected a valid absolute URI (e.g. 'https://example.com').");
+        var rel = slidePart.AddHyperlinkRelationship(uri, isExternal: true);
         foreach (var run in allRuns)
         {
             var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
@@ -45,7 +47,9 @@ public partial class PowerPointHandler
 
         if (!string.IsNullOrEmpty(url) && !url.Equals("none", StringComparison.OrdinalIgnoreCase))
         {
-            var rel = slidePart.AddHyperlinkRelationship(new Uri(url), isExternal: true);
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var runUri))
+                throw new ArgumentException($"Invalid hyperlink URL '{url}'. Expected a valid absolute URI (e.g. 'https://example.com').");
+            var rel = slidePart.AddHyperlinkRelationship(runUri, isExternal: true);
             rProps.InsertAt(new Drawing.HyperlinkOnClick { Id = rel.Id }, 0);
         }
     }
