@@ -1198,6 +1198,17 @@ Video/Audio properties (/slide[N]/video[M] or /slide[N]/audio[M]):
   trimEnd      End time in ms
   x, y, width, height  Position and size
 
+Connector properties (/slide[N]/connector[M]):
+  name         Connector name
+  x, y, width, height  Position and size
+  lineWidth    Line width (EMU or cm/pt, e.g. 2pt) (alias: line.width)
+  lineColor    Line color hex (e.g. FF0000) (alias: line.color)
+  preset       Connector geometry (e.g. straightConnector1, bentConnector3, curvedConnector3)
+
+Group properties (/slide[N]/group[M]):
+  name         Group name
+  x, y, width, height  Position and size
+
 Master/Layout editing (/slideMaster[N] or /slideLayout[N]):
   name         Change layout/master name
   /slideMaster[N]/shape[M] or /slideLayout[N]/shape[M]  — set shape properties
