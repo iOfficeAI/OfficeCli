@@ -86,7 +86,7 @@ public partial class ExcelHandler
         // Sheet-level Set (path is just /SheetName)
         if (segments.Length < 2)
         {
-            return SetSheetLevel(worksheet, properties);
+            return SetSheetLevel(worksheet, sheetName, properties);
         }
 
         var cellRef = segments[1];
@@ -702,7 +702,7 @@ public partial class ExcelHandler
 
     // ==================== Sheet-level Set (freeze panes) ====================
 
-    private List<string> SetSheetLevel(WorksheetPart worksheet, Dictionary<string, string> properties)
+    private List<string> SetSheetLevel(WorksheetPart worksheet, string sheetName, Dictionary<string, string> properties)
     {
         var unsupported = new List<string>();
         var ws = GetSheet(worksheet);
@@ -711,6 +711,20 @@ public partial class ExcelHandler
         {
             switch (key.ToLowerInvariant())
             {
+                case "name":
+                {
+                    // Rename the sheet
+                    var workbook = GetWorkbook();
+                    var sheets = workbook.Sheets?.Elements<Sheet>().ToList();
+                    var sheet = sheets?.FirstOrDefault(s =>
+                        s.Name?.Value?.Equals(sheetName, StringComparison.OrdinalIgnoreCase) == true);
+                    if (sheet != null)
+                    {
+                        sheet.Name = value;
+                        workbook.Save();
+                    }
+                    break;
+                }
                 case "freeze":
                 {
                     var sheetViews = ws.GetFirstChild<SheetViews>();
@@ -1000,8 +1014,8 @@ public partial class ExcelHandler
             switch (key.ToLowerInvariant())
             {
                 case "height":
-                    if (!double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var heightVal))
-                        throw new ArgumentException($"Invalid 'height' value: '{value}'. Expected a number (row height in points, e.g. 15.75).");
+                    if (!double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var heightVal) || double.IsNaN(heightVal) || double.IsInfinity(heightVal))
+                        throw new ArgumentException($"Invalid 'height' value: '{value}'. Expected a finite number (row height in points, e.g. 15.75).");
                     row.Height = heightVal;
                     row.CustomHeight = true;
                     break;

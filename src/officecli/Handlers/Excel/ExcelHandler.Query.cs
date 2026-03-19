@@ -537,7 +537,9 @@ public partial class ExcelHandler
                 {
                     if (MatchesCellSelector(cell, sheetName, parsed))
                     {
-                        results.Add(CellToNode(sheetName, cell, worksheetPart));
+                        var node = CellToNode(sheetName, cell, worksheetPart);
+                        if (MatchesFormatAttributes(node, parsed))
+                            results.Add(node);
                     }
                 }
             }

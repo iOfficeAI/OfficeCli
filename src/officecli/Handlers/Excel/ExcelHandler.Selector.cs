@@ -4,6 +4,7 @@
 using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
+using OfficeCli.Core;
 
 namespace OfficeCli.Handlers;
 
@@ -12,7 +13,8 @@ public partial class ExcelHandler
     // ==================== Selector ====================
 
     private record CellSelector(string? Sheet, string? Column, string? ValueEquals, string? ValueNotEquals,
-        string? ValueContains, bool? HasFormula, bool? IsEmpty, string? TypeEquals, string? TypeNotEquals);
+        string? ValueContains, bool? HasFormula, bool? IsEmpty, string? TypeEquals, string? TypeNotEquals,
+        Dictionary<string, string>? FormatEquals = null, Dictionary<string, string>? FormatNotEquals = null);
 
     private CellSelector ParseCellSelector(string selector)
     {
@@ -47,7 +49,9 @@ public partial class ExcelHandler
         }
 
         // Parse attributes (\\?! handles zsh escaping \! as !)
-        foreach (Match attrMatch in Regex.Matches(selector, @"\[(\w+)(\\?!?=)([^\]]*)\]"))
+        Dictionary<string, string>? formatEquals = null;
+        Dictionary<string, string>? formatNotEquals = null;
+        foreach (Match attrMatch in Regex.Matches(selector, @"\[([\w.]+)(\\?!?=)([^\]]*)\]"))
         {
             var key = attrMatch.Groups[1].Value.ToLowerInvariant();
             var op = attrMatch.Groups[2].Value.Replace("\\", "");
@@ -61,6 +65,18 @@ public partial class ExcelHandler
                 case "type" when op == "!=": typeNotEquals = val; break;
                 case "formula": hasFormula = val.ToLowerInvariant() != "false"; break;
                 case "empty": isEmpty = val.ToLowerInvariant() != "false"; break;
+                default:
+                    if (op == "=")
+                    {
+                        formatEquals ??= new Dictionary<string, string>();
+                        formatEquals[attrMatch.Groups[1].Value] = val;
+                    }
+                    else if (op == "!=")
+                    {
+                        formatNotEquals ??= new Dictionary<string, string>();
+                        formatNotEquals[attrMatch.Groups[1].Value] = val;
+                    }
+                    break;
             }
         }
 
@@ -81,7 +97,7 @@ public partial class ExcelHandler
         // :has(formula) pseudo-selector
         if (selector.Contains(":has(formula)")) hasFormula = true;
 
-        return new CellSelector(sheet, column, valueEquals, valueNotEquals, valueContains, hasFormula, isEmpty, typeEquals, typeNotEquals);
+        return new CellSelector(sheet, column, valueEquals, valueNotEquals, valueContains, hasFormula, isEmpty, typeEquals, typeNotEquals, formatEquals, formatNotEquals);
     }
 
     private bool MatchesCellSelector(Cell cell, string sheetName, CellSelector selector)
@@ -143,13 +159,47 @@ public partial class ExcelHandler
         return "Number";
     }
 
+    private static bool MatchesFormatAttributes(DocumentNode node, CellSelector selector)
+    {
+        if (selector.FormatEquals != null)
+        {
+            foreach (var (key, expected) in selector.FormatEquals)
+            {
+                var matchedKey = node.Format.Keys.FirstOrDefault(k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase));
+                if (matchedKey == null) return false;
+                var actual = node.Format[matchedKey]?.ToString() ?? "";
+                if (!actual.Equals(expected, StringComparison.OrdinalIgnoreCase))
+                    return false;
+            }
+        }
+        if (selector.FormatNotEquals != null)
+        {
+            foreach (var (key, expected) in selector.FormatNotEquals)
+            {
+                var matchedKey = node.Format.Keys.FirstOrDefault(k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase));
+                var actual = matchedKey != null ? (node.Format[matchedKey]?.ToString() ?? "") : "";
+                if (actual.Equals(expected, StringComparison.OrdinalIgnoreCase))
+                    return false;
+            }
+        }
+        return true;
+    }
+
     // ==================== Cell Reference Utils ====================
 
     private static (string Column, int Row) ParseCellReference(string cellRef)
     {
         var match = Regex.Match(cellRef, @"^([A-Z]+)(\d+)$", RegexOptions.IgnoreCase);
-        if (!match.Success) return ("A", 1);
-        return (match.Groups[1].Value.ToUpperInvariant(), int.Parse(match.Groups[2].Value));
+        if (!match.Success)
+            throw new ArgumentException($"Invalid cell reference: '{cellRef}'. Expected format like 'A1', 'B2', 'XFD1048576'.");
+        var col = match.Groups[1].Value.ToUpperInvariant();
+        var row = int.Parse(match.Groups[2].Value);
+        if (row < 1 || row > 1048576)
+            throw new ArgumentException($"Row {row} in cell reference '{cellRef}' is out of range. Valid range: 1-1048576.");
+        var colIdx = ColumnNameToIndex(col);
+        if (colIdx < 1 || colIdx > 16384)
+            throw new ArgumentException($"Column '{col}' in cell reference '{cellRef}' is out of range. Valid range: A-XFD (1-16384).");
+        return (col, row);
     }
 
     private static int ColumnNameToIndex(string col)
