@@ -294,8 +294,17 @@ public class ExcelStyleManager
         string? underline = fontProps.TryGetValue("underline", out var uVal)
             ? (uVal.ToLowerInvariant() is "double" ? "double" : (IsTruthy(uVal) || uVal.ToLowerInvariant() == "single" ? "single" : null))
             : (baseFont.Underline != null ? (baseFont.Underline.Val?.InnerText == "double" ? "double" : "single") : null);
-        double size = fontProps.TryGetValue("size", out var szVal) && double.TryParse(szVal, out var sz)
-            ? sz : baseFont.FontSize?.Val?.Value ?? 11;
+        double size;
+        if (fontProps.TryGetValue("size", out var szVal))
+        {
+            if (!double.TryParse(szVal, out var sz) || double.IsNaN(sz) || double.IsInfinity(sz))
+                throw new ArgumentException($"Invalid font.size value: '{szVal}'. Expected a finite number.");
+            size = sz;
+        }
+        else
+        {
+            size = baseFont.FontSize?.Val?.Value ?? 11;
+        }
         string name = fontProps.GetValueOrDefault("name",
             baseFont.FontName?.Val?.Value ?? "Calibri");
         string? color = fontProps.TryGetValue("color", out var cVal)
@@ -649,7 +658,7 @@ public class ExcelStyleManager
             "mediumdashdotdot" => BorderStyleValues.MediumDashDotDot,
             "slantdashdot" => BorderStyleValues.SlantDashDot,
             "none" => BorderStyleValues.None,
-            _ => BorderStyleValues.None,
+            _ => throw new ArgumentException($"Invalid border style: '{value}'. Valid values: thin, medium, thick, double, dashed, dotted, dashdot, dashdotdot, hair, mediumdashed, mediumdashdot, mediumdashdotdot, slantdashdot, none."),
         };
 
     // ==================== CellFormat ====================
@@ -754,22 +763,22 @@ public class ExcelStyleManager
     private static bool IsTruthy(string value) =>
         ParseHelpers.IsTruthy(value);
 
-    private static HorizontalAlignmentValues? ParseHAlign(string value) =>
+    private static HorizontalAlignmentValues ParseHAlign(string value) =>
         value.ToLowerInvariant() switch
         {
             "left" => HorizontalAlignmentValues.Left,
             "center" => HorizontalAlignmentValues.Center,
             "right" => HorizontalAlignmentValues.Right,
             "justify" => HorizontalAlignmentValues.Justify,
-            _ => null
+            _ => throw new ArgumentException($"Invalid horizontal alignment: '{value}'. Valid values: left, center, right, justify.")
         };
 
-    private static VerticalAlignmentValues? ParseVAlign(string value) =>
+    private static VerticalAlignmentValues ParseVAlign(string value) =>
         value.ToLowerInvariant() switch
         {
             "top" => VerticalAlignmentValues.Top,
             "center" => VerticalAlignmentValues.Center,
             "bottom" => VerticalAlignmentValues.Bottom,
-            _ => null
+            _ => throw new ArgumentException($"Invalid vertical alignment: '{value}'. Valid values: top, center, bottom.")
         };
 }
