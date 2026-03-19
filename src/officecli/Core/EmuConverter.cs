@@ -79,6 +79,23 @@ public static class EmuConverter
         return $"{cm:0.##}cm";
     }
 
+    /// <summary>
+    /// Try to parse a dimension string into EMU. Returns false if parsing fails.
+    /// </summary>
+    public static bool TryParseEmu(string value, out long emu)
+    {
+        try
+        {
+            emu = ParseEmu(value);
+            return true;
+        }
+        catch
+        {
+            emu = 0;
+            return false;
+        }
+    }
+
     private static long ParseWithUnit(string value, int suffixLen, double factor, string unit)
     {
         var numberPart = value[..^suffixLen];

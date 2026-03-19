@@ -141,7 +141,9 @@ public partial class PowerPointHandler
 
         foreach (var (key, (expected, negate)) in attributes)
         {
-            var hasKey = node.Format.TryGetValue(key, out var actual);
+            var matchedKey = node.Format.Keys.FirstOrDefault(k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase));
+            var hasKey = matchedKey != null;
+            object? actual = hasKey ? node.Format[matchedKey!] : null;
             var actualStr = actual?.ToString() ?? "";
 
             if (negate)
@@ -158,6 +160,11 @@ public partial class PowerPointHandler
                 {
                     // Special case: boolean properties stored as `true`/`True` matching "true"
                     if (actual is bool b && string.Equals(expected, b.ToString(), StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    // Special case: dimension values with different units (e.g., "0.07cm" vs "2pt")
+                    if (Core.EmuConverter.TryParseEmu(actualStr, out var actualEmu)
+                        && Core.EmuConverter.TryParseEmu(expected, out var expectedEmu)
+                        && Math.Abs(actualEmu - expectedEmu) <= 500)
                         continue;
                     return false;
                 }
