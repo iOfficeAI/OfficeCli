@@ -851,6 +851,87 @@ public partial class PowerPointHandler
             }
         }
 
+        // Try connector path: /slide[N]/connector[M]
+        var cxnMatch = Regex.Match(path, @"^/slide\[(\d+)\]/connector\[(\d+)\]$");
+        if (cxnMatch.Success)
+        {
+            var slideIdx = int.Parse(cxnMatch.Groups[1].Value);
+            var cxnIdx = int.Parse(cxnMatch.Groups[2].Value);
+
+            var slideParts5 = GetSlideParts().ToList();
+            if (slideIdx < 1 || slideIdx > slideParts5.Count)
+                throw new ArgumentException($"Slide {slideIdx} not found");
+
+            var slidePart = slideParts5[slideIdx - 1];
+            var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree
+                ?? throw new ArgumentException("Slide has no shape tree");
+            var connectors = shapeTree.Elements<ConnectionShape>().ToList();
+            if (cxnIdx < 1 || cxnIdx > connectors.Count)
+                throw new ArgumentException($"Connector {cxnIdx} not found (total: {connectors.Count})");
+
+            var cxn = connectors[cxnIdx - 1];
+            var unsupported = new List<string>();
+            foreach (var (key, value) in properties)
+            {
+                switch (key.ToLowerInvariant())
+                {
+                    case "name":
+                        var nvCxnPr = cxn.NonVisualConnectionShapeProperties?.NonVisualDrawingProperties;
+                        if (nvCxnPr != null) nvCxnPr.Name = value;
+                        break;
+                    case "x" or "y" or "width" or "height":
+                    {
+                        var spPr = cxn.ShapeProperties ?? (cxn.ShapeProperties = new ShapeProperties());
+                        var xfrm = spPr.Transform2D ?? (spPr.Transform2D = new Drawing.Transform2D());
+                        var offset = xfrm.Offset ?? (xfrm.Offset = new Drawing.Offset());
+                        var extents = xfrm.Extents ?? (xfrm.Extents = new Drawing.Extents());
+                        var emu = ParseEmu(value);
+                        switch (key.ToLowerInvariant())
+                        {
+                            case "x": offset.X = emu; break;
+                            case "y": offset.Y = emu; break;
+                            case "width": extents.Cx = emu; break;
+                            case "height": extents.Cy = emu; break;
+                        }
+                        break;
+                    }
+                    case "linewidth" or "line.width":
+                    {
+                        var spPr = cxn.ShapeProperties ?? (cxn.ShapeProperties = new ShapeProperties());
+                        var outline = spPr.GetFirstChild<Drawing.Outline>()
+                            ?? spPr.AppendChild(new Drawing.Outline());
+                        outline.Width = (int)ParseEmu(value);
+                        break;
+                    }
+                    case "linecolor" or "line.color":
+                    {
+                        var spPr = cxn.ShapeProperties ?? (cxn.ShapeProperties = new ShapeProperties());
+                        var outline = spPr.GetFirstChild<Drawing.Outline>()
+                            ?? spPr.AppendChild(new Drawing.Outline());
+                        var (rgb, _) = ParseHelpers.SanitizeColorForOoxml(value);
+                        outline.RemoveAllChildren<Drawing.SolidFill>();
+                        outline.PrependChild(new Drawing.SolidFill(
+                            new Drawing.RgbColorModelHex { Val = rgb }));
+                        break;
+                    }
+                    case "preset" or "prstgeom":
+                    {
+                        var spPr = cxn.ShapeProperties ?? (cxn.ShapeProperties = new ShapeProperties());
+                        var prstGeom = spPr.GetFirstChild<Drawing.PresetGeometry>()
+                            ?? spPr.AppendChild(new Drawing.PresetGeometry());
+                        prstGeom.Preset = new Drawing.ShapeTypeValues(value);
+                        break;
+                    }
+                    default:
+                        if (!GenericXmlQuery.SetGenericAttribute(cxn, key, value))
+                            unsupported.Add(key);
+                        break;
+                }
+            }
+            GetSlide(slidePart).Save();
+            return unsupported;
+        }
+
         // Generic XML fallback: navigate to element and set attributes
         {
             SlidePart fbSlidePart;
