@@ -699,6 +699,20 @@ public partial class WordHandler
         var just = firstPara?.ParagraphProperties?.Justification?.Val;
         if (just != null)
             node.Format["alignment"] = just.InnerText;
+        // Run-level formatting from first run (mirrors PPTX table cell behavior)
+        var firstRun = cell.Descendants<Run>().FirstOrDefault();
+        if (firstRun?.RunProperties != null)
+        {
+            var rPr = firstRun.RunProperties;
+            if (rPr.RunFonts?.Ascii?.Value != null) node.Format["font"] = rPr.RunFonts.Ascii.Value;
+            if (rPr.FontSize?.Val?.Value != null) node.Format["size"] = int.Parse(rPr.FontSize.Val.Value) / 2;
+            if (rPr.Bold != null) node.Format["bold"] = true;
+            if (rPr.Italic != null) node.Format["italic"] = true;
+            if (rPr.Color?.Val?.Value != null) node.Format["color"] = rPr.Color.Val.Value;
+            if (rPr.Underline?.Val != null) node.Format["underline"] = rPr.Underline.Val.InnerText;
+            if (rPr.Strike != null) node.Format["strike"] = true;
+            if (rPr.Highlight?.Val != null) node.Format["highlight"] = rPr.Highlight.Val.InnerText;
+        }
     }
 
     private static void ReadBorder(BorderType? border, string key, DocumentNode node)

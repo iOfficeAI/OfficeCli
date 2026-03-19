@@ -43,7 +43,7 @@ public partial class WordHandler : IDocumentHandler
             _ when partPath.StartsWith("/header") => GetHeaderRawXml(partPath),
             _ when partPath.StartsWith("/footer") => GetFooterRawXml(partPath),
             _ when partPath.StartsWith("/chart") => GetChartRawXml(partPath),
-            _ => $"Unknown part: {partPath}. Available: /document, /styles, /settings, /numbering, /header[n], /footer[n], /chart[n]"
+            _ => throw new ArgumentException($"Unknown part: {partPath}. Available: /document, /styles, /settings, /numbering, /header[n], /footer[n], /chart[n]")
         };
     }
 

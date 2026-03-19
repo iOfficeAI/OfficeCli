@@ -451,10 +451,10 @@ public partial class PowerPointHandler : IDocumentHandler
             var slideParts = GetSlideParts().ToList();
             if (idx >= 1 && idx <= slideParts.Count)
                 return GetSlide(slideParts[idx - 1]).OuterXml;
-            return $"(slide[{idx}] not found)";
+            throw new ArgumentException($"slide[{idx}] not found (total: {slideParts.Count})");
         }
 
-        return $"Unknown part: {partPath}. Available: /presentation, /slide[N]";
+        throw new ArgumentException($"Unknown part: {partPath}. Available: /presentation, /slide[N]");
     }
 
     public void RawSet(string partPath, string xpath, string action, string? xml)

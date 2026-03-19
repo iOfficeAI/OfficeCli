@@ -170,7 +170,7 @@ viewCommand.SetAction(result => SafeRun(() =>
         "outline" or "o" => handler.ViewAsOutline(),
         "stats" or "s" => handler.ViewAsStats(),
         "issues" or "i" => OutputFormatter.FormatIssues(handler.ViewAsIssues(issueType, limit), format),
-        _ => $"Unknown mode: {mode}. Available: text, annotated, outline, stats, issues"
+        _ => throw new ArgumentException($"Unknown mode: {mode}. Available: text, annotated, outline, stats, issues")
     };
 
     if (json && mode is not ("issues" or "i"))
@@ -292,7 +292,7 @@ setCommand.SetAction(result => SafeRun(() =>
     if (applied.Count > 0)
         Console.WriteLine($"Updated {path}: {string.Join(", ", applied.Select(kv => $"{kv.Key}={kv.Value}"))}");
     if (unsupported.Count > 0)
-        Console.Error.WriteLine($"UNSUPPORTED props (use raw-set instead): {string.Join(", ", unsupported)}");
+        Console.Error.WriteLine(FormatUnsupported(unsupported));
 }));
 
 rootCommand.Add(setCommand);
@@ -598,8 +598,7 @@ batchCommand.SetAction(result => SafeRun(() =>
     {
         if (!inputFile.Exists)
         {
-            Console.Error.WriteLine($"Error: Input file not found: {inputFile.FullName}");
-            return;
+            throw new FileNotFoundException($"Input file not found: {inputFile.FullName}");
         }
         jsonText = File.ReadAllText(inputFile.FullName);
     }
@@ -612,8 +611,7 @@ batchCommand.SetAction(result => SafeRun(() =>
     var items = System.Text.Json.JsonSerializer.Deserialize<List<BatchItem>>(jsonText, BatchJsonContext.Default.ListBatchItem);
     if (items == null || items.Count == 0)
     {
-        Console.Error.WriteLine("Error: No commands found in input.");
-        return;
+        throw new ArgumentException("No commands found in input.");
     }
 
     // If a resident process is running, forward each command to it
@@ -667,7 +665,7 @@ var createCommand = new Command("create", "Create a blank Office document");
 createCommand.Add(createFileArg);
 createCommand.Add(createTypeOpt);
 
-createCommand.SetAction(result =>
+createCommand.SetAction(result => SafeRun(() =>
 {
     var file = result.GetValue(createFileArg)!;
     var type = result.GetValue(createTypeOpt);
@@ -688,7 +686,7 @@ createCommand.SetAction(result =>
     }
 
     OfficeCli.BlankDocCreator.Create(file);
-});
+}));
 
 rootCommand.Add(createCommand);
 
@@ -769,7 +767,7 @@ static string ExecuteBatchItem(OfficeCli.Core.IDocumentHandler handler, BatchIte
             if (applied.Count > 0)
                 parts.Add($"Updated {path}: {string.Join(", ", applied.Select(kv => $"{kv.Key}={kv.Value}"))}");
             if (unsupported.Count > 0)
-                parts.Add($"UNSUPPORTED: {string.Join(", ", unsupported)}");
+                parts.Add(FormatUnsupported(unsupported));
             return string.Join("\n", parts);
         }
         case "add":
@@ -888,4 +886,70 @@ static void ReportNewErrors(OfficeCli.Core.IDocumentHandler handler, HashSet<str
             if (err.Part != null) Console.WriteLine($"    Part: {err.Part}");
         }
     }
+}
+
+static string FormatUnsupported(IEnumerable<string> unsupported)
+{
+    var parts = new List<string>();
+    foreach (var prop in unsupported)
+    {
+        var suggestion = SuggestProperty(prop);
+        parts.Add(suggestion != null ? $"{prop} (did you mean: {suggestion}?)" : prop);
+    }
+    return $"UNSUPPORTED props: {string.Join(", ", parts)}. Use 'officecli help <format>-set' to see available properties, or use raw-set for direct XML manipulation.";
+}
+
+static string? SuggestProperty(string input)
+{
+    var knownProps = new[]
+    {
+        "text", "bold", "italic", "underline", "strike", "font", "size", "color",
+        "highlight", "alignment", "spacing", "indent", "shd", "border",
+        "width", "height", "valign", "header", "formula", "value", "type",
+        "fill", "src", "path", "title", "name", "style", "caps", "smallcaps",
+        "lineSpacing", "listStyle", "start", "level", "cols", "rows",
+        "gridspan", "vmerge", "nowrap", "padding", "margin",
+        "orientation", "pageWidth", "pageHeight",
+        "x", "y", "cx", "cy", "rotation", "opacity",
+        "borderColor", "borderWidth", "borderStyle",
+        "fontColor", "fontSize", "fontFamily", "fontBold", "fontItalic",
+        "hyperlink", "tooltip", "alt", "description",
+    };
+
+    var lower = input.ToLowerInvariant();
+    string? best = null;
+    int bestDist = int.MaxValue;
+
+    foreach (var prop in knownProps)
+    {
+        var dist = LevenshteinDistance(lower, prop.ToLowerInvariant());
+        if (dist < bestDist && dist <= Math.Max(2, input.Length / 3))
+        {
+            bestDist = dist;
+            best = prop;
+        }
+    }
+
+    return best;
+}
+
+static int LevenshteinDistance(string s, string t)
+{
+    if (s.Length == 0) return t.Length;
+    if (t.Length == 0) return s.Length;
+
+    var d = new int[s.Length + 1, t.Length + 1];
+    for (int i = 0; i <= s.Length; i++) d[i, 0] = i;
+    for (int j = 0; j <= t.Length; j++) d[0, j] = j;
+
+    for (int i = 1; i <= s.Length; i++)
+    {
+        for (int j = 1; j <= t.Length; j++)
+        {
+            int cost = s[i - 1] == t[j - 1] ? 0 : 1;
+            d[i, j] = Math.Min(Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1), d[i - 1, j - 1] + cost);
+        }
+    }
+
+    return d[s.Length, t.Length];
 }

@@ -62,7 +62,7 @@ public static class GenericXmlQuery
         var idx = parentCounters[counterKey];
         parentCounters[counterKey] = idx + 1;
 
-        var currentPath = $"{parentPath}/{elLocalName}[{idx}]";
+        var currentPath = $"{parentPath}/{elLocalName}[{idx + 1}]";
 
         // Check if this element matches
         if (MatchesElement(element, targetLocalName, targetNsUri, attributes, containsText))

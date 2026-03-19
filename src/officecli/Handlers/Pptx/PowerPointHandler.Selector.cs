@@ -3,6 +3,7 @@
 
 using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml.Presentation;
+using OfficeCli.Core;
 using Drawing = DocumentFormat.OpenXml.Drawing;
 
 namespace OfficeCli.Handlers;
@@ -10,7 +11,8 @@ namespace OfficeCli.Handlers;
 public partial class PowerPointHandler
 {
     private record ShapeSelector(string? ElementType, int? SlideNum, string? TextContains,
-        string? FontEquals, string? FontNotEquals, bool? IsTitle, bool? HasAlt);
+        string? FontEquals, string? FontNotEquals, bool? IsTitle, bool? HasAlt,
+        Dictionary<string, (string Value, bool Negate)>? Attributes = null);
 
     private static ShapeSelector ParseShapeSelector(string selector)
     {
@@ -43,6 +45,7 @@ public partial class PowerPointHandler
         }
 
         // Attributes
+        Dictionary<string, (string Value, bool Negate)>? genericAttrs = null;
         foreach (Match attrMatch in Regex.Matches(selector, @"\[(\w+)(!?=)([^\]]*)\]"))
         {
             var key = attrMatch.Groups[1].Value.ToLowerInvariant();
@@ -55,6 +58,10 @@ public partial class PowerPointHandler
                 case "font" when op == "!=": fontNotEquals = val; break;
                 case "title": isTitle = val.ToLowerInvariant() != "false"; break;
                 case "alt": hasAlt = !string.IsNullOrEmpty(val) && val.ToLowerInvariant() != "false"; break;
+                default:
+                    genericAttrs ??= new Dictionary<string, (string, bool)>();
+                    genericAttrs[key] = (val, op == "!=");
+                    break;
             }
         }
 
@@ -75,7 +82,7 @@ public partial class PowerPointHandler
         // :no-alt
         if (selector.Contains(":no-alt")) hasAlt = false;
 
-        return new ShapeSelector(elementType, slideNum, textContains, fontEquals, fontNotEquals, isTitle, hasAlt);
+        return new ShapeSelector(elementType, slideNum, textContains, fontEquals, fontNotEquals, isTitle, hasAlt, genericAttrs);
     }
 
     private static bool MatchesShapeSelector(Shape shape, ShapeSelector selector)
@@ -120,6 +127,38 @@ public partial class PowerPointHandler
                 return font != null && !string.Equals(font, selector.FontNotEquals, StringComparison.OrdinalIgnoreCase);
             });
             if (!hasWrongFont) return false;
+        }
+
+        return true;
+    }
+
+    private static bool MatchesGenericAttributes(DocumentNode node, Dictionary<string, (string Value, bool Negate)>? attributes)
+    {
+        if (attributes == null || attributes.Count == 0) return true;
+
+        foreach (var (key, (expected, negate)) in attributes)
+        {
+            var hasKey = node.Format.TryGetValue(key, out var actual);
+            var actualStr = actual?.ToString() ?? "";
+
+            if (negate)
+            {
+                // [attr!=value]: must not equal
+                if (hasKey && string.Equals(actualStr, expected, StringComparison.OrdinalIgnoreCase))
+                    return false;
+            }
+            else
+            {
+                // [attr=value]: must exist and equal
+                if (!hasKey) return false;
+                if (!string.Equals(actualStr, expected, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Special case: boolean properties stored as `true`/`True` matching "true"
+                    if (actual is bool b && string.Equals(expected, b.ToString(), StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    return false;
+                }
+            }
         }
 
         return true;

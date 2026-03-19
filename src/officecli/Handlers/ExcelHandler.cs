@@ -96,7 +96,7 @@ public partial class ExcelHandler : IDocumentHandler
             return GetSheet(worksheet).OuterXml;
         }
 
-        return $"Unknown part: {partPath}. Available: /workbook, /styles, /sharedstrings, /<SheetName>, /<SheetName>/drawing, /<SheetName>/chart[N], /chart[N]";
+        throw new ArgumentException($"Unknown part: {partPath}. Available: /workbook, /styles, /sharedstrings, /<SheetName>, /<SheetName>/drawing, /<SheetName>/chart[N], /chart[N]");
     }
 
     private static string RawSheetWithFilter(WorksheetPart worksheetPart, int? startRow, int? endRow, HashSet<string>? cols)

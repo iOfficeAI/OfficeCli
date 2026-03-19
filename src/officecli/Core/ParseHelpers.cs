@@ -28,7 +28,9 @@ public static class ParseHelpers
         var trimmed = value.Trim();
         if (trimmed.EndsWith("pt", StringComparison.OrdinalIgnoreCase))
             trimmed = trimmed[..^2].Trim();
-        return double.Parse(trimmed, CultureInfo.InvariantCulture);
+        if (!double.TryParse(trimmed, CultureInfo.InvariantCulture, out var result))
+            throw new ArgumentException($"Invalid font size: '{value}'. Expected a number (e.g., '12', '10.5', '14pt').");
+        return result;
     }
 
     /// <summary>
