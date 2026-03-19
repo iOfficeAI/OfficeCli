@@ -405,7 +405,8 @@ public partial class PowerPointHandler
                       "spacing", "charspacing", "letterspacing",
                       "indent", "marginleft", "marl", "marginright", "marr",
                       "textfill", "textgradient", "geometry",
-                      "baseline", "superscript", "subscript" };
+                      "baseline", "superscript", "subscript",
+                      "textwarp", "wordart", "autofit" };
                 var effectProps = properties
                     .Where(kv => effectKeys.Contains(kv.Key))
                     .ToDictionary(kv => kv.Key, kv => kv.Value);
