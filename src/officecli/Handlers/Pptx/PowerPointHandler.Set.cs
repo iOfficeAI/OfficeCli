@@ -835,6 +835,8 @@ public partial class PowerPointHandler
                         break;
                 }
             }
+            // Reconcile morph transition with advanceTime/advanceClick
+            ReconcileMorphTransitionAttrs(slide2);
             slide2.Save();
             return unsupported;
         }

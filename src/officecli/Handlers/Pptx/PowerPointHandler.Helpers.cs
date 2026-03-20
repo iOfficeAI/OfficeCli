@@ -36,7 +36,66 @@ public partial class PowerPointHandler
             return trans;
         }
 
+        // Check for morph transition inside mc:AlternateContent — don't create a duplicate
+        var acMorph = slide.ChildElements.FirstOrDefault(c =>
+            c.LocalName == "AlternateContent" && c.InnerXml.Contains("morph"));
+        if (acMorph != null)
+        {
+            // Find the p:transition inside mc:Choice and wrap it as typed Transition
+            // We create a proxy typed Transition that applies attrs to BOTH choice and fallback
+            var choiceTrans = acMorph.Descendants().FirstOrDefault(d => d.LocalName == "transition" && d.Parent?.LocalName == "Choice");
+            var fallbackTrans = acMorph.Descendants().FirstOrDefault(d => d.LocalName == "transition" && d.Parent?.LocalName == "Fallback");
+            // Create a typed proxy — when caller sets AdvanceAfterTime/AdvanceOnClick,
+            // we also propagate to the raw elements
+            var proxy = new Transition();
+            // Copy existing attributes from choice transition
+            if (choiceTrans != null)
+                foreach (var attr in choiceTrans.GetAttributes()) proxy.SetAttribute(attr);
+            // Insert after AlternateContent, then register a save hook via event
+            acMorph.InsertAfterSelf(proxy);
+            // We'll propagate attrs back to AC transitions in a moment,
+            // but the caller only sets AdvanceAfterTime/AdvanceOnClick on the proxy.
+            // We need to propagate after the caller is done — use a simple approach:
+            // store references and propagate when slide.Save() is called.
+            // Simpler: just set attrs directly on the raw elements now and return proxy.
+            // Actually, the caller sets on proxy AFTER this returns. So we use a different approach:
+            // Return proxy, and also modify the raw elements in the Set handler after the fact.
+            // Simplest fix: just let the proxy exist alongside the AC. The validator complains
+            // but PowerPoint reads both. However, we should merge them.
+            // Best approach: remove proxy after use and propagate attrs to AC transitions.
+            // For now, return proxy and handle propagation in a cleanup step.
+            return proxy;
+        }
+
         return slide.AppendChild(new Transition());
+    }
+
+    /// <summary>
+    /// After setting advanceTime/advanceClick on a slide with morph transition,
+    /// propagate the attributes to the transitions inside mc:AlternateContent
+    /// and remove the duplicate typed Transition.
+    /// </summary>
+    internal static void ReconcileMorphTransitionAttrs(Slide slide)
+    {
+        var typed = slide.GetFirstChild<Transition>();
+        var acMorph = slide.ChildElements.FirstOrDefault(c =>
+            c.LocalName == "AlternateContent" && c.InnerXml.Contains("morph"));
+        if (typed == null || acMorph == null) return;
+
+        // Propagate advTm and advClick from typed to AC transitions
+        var advTm = typed.AdvanceAfterTime?.Value;
+        var advClick = typed.AdvanceOnClick?.Value;
+
+        foreach (var trans in acMorph.Descendants().Where(d => d.LocalName == "transition"))
+        {
+            if (advTm != null)
+                trans.SetAttribute(new OpenXmlAttribute("", "advTm", null!, advTm));
+            if (advClick.HasValue)
+                trans.SetAttribute(new OpenXmlAttribute("", "advClick", null!, advClick.Value ? "1" : "0"));
+        }
+
+        // Remove the duplicate typed Transition
+        typed.Remove();
     }
 
     private static double ParseFontSize(string value) =>

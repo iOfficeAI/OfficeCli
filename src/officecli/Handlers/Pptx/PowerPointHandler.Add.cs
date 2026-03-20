@@ -76,6 +76,7 @@ public partial class PowerPointHandler
                     FindOrCreateTransition(newSlidePart.Slide).AdvanceAfterTime = advTime;
                 if (properties.TryGetValue("advanceclick", out var advClick))
                     FindOrCreateTransition(newSlidePart.Slide).AdvanceOnClick = IsTruthy(advClick);
+                ReconcileMorphTransitionAttrs(newSlidePart.Slide);
 
                 newSlidePart.Slide.Save();
 
