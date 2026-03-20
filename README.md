@@ -1,6 +1,6 @@
 # OfficeCLI
 
-[![GitHub Release](https://img.shields.io/github/v/release/iOfficeAI/OfficeCli)](https://github.com/iOfficeAI/OfficeCli/releases)
+[![GitHub Release](https://img.shields.io/github/v/release/iOfficeAI/OfficeCLI)](https://github.com/iOfficeAI/OfficeCLI/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 **English** | [中文](README_zh.md)
@@ -20,7 +20,7 @@ OfficeCLI ships with a [SKILL.md](SKILL.md) that teaches AI agents how to use it
 Talk to your agent with this first:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCli/main/SKILL.md
+curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/SKILL.md
 ```
 
 If your agent supports local skill installation, install it locally instead:
@@ -28,7 +28,7 @@ If your agent supports local skill installation, install it locally instead:
 **Claude Code:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCli/main/SKILL.md -o ~/.claude/skills/officecli.md
+curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/SKILL.md -o ~/.claude/skills/officecli.md
 ```
 
 **Other agents:**
@@ -38,13 +38,13 @@ Include the contents of that `SKILL.md` in your agent's system prompt or tool de
 Then install the CLI binary:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCli/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh | bash
 ```
 
 For Windows (PowerShell):
 
 ```powershell
-irm https://raw.githubusercontent.com/iOfficeAI/OfficeCli/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex
 ```
 
 ## Why OfficeCLI?
@@ -66,16 +66,16 @@ OfficeCLI is a single binary — no runtime, no dependencies. One command to ins
 **macOS / Linux:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCli/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh | bash
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-irm https://raw.githubusercontent.com/iOfficeAI/OfficeCli/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex
 ```
 
-Or download manually from [GitHub Releases](https://github.com/iOfficeAI/OfficeCli/releases).
+Or download manually from [GitHub Releases](https://github.com/iOfficeAI/OfficeCLI/releases).
 
 ## Quick Start
 

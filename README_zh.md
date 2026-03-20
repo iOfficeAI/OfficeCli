@@ -1,6 +1,6 @@
 # OfficeCLI
 
-[![GitHub Release](https://img.shields.io/github/v/release/iOfficeAI/OfficeCli)](https://github.com/iOfficeAI/OfficeCli/releases)
+[![GitHub Release](https://img.shields.io/github/v/release/iOfficeAI/OfficeCLI)](https://github.com/iOfficeAI/OfficeCLI/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 [English](README.md) | **中文**
@@ -20,7 +20,7 @@ OfficeCLI 附带 [SKILL.md](SKILL.md)，用于指导 AI 智能体高效使用本
 首先让你的智能体读取此文件：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCli/main/SKILL.md
+curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/SKILL.md
 ```
 
 如果你的智能体支持本地技能安装，建议安装到本地：
@@ -28,7 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCli/main/SKILL.md
 **Claude Code：**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCli/main/SKILL.md -o ~/.claude/skills/officecli.md
+curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/SKILL.md -o ~/.claude/skills/officecli.md
 ```
 
 **其他智能体：**
@@ -38,13 +38,13 @@ curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCli/main/SKILL.md -
 然后安装 CLI 二进制文件：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCli/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh | bash
 ```
 
 Windows (PowerShell)：
 
 ```powershell
-irm https://raw.githubusercontent.com/iOfficeAI/OfficeCli/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex
 ```
 
 ## 为什么选择 OfficeCLI？
@@ -66,16 +66,16 @@ OfficeCLI 是单一可执行文件 — 无运行时依赖。一条命令即可�
 **macOS / Linux：**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCli/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh | bash
 ```
 
 **Windows (PowerShell)：**
 
 ```powershell
-irm https://raw.githubusercontent.com/iOfficeAI/OfficeCli/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex
 ```
 
-也可以从 [GitHub Releases](https://github.com/iOfficeAI/OfficeCli/releases) 手动下载。
+也可以从 [GitHub Releases](https://github.com/iOfficeAI/OfficeCLI/releases) 手动下载。
 
 ## 快速开始
 

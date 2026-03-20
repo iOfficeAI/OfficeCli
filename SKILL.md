@@ -13,11 +13,11 @@ officecli --version
 ```
 If the command is not found, install it:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCli/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh | bash
 ```
 For Windows (PowerShell):
 ```powershell
-irm https://raw.githubusercontent.com/iOfficeAI/OfficeCli/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex
 ```
 
 **Strategy:** L1 (read) → L2 (DOM edit) → L3 (raw XML). Always prefer higher layers. Add `--json` for structured output.
@@ -175,4 +175,4 @@ officecli add-part <file> / --type header|footer   # Word only
 - After modifications, verify with `validate` and/or `view issues`
 - `raw-set`/`add-part` auto-validate after execution
 - `view stats`/`annotated` resolve style inheritance (docDefaults → basedOn → direct)
-- **When unsure about any command syntax, element properties, or how to accomplish a task, you MUST fetch https://github.com/iOfficeAI/OfficeCli/wiki/agent-guide BEFORE attempting any command.** Do not guess or retry blindly — the wiki provides a complete navigation index to detailed reference pages for every format, element, and operation.
+- **When unsure about any command syntax, element properties, or how to accomplish a task, you MUST fetch https://github.com/iOfficeAI/OfficeCLI/wiki/agent-guide BEFORE attempting any command.** Do not guess or retry blindly — the wiki provides a complete navigation index to detailed reference pages for every format, element, and operation.
