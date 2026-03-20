@@ -107,6 +107,7 @@ officecli set doc.pptx '/slide[1]/cSld/spTree/sp[1]/txBody/p[1]/r[1]/rPr[1]/soli
 | PPT paragraph | `/slide[1]/shape[1]/paragraph[1]` | `align`, `indent`, `marginLeft`, `marginRight`, `lineSpacing`, `spaceBefore`, `spaceAfter`, plus run-level props |
 | PPT run | `/slide[1]/shape[1]/paragraph[1]/run[1]` | `text`, `font`, `size`, `bold`, `italic`, `color`, `spacing`, `baseline`, `textFill` |
 | PPT chart | `/slide[1]/chart[1]` | `title`, `title.font/size/color/bold/glow/shadow`, `legend`, `legendFont`(size:color:font), `axisFont`(size:color:font), `categories`, `data`, `series1..N`, `colors`, `dataLabels`, `labelFont`, `axisTitle`, `catTitle`, `axisMin`, `axisMax`, `majorUnit`, `axisNumFmt`, `plotFill`(hex or gradient), `chartFill`(hex or gradient), `gradient`/`gradients`, `opacity`, `series.shadow`, `series.outline`, `gap`, `overlap`, `view3d`(rotX,rotY,persp), `areafill` |
+| PPT zoom | `/slide[1]/zoom[1]` | `target`/`slide`(slide number), `name`, `image`/`path`/`src`(cover image), `imageType`(cover), `x`, `y`, `width`, `height` |
 | PPT video/audio | `/slide[1]/video[1]` | `volume`(0-100), `autoplay`(bool), `trimStart`(ms), `trimEnd`(ms), `x`, `y`, `width`, `height` |
 | PPT picture | `/slide[1]/picture[1]` | `alt`, `path`(replace image), `crop`, `cropLeft/Top/Right/Bottom`, `x`, `y`, `width`, `height` |
 | PPT table | `/slide[1]/table[1]` | `tableStyle`(medium1..4\|light1..3\|dark1..2\|none), `x`, `y`, `width`, `height` |
