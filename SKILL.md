@@ -5,37 +5,61 @@ description: Create, analyze, proofread, and modify Office documents (.docx, .xl
 
 # officecli
 
-AI-friendly CLI for .docx, .xlsx, .pptx.
+AI-friendly CLI for .docx, .xlsx, .pptx. Single binary, no dependencies, no Office installation needed.
 
-**First, ensure officecli is installed and up to date (same command for install and upgrade):**
+## Install & Update
+
+Same command for both install and upgrade:
+
 ```bash
+# macOS / Linux
 curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh | bash
-```
-For Windows (PowerShell):
-```powershell
+
+# Windows (PowerShell)
 irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex
 ```
 
-**Strategy:** L1 (read) → L2 (DOM edit) → L3 (raw XML). Always prefer higher layers. Add `--json` for structured output.
+Verify: `officecli --version`
 
-**IMPORTANT: When unsure about property names, value formats, or command syntax, run the help command below instead of guessing. When a command fails, ALWAYS check help before retrying.** One help query is faster than guess-fail-retry loops.
+officecli auto-updates daily in the background.
 
-**Help — three-layer navigation (start from the deepest level you know):**
+---
+
+## Strategy
+
+**L1 (read) → L2 (DOM edit) → L3 (raw XML)**. Always prefer higher layers. Add `--json` for structured output.
+
+---
+
+## Help System (IMPORTANT)
+
+**When unsure about property names, value formats, or command syntax, ALWAYS run help instead of guessing.** One help query is faster than guess-fail-retry loops.
+
+**Three-layer navigation** — start from the deepest level you know:
 ```bash
 officecli pptx set              # All settable elements and their properties
 officecli pptx set shape        # Shape properties in detail
 officecli pptx set shape.fill   # Specific property format and examples
 ```
+
 Replace `pptx` with `docx` or `xlsx`. Commands: `view`, `get`, `query`, `set`, `add`, `raw`.
 
-**Performance:** For multi-step workflows, use `open`/`close` to keep the document in memory:
+---
+
+## Performance: Resident Mode
+
+For multi-step workflows (3+ commands on the same file), use `open`/`close`:
 ```bash
-officecli open report.docx       # keep in memory
-officecli set report.docx ...    # fast — no file I/O
+officecli open report.docx       # keep in memory — fast subsequent commands
+officecli set report.docx ...    # no file I/O overhead
 officecli close report.docx      # save and release
 ```
 
-**Quick start — create a PPT from scratch:**
+---
+
+## Quick Start
+
+**PPT:**
 ```bash
 officecli create slides.pptx
 officecli add slides.pptx / --type slide --prop title="Q4 Report" --prop background=1A1A2E
@@ -43,63 +67,135 @@ officecli add slides.pptx /slide[1] --type shape --prop text="Revenue grew 25%" 
 officecli set slides.pptx /slide[1] --prop transition=fade --prop advanceTime=3000
 ```
 
+**Word:**
+```bash
+officecli create report.docx
+officecli add report.docx /body --type paragraph --prop text="Executive Summary" --prop style=Heading1
+officecli add report.docx /body --type paragraph --prop text="Revenue increased by 25% year-over-year."
+```
+
+**Excel:**
+```bash
+officecli create data.xlsx
+officecli set data.xlsx /Sheet1/A1 --prop value="Name" --prop bold=true
+officecli set data.xlsx /Sheet1/B1 --prop value="Score" --prop bold=true
+officecli set data.xlsx /Sheet1/A2 --prop value="Alice"
+officecli set data.xlsx /Sheet1/B2 --prop value=95
+```
+
 ---
 
 ## L1: Create, Read & Inspect
 
 ```bash
-officecli create <file>          # create blank .docx/.xlsx/.pptx (type inferred from extension)
-officecli view <file> outline|stats|issues|text|annotated [--start N --end N] [--max-lines N] [--cols A,B]
-officecli get <file> '/body/p[3]' --depth 2 [--json]
-officecli query <file> 'paragraph[style=Normal] > run[font!=宋体]'
+officecli create <file>               # Create blank .docx/.xlsx/.pptx (type from extension)
+officecli view <file> <mode>          # outline | stats | issues | text | annotated
+officecli get <file> <path> --depth N # Get a node and its children [--json]
+officecli query <file> <selector>     # CSS-like query
+officecli validate <file>             # Validate against OpenXML schema
 ```
 
-**get** supports any XML path via element localName. Use `--depth N` to expand children. Run `officecli docx get` / `officecli xlsx get` / `officecli pptx get` for all available paths.
+### view modes
 
-**view modes:** `outline` (structure), `stats` (statistics), `issues` (`--type format|content|structure`, `--limit N`), `text` (plain), `annotated` (with formatting)
+| Mode | Description | Useful flags |
+|------|-------------|-------------|
+| `outline` | Document structure | |
+| `stats` | Statistics (pages, words, shapes) | |
+| `issues` | Formatting/content/structure problems | `--type format\|content\|structure`, `--limit N` |
+| `text` | Plain text extraction | `--start N --end N`, `--max-lines N` |
+| `annotated` | Text with formatting annotations | |
 
-**query selectors:** `[attr=value]`, `[attr!=value]`, `[attr~=text]`, `[attr>=value]`, `[attr<=value]`, `:contains("text")`, `:empty`, `:has(formula)`, `:no-alt`. Run `officecli docx query` / `officecli pptx query` for all selector types.
+### get
 
-For large documents, ALWAYS use `--max-lines` or `--start`/`--end` to limit output.
+Any XML path via element localName. Use `--depth N` to expand children. Add `--json` for structured output.
+
+```bash
+officecli get report.docx '/body/p[3]' --depth 2 --json
+officecli get slides.pptx '/slide[1]' --depth 1          # list all shapes on slide 1
+officecli get data.xlsx '/Sheet1/B2' --json
+```
+
+Run `officecli docx get` / `officecli xlsx get` / `officecli pptx get` for all available paths.
+
+### query
+
+CSS-like selectors: `[attr=value]`, `[attr!=value]`, `[attr~=text]`, `[attr>=value]`, `[attr<=value]`, `:contains("text")`, `:empty`, `:has(formula)`, `:no-alt`.
+
+```bash
+officecli query report.docx 'paragraph[style=Normal] > run[font!=Arial]'
+officecli query slides.pptx 'shape[fill=FF0000]'
+```
+
+### validate
+
+```bash
+officecli validate report.docx    # Check for schema errors
+officecli validate slides.pptx    # Must pass before delivery
+```
+
+**For large documents**, ALWAYS use `--max-lines` or `--start`/`--end` to limit output.
 
 ---
 
 ## L2: DOM Operations
 
-### set — `officecli set <file> <path> --prop key=value [--prop ...]`
-
-**Any XML attribute is settable via element path** (found via `get --depth N`) — even attributes not currently present. Use this before reaching for L3.
-
-Run `officecli <format> set` for all settable elements and properties. Run `officecli <format> set <element>` for detail (e.g. `officecli pptx set shape`, `officecli docx set paragraph`).
-
-Colors: hex RGB (`FF0000`, `#FF0000`), named colors (`red`, `blue`), `rgb(255,0,0)`, or theme names (`accent1`..`accent6`, `dk1`, `dk2`, `lt1`, `lt2`)
-
-Spacing: unit-qualified — `12pt`, `0.5cm`, `1.5x` (multiplier), `150%`, `18pt` (fixed)
-
-Dimensions: raw EMU or suffixed `cm`/`in`/`pt`/`px`
-
-### add — `officecli add <file> <parent> --type <type> [--index N] [--prop ...]` or `--from <path>`
-
-Run `officecli <format> add` for all addable element types and properties.
-
-**Copy from existing:** `officecli add <file> <parent> --from <path> [--index N]` — clones the element. Cross-part relationships handled automatically. Either `--type` or `--from` is required.
-
-**Clone entire slide:** `officecli add <file> / --from /slide[1] [--index 0]`
-
-### move — `officecli move <file> <path> [--to <parent>] [--index N]`
-
-### swap — `officecli swap <file> <path1> <path2>`
-
-### remove — `officecli remove <file> '/body/p[4]'`
-
-### batch — For 3+ mutations (one open/save cycle)
+### set — modify properties
 
 ```bash
-echo '[{"command":"set","path":"/Sheet1/A1","props":{"value":"Name","bold":"true"}},
-      {"command":"set","path":"/Sheet1/B1","props":{"value":"Score","bold":"true"}}]' | officecli batch data.xlsx --json
+officecli set <file> <path> --prop key=value [--prop ...]
 ```
 
-Batch fields: `command`(add/set/get/query/remove/move/view/raw/raw-set/validate), `path`, `parent`, `type`, `from`, `to`, `index`, `props`(dict), `selector`, `mode`, `depth`, `part`, `xpath`, `action`, `xml`.
+**Any XML attribute is settable** via element path (found via `get --depth N`) — even attributes not currently present.
+
+Run `officecli <format> set` for all settable elements. Run `officecli <format> set <element>` for detail.
+
+**Value formats:**
+
+| Type | Format | Examples |
+|------|--------|---------|
+| Colors | Hex, named, RGB, theme | `FF0000`, `red`, `rgb(255,0,0)`, `accent1`..`accent6` |
+| Spacing | Unit-qualified | `12pt`, `0.5cm`, `1.5x`, `150%` |
+| Dimensions | EMU or suffixed | `914400`, `2.54cm`, `1in`, `72pt`, `96px` |
+
+### add — add elements or clone
+
+```bash
+officecli add <file> <parent> --type <type> [--index N] [--prop ...]
+officecli add <file> <parent> --from <path> [--index N]    # clone existing element
+```
+
+**Element types (with aliases):**
+
+| Format | Types |
+|--------|-------|
+| **pptx** | slide, shape (textbox), picture (image/img), chart, table, row (tr), connector (connection/line), group, video (audio/media), equation (formula/math), notes, paragraph (para), run, zoom (slidezoom) |
+| **docx** | paragraph (para), run, table, row (tr), cell (td), image (picture/img), header, footer, section, bookmark, comment, footnote, endnote |
+| **xlsx** | sheet, row, cell, chart, image (picture), comment, hyperlink |
+
+**Clone:** `officecli add <file> / --from /slide[1]` — copies with all cross-part relationships.
+
+Run `officecli <format> add` for all addable types and their properties.
+
+### move, swap, remove
+
+```bash
+officecli move <file> <path> [--to <parent>] [--index N]
+officecli swap <file> <path1> <path2>
+officecli remove <file> '/body/p[4]'
+```
+
+### batch — multiple operations in one save cycle
+
+```bash
+echo '[
+  {"command":"set","path":"/Sheet1/A1","props":{"value":"Name","bold":"true"}},
+  {"command":"set","path":"/Sheet1/B1","props":{"value":"Score","bold":"true"}}
+]' | officecli batch data.xlsx --json
+```
+
+Batch supports: `add`, `set`, `get`, `query`, `remove`, `move`, `view`, `raw`, `raw-set`, `validate`.
+
+Batch fields: `command`, `path`, `parent`, `type`, `from`, `to`, `index`, `props` (dict), `selector`, `mode`, `depth`, `part`, `xpath`, `action`, `xml`.
 
 ---
 
@@ -108,16 +204,33 @@ Batch fields: `command`(add/set/get/query/remove/move/view/raw/raw-set/validate)
 Use when L2 cannot express what you need. No xmlns declarations needed — prefixes auto-registered.
 
 ```bash
-officecli raw <file> /document           # view raw XML (Word/Excel/PPT parts vary — run officecli <format> raw for details)
-officecli raw-set <file> /document --xpath "//w:body/w:p[1]" --action replace --xml '<w:p>...</w:p>'
-# actions: append, prepend, insertbefore, insertafter, replace, remove, setattr
+officecli raw <file> <part>                          # view raw XML
+officecli raw-set <file> <part> --xpath "..." --action replace --xml '<w:p>...</w:p>'
+officecli add-part <file> <parent>                   # create new document part (returns rId)
 ```
+
+**raw-set actions:** `append`, `prepend`, `insertbefore`, `insertafter`, `replace`, `remove`, `setattr`.
+
+Run `officecli <format> raw` for available parts per format.
+
+---
+
+## Common Pitfalls
+
+| Pitfall | Correct Approach |
+|---------|-----------------|
+| `--name "foo"` | ❌ Use `--prop name="foo"` — all attributes go through `--prop` |
+| `x=-3cm` | ❌ Negative coordinates not supported. Use `x=0cm` or `x=36cm` |
+| `/shape[myname]` | ❌ Name indexing not supported. Use numeric index: `/shape[3]` |
+| Guessing property names | ❌ Run `officecli <format> set <element>` to see exact names |
+| Modifying an open file | ❌ Close the file in PowerPoint/WPS first |
+| `\n` in shell strings | ❌ Use `\\n` for newlines in `--prop text="..."` |
 
 ---
 
 ## Notes
 
-- Paths are **1-based** (XPath convention), quote brackets: `'/body/p[3]'`
+- Paths are **1-based** (XPath convention): `'/body/p[3]'` = third paragraph
 - `--index` is **0-based** (array convention): `--index 0` = first position
 - After modifications, verify with `validate` and/or `view issues`
-- **When unsure about any property or format**, run `officecli <format> <command> [element[.property]]` instead of guessing. Example: `officecli pptx set chart` shows all chart properties and accepted values
+- **When unsure**, run `officecli <format> <command> [element[.property]]` instead of guessing
