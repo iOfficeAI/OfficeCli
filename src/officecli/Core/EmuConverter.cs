@@ -53,9 +53,6 @@ public static class EmuConverter
                 throw new ArgumentException($"Invalid EMU value '{value}'. Expected a number with optional unit suffix (cm, in, pt, px).");
         }
 
-        if (result < 0)
-            throw new ArgumentException($"Negative dimension value '{value}' is not allowed. EMU values must be non-negative.");
-
         return result;
     }
 
@@ -65,6 +62,8 @@ public static class EmuConverter
     public static int ParseEmuAsInt(string value)
     {
         long emu = ParseEmu(value);
+        if (emu < 0)
+            throw new ArgumentException($"Negative dimension value '{value}' is not allowed. This property requires a non-negative value.");
         if (emu > int.MaxValue)
             throw new OverflowException($"EMU value {emu} (from '{value}') exceeds the maximum allowed value of {int.MaxValue}.");
         return (int)emu;
