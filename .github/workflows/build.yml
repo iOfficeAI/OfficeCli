@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Clone wiki for embedded help
-        run: git clone https://github.com/nicenemo/OfficeCli.wiki.git src/officecli/wiki || echo "Wiki clone failed, using fallback help"
+        run: git clone https://github.com/iOfficeAI/OfficeCLI.wiki.git src/officecli/wiki || echo "Wiki clone failed, using fallback help"
 
       - name: Verify wiki version matches csproj version
         run: |
