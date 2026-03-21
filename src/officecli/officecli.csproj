@@ -23,4 +23,9 @@
     <EmbeddedResource Include="wiki/**/*.md" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Resources/preview.css" />
+    <EmbeddedResource Include="Resources/preview.js" />
+  </ItemGroup>
+
 </Project>

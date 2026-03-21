@@ -43,6 +43,28 @@ public partial class PowerPointHandler
         sb.AppendLine("</style>");
         sb.AppendLine("</head>");
         sb.AppendLine("<body>");
+        sb.AppendLine("<div class=\"toggle-zone\"></div><button class=\"sidebar-toggle\" onclick=\"toggleSidebar()\">\u2630</button>");
+
+        // ===== Sidebar (thumbnails populated by JS cloneNode to avoid duplicating base64 images) =====
+        sb.AppendLine("<div class=\"sidebar\">");
+        sb.AppendLine($"  <div class=\"sidebar-title\">{HtmlEncode(Path.GetFileName(_filePath))}</div>");
+        // Empty thumb containers — JS will clone slide content into them
+        int thumbNum = 0;
+        foreach (var slidePart in slideParts)
+        {
+            thumbNum++;
+            if (startSlide.HasValue && thumbNum < startSlide.Value) continue;
+            if (endSlide.HasValue && thumbNum > endSlide.Value) break;
+
+            sb.AppendLine($"  <div class=\"thumb\" data-slide=\"{thumbNum}\">");
+            sb.AppendLine("    <div class=\"thumb-inner\"></div>");
+            sb.AppendLine($"    <span class=\"thumb-num\">{thumbNum}</span>");
+            sb.AppendLine("  </div>");
+        }
+        sb.AppendLine("</div>");
+
+        // ===== Main content area =====
+        sb.AppendLine("<div class=\"main\">");
         sb.AppendLine($"<h1 class=\"file-title\">{HtmlEncode(Path.GetFileName(_filePath))}</h1>");
 
         int slideNum = 0;
@@ -54,7 +76,8 @@ public partial class PowerPointHandler
 
             sb.AppendLine($"<div class=\"slide-container\">");
             sb.AppendLine($"  <div class=\"slide-label\">Slide {slideNum}</div>");
-            sb.Append($"  <div class=\"slide\"");
+            sb.AppendLine("  <div class=\"slide-wrapper\">");
+            sb.Append($"    <div class=\"slide\"");
 
             // Slide background + inherited text defaults from master/layout/theme
             var slideStyles = new List<string>();
@@ -68,12 +91,19 @@ public partial class PowerPointHandler
                 sb.Append($" style=\"{string.Join("", slideStyles)}\"");
             sb.AppendLine(">");
 
-            // Render all elements
+            // Render slide elements + inherited layout placeholders
+            RenderLayoutPlaceholders(sb, slidePart, themeColors);
             RenderSlideElements(sb, slidePart, slideNum, slideWidthEmu, slideHeightEmu, themeColors);
 
+            sb.AppendLine("    </div>");
             sb.AppendLine("  </div>");
             sb.AppendLine("</div>");
         }
+
+        sb.AppendLine("</div>"); // main
+
+        // Page counter
+        sb.AppendLine($"<div class=\"page-counter\">1 / {slideParts.Count}</div>");
 
         // Navigation script
         sb.AppendLine("<script>");
@@ -89,151 +119,25 @@ public partial class PowerPointHandler
 
     private static string GenerateCss(double slideWidthCm, double slideHeightCm)
     {
-        return $@"
-* {{ margin: 0; padding: 0; box-sizing: border-box; }}
-body {{
-    background: #1a1a2e;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
-    padding: 20px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 30px;
-}}
-.file-title {{
-    color: #e0e0e0;
-    font-size: 16px;
-    font-weight: 400;
-    opacity: 0.7;
-}}
-.slide-container {{
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-}}
-.slide-label {{
-    color: #888;
-    font-size: 13px;
-}}
-.slide {{
-    width: {slideWidthCm:0.###}cm;
-    height: {slideHeightCm:0.###}cm;
-    position: relative;
-    overflow: hidden;
-    background: white;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
-    border-radius: 2px;
-}}
-.shape {{
-    position: absolute;
-    overflow: hidden;
-    white-space: pre-wrap;
-    word-wrap: break-word;
-}}
-.shape-text {{
-    width: 100%;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-}}
-.shape-text.valign-top {{ justify-content: flex-start; }}
-.shape-text.valign-center {{ justify-content: center; }}
-.shape-text.valign-bottom {{ justify-content: flex-end; }}
-.para {{
-    width: 100%;
-}}
-.picture {{
-    position: absolute;
-}}
-.picture img {{
-    width: 100%;
-    height: 100%;
-    object-fit: fill;
-}}
-.table-container {{
-    position: absolute;
-    overflow: hidden;
-}}
-.slide-table {{
-    width: 100%;
-    height: 100%;
-    border-collapse: collapse;
-    table-layout: fixed;
-}}
-.slide-table td {{
-    border: 1px solid #d0d0d0;
-    padding: 4px 6px;
-    vertical-align: top;
-    overflow: hidden;
-    font-size: 10pt;
-}}
-.connector {{
-    position: absolute;
-    pointer-events: none;
-}}
-.group {{
-    position: absolute;
-}}
-
-/* Responsive scaling */
-@media (max-width: 1200px) {{
-    .slide {{
-        width: 90vw;
-        height: calc(90vw * {slideHeightCm / slideWidthCm:0.######});
-    }}
-    /* Scale all absolute positions via CSS transform */
-    .slide > * {{
-        transform-origin: 0 0;
-    }}
-}}";
+        var aspect = slideWidthCm / slideHeightCm;
+        // Dynamic CSS variables + static CSS from embedded resource
+        var dynamicVars = $":root{{--slide-design-w:{slideWidthCm:0.###}cm;--slide-design-h:{slideHeightCm:0.###}cm;--slide-aspect:{aspect:0.####};}}\n";
+        return dynamicVars + LoadEmbeddedResource("Resources.preview.css");
     }
 
     private static string GenerateScript()
     {
-        return @"
-// Responsive scaling: when slide is scaled down, scale internal elements proportionally
-function scaleSlides() {
-    document.querySelectorAll('.slide').forEach(slide => {
-        const naturalWidth = parseFloat(getComputedStyle(slide).width);
-        const designWidth = slide.dataset.designWidth;
-        if (!designWidth) {
-            // Store the design width on first run
-            slide.dataset.designWidth = naturalWidth;
-            return;
-        }
-        const scale = naturalWidth / parseFloat(designWidth);
-        if (Math.abs(scale - 1) > 0.01) {
-            slide.style.transform = `scale(${scale})`;
-            slide.style.transformOrigin = '0 0';
-            slide.parentElement.style.height = (parseFloat(designWidth) * parseFloat(slide.dataset.designHeight || naturalWidth) / parseFloat(designWidth) * scale) + 'px';
-        }
-    });
-}
-// Keyboard navigation
-document.addEventListener('keydown', e => {
-    if (e.key === 'ArrowDown' || e.key === ' ') {
-        e.preventDefault();
-        const containers = document.querySelectorAll('.slide-container');
-        const scrollY = window.scrollY;
-        for (const c of containers) {
-            if (c.offsetTop > scrollY + 10) {
-                c.scrollIntoView({ behavior: 'smooth' });
-                break;
-            }
-        }
-    } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        const containers = [...document.querySelectorAll('.slide-container')];
-        const scrollY = window.scrollY;
-        for (let i = containers.length - 1; i >= 0; i--) {
-            if (containers[i].offsetTop < scrollY - 10) {
-                containers[i].scrollIntoView({ behavior: 'smooth' });
-                break;
-            }
-        }
+        return LoadEmbeddedResource("Resources.preview.js");
     }
-});";
+
+    private static string LoadEmbeddedResource(string name)
+    {
+        var assembly = typeof(PowerPointHandler).Assembly;
+        var fullName = $"OfficeCli.{name}";
+        using var stream = assembly.GetManifestResourceStream(fullName);
+        if (stream == null) return $"/* Resource not found: {fullName} */";
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
     }
 
     // ==================== Slide Background ====================
@@ -386,6 +290,91 @@ document.addEventListener('keydown', e => {
                     RenderGroup(sb, grp, slidePart, themeColors);
                     break;
             }
+        }
+    }
+
+    // ==================== Layout/Master Placeholder Rendering ====================
+
+    /// <summary>
+    /// Render visible placeholders from SlideLayout and SlideMaster that are not
+    /// overridden by the slide itself. This includes footers, slide numbers,
+    /// date/time, logos, and decorative shapes from the layout/master.
+    /// </summary>
+    private void RenderLayoutPlaceholders(StringBuilder sb, SlidePart slidePart, Dictionary<string, string> themeColors)
+    {
+        // Collect placeholder identifiers already present on the slide
+        var slidePlaceholders = new HashSet<string>();
+        var slideShapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree;
+        if (slideShapeTree != null)
+        {
+            foreach (var shape in slideShapeTree.Elements<Shape>())
+            {
+                var ph = shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
+                    ?.GetFirstChild<PlaceholderShape>();
+                if (ph?.Index?.HasValue == true) slidePlaceholders.Add($"idx:{ph.Index.Value}");
+                if (ph?.Type?.HasValue == true) slidePlaceholders.Add($"type:{ph.Type.InnerText}");
+            }
+        }
+
+        // Render shapes from SlideLayout (higher priority)
+        var layoutPart = slidePart.SlideLayoutPart;
+        if (layoutPart != null)
+            RenderInheritedShapes(sb, layoutPart.SlideLayout?.CommonSlideData?.ShapeTree, layoutPart, slidePlaceholders, themeColors);
+
+        // Render shapes from SlideMaster (lower priority, only if not in layout)
+        var masterPart = layoutPart?.SlideMasterPart;
+        if (masterPart != null)
+            RenderInheritedShapes(sb, masterPart.SlideMaster?.CommonSlideData?.ShapeTree, masterPart, slidePlaceholders, themeColors);
+    }
+
+    private void RenderInheritedShapes(StringBuilder sb, ShapeTree? shapeTree, OpenXmlPart part,
+        HashSet<string> skipIndices, Dictionary<string, string> themeColors)
+    {
+        if (shapeTree == null) return;
+
+        foreach (var element in shapeTree.ChildElements)
+        {
+            if (element is not Shape shape) continue;
+
+            var ph = shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
+                ?.GetFirstChild<PlaceholderShape>();
+
+            // Skip title/body content placeholders (these are structural, not decorative)
+            if (ph?.Type?.HasValue == true)
+            {
+                var t = ph.Type.Value;
+                if (t == PlaceholderValues.Title || t == PlaceholderValues.CenteredTitle ||
+                    t == PlaceholderValues.SubTitle || t == PlaceholderValues.Body ||
+                    t == PlaceholderValues.Object)
+                    continue;
+
+                // Skip if slide already has this placeholder type
+                if (skipIndices.Contains($"type:{ph.Type.InnerText}")) continue;
+            }
+
+            // Skip if slide already has a shape with this placeholder index
+            if (ph?.Index?.HasValue == true && skipIndices.Contains($"idx:{ph.Index.Value}"))
+                continue;
+
+            // Skip shapes with no visual content (empty text, no fill, no picture)
+            var text = GetShapeText(shape);
+            var hasFill = shape.ShapeProperties?.GetFirstChild<Drawing.SolidFill>() != null
+                || shape.ShapeProperties?.GetFirstChild<Drawing.GradientFill>() != null
+                || shape.ShapeProperties?.GetFirstChild<Drawing.BlipFill>() != null;
+            var hasLine = shape.ShapeProperties?.GetFirstChild<Drawing.Outline>()?.GetFirstChild<Drawing.SolidFill>() != null;
+
+            if (string.IsNullOrWhiteSpace(text) && !hasFill && !hasLine)
+                continue;
+
+            // Render this inherited shape
+            RenderShape(sb, shape, part, themeColors);
+        }
+
+        // Also render pictures from layout/master (logos, decorative images)
+        foreach (var pic in shapeTree.Elements<Picture>())
+        {
+            if (part is SlidePart sp)
+                RenderPicture(sb, pic, sp, themeColors);
         }
     }
 

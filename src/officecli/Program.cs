@@ -134,7 +134,7 @@ rootCommand.Add(serveCommand);
 
 // ==================== view command ====================
 var viewFileArg = new Argument<FileInfo>("file") { Description = "Office document path (.docx, .xlsx, .pptx)" };
-var viewModeArg = new Argument<string>("mode") { Description = "View mode: text, annotated, outline, stats, issues" };
+var viewModeArg = new Argument<string>("mode") { Description = "View mode: text, annotated, outline, stats, issues, html" };
 var startLineOpt = new Option<int?>("--start") { Description = "Start line/paragraph number" };
 var endLineOpt = new Option<int?>("--end") { Description = "End line/paragraph number" };
 var maxLinesOpt = new Option<int?>("--max-lines") { Description = "Maximum number of lines/rows/slides to output (truncates with total count)" };
@@ -185,6 +185,38 @@ viewCommand.SetAction(result => SafeRun(() =>
 
     using var handler = DocumentHandlerFactory.Open(file.FullName);
 
+    if (mode.ToLowerInvariant() is "html" or "h")
+    {
+        if (handler is OfficeCli.Handlers.PowerPointHandler pptHandler)
+        {
+            var html = pptHandler.ViewAsHtml(start, end);
+
+            if (json)
+            {
+                // --json: output raw HTML to stdout (for third-party integration / piping)
+                Console.Write(html);
+            }
+            else
+            {
+                // Interactive: write to temp file and open in browser
+                var htmlPath = Path.Combine(Path.GetTempPath(), $"officecli_preview_{Path.GetFileNameWithoutExtension(file.Name)}_{DateTime.Now:HHmmss}.html");
+                File.WriteAllText(htmlPath, html);
+                Console.WriteLine(htmlPath);
+                try
+                {
+                    var psi = new System.Diagnostics.ProcessStartInfo(htmlPath) { UseShellExecute = true };
+                    System.Diagnostics.Process.Start(psi);
+                }
+                catch { /* silently ignore if browser can't be opened */ }
+            }
+        }
+        else
+        {
+            Console.Error.WriteLine("HTML preview is only supported for .pptx files.");
+        }
+        return;
+    }
+
     var output = mode.ToLowerInvariant() switch
     {
         "text" or "t" => handler.ViewAsText(start, end, maxLines, cols),
@@ -192,7 +224,7 @@ viewCommand.SetAction(result => SafeRun(() =>
         "outline" or "o" => handler.ViewAsOutline(),
         "stats" or "s" => handler.ViewAsStats(),
         "issues" or "i" => OutputFormatter.FormatIssues(handler.ViewAsIssues(issueType, limit), format),
-        _ => throw new ArgumentException($"Unknown mode: {mode}. Available: text, annotated, outline, stats, issues")
+        _ => throw new ArgumentException($"Unknown mode: {mode}. Available: text, annotated, outline, stats, issues, html")
     };
 
     if (json && mode is not ("issues" or "i"))
@@ -830,6 +862,13 @@ static string ExecuteBatchItem(OfficeCli.Core.IDocumentHandler handler, BatchIte
         case "view":
         {
             var mode = item.Mode ?? "text";
+            if (mode.ToLowerInvariant() is "html" or "h" && handler is OfficeCli.Handlers.PowerPointHandler pptH)
+            {
+                var html = pptH.ViewAsHtml();
+                var htmlPath = Path.Combine(Path.GetTempPath(), $"officecli_preview_{DateTime.Now:HHmmss}.html");
+                File.WriteAllText(htmlPath, html);
+                return htmlPath;
+            }
             return mode.ToLowerInvariant() switch
             {
                 "text" or "t" => handler.ViewAsText(null, null, null, null),
