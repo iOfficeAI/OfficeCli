@@ -202,128 +202,19 @@ public partial class ExcelHandler
 
             foreach (var (key, value) in properties)
             {
-                switch (key.ToLowerInvariant())
+                var lk = key.ToLowerInvariant();
+                if (TrySetAnchorPosition(anchor, lk, value)) continue;
+
+                var spPr = anchor.Descendants<XDR.ShapeProperties>().FirstOrDefault();
+                if (TrySetRotation(spPr, lk, value)) continue;
+                if (TrySetShapeEffect(spPr, lk, value)) continue;
+
+                switch (lk)
                 {
-                    case "x":
-                        if (anchor.FromMarker != null)
-                        {
-                            var xVal = ParseHelpers.SafeParseInt(value, "x");
-                            if (xVal < 0) throw new ArgumentException($"Invalid 'x' value: '{value}'. Column index must be >= 0.");
-                            anchor.FromMarker.ColumnId!.Text = xVal.ToString();
-                        }
-                        break;
-                    case "y":
-                        if (anchor.FromMarker != null)
-                        {
-                            var yVal = ParseHelpers.SafeParseInt(value, "y");
-                            if (yVal < 0) throw new ArgumentException($"Invalid 'y' value: '{value}'. Row index must be >= 0.");
-                            anchor.FromMarker.RowId!.Text = yVal.ToString();
-                        }
-                        break;
-                    case "width":
-                        if (anchor.FromMarker != null && anchor.ToMarker != null)
-                        {
-                            if (!int.TryParse(value, out var widthVal))
-                                throw new FormatException($"Invalid width value: '{value}'. Expected an integer.");
-                            var fromCol = int.TryParse(anchor.FromMarker.ColumnId?.Text, out var fc) ? fc : 0;
-                            anchor.ToMarker.ColumnId!.Text = (fromCol + widthVal).ToString();
-                        }
-                        break;
-                    case "height":
-                        if (anchor.FromMarker != null && anchor.ToMarker != null)
-                        {
-                            if (!int.TryParse(value, out var heightVal))
-                                throw new FormatException($"Invalid height value: '{value}'. Expected an integer.");
-                            var fromRow = int.TryParse(anchor.FromMarker.RowId?.Text, out var fr) ? fr : 0;
-                            anchor.ToMarker.RowId!.Text = (fromRow + heightVal).ToString();
-                        }
-                        break;
                     case "alt":
                         var nvProps = anchor.Descendants<XDR.NonVisualDrawingProperties>().FirstOrDefault();
                         if (nvProps != null) nvProps.Description = value;
                         break;
-                    case "rotation" or "rot":
-                    {
-                        var spPr = anchor.Descendants<XDR.ShapeProperties>().FirstOrDefault();
-                        if (spPr != null)
-                        {
-                            var xfrm = spPr.GetFirstChild<Drawing.Transform2D>();
-                            if (xfrm == null)
-                            {
-                                xfrm = new Drawing.Transform2D(
-                                    new Drawing.Offset { X = 0, Y = 0 },
-                                    new Drawing.Extents { Cx = 0, Cy = 0 }
-                                );
-                                spPr.InsertAt(xfrm, 0);
-                            }
-                            // Rotation in degrees -> 60000ths of a degree
-                            if (!double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var degrees))
-                                throw new ArgumentException($"Invalid 'rotation' value: '{value}'. Expected a number in degrees (e.g. 45, -90, 180.5).");
-                            xfrm.Rotation = (int)(degrees * 60000);
-                        }
-                        break;
-                    }
-                    case "shadow":
-                    case "glow":
-                    case "reflection":
-                    case "softedge":
-                    {
-                        var spPr = anchor.Descendants<XDR.ShapeProperties>().FirstOrDefault();
-                        if (spPr != null)
-                        {
-                            var effectList = spPr.GetFirstChild<Drawing.EffectList>();
-                            // Normalize : separator to - for shared helper compatibility
-                            var normalizedVal = value.Replace(':', '-');
-                            if (normalizedVal == "true") normalizedVal = key == "shadow" ? "000000" : key == "glow" ? "4472C4" : "half";
-
-                            if (normalizedVal.Equals("none", StringComparison.OrdinalIgnoreCase) ||
-                                normalizedVal.Equals("false", StringComparison.OrdinalIgnoreCase))
-                            {
-                                if (effectList != null)
-                                {
-                                    switch (key)
-                                    {
-                                        case "shadow": effectList.RemoveAllChildren<Drawing.OuterShadow>(); break;
-                                        case "glow": effectList.RemoveAllChildren<Drawing.Glow>(); break;
-                                        case "reflection": effectList.RemoveAllChildren<Drawing.Reflection>(); break;
-                                        case "softedge": effectList.RemoveAllChildren<Drawing.SoftEdge>(); break;
-                                    }
-                                    if (!effectList.HasChildren) spPr.RemoveChild(effectList);
-                                }
-                            }
-                            else
-                            {
-                                if (effectList == null) { effectList = new Drawing.EffectList(); spPr.AppendChild(effectList); }
-                                Func<string, DocumentFormat.OpenXml.OpenXmlElement> colorBuilder = c =>
-                                {
-                                    var (rgb, alpha) = OfficeCli.Core.ParseHelpers.SanitizeColorForOoxml(c);
-                                    var clr = new Drawing.RgbColorModelHex { Val = rgb };
-                                    if (alpha.HasValue) clr.AppendChild(new Drawing.Alpha { Val = alpha.Value });
-                                    return clr;
-                                };
-                                switch (key)
-                                {
-                                    case "shadow":
-                                        effectList.RemoveAllChildren<Drawing.OuterShadow>();
-                                        effectList.AppendChild(OfficeCli.Core.DrawingEffectsHelper.BuildOuterShadow(normalizedVal, colorBuilder));
-                                        break;
-                                    case "glow":
-                                        effectList.RemoveAllChildren<Drawing.Glow>();
-                                        effectList.AppendChild(OfficeCli.Core.DrawingEffectsHelper.BuildGlow(normalizedVal, colorBuilder));
-                                        break;
-                                    case "reflection":
-                                        effectList.RemoveAllChildren<Drawing.Reflection>();
-                                        effectList.AppendChild(OfficeCli.Core.DrawingEffectsHelper.BuildReflection(normalizedVal));
-                                        break;
-                                    case "softedge":
-                                        effectList.RemoveAllChildren<Drawing.SoftEdge>();
-                                        effectList.AppendChild(OfficeCli.Core.DrawingEffectsHelper.BuildSoftEdge(normalizedVal));
-                                        break;
-                                }
-                            }
-                        }
-                        break;
-                    }
                     default:
                         picUnsupported.Add(key);
                         break;
@@ -355,30 +246,39 @@ public partial class ExcelHandler
 
             foreach (var (key, value) in properties)
             {
-                switch (key.ToLowerInvariant())
+                var lk = key.ToLowerInvariant();
+                if (TrySetAnchorPosition(anchor, lk, value)) continue;
+                if (TrySetRotation(shape.ShapeProperties, lk, value)) continue;
+
+                // For effects on shapes: check if fill=none → text-level, otherwise shape-level
+                if (lk is "shadow" or "glow" or "reflection" or "softedge")
                 {
-                    case "x":
-                        if (anchor.FromMarker != null)
-                            anchor.FromMarker.ColumnId!.Text = ParseHelpers.SafeParseInt(value, "x").ToString();
-                        break;
-                    case "y":
-                        if (anchor.FromMarker != null)
-                            anchor.FromMarker.RowId!.Text = ParseHelpers.SafeParseInt(value, "y").ToString();
-                        break;
-                    case "width":
-                        if (anchor.FromMarker != null && anchor.ToMarker != null)
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) continue;
+                    var isNoFill = spPr.GetFirstChild<Drawing.NoFill>() != null;
+                    var normalizedVal = value.Replace(':', '-');
+
+                    if (isNoFill && lk is "shadow" or "glow")
+                    {
+                        foreach (var run in shape.Descendants<Drawing.Run>())
                         {
-                            var fromCol = int.TryParse(anchor.FromMarker.ColumnId?.Text, out var fc) ? fc : 0;
-                            anchor.ToMarker.ColumnId!.Text = (fromCol + ParseHelpers.SafeParseInt(value, "width")).ToString();
+                            if (lk == "shadow")
+                                OfficeCli.Core.DrawingEffectsHelper.ApplyTextEffect<Drawing.OuterShadow>(run, normalizedVal, () =>
+                                    OfficeCli.Core.DrawingEffectsHelper.BuildOuterShadow(normalizedVal, OfficeCli.Core.DrawingEffectsHelper.BuildRgbColor));
+                            else
+                                OfficeCli.Core.DrawingEffectsHelper.ApplyTextEffect<Drawing.Glow>(run, normalizedVal, () =>
+                                    OfficeCli.Core.DrawingEffectsHelper.BuildGlow(normalizedVal, OfficeCli.Core.DrawingEffectsHelper.BuildRgbColor));
                         }
-                        break;
-                    case "height":
-                        if (anchor.FromMarker != null && anchor.ToMarker != null)
-                        {
-                            var fromRow = int.TryParse(anchor.FromMarker.RowId?.Text, out var fr) ? fr : 0;
-                            anchor.ToMarker.RowId!.Text = (fromRow + ParseHelpers.SafeParseInt(value, "height")).ToString();
-                        }
-                        break;
+                    }
+                    else
+                    {
+                        TrySetShapeEffect(spPr, lk, value);
+                    }
+                    continue;
+                }
+
+                switch (lk)
+                {
                     case "name":
                     {
                         var nvProps = shape.NonVisualShapeProperties?.GetFirstChild<XDR.NonVisualDrawingProperties>();
@@ -390,7 +290,6 @@ public partial class ExcelHandler
                         var txBody = shape.TextBody;
                         if (txBody != null)
                         {
-                            // Preserve first paragraph's properties, replace text
                             var firstPara = txBody.Elements<Drawing.Paragraph>().FirstOrDefault();
                             var pProps = firstPara?.ParagraphProperties?.CloneNode(true);
                             var rProps = firstPara?.Elements<Drawing.Run>().FirstOrDefault()?.RunProperties?.CloneNode(true);
@@ -462,88 +361,6 @@ public partial class ExcelHandler
                             {
                                 var (fRgb, _) = ParseHelpers.SanitizeColorForOoxml(value);
                                 spPr.AppendChild(new Drawing.SolidFill(new Drawing.RgbColorModelHex { Val = fRgb }));
-                            }
-                        }
-                        break;
-                    }
-                    case "shadow":
-                    case "glow":
-                    case "reflection":
-                    case "softedge":
-                    {
-                        var spPr = shape.ShapeProperties;
-                        if (spPr == null) break;
-                        var isNoFill = spPr.GetFirstChild<Drawing.NoFill>() != null;
-                        var normalizedVal = value.Replace(':', '-');
-
-                        // Text-level effects for fill=none shapes
-                        if (isNoFill && (key == "shadow" || key == "glow"))
-                        {
-                            foreach (var run in shape.Descendants<Drawing.Run>())
-                            {
-                                Func<string, DocumentFormat.OpenXml.OpenXmlElement> cb = c =>
-                                {
-                                    var (rgb, alpha) = ParseHelpers.SanitizeColorForOoxml(c);
-                                    var clr = new Drawing.RgbColorModelHex { Val = rgb };
-                                    if (alpha.HasValue) clr.AppendChild(new Drawing.Alpha { Val = alpha.Value });
-                                    return clr;
-                                };
-                                if (key == "shadow")
-                                    OfficeCli.Core.DrawingEffectsHelper.ApplyTextEffect<Drawing.OuterShadow>(run, normalizedVal, () =>
-                                        OfficeCli.Core.DrawingEffectsHelper.BuildOuterShadow(normalizedVal, cb));
-                                else
-                                    OfficeCli.Core.DrawingEffectsHelper.ApplyTextEffect<Drawing.Glow>(run, normalizedVal, () =>
-                                        OfficeCli.Core.DrawingEffectsHelper.BuildGlow(normalizedVal, cb));
-                            }
-                        }
-                        else
-                        {
-                            // Shape-level effects
-                            var effectList = spPr.GetFirstChild<Drawing.EffectList>();
-                            if (normalizedVal.Equals("none", StringComparison.OrdinalIgnoreCase) ||
-                                normalizedVal.Equals("false", StringComparison.OrdinalIgnoreCase))
-                            {
-                                if (effectList != null)
-                                {
-                                    switch (key)
-                                    {
-                                        case "shadow": effectList.RemoveAllChildren<Drawing.OuterShadow>(); break;
-                                        case "glow": effectList.RemoveAllChildren<Drawing.Glow>(); break;
-                                        case "reflection": effectList.RemoveAllChildren<Drawing.Reflection>(); break;
-                                        case "softedge": effectList.RemoveAllChildren<Drawing.SoftEdge>(); break;
-                                    }
-                                    if (!effectList.HasChildren) spPr.RemoveChild(effectList);
-                                }
-                            }
-                            else
-                            {
-                                if (effectList == null) { effectList = new Drawing.EffectList(); spPr.AppendChild(effectList); }
-                                Func<string, DocumentFormat.OpenXml.OpenXmlElement> cb = c =>
-                                {
-                                    var (rgb, alpha) = ParseHelpers.SanitizeColorForOoxml(c);
-                                    var clr = new Drawing.RgbColorModelHex { Val = rgb };
-                                    if (alpha.HasValue) clr.AppendChild(new Drawing.Alpha { Val = alpha.Value });
-                                    return clr;
-                                };
-                                switch (key)
-                                {
-                                    case "shadow":
-                                        effectList.RemoveAllChildren<Drawing.OuterShadow>();
-                                        effectList.AppendChild(OfficeCli.Core.DrawingEffectsHelper.BuildOuterShadow(normalizedVal, cb));
-                                        break;
-                                    case "glow":
-                                        effectList.RemoveAllChildren<Drawing.Glow>();
-                                        effectList.AppendChild(OfficeCli.Core.DrawingEffectsHelper.BuildGlow(normalizedVal, cb));
-                                        break;
-                                    case "reflection":
-                                        effectList.RemoveAllChildren<Drawing.Reflection>();
-                                        effectList.AppendChild(OfficeCli.Core.DrawingEffectsHelper.BuildReflection(normalizedVal));
-                                        break;
-                                    case "softedge":
-                                        effectList.RemoveAllChildren<Drawing.SoftEdge>();
-                                        effectList.AppendChild(OfficeCli.Core.DrawingEffectsHelper.BuildSoftEdge(normalizedVal));
-                                        break;
-                                }
                             }
                         }
                         break;

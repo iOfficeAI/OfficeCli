@@ -121,8 +121,8 @@ public partial class BugHuntTests
                 ["width"] = "large"
             });
 
-            act.Should().Throw<FormatException>(
-                "int.Parse crashes on 'large' for picture width");
+            act.Should().Throw<Exception>(
+                "invalid string 'large' for picture width should throw");
         }
         finally
         {

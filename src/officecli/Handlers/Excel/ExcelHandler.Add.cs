@@ -663,14 +663,7 @@ public partial class ExcelHandler
                 if (string.IsNullOrEmpty(imgPath) || !File.Exists(imgPath))
                     throw new ArgumentException("picture requires a valid 'path' or 'src' property");
 
-                var pxStr = properties.GetValueOrDefault("x", "0") ?? "0";
-                var pyStr = properties.GetValueOrDefault("y", "0") ?? "0";
-                var pwStr = properties.GetValueOrDefault("width", "5") ?? "5";
-                var phStr = properties.GetValueOrDefault("height", "5") ?? "5";
-                var px = ParseHelpers.SafeParseInt(pxStr, "x");
-                var py = ParseHelpers.SafeParseInt(pyStr, "y");
-                var pw = ParseHelpers.SafeParseInt(pwStr, "width");
-                var ph = ParseHelpers.SafeParseInt(phStr, "height");
+                var (px, py, pw, ph) = ParseAnchorBounds(properties, "0", "0", "5", "5");
                 var alt = properties.GetValueOrDefault("alt", "");
 
                 var picDrawingsPart = picWorksheet.DrawingsPart
@@ -758,14 +751,7 @@ public partial class ExcelHandler
                 var shpWorksheet = FindWorksheet(shpSheetName)
                     ?? throw new ArgumentException($"Sheet not found: {shpSheetName}");
 
-                var sxStr = properties.GetValueOrDefault("x", "1") ?? "1";
-                var syStr = properties.GetValueOrDefault("y", "1") ?? "1";
-                var swStr = properties.GetValueOrDefault("width", "5") ?? "5";
-                var shStr = properties.GetValueOrDefault("height", "3") ?? "3";
-                var sx = ParseHelpers.SafeParseInt(sxStr, "x");
-                var sy = ParseHelpers.SafeParseInt(syStr, "y");
-                var sw = ParseHelpers.SafeParseInt(swStr, "width");
-                var sh = ParseHelpers.SafeParseInt(shStr, "height");
+                var (sx, sy, sw, sh) = ParseAnchorBounds(properties, "1", "1", "5", "3");
                 var shpText = properties.GetValueOrDefault("text", "") ?? "";
                 var shpName = properties.GetValueOrDefault("name", "");
 
@@ -826,24 +812,17 @@ public partial class ExcelHandler
                 // For fill=none shapes, shadow/glow go to text-level (rPr) below
                 var isNoFillShape = properties.TryGetValue("fill", out var fillCheck) && fillCheck.Equals("none", StringComparison.OrdinalIgnoreCase);
                 Drawing.EffectList? shpEffectList = null;
-                Func<string, DocumentFormat.OpenXml.OpenXmlElement> colorBuilder = c =>
-                {
-                    var (rgb2, alpha2) = ParseHelpers.SanitizeColorForOoxml(c);
-                    var clr = new Drawing.RgbColorModelHex { Val = rgb2 };
-                    if (alpha2.HasValue) clr.AppendChild(new Drawing.Alpha { Val = alpha2.Value });
-                    return clr;
-                };
                 if (!isNoFillShape)
                 {
                     if (properties.TryGetValue("shadow", out var shpShadow) && !shpShadow.Equals("none", StringComparison.OrdinalIgnoreCase))
                     {
                         shpEffectList ??= new Drawing.EffectList();
-                        shpEffectList.AppendChild(OfficeCli.Core.DrawingEffectsHelper.BuildOuterShadow(shpShadow.Replace(':', '-'), colorBuilder));
+                        shpEffectList.AppendChild(OfficeCli.Core.DrawingEffectsHelper.BuildOuterShadow(shpShadow.Replace(':', '-'), OfficeCli.Core.DrawingEffectsHelper.BuildRgbColor));
                     }
                     if (properties.TryGetValue("glow", out var shpGlow) && !shpGlow.Equals("none", StringComparison.OrdinalIgnoreCase))
                     {
                         shpEffectList ??= new Drawing.EffectList();
-                        shpEffectList.AppendChild(OfficeCli.Core.DrawingEffectsHelper.BuildGlow(shpGlow.Replace(':', '-'), colorBuilder));
+                        shpEffectList.AppendChild(OfficeCli.Core.DrawingEffectsHelper.BuildGlow(shpGlow.Replace(':', '-'), OfficeCli.Core.DrawingEffectsHelper.BuildRgbColor));
                     }
                 }
                 if (properties.TryGetValue("reflection", out var shpRefl) && !shpRefl.Equals("none", StringComparison.OrdinalIgnoreCase))
@@ -897,12 +876,12 @@ public partial class ExcelHandler
                         if (properties.TryGetValue("shadow", out var ts) && !ts.Equals("none", StringComparison.OrdinalIgnoreCase))
                         {
                             txtEffects ??= new Drawing.EffectList();
-                            txtEffects.AppendChild(OfficeCli.Core.DrawingEffectsHelper.BuildOuterShadow(ts.Replace(':', '-'), colorBuilder));
+                            txtEffects.AppendChild(OfficeCli.Core.DrawingEffectsHelper.BuildOuterShadow(ts.Replace(':', '-'), OfficeCli.Core.DrawingEffectsHelper.BuildRgbColor));
                         }
                         if (properties.TryGetValue("glow", out var tg) && !tg.Equals("none", StringComparison.OrdinalIgnoreCase))
                         {
                             txtEffects ??= new Drawing.EffectList();
-                            txtEffects.AppendChild(OfficeCli.Core.DrawingEffectsHelper.BuildGlow(tg.Replace(':', '-'), colorBuilder));
+                            txtEffects.AppendChild(OfficeCli.Core.DrawingEffectsHelper.BuildGlow(tg.Replace(':', '-'), OfficeCli.Core.DrawingEffectsHelper.BuildRgbColor));
                         }
                         if (txtEffects != null)
                             rPr.AppendChild(txtEffects);

@@ -169,6 +169,18 @@ public static class DrawingEffectsHelper
         effectList.AppendChild(builder());
     }
 
+    /// <summary>
+    /// Standard color builder for Drawing effects: sanitizes hex, creates RgbColorModelHex with optional alpha.
+    /// Use instead of duplicating the lambda pattern inline.
+    /// </summary>
+    public static OpenXmlElement BuildRgbColor(string colorValue)
+    {
+        var (rgb, alpha) = ParseHelpers.SanitizeColorForOoxml(colorValue);
+        var clr = new Drawing.RgbColorModelHex { Val = rgb };
+        if (alpha.HasValue) clr.AppendChild(new Drawing.Alpha { Val = alpha.Value });
+        return clr;
+    }
+
     // --- Private helpers ---
 
     private static double ParseParam(string[] parts, int index, double defaultValue, string paramName)
