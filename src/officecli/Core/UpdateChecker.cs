@@ -21,7 +21,7 @@ namespace OfficeCli.Core;
 /// </summary>
 internal static class UpdateChecker
 {
-    private static readonly string ConfigDir = Path.Combine(
+    internal static readonly string ConfigDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".officecli");
     private static readonly string ConfigPath = Path.Combine(ConfigDir, "config.json");
     private const string GitHubRepo = "iOfficeAI/OfficeCLI";
@@ -263,8 +263,17 @@ internal static class UpdateChecker
     /// </summary>
     internal static void HandleConfigCommand(string[] args)
     {
+        const string available = "autoUpdate, log, log clear";
         var key = args[0].ToLowerInvariant();
         var config = LoadConfig();
+
+        // officecli config log clear
+        if (key == "log" && args.Length == 2 && args[1].ToLowerInvariant() == "clear")
+        {
+            CliLogger.Clear();
+            Console.WriteLine("Log cleared.");
+            return;
+        }
 
         if (args.Length == 1)
         {
@@ -272,12 +281,13 @@ internal static class UpdateChecker
             var value = key switch
             {
                 "autoupdate" => config.AutoUpdate.ToString().ToLowerInvariant(),
+                "log" => config.Log.ToString().ToLowerInvariant(),
                 _ => null
             };
             if (value != null)
                 Console.WriteLine(value);
             else
-                Console.Error.WriteLine($"Unknown config key: {args[0]}. Available: autoUpdate");
+                Console.Error.WriteLine($"Unknown config key: {args[0]}. Available: {available}");
             return;
         }
 
@@ -288,8 +298,11 @@ internal static class UpdateChecker
             case "autoupdate":
                 config.AutoUpdate = ParseHelpers.IsTruthy(newValue);
                 break;
+            case "log":
+                config.Log = ParseHelpers.IsTruthy(newValue);
+                break;
             default:
-                Console.Error.WriteLine($"Unknown config key: {args[0]}. Available: autoUpdate");
+                Console.Error.WriteLine($"Unknown config key: {args[0]}. Available: {available}");
                 return;
         }
 
@@ -326,31 +339,32 @@ internal static class UpdateChecker
         return lp.Length > cp.Length;
     }
 
-    private static UpdateConfig LoadConfig()
+    internal static AppConfig LoadConfig()
     {
-        if (!File.Exists(ConfigPath)) return new UpdateConfig();
+        if (!File.Exists(ConfigPath)) return new AppConfig();
         try
         {
             var json = File.ReadAllText(ConfigPath);
-            return JsonSerializer.Deserialize(json, UpdateConfigContext.Default.UpdateConfig) ?? new UpdateConfig();
+            return JsonSerializer.Deserialize(json, AppConfigContext.Default.AppConfig) ?? new AppConfig();
         }
-        catch { return new UpdateConfig(); }
+        catch { return new AppConfig(); }
     }
 
-    private static void SaveConfig(UpdateConfig config)
+    private static void SaveConfig(AppConfig config)
     {
-        var json = JsonSerializer.Serialize(config, UpdateConfigContext.Default.UpdateConfig);
+        var json = JsonSerializer.Serialize(config, AppConfigContext.Default.AppConfig);
         File.WriteAllText(ConfigPath, json);
     }
 }
 
-internal class UpdateConfig
+internal class AppConfig
 {
     public DateTime? LastUpdateCheck { get; set; }
     public string? LatestVersion { get; set; }
     public bool AutoUpdate { get; set; } = true;
+    public bool Log { get; set; }
 }
 
-[JsonSerializable(typeof(UpdateConfig))]
+[JsonSerializable(typeof(AppConfig))]
 [JsonSourceGenerationOptions(WriteIndented = true, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
-internal partial class UpdateConfigContext : JsonSerializerContext;
+internal partial class AppConfigContext : JsonSerializerContext;

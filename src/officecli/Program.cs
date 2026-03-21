@@ -3,6 +3,7 @@
 
 using System.CommandLine;
 using System.Diagnostics;
+using System.Text;
 using OfficeCli.Core;
 
 // Internal commands (spawned as separate processes, not user-facing)
@@ -15,9 +16,13 @@ if (args.Length == 1 && args[0] == "__update-check__")
 // Config command: officecli config <key> [value]
 if (args.Length >= 2 && args[0] == "config")
 {
+    OfficeCli.Core.CliLogger.LogCommand(args);
     OfficeCli.Core.UpdateChecker.HandleConfigCommand(args.Skip(1).ToArray());
     return 0;
 }
+
+// Log command
+OfficeCli.Core.CliLogger.LogCommand(args);
 
 // Non-blocking update check: spawns background upgrade if stale
 if (Environment.GetEnvironmentVariable("OFFICECLI_SKIP_UPDATE") != "1")
@@ -786,15 +791,45 @@ static bool TryResident(string filePath, Action<ResidentRequest> configure)
 
 static int SafeRun(Action action)
 {
+    if (!OfficeCli.Core.CliLogger.Enabled)
+    {
+        try
+        {
+            action();
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Error: {ex.Message}");
+            return 1;
+        }
+    }
+
+    // Logging enabled: capture stdout/stderr
+    var stdoutWriter = new StringWriter();
+    var stderrWriter = new StringWriter();
+    var origOut = Console.Out;
+    var origErr = Console.Error;
+    Console.SetOut(new TeeWriter(origOut, stdoutWriter));
+    Console.SetError(new TeeWriter(origErr, stderrWriter));
     try
     {
         action();
+        var stdout = stdoutWriter.ToString().TrimEnd('\r', '\n');
+        OfficeCli.Core.CliLogger.LogOutput(stdout);
         return 0;
     }
     catch (Exception ex)
     {
         Console.Error.WriteLine($"Error: {ex.Message}");
+        var stderr = stderrWriter.ToString().TrimEnd('\r', '\n');
+        OfficeCli.Core.CliLogger.LogError(stderr);
         return 1;
+    }
+    finally
+    {
+        Console.SetOut(origOut);
+        Console.SetError(origErr);
     }
 }
 
@@ -1022,4 +1057,19 @@ static int LevenshteinDistance(string s, string t)
     }
 
     return d[s.Length, t.Length];
+}
+
+/// <summary>
+/// TextWriter that writes to two targets simultaneously (tee pattern).
+/// </summary>
+class TeeWriter : TextWriter
+{
+    private readonly TextWriter _a;
+    private readonly TextWriter _b;
+    public TeeWriter(TextWriter a, TextWriter b) { _a = a; _b = b; }
+    public override Encoding Encoding => _a.Encoding;
+    public override void Write(char value) { _a.Write(value); _b.Write(value); }
+    public override void Write(string? value) { _a.Write(value); _b.Write(value); }
+    public override void WriteLine(string? value) { _a.WriteLine(value); _b.WriteLine(value); }
+    public override void Flush() { _a.Flush(); _b.Flush(); }
 }
