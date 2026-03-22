@@ -49,6 +49,7 @@ public partial class PowerPointHandler
         foreach (var row in table.Elements<Drawing.TableRow>())
         {
             sb.AppendLine("        <tr>");
+            int skipCols = 0;
             foreach (var cell in row.Elements<Drawing.TableCell>())
             {
                 var cellStyles = new List<string>();
@@ -121,6 +122,15 @@ public partial class PowerPointHandler
                 // Skip merged continuation cells
                 if (cell.HorizontalMerge?.Value == true || cell.VerticalMerge?.Value == true)
                     continue;
+
+                // Skip cells covered by previous gridSpan
+                if (skipCols > 0)
+                {
+                    skipCols--;
+                    continue;
+                }
+
+                if (gridSpan > 1) skipCols = (int)gridSpan - 1;
 
                 sb.AppendLine($"          <td{spanAttrs}{styleStr}>{HtmlEncode(cellText)}</td>");
             }

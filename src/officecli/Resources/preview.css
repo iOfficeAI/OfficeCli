@@ -217,6 +217,6 @@ body.sidebar-hidden .sidebar-toggle { left: 8px; }
 .picture img { width: 100%; height: 100%; object-fit: fill; }
 .table-container { position: absolute; overflow: hidden; }
 .slide-table { width: 100%; height: 100%; border-collapse: collapse; table-layout: fixed; }
-.slide-table td { border: 1px solid #d0d0d0; padding: 4px 6px; vertical-align: top; overflow: hidden; font-size: 10pt; }
+.slide-table td { border: 1px solid rgba(255,255,255,0.2); padding: 4px 6px; vertical-align: top; overflow: hidden; font-size: 10pt; color: inherit; }
 .connector { position: absolute; pointer-events: none; }
 .group { position: absolute; }
