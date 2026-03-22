@@ -143,25 +143,13 @@ public partial class PowerPointHandler
 
         if (transElem != null) trans.Append(transElem);
 
-        // Insert transition XML directly as an unknown element to prevent SDK from dropping it.
-        // The SDK's typed Slide.Transition setter appears to work (OuterXml shows the element)
-        // but Save() strips it during serialization. Workaround: inject as raw XML element
-        // that the SDK preserves as-is.
-        var transXml = trans.OuterXml;
-        // Remove any existing transition from the slide's children (including AlternateContent wrappers)
+        // Remove any existing transition (including AlternateContent wrappers for p14/morph)
         foreach (var existing in slide.ChildElements
             .Where(c => c.LocalName == "transition" || c.LocalName == "AlternateContent")
             .ToList())
             existing.Remove();
-        // Parse the transition XML as a generic OpenXmlUnknownElement and insert after cSld
-        var unknownTrans = new OpenXmlUnknownElement(trans.Prefix, trans.LocalName, trans.NamespaceUri);
-        unknownTrans.InnerXml = trans.InnerXml;
-        foreach (var attr in trans.GetAttributes()) unknownTrans.SetAttribute(attr);
-        var csd = slide.CommonSlideData;
-        if (csd != null)
-            csd.InsertAfterSelf(unknownTrans);
-        else
-            slide.AppendChild(unknownTrans);
+
+        slide.Transition = trans;
     }
 
     /// <summary>
