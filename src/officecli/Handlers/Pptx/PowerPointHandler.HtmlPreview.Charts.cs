@@ -76,10 +76,10 @@ public partial class PowerPointHandler
             || dataLabels?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.ShowCategoryName>()?.Val?.Value == true
             || dataLabels?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.ShowPercent>()?.Val?.Value == true;
 
-        // Plot/chart fill
+        // Plot/chart fill — only direct children, not series fills
         var plotSpPr = plotArea.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.ShapeProperties>();
         var plotFillColor = plotSpPr?.GetFirstChild<Drawing.SolidFill>()?.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
-        var chartSpPr = chart?.Parent?.Descendants<DocumentFormat.OpenXml.Drawing.Charts.ChartShapeProperties>().FirstOrDefault();
+        var chartSpPr = chart?.Parent?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.ChartShapeProperties>();
         var chartFillColor = chartSpPr?.GetFirstChild<Drawing.SolidFill>()?.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
 
         // Axis titles
