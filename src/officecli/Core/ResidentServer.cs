@@ -244,24 +244,30 @@ public class ResidentServer : IDisposable
                 break;
             case "set":
                 ExecuteSet(request);
+                WatchNotifier.NotifyIfWatching(_filePath, request.GetArg("path"));
                 break;
             case "add":
                 ExecuteAdd(request);
+                WatchNotifier.NotifyIfWatching(_filePath, request.GetArg("parent"));
                 break;
             case "remove":
                 ExecuteRemove(request);
+                WatchNotifier.NotifyIfWatching(_filePath, request.GetArg("path"));
                 break;
             case "move":
                 ExecuteMove(request);
+                WatchNotifier.NotifyIfWatching(_filePath, request.GetArg("path"));
                 break;
             case "raw":
                 ExecuteRaw(request);
                 break;
             case "raw-set":
                 ExecuteRawSet(request);
+                WatchNotifier.NotifyIfWatching(_filePath);
                 break;
             case "add-part":
                 ExecuteAddPart(request);
+                WatchNotifier.NotifyIfWatching(_filePath);
                 break;
             case "validate":
                 ExecuteValidate();

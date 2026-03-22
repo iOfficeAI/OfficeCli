@@ -74,7 +74,7 @@ public partial class PowerPointHandler
             if (startSlide.HasValue && slideNum < startSlide.Value) continue;
             if (endSlide.HasValue && slideNum > endSlide.Value) break;
 
-            sb.AppendLine($"<div class=\"slide-container\">");
+            sb.AppendLine($"<div class=\"slide-container\" data-slide=\"{slideNum}\">");
             sb.AppendLine($"  <div class=\"slide-label\">Slide {slideNum}</div>");
             sb.AppendLine("  <div class=\"slide-wrapper\">");
             sb.Append($"    <div class=\"slide\"");
@@ -113,6 +113,56 @@ public partial class PowerPointHandler
         sb.AppendLine("</html>");
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Render a single slide's HTML fragment (slide-container div) for incremental updates.
+    /// Returns null if the slide number is out of range.
+    /// </summary>
+    public string? RenderSlideHtml(int slideNum)
+    {
+        var slideParts = GetSlideParts().ToList();
+        if (slideNum < 1 || slideNum > slideParts.Count) return null;
+
+        var sldSz = _doc.PresentationPart?.Presentation?.GetFirstChild<SlideSize>();
+        long slideWidthEmu = sldSz?.Cx?.Value ?? 12192000;
+        long slideHeightEmu = sldSz?.Cy?.Value ?? 6858000;
+        var themeColors = ResolveThemeColorMap();
+        var slidePart = slideParts[slideNum - 1];
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"<div class=\"slide-container\" data-slide=\"{slideNum}\">");
+        sb.AppendLine($"  <div class=\"slide-label\">Slide {slideNum}</div>");
+        sb.AppendLine("  <div class=\"slide-wrapper\">");
+        sb.Append($"    <div class=\"slide\"");
+
+        var slideStyles = new List<string>();
+        var bgStyle = GetSlideBackgroundCss(slidePart, themeColors);
+        if (!string.IsNullOrEmpty(bgStyle))
+            slideStyles.Add(bgStyle);
+        var textDefaults = GetTextDefaults(slidePart, themeColors);
+        if (!string.IsNullOrEmpty(textDefaults))
+            slideStyles.Add(textDefaults);
+        if (slideStyles.Count > 0)
+            sb.Append($" style=\"{string.Join("", slideStyles)}\"");
+        sb.AppendLine(">");
+
+        RenderLayoutPlaceholders(sb, slidePart, themeColors);
+        RenderSlideElements(sb, slidePart, slideNum, slideWidthEmu, slideHeightEmu, themeColors);
+
+        sb.AppendLine("    </div>");
+        sb.AppendLine("  </div>");
+        sb.AppendLine("</div>");
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Get total slide count.
+    /// </summary>
+    public int GetSlideCount()
+    {
+        return GetSlideParts().Count();
     }
 
     // ==================== CSS ====================

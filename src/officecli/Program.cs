@@ -122,6 +122,29 @@ closeCommand.SetAction(result => SafeRun(() =>
 
 rootCommand.Add(closeCommand);
 
+// ==================== watch command ====================
+var watchFileArg = new Argument<FileInfo>("file") { Description = "Office document path (.pptx)" };
+var watchPortOpt = new Option<int>("--port") { Description = "HTTP port for preview server" };
+watchPortOpt.DefaultValueFactory = _ => 18080;
+
+var watchCommand = new Command("watch", "Start a live preview server that auto-refreshes when the document changes");
+watchCommand.Add(watchFileArg);
+watchCommand.Add(watchPortOpt);
+
+watchCommand.SetAction(result => SafeRun(() =>
+{
+    var file = result.GetValue(watchFileArg)!;
+    var port = result.GetValue(watchPortOpt);
+
+    using var cts = new CancellationTokenSource();
+    Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+
+    using var watch = new WatchServer(file.FullName, port);
+    watch.RunAsync(cts.Token).GetAwaiter().GetResult();
+}));
+
+rootCommand.Add(watchCommand);
+
 // ==================== __resident-serve__ (internal, hidden) ====================
 var serveFileArg = new Argument<FileInfo>("file") { Description = "Office document path (required even with open/close mode)" };
 var serveCommand = new Command("__resident-serve__", "Internal: run resident server (do not call directly)");
@@ -335,7 +358,7 @@ setCommand.SetAction(result => SafeRun(() =>
         req.Command = "set";
         req.Args["path"] = path;
         req.Props = props;
-    })) return;
+    })) { WatchNotifier.NotifyIfWatching(file.FullName, path); return; }
 
     var properties = new Dictionary<string, string>();
     foreach (var prop in props ?? Array.Empty<string>())
@@ -354,6 +377,7 @@ setCommand.SetAction(result => SafeRun(() =>
         Console.WriteLine($"Updated {path}: {string.Join(", ", applied.Select(kv => $"{kv.Key}={kv.Value}"))}");
     if (unsupported.Count > 0)
         Console.Error.WriteLine(FormatUnsupported(unsupported));
+    WatchNotifier.NotifyIfWatching(file.FullName, path);
 }));
 
 rootCommand.Add(setCommand);
@@ -398,11 +422,12 @@ addCommand.SetAction(result => SafeRun(() =>
             req.Args["parent"] = parentPath;
             req.Args["from"] = from;
             if (index.HasValue) req.Args["index"] = index.Value.ToString();
-        })) return;
+        })) { WatchNotifier.NotifyIfWatching(file.FullName, parentPath); return; }
 
         using var handler = DocumentHandlerFactory.Open(file.FullName, editable: true);
         var resultPath = handler.CopyFrom(from, parentPath, index);
         Console.WriteLine($"Copied to {resultPath}");
+        WatchNotifier.NotifyIfWatching(file.FullName, parentPath);
     }
     else
     {
@@ -413,7 +438,7 @@ addCommand.SetAction(result => SafeRun(() =>
             req.Args["type"] = type!;
             if (index.HasValue) req.Args["index"] = index.Value.ToString();
             req.Props = props;
-        })) return;
+        })) { WatchNotifier.NotifyIfWatching(file.FullName, parentPath); return; }
 
         var properties = new Dictionary<string, string>();
         foreach (var prop in props ?? Array.Empty<string>())
@@ -428,6 +453,7 @@ addCommand.SetAction(result => SafeRun(() =>
         using var handler = DocumentHandlerFactory.Open(file.FullName, editable: true);
         var resultPath = handler.Add(parentPath, type!, index, properties);
         Console.WriteLine($"Added {type} at {resultPath}");
+        WatchNotifier.NotifyIfWatching(file.FullName, parentPath);
     }
 }));
 
@@ -450,11 +476,12 @@ removeCommand.SetAction(result => SafeRun(() =>
     {
         req.Command = "remove";
         req.Args["path"] = path;
-    })) return;
+    })) { WatchNotifier.NotifyIfWatching(file.FullName, path); return; }
 
     using var handler = DocumentHandlerFactory.Open(file.FullName, editable: true);
     handler.Remove(path);
     Console.WriteLine($"Removed {path}");
+    WatchNotifier.NotifyIfWatching(file.FullName, path);
 }));
 
 rootCommand.Add(removeCommand);
@@ -484,11 +511,12 @@ moveCommand.SetAction(result => SafeRun(() =>
         req.Args["path"] = path;
         if (to != null) req.Args["to"] = to;
         if (index.HasValue) req.Args["index"] = index.Value.ToString();
-    })) return;
+    })) { WatchNotifier.NotifyIfWatching(file.FullName, path); return; }
 
     using var handler = DocumentHandlerFactory.Open(file.FullName, editable: true);
     var resultPath = handler.Move(path, to, index);
     Console.WriteLine($"Moved to {resultPath}");
+    WatchNotifier.NotifyIfWatching(file.FullName, path);
 }));
 
 rootCommand.Add(moveCommand);
@@ -564,12 +592,13 @@ rawSetCommand.SetAction(result => SafeRun(() =>
         req.Args["xpath"] = xpath;
         req.Args["action"] = action;
         if (xml != null) req.Args["xml"] = xml;
-    })) return;
+    })) { WatchNotifier.NotifyIfWatching(file.FullName, partPath); return; }
 
     using var handler = DocumentHandlerFactory.Open(file.FullName, editable: true);
     var errorsBefore = handler.Validate().Select(e => e.Description).ToHashSet();
     handler.RawSet(partPath, xpath, action, xml);
     ReportNewErrors(handler, errorsBefore);
+    WatchNotifier.NotifyIfWatching(file.FullName, partPath);
 }));
 
 rootCommand.Add(rawSetCommand);
@@ -594,13 +623,14 @@ addPartCommand.SetAction(result => SafeRun(() =>
         req.Command = "add-part";
         req.Args["parent"] = parent;
         req.Args["type"] = type;
-    })) return;
+    })) { WatchNotifier.NotifyIfWatching(file, parent); return; }
 
     using var handler = DocumentHandlerFactory.Open(file, editable: true);
     var errorsBefore = handler.Validate().Select(e => e.Description).ToHashSet();
     var (relId, partPath) = handler.AddPart(parent, type);
     Console.WriteLine($"Created {type} part: relId={relId} path={partPath}");
     ReportNewErrors(handler, errorsBefore);
+    WatchNotifier.NotifyIfWatching(file, parent);
 }));
 
 rootCommand.Add(addPartCommand);
