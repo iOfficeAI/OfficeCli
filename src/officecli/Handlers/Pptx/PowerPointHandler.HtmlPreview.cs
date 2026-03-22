@@ -507,13 +507,23 @@ public partial class PowerPointHandler
         if (transforms.Count > 0)
             styles.Add($"transform:{string.Join(" ", transforms)}");
 
-        // Geometry: preset or custom
+        // Geometry: preset or custom — track clip-path separately to avoid clipping text
+        string clipPathCss = "";
+        string borderRadiusCss = "";
         var presetGeom = shape.ShapeProperties?.GetFirstChild<Drawing.PresetGeometry>();
         if (presetGeom?.Preset?.HasValue == true)
         {
             var geomCss = PresetGeometryToCss(presetGeom.Preset!.InnerText!);
             if (!string.IsNullOrEmpty(geomCss))
-                styles.Add(geomCss);
+            {
+                if (geomCss.StartsWith("clip-path:"))
+                    clipPathCss = geomCss;
+                else
+                {
+                    styles.Add(geomCss);
+                    borderRadiusCss = geomCss;
+                }
+            }
         }
         else
         {
@@ -523,7 +533,7 @@ public partial class PowerPointHandler
             {
                 var clipPath = CustomGeometryToClipPath(custGeom);
                 if (!string.IsNullOrEmpty(clipPath))
-                    styles.Add(clipPath);
+                    clipPathCss = clipPath;
             }
         }
 
@@ -590,12 +600,47 @@ public partial class PowerPointHandler
             || shape.ShapeProperties?.GetFirstChild<Drawing.GradientFill>() != null
             || shape.ShapeProperties?.GetFirstChild<Drawing.BlipFill>() != null;
         var shapeClass = hasFillBg ? "shape has-fill" : "shape";
-        sb.Append($"    <div class=\"{shapeClass}\" style=\"{string.Join(";", styles)}\">");
+
+        if (!string.IsNullOrEmpty(clipPathCss))
+        {
+            // For clip-path shapes: move fill to a clipped background layer, keep text unclipped
+            // Extract fill-related styles for the clipped background layer
+            var fillStyles = new List<string>();
+            var outerStyles = new List<string>();
+            foreach (var s in styles)
+            {
+                if (s.StartsWith("background:") || s.StartsWith("background-image:"))
+                    fillStyles.Add(s);
+                else
+                    outerStyles.Add(s);
+            }
+            sb.Append($"    <div class=\"{shapeClass}\" style=\"{string.Join(";", outerStyles)}\">");
+            if (fillStyles.Count > 0)
+                sb.Append($"<div style=\"position:absolute;inset:0;{clipPathCss};{string.Join(";", fillStyles)}\"></div>");
+        }
+        else
+        {
+            sb.Append($"    <div class=\"{shapeClass}\" style=\"{string.Join(";", styles)}\">");
+        }
 
         // Text content
         if (shape.TextBody != null)
         {
-            sb.Append($"<div class=\"shape-text valign-{valign}\">");
+            // Counter-flip text so it remains readable when shape is flipped
+            var flipStyle = "";
+            var isFlipH = xfrm?.HorizontalFlip?.Value == true;
+            var isFlipV = xfrm?.VerticalFlip?.Value == true;
+            if (isFlipH && isFlipV)
+                flipStyle = "transform:scale(-1,-1);";
+            else if (isFlipH)
+                flipStyle = "transform:scaleX(-1);";
+            else if (isFlipV)
+                flipStyle = "transform:scaleY(-1);";
+
+            var textStyle = !string.IsNullOrEmpty(flipStyle) || !string.IsNullOrEmpty(clipPathCss)
+                ? $" style=\"{flipStyle}{(string.IsNullOrEmpty(clipPathCss) ? "" : "position:relative;")}\""
+                : "";
+            sb.Append($"<div class=\"shape-text valign-{valign}\"{textStyle}>");
             RenderTextBody(sb, shape.TextBody, themeColors);
             sb.Append("</div>");
         }
