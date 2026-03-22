@@ -1153,6 +1153,14 @@ public partial class PowerPointHandler
         {
             RenderRadarChartSvg(sb, seriesList, categories, seriesColors, svgW, chartSvgH);
         }
+        else if (chartType == "bubble")
+        {
+            RenderBubbleChartSvg(sb, seriesList, categories, seriesColors, margin.left, margin.top, plotW, plotH);
+        }
+        else if (chartType == "stock")
+        {
+            RenderStockChartSvg(sb, seriesList, categories, seriesColors, margin.left, margin.top, plotW, plotH);
+        }
         else if (chartType.Contains("line") || chartType == "scatter")
         {
             RenderLineChartSvg(sb, seriesList, categories, seriesColors, margin.left, margin.top, plotW, plotH);
@@ -1576,6 +1584,121 @@ public partial class PowerPointHandler
             var ly = cy + (r + 15) * Math.Sin(angle);
             var anchor = Math.Abs(Math.Cos(angle)) < 0.1 ? "middle" : (Math.Cos(angle) > 0 ? "start" : "end");
             sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{ly:0.#}\" fill=\"#999\" font-size=\"9\" text-anchor=\"{anchor}\" dominant-baseline=\"middle\">{HtmlEncode(label)}</text>");
+        }
+    }
+
+    private static void RenderBubbleChartSvg(StringBuilder sb, List<(string name, double[] values)> series,
+        string[] categories, List<string> colors, int ox, int oy, int pw, int ph)
+    {
+        // Bubble chart: X = category index, Y = value, size = value (simplified)
+        var allValues = series.SelectMany(s => s.values).ToArray();
+        if (allValues.Length == 0) return;
+        var maxVal = allValues.Max();
+        if (maxVal <= 0) maxVal = 1;
+        var catCount = Math.Max(categories.Length, series.Max(s => s.values.Length));
+        var maxRadius = Math.Min(pw, ph) * 0.08;
+
+        // Axis lines
+        sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy}\" x2=\"{ox}\" y2=\"{oy + ph}\" stroke=\"#555\" stroke-width=\"1\"/>");
+        sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy + ph}\" x2=\"{ox + pw}\" y2=\"{oy + ph}\" stroke=\"#555\" stroke-width=\"1\"/>");
+
+        for (int s = 0; s < series.Count; s++)
+        {
+            for (int c = 0; c < series[s].values.Length && c < catCount; c++)
+            {
+                var val = series[s].values[c];
+                var cx = ox + (catCount > 1 ? (double)pw * c / (catCount - 1) : pw / 2.0);
+                var cy = oy + ph - (val / maxVal) * ph;
+                var r = (val / maxVal) * maxRadius + 4;
+                sb.AppendLine($"        <circle cx=\"{cx:0.#}\" cy=\"{cy:0.#}\" r=\"{r:0.#}\" fill=\"{colors[s % colors.Count]}\" opacity=\"0.6\"/>");
+            }
+        }
+
+        // Category labels
+        for (int c = 0; c < catCount; c++)
+        {
+            var label = c < categories.Length ? categories[c] : "";
+            var lx = ox + (catCount > 1 ? (double)pw * c / (catCount - 1) : pw / 2.0);
+            sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{oy + ph + 14}\" fill=\"#999\" font-size=\"9\" text-anchor=\"middle\">{HtmlEncode(label)}</text>");
+        }
+
+        // Value axis labels
+        for (int t = 0; t <= 4; t++)
+        {
+            var val = maxVal * t / 4;
+            var label = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
+            var ty = oy + ph - (double)ph * t / 4;
+            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"#777\" font-size=\"8\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
+        }
+    }
+
+    private static void RenderStockChartSvg(StringBuilder sb, List<(string name, double[] values)> series,
+        string[] categories, List<string> colors, int ox, int oy, int pw, int ph)
+    {
+        // Stock chart: render as candlestick-like bars
+        // Typically 4 series: Open, High, Low, Close — or fewer
+        var allValues = series.SelectMany(s => s.values).ToArray();
+        if (allValues.Length == 0) return;
+        var maxVal = allValues.Max();
+        var minVal = allValues.Min();
+        if (maxVal <= minVal) { maxVal = minVal + 1; }
+        var range = maxVal - minVal;
+        var catCount = Math.Max(categories.Length, series.Max(s => s.values.Length));
+
+        // Axis lines
+        sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy}\" x2=\"{ox}\" y2=\"{oy + ph}\" stroke=\"#555\" stroke-width=\"1\"/>");
+        sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy + ph}\" x2=\"{ox + pw}\" y2=\"{oy + ph}\" stroke=\"#555\" stroke-width=\"1\"/>");
+
+        var groupW = (double)pw / Math.Max(catCount, 1);
+
+        if (series.Count >= 4)
+        {
+            // OHLC: Open, High, Low, Close
+            for (int c = 0; c < catCount; c++)
+            {
+                var open = c < series[0].values.Length ? series[0].values[c] : 0;
+                var high = c < series[1].values.Length ? series[1].values[c] : 0;
+                var low = c < series[2].values.Length ? series[2].values[c] : 0;
+                var close = c < series[3].values.Length ? series[3].values[c] : 0;
+                var cx = ox + c * groupW + groupW / 2;
+                var yHigh = oy + ph - ((high - minVal) / range) * ph;
+                var yLow = oy + ph - ((low - minVal) / range) * ph;
+                var yOpen = oy + ph - ((open - minVal) / range) * ph;
+                var yClose = oy + ph - ((close - minVal) / range) * ph;
+                var color = close >= open ? "#2ECC71" : "#E74C3C";
+                var barW = groupW * 0.5;
+
+                // High-Low line
+                sb.AppendLine($"        <line x1=\"{cx:0.#}\" y1=\"{yHigh:0.#}\" x2=\"{cx:0.#}\" y2=\"{yLow:0.#}\" stroke=\"{color}\" stroke-width=\"1.5\"/>");
+                // Open-Close body
+                var bodyTop = Math.Min(yOpen, yClose);
+                var bodyH = Math.Abs(yOpen - yClose);
+                if (bodyH < 1) bodyH = 1;
+                sb.AppendLine($"        <rect x=\"{cx - barW / 2:0.#}\" y=\"{bodyTop:0.#}\" width=\"{barW:0.#}\" height=\"{bodyH:0.#}\" fill=\"{color}\" opacity=\"0.85\"/>");
+            }
+        }
+        else
+        {
+            // Fallback: render as line chart
+            RenderLineChartSvg(sb, series, categories, colors, ox, oy, pw, ph);
+            return;
+        }
+
+        // Category labels
+        for (int c = 0; c < catCount; c++)
+        {
+            var label = c < categories.Length ? categories[c] : "";
+            var lx = ox + c * groupW + groupW / 2;
+            sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{oy + ph + 14}\" fill=\"#999\" font-size=\"9\" text-anchor=\"middle\">{HtmlEncode(label)}</text>");
+        }
+
+        // Value axis labels
+        for (int t = 0; t <= 4; t++)
+        {
+            var val = minVal + range * t / 4;
+            var label = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
+            var ty = oy + ph - (double)ph * t / 4;
+            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"#777\" font-size=\"8\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
         }
     }
 
