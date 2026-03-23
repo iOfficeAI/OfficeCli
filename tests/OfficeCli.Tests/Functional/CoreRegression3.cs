@@ -338,6 +338,45 @@ public class CoreRegression3 : IDisposable
             "Negative dimensions should be rejected by ParseEmu");
     }
 
+    /// Bug #222b — ParseEmu: negative positions (x, y) should be allowed
+    /// Shapes can be placed off-screen with negative x/y values.
+    [Fact]
+    public void Bug222b_ParseEmu_NegativePositionsAllowed()
+    {
+        BlankDocCreator.Create(_pptxPath);
+        using var pptx = new PowerPointHandler(_pptxPath, editable: true);
+        pptx.Add("/", "slide", null, new());
+
+        // Add shape with negative x — should NOT throw
+        pptx.Add("/slide[1]", "shape", null, new()
+        {
+            ["text"] = "OffScreen",
+            ["x"] = "-10cm",
+            ["y"] = "-5cm",
+            ["width"] = "15cm",
+            ["height"] = "10cm"
+        });
+
+        var node = pptx.Get("/slide[1]/shape[1]");
+        node.Should().NotBeNull();
+        node!.Format["x"].Should().Be("-10cm");
+        node.Format["y"].Should().Be("-5cm");
+
+        // Set negative position on existing shape — should NOT throw
+        pptx.Set("/slide[1]/shape[1]", new() { ["x"] = "-3cm", ["y"] = "-2cm" });
+        node = pptx.Get("/slide[1]/shape[1]");
+        node!.Format["x"].Should().Be("-3cm");
+        node.Format["y"].Should().Be("-2cm");
+
+        // Set negative width — SHOULD throw
+        var actW = () => pptx.Set("/slide[1]/shape[1]", new() { ["width"] = "-5cm" });
+        actW.Should().Throw<Exception>("Negative width should be rejected");
+
+        // Set negative height — SHOULD throw
+        var actH = () => pptx.Set("/slide[1]/shape[1]", new() { ["height"] = "-3cm" });
+        actH.Should().Throw<Exception>("Negative height should be rejected");
+    }
+
     /// Bug #223 — ParseEmu: empty unit suffix causes crash
     /// File: WordHandler.ImageHelpers.cs, line 22
     /// Input "cm" (unit only, no number) → value[..^2] = "" → double.Parse("") crash.

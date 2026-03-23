@@ -13,8 +13,9 @@ namespace OfficeCli.Core;
 public static class EmuConverter
 {
     /// <summary>
-    /// Parse a dimension string into EMU (long).
+    /// Parse a dimension/position string into EMU (long).
     /// Supported formats: "914400" (raw EMU), "2.54cm", "1in", "72pt", "96px".
+    /// Negative values are allowed (for positions like x, y).
     /// Throws ArgumentException on invalid input.
     /// </summary>
     public static long ParseEmu(string value)
@@ -52,9 +53,6 @@ public static class EmuConverter
             if (!long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out result))
                 throw new ArgumentException($"Invalid EMU value '{value}'. Expected a number with optional unit suffix (cm, in, pt, px).");
         }
-
-        if (result < 0)
-            throw new ArgumentException($"Negative dimensions are not allowed: '{value}'.");
 
         return result;
     }

@@ -362,6 +362,98 @@ public partial class PowerPointHandler
     }
 
     /// <summary>
+    /// Find all 3D model AlternateContent elements in a shape tree.
+    /// </summary>
+    private static List<OpenXmlElement> GetModel3DElements(ShapeTree shapeTree)
+    {
+        return shapeTree.ChildElements
+            .Where(e => e.LocalName == "AlternateContent" &&
+                   e.Descendants().Any(d => d.LocalName == "model3d"))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Build a DocumentNode from a 3D model AlternateContent element.
+    /// </summary>
+    private DocumentNode Model3DToNode(OpenXmlElement acElement, int slideNum, int modelIdx)
+    {
+        var node = new DocumentNode
+        {
+            Path = $"/slide[{slideNum}]/model3d[{modelIdx}]",
+            Type = "model3d"
+        };
+
+        // Navigate: mc:Choice > p:graphicFrame (or p:sp for legacy)
+        var choice = acElement.ChildElements.FirstOrDefault(e => e.LocalName == "Choice");
+        var gf = choice?.ChildElements.FirstOrDefault(e => e.LocalName == "graphicFrame")
+              ?? choice?.ChildElements.FirstOrDefault(e => e.LocalName == "sp");
+
+        // Name from cNvPr
+        var nvGfPr = gf?.ChildElements.FirstOrDefault(e => e.LocalName == "nvGraphicFramePr")
+                  ?? gf?.ChildElements.FirstOrDefault(e => e.LocalName == "nvSpPr");
+        var cNvPr = nvGfPr?.ChildElements.FirstOrDefault(e => e.LocalName == "cNvPr");
+        if (cNvPr != null)
+        {
+            var nameAttr = cNvPr.GetAttribute("name", "");
+            if (!string.IsNullOrEmpty(nameAttr.Value))
+                node.Format["name"] = nameAttr.Value;
+        }
+
+        // Position/size from xfrm (graphicFrame level) or spPr > xfrm
+        var xfrm = gf?.ChildElements.FirstOrDefault(e => e.LocalName == "xfrm");
+        if (xfrm == null)
+        {
+            var spPr = gf?.ChildElements.FirstOrDefault(e => e.LocalName == "spPr");
+            xfrm = spPr?.ChildElements.FirstOrDefault(e => e.LocalName == "xfrm");
+        }
+        if (xfrm != null)
+        {
+            var off = xfrm.ChildElements.FirstOrDefault(e => e.LocalName == "off");
+            var ext = xfrm.ChildElements.FirstOrDefault(e => e.LocalName == "ext");
+            if (off != null)
+            {
+                var xAttr = off.GetAttribute("x", "");
+                var yAttr = off.GetAttribute("y", "");
+                if (!string.IsNullOrEmpty(xAttr.Value) && long.TryParse(xAttr.Value, out var xVal))
+                    node.Format["x"] = FormatEmu(xVal);
+                if (!string.IsNullOrEmpty(yAttr.Value) && long.TryParse(yAttr.Value, out var yVal))
+                    node.Format["y"] = FormatEmu(yVal);
+            }
+            if (ext != null)
+            {
+                var cxAttr = ext.GetAttribute("cx", "");
+                var cyAttr = ext.GetAttribute("cy", "");
+                if (!string.IsNullOrEmpty(cxAttr.Value) && long.TryParse(cxAttr.Value, out var cxVal))
+                    node.Format["width"] = FormatEmu(cxVal);
+                if (!string.IsNullOrEmpty(cyAttr.Value) && long.TryParse(cyAttr.Value, out var cyVal))
+                    node.Format["height"] = FormatEmu(cyVal);
+            }
+        }
+
+        // Model3D-specific properties
+        var model3d = acElement.Descendants().FirstOrDefault(d => d.LocalName == "model3d");
+        if (model3d != null)
+        {
+            // Model rotation
+            var rot = model3d.Descendants().FirstOrDefault(d => d.LocalName == "rot");
+            if (rot != null)
+            {
+                var ax = rot.GetAttribute("ax", "").Value;
+                var ay = rot.GetAttribute("ay", "").Value;
+                var az = rot.GetAttribute("az", "").Value;
+                if (!string.IsNullOrEmpty(ax) || !string.IsNullOrEmpty(ay) || !string.IsNullOrEmpty(az))
+                {
+                    static string ToDeg(string val) =>
+                        !string.IsNullOrEmpty(val) && int.TryParse(val, out var v) ? (v / 60000.0).ToString("0.##") : "0";
+                    node.Format["rotation"] = $"{ToDeg(ax)},{ToDeg(ay)},{ToDeg(az)}";
+                }
+            }
+        }
+
+        return node;
+    }
+
+    /// <summary>
     /// Convert a SlideId value to 1-based slide number.
     /// </summary>
     private int SlideIdToNumber(uint sldId)
@@ -702,8 +794,12 @@ public partial class PowerPointHandler
         {
             case "x": offset.X = emu; return true;
             case "y": offset.Y = emu; return true;
-            case "width": extents.Cx = emu; return true;
-            case "height": extents.Cy = emu; return true;
+            case "width":
+                if (emu < 0) throw new ArgumentException($"Negative width is not allowed: '{value}'.");
+                extents.Cx = emu; return true;
+            case "height":
+                if (emu < 0) throw new ArgumentException($"Negative height is not allowed: '{value}'.");
+                extents.Cy = emu; return true;
             default: return false;
         }
     }
