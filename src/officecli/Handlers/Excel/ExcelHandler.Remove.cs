@@ -10,7 +10,7 @@ namespace OfficeCli.Handlers;
 
 public partial class ExcelHandler
 {
-    public void Remove(string path)
+    public string? Remove(string path)
     {
         path = NormalizeExcelPath(path);
         var segments = path.TrimStart('/').Split('/', 2);
@@ -61,7 +61,7 @@ public partial class ExcelHandler
             }
 
             workbook.Save();
-            return;
+            return null;
         }
 
         var cellRef = segments[1];
@@ -78,9 +78,10 @@ public partial class ExcelHandler
             sheetData.Elements<Row>()
                 .FirstOrDefault(r => r.RowIndex?.Value == (uint)rowIdx)
                 ?.Remove();
+            var affected = CollectFormulaCellsAffectedByRowDelete(worksheet, rowIdx);
             ShiftRowsUp(worksheet, rowIdx);
             SaveWorksheet(worksheet);
-            return;
+            return FormatFormulaWarning(affected);
         }
 
         // col[X] — true shift delete
@@ -88,9 +89,11 @@ public partial class ExcelHandler
         if (colMatch.Success)
         {
             var colName = colMatch.Groups[1].Value.ToUpperInvariant();
+            var deletedColIdx = ColumnNameToIndex(colName);
+            var affected = CollectFormulaCellsAffectedByColDelete(worksheet, deletedColIdx);
             ShiftColumnsLeft(worksheet, colName);
             SaveWorksheet(worksheet);
-            return;
+            return FormatFormulaWarning(affected);
         }
 
         // Single cell
@@ -98,6 +101,7 @@ public partial class ExcelHandler
             ?? throw new ArgumentException($"Cell {cellRef} not found");
         cell.Remove();
         SaveWorksheet(worksheet);
+        return null;
     }
 
     // ==================== Row shift ====================
@@ -373,6 +377,86 @@ public partial class ExcelHandler
             dn.Text = ShiftColLettersInText(dn.Text, sheetName, deletedColIdx);
         }
         GetWorkbook().Save();
+    }
+
+    // ==================== Formula impact detection ====================
+
+    /// <summary>
+    /// Find all cells with formulas that reference rows >= deletedRow (will shift or become #REF!).
+    /// Returns list of cell references like ["C3", "D5"].
+    /// </summary>
+    private List<string> CollectFormulaCellsAffectedByRowDelete(WorksheetPart worksheet, int deletedRow)
+    {
+        var affected = new List<string>();
+        var sheetData = GetSheet(worksheet).GetFirstChild<SheetData>();
+        if (sheetData == null) return affected;
+
+        foreach (var row in sheetData.Elements<Row>())
+        {
+            foreach (var cell in row.Elements<Cell>())
+            {
+                var formula = cell.CellFormula?.Text;
+                if (string.IsNullOrEmpty(formula)) continue;
+                // Formula references a row >= deletedRow
+                if (Regex.IsMatch(formula, $@"\$?[A-Z]+\$?({deletedRow}|[{deletedRow + 1}-9]\d*|\d{{2,}})", RegexOptions.IgnoreCase)
+                    || Regex.IsMatch(formula, $@"\$?[A-Z]+\$?[{deletedRow}-9]\d*", RegexOptions.IgnoreCase))
+                {
+                    // Simpler: any row number >= deletedRow in the formula
+                    if (FormulaReferencesRowOrAbove(formula, deletedRow))
+                        affected.Add(cell.CellReference?.Value ?? "?");
+                }
+            }
+        }
+        return affected;
+    }
+
+    private static bool FormulaReferencesRowOrAbove(string formula, int deletedRow)
+    {
+        foreach (Match m in Regex.Matches(formula, @"\$?[A-Z]+\$?(\d+)", RegexOptions.IgnoreCase))
+        {
+            if (int.TryParse(m.Groups[1].Value, out var row) && row >= deletedRow)
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Find all cells with formulas that reference columns >= deletedColIdx.
+    /// </summary>
+    private List<string> CollectFormulaCellsAffectedByColDelete(WorksheetPart worksheet, int deletedColIdx)
+    {
+        var affected = new List<string>();
+        var sheetData = GetSheet(worksheet).GetFirstChild<SheetData>();
+        if (sheetData == null) return affected;
+
+        foreach (var row in sheetData.Elements<Row>())
+        {
+            foreach (var cell in row.Elements<Cell>())
+            {
+                var formula = cell.CellFormula?.Text;
+                if (string.IsNullOrEmpty(formula)) continue;
+                if (FormulaReferencesColOrAbove(formula, deletedColIdx))
+                    affected.Add(cell.CellReference?.Value ?? "?");
+            }
+        }
+        return affected;
+    }
+
+    private static bool FormulaReferencesColOrAbove(string formula, int deletedColIdx)
+    {
+        foreach (Match m in Regex.Matches(formula, @"\$?([A-Z]+)\$?\d+", RegexOptions.IgnoreCase))
+        {
+            var colIdx = ColumnNameToIndex(m.Groups[1].Value.ToUpperInvariant());
+            if (colIdx >= deletedColIdx) return true;
+        }
+        return false;
+    }
+
+    private static string? FormatFormulaWarning(List<string> affected)
+    {
+        if (affected.Count == 0) return null;
+        var cells = string.Join(", ", affected);
+        return $"Warning: {affected.Count} formula cell(s) may reference shifted cells — verify: {cells}";
     }
 
     /// <summary>

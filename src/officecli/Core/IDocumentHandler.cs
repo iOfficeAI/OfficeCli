@@ -32,7 +32,10 @@ public interface IDocumentHandler : IDisposable
     /// </summary>
     List<string> Set(string path, Dictionary<string, string> properties);
     string Add(string parentPath, string type, int? index, Dictionary<string, string> properties);
-    void Remove(string path);
+    /// <summary>
+    /// Remove element at path. Returns an optional warning message (e.g. formula cells affected by shift).
+    /// </summary>
+    string? Remove(string path);
     string Move(string sourcePath, string? targetParentPath, int? index);
     string CopyFrom(string sourcePath, string targetParentPath, int? index);
 

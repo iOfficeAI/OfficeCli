@@ -556,8 +556,9 @@ static class CommandBuilder
             }, json)) { WatchNotifier.NotifyIfWatching(file.FullName, path); return; }
 
             using var handler = DocumentHandlerFactory.Open(file.FullName, editable: true);
-            handler.Remove(path);
+            var warning = handler.Remove(path);
             var message = $"Removed {path}";
+            if (warning != null) message += $"\n{warning}";
             if (json) Console.WriteLine(OutputFormatter.WrapEnvelopeText(message));
             else Console.WriteLine(message);
             WatchNotifier.NotifyIfWatching(file.FullName, path);
@@ -856,6 +857,8 @@ static class CommandBuilder
                 }
             }
             PrintBatchResults(batchResults, json);
+            if (batchResults.Any(r => r.Success))
+                WatchNotifier.NotifyIfWatching(file.FullName);
             if (batchResults.Any(r => !r.Success))
                 throw new InvalidOperationException($"Batch completed with {batchResults.Count(r => !r.Success)} error(s)");
         }, json); });
@@ -1041,8 +1044,10 @@ static class CommandBuilder
             case "remove":
             {
                 var path = item.Path ?? "/";
-                handler.Remove(path);
-                return $"Removed {path}";
+                var warning = handler.Remove(path);
+                var msg = $"Removed {path}";
+                if (warning != null) msg += $"\n{warning}";
+                return msg;
             }
             case "move":
             {
@@ -1055,14 +1060,7 @@ static class CommandBuilder
                 var mode = item.Mode ?? "text";
                 if (mode.ToLowerInvariant() is "html" or "h" && handler is OfficeCli.Handlers.PowerPointHandler pptH)
                 {
-                    var html = pptH.ViewAsHtml();
-                    if (item.GetArg("browser") == "true")
-                    {
-                        var htmlPath = Path.Combine(Path.GetTempPath(), $"officecli_preview_{DateTime.Now:HHmmss}.html");
-                        File.WriteAllText(htmlPath, html);
-                        return htmlPath;
-                    }
-                    return html;
+                    return pptH.ViewAsHtml();
                 }
                 return mode.ToLowerInvariant() switch
                 {

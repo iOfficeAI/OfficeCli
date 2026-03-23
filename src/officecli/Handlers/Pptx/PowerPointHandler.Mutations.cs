@@ -14,7 +14,7 @@ namespace OfficeCli.Handlers;
 
 public partial class PowerPointHandler
 {
-    public void Remove(string path)
+    public string? Remove(string path)
     {
         var slideMatch = Regex.Match(path, @"^/slide\[(\d+)\](?:/(\w+)\[(\d+)\])?$");
         if (!slideMatch.Success)
@@ -42,7 +42,7 @@ public partial class PowerPointHandler
             if (relId != null)
                 presentationPart.DeletePart(presentationPart.GetPartById(relId));
             presentation.Save();
-            return;
+            return null;
         }
 
         // Remove element from slide
@@ -159,7 +159,7 @@ public partial class PowerPointHandler
                         try { slidePart.DeletePart(relId); } catch { }
                     }
                     GetSlide(slidePart).Save();
-                    return;
+                    return null;
                 }
             }
             zmAc.Remove();
@@ -170,6 +170,7 @@ public partial class PowerPointHandler
         }
 
         GetSlide(slidePart).Save();
+        return null;
     }
 
     public string Move(string sourcePath, string? targetParentPath, int? index)

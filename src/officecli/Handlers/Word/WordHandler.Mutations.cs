@@ -15,14 +15,14 @@ namespace OfficeCli.Handlers;
 
 public partial class WordHandler
 {
-    public void Remove(string path)
+    public string? Remove(string path)
     {
         // Handle /watermark removal
         if (path.Equals("/watermark", StringComparison.OrdinalIgnoreCase))
         {
             RemoveWatermarkHeaders();
             _doc.MainDocumentPart?.Document?.Save();
-            return;
+            return null;
         }
 
         var parts = ParsePath(path);
@@ -31,6 +31,7 @@ public partial class WordHandler
 
         element.Remove();
         _doc.MainDocumentPart?.Document?.Save();
+        return null;
     }
 
     public string Move(string sourcePath, string? targetParentPath, int? index)
