@@ -8,22 +8,28 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
           - rid: osx-arm64
             name: officecli-mac-arm64
+            os: macos-latest
           - rid: osx-x64
             name: officecli-mac-x64
+            os: macos-latest
           - rid: linux-x64
             name: officecli-linux-x64
+            os: ubuntu-latest
           - rid: linux-arm64
             name: officecli-linux-arm64
+            os: ubuntu-latest
           - rid: win-x64
             name: officecli-win-x64.exe
+            os: ubuntu-latest
           - rid: win-arm64
             name: officecli-win-arm64.exe
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
@@ -57,6 +63,10 @@ jobs:
           else
             mv publish/officecli publish/${{ matrix.name }}
           fi
+
+      - name: Ad-hoc codesign (macOS)
+        if: startsWith(matrix.rid, 'osx-')
+        run: codesign -s - -f publish/${{ matrix.name }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

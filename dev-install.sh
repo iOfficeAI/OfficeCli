@@ -49,6 +49,12 @@ cp "$TMPDIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
 chmod +x "$INSTALL_DIR/$BINARY_NAME"
 rm -rf "$TMPDIR"
 
+# macOS: remove quarantine flag and ad-hoc codesign (required by AppleSystemPolicy)
+if [ "$(uname -s)" = "Darwin" ]; then
+    xattr -d com.apple.quarantine "$INSTALL_DIR/$BINARY_NAME" 2>/dev/null || true
+    codesign -s - -f "$INSTALL_DIR/$BINARY_NAME" 2>/dev/null || true
+fi
+
 # Hint if not in PATH
 case ":$PATH:" in
     *":$INSTALL_DIR:"*) ;;

@@ -54,6 +54,11 @@ build_config() {
         else
             cp "$TMPDIR/officecli" "$OUTPUT/$NAME"
         fi
+
+        # Ad-hoc codesign on macOS (required by AppleSystemPolicy)
+        if [ "$(uname -s)" = "Darwin" ] && [[ "$RID" == osx-* ]]; then
+            codesign -s - -f "$OUTPUT/$NAME" 2>/dev/null || true
+        fi
         cp "$TMPDIR/officecli.pdb" "$OUTPUT/${NAME%.*}.pdb"
 
         rm -rf "$TMPDIR"
