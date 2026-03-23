@@ -85,8 +85,8 @@ public class MixedRegression22 : IDisposable
         _excelHandler.Remove("/Data");
 
         // The named range should be removed when the sheet it references is deleted
-        var act = () => _excelHandler.Get("/namedrange[MyRange]");
-        act.Should().Throw<ArgumentException>(
+        var result = _excelHandler.Get("/namedrange[MyRange]");
+        result.Should().BeNull(
             "named range referencing a deleted sheet should be automatically cleaned up");
     }
 

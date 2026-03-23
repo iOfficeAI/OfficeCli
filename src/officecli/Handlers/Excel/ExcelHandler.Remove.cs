@@ -16,6 +16,39 @@ public partial class ExcelHandler
         var segments = path.TrimStart('/').Split('/', 2);
         var sheetName = segments[0];
 
+        // Handle /namedrange[N] or /namedrange[Name] before sheet lookup
+        var namedRangeRemoveMatch = Regex.Match(sheetName, @"^namedrange\[(.+?)\]$", RegexOptions.IgnoreCase);
+        if (namedRangeRemoveMatch.Success)
+        {
+            var selector = namedRangeRemoveMatch.Groups[1].Value;
+            var workbook = GetWorkbook();
+            var definedNames = workbook.GetFirstChild<DefinedNames>();
+            if (definedNames == null)
+                throw new ArgumentException("No named ranges found in workbook");
+
+            var allDefs = definedNames.Elements<DefinedName>().ToList();
+            DefinedName? dn = null;
+
+            if (int.TryParse(selector, out var dnIndex))
+            {
+                if (dnIndex < 1 || dnIndex > allDefs.Count)
+                    throw new ArgumentException($"Named range index {dnIndex} out of range (1-{allDefs.Count})");
+                dn = allDefs[dnIndex - 1];
+            }
+            else
+            {
+                dn = allDefs.FirstOrDefault(d =>
+                    d.Name?.Value?.Equals(selector, StringComparison.OrdinalIgnoreCase) == true);
+                if (dn == null)
+                    throw new ArgumentException($"Named range '{selector}' not found");
+            }
+
+            dn.Remove();
+            if (!definedNames.HasChildren) definedNames.Remove();
+            workbook.Save();
+            return null;
+        }
+
         if (segments.Length == 1)
         {
             // Remove entire sheet
@@ -179,6 +212,65 @@ public partial class ExcelHandler
                 try { drawingsPart.DeletePart(drawingsPart.GetPartById(blipFill)); } catch { }
             }
             wsDrawing.Save();
+            SaveWorksheet(worksheet);
+            return null;
+        }
+
+        // comment[N] — remove comment from WorksheetCommentsPart
+        var commentRemoveMatch = Regex.Match(cellRef, @"^comment\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (commentRemoveMatch.Success)
+        {
+            var cmtIdx = int.Parse(commentRemoveMatch.Groups[1].Value);
+            var commentsPart = worksheet.WorksheetCommentsPart;
+            if (commentsPart?.Comments == null)
+                throw new ArgumentException($"No comments found in sheet");
+            var cmtList = commentsPart.Comments.GetFirstChild<CommentList>();
+            var comments = cmtList?.Elements<Comment>().ToList() ?? new();
+            if (cmtIdx < 1 || cmtIdx > comments.Count)
+                throw new ArgumentException($"Comment index {cmtIdx} out of range (1..{comments.Count})");
+            comments[cmtIdx - 1].Remove();
+            if (cmtList != null && !cmtList.HasChildren)
+            {
+                worksheet.DeletePart(commentsPart);
+            }
+            else
+            {
+                commentsPart.Comments.Save();
+            }
+            SaveWorksheet(worksheet);
+            return null;
+        }
+
+        // validation[N] — remove data validation
+        var validationRemoveMatch = Regex.Match(cellRef, @"^validation\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (validationRemoveMatch.Success)
+        {
+            var dvIdx = int.Parse(validationRemoveMatch.Groups[1].Value);
+            var dvs = GetSheet(worksheet).GetFirstChild<DataValidations>();
+            if (dvs == null)
+                throw new ArgumentException("No data validations found in sheet");
+            var dvList = dvs.Elements<DataValidation>().ToList();
+            if (dvIdx < 1 || dvIdx > dvList.Count)
+                throw new ArgumentException($"Validation index {dvIdx} out of range (1..{dvList.Count})");
+            dvList[dvIdx - 1].Remove();
+            if (!dvs.HasChildren)
+                dvs.Remove();
+            else
+                dvs.Count = (uint)dvs.Elements<DataValidation>().Count();
+            SaveWorksheet(worksheet);
+            return null;
+        }
+
+        // cf[N] — remove conditional formatting
+        var cfRemoveMatch = Regex.Match(cellRef, @"^cf\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (cfRemoveMatch.Success)
+        {
+            var cfIdx = int.Parse(cfRemoveMatch.Groups[1].Value);
+            var ws = GetSheet(worksheet);
+            var cfElements = ws.Elements<ConditionalFormatting>().ToList();
+            if (cfIdx < 1 || cfIdx > cfElements.Count)
+                throw new ArgumentException($"Conditional formatting index {cfIdx} out of range (1..{cfElements.Count})");
+            cfElements[cfIdx - 1].Remove();
             SaveWorksheet(worksheet);
             return null;
         }

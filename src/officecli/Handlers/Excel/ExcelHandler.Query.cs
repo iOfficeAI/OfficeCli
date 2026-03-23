@@ -47,7 +47,7 @@ public partial class ExcelHandler
             var workbook = GetWorkbook();
             var definedNames = workbook.GetFirstChild<DefinedNames>();
             if (definedNames == null)
-                throw new ArgumentException("No named ranges found in workbook");
+                return null!;
 
             var allDefs = definedNames.Elements<DefinedName>().ToList();
             DefinedName? dn = null;
@@ -56,7 +56,7 @@ public partial class ExcelHandler
             if (int.TryParse(selector, out dnIndex))
             {
                 if (dnIndex < 1 || dnIndex > allDefs.Count)
-                    throw new ArgumentException($"Named range index {dnIndex} out of range (1-{allDefs.Count})");
+                    return null!;
                 dn = allDefs[dnIndex - 1];
             }
             else
@@ -64,7 +64,7 @@ public partial class ExcelHandler
                 dn = allDefs.FirstOrDefault(d =>
                     d.Name?.Value?.Equals(selector, StringComparison.OrdinalIgnoreCase) == true);
                 if (dn == null)
-                    throw new ArgumentException($"Named range '{selector}' not found");
+                    return null!;
                 dnIndex = allDefs.IndexOf(dn) + 1;
             }
 
@@ -253,11 +253,11 @@ public partial class ExcelHandler
             var dvIdx = int.Parse(validationMatch.Groups[1].Value);
             var dvs = GetSheet(worksheet).GetFirstChild<DataValidations>();
             if (dvs == null)
-                throw new ArgumentException("No data validations found in sheet");
+                return null!;
 
             var dvList = dvs.Elements<DataValidation>().ToList();
             if (dvIdx < 1 || dvIdx > dvList.Count)
-                throw new ArgumentException($"Validation index {dvIdx} out of range (1-{dvList.Count})");
+                return null!;
 
             return DataValidationToNode(sheetNameFromPath, dvList[dvIdx - 1], dvIdx);
         }
@@ -334,7 +334,7 @@ public partial class ExcelHandler
             var cfIdx = int.Parse(cfMatch.Groups[1].Value);
             var cfElements = GetSheet(worksheet).Elements<ConditionalFormatting>().ToList();
             if (cfIdx < 1 || cfIdx > cfElements.Count)
-                throw new ArgumentException($"Conditional formatting index {cfIdx} out of range (1-{cfElements.Count})");
+                return null!;
 
             var cf = cfElements[cfIdx - 1];
             var cfNode = new DocumentNode { Path = path, Type = "conditionalFormatting" };
@@ -497,11 +497,12 @@ public partial class ExcelHandler
             var cmtIndex = int.Parse(commentMatch.Groups[1].Value);
             var commentsPart = worksheet.WorksheetCommentsPart;
             if (commentsPart?.Comments == null)
-                throw new ArgumentException($"No comments found in sheet: {sheetNameFromPath}");
+                return null!;
 
             var cmtList = commentsPart.Comments.GetFirstChild<CommentList>();
-            var cmtElement = cmtList?.Elements<Comment>().ElementAtOrDefault(cmtIndex - 1)
-                ?? throw new ArgumentException($"Comment [{cmtIndex}] not found");
+            var cmtElement = cmtList?.Elements<Comment>().ElementAtOrDefault(cmtIndex - 1);
+            if (cmtElement == null)
+                return null!;
 
             return CommentToNode(sheetNameFromPath, cmtElement, commentsPart.Comments, cmtIndex);
         }

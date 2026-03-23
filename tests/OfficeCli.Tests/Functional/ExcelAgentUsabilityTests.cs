@@ -70,28 +70,24 @@ public class ExcelAgentUsabilityTests : IDisposable
     // the requested index does not exist, so the JSON envelope carries success:false.
 
     [Fact]
-    public void Bug1_Get_CfOutOfRange_ShouldThrowNotReturnErrorNode()
+    public void Bug1_Get_CfOutOfRange_ShouldReturnNull()
     {
         // Arrange: sheet with no conditional formatting
         _handler.Add("/", "sheet", null, new() { ["name"] = "Sheet1" });
 
-        // Act + Assert: accessing cf[99] on a sheet with 0 CF rules should throw,
-        // NOT return a DocumentNode with Type == "error".
-        // Currently this test FAILS because Get returns an error node silently.
-        var act = () => _handler.Get("/Sheet1/cf[99]");
-        act.Should().Throw<ArgumentException>("because cf[N] not found should be an error, not a silent success");
+        // Act + Assert: accessing cf[99] on a sheet with 0 CF rules should return null
+        var result = _handler.Get("/Sheet1/cf[99]");
+        result.Should().BeNull("because cf[N] out of range should return null");
     }
 
     [Fact]
-    public void Bug1_Get_CfOutOfRange_ReturnsErrorNode_DocumentsBehavior()
+    public void Bug1_Get_CfOutOfRange_ReturnsNull_DocumentsBehavior()
     {
-        // This test previously documented the buggy behavior (returning an error node instead
-        // of throwing). Now that the bug is fixed, it verifies the corrected behavior.
+        // cf[N] out of range returns null consistently with remove-then-get pattern.
         _handler.Add("/", "sheet", null, new() { ["name"] = "Sheet1" });
 
-        // Fixed: now throws ArgumentException instead of returning an error node
-        var act = () => _handler.Get("/Sheet1/cf[99]");
-        act.Should().Throw<ArgumentException>("cf[N] not found now throws consistently with other not-found paths");
+        var result = _handler.Get("/Sheet1/cf[99]");
+        result.Should().BeNull("cf[N] not found returns null for consistency with removal workflow");
     }
 
     [Fact]
@@ -106,9 +102,9 @@ public class ExcelAgentUsabilityTests : IDisposable
             ["color"] = "FF0000"
         });
 
-        // Accessing cf[2] when only cf[1] exists should throw
-        var act = () => _handler.Get("/Sheet1/cf[2]");
-        act.Should().Throw<ArgumentException>("cf[2] does not exist when there is only one CF rule");
+        // Accessing cf[2] when only cf[1] exists should return null
+        var result = _handler.Get("/Sheet1/cf[2]");
+        result.Should().BeNull("cf[2] does not exist when there is only one CF rule");
     }
 
     // =========================================================

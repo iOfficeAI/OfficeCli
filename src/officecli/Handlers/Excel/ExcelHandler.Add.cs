@@ -128,21 +128,111 @@ public partial class ExcelHandler
                 }
                 if (properties.TryGetValue("type", out var cellType))
                 {
-                    cell.DataType = cellType.ToLowerInvariant() switch
+                    if (cellType.Equals("richtext", StringComparison.OrdinalIgnoreCase) ||
+                        cellType.Equals("rich", StringComparison.OrdinalIgnoreCase))
                     {
-                        "string" or "str" => new EnumValue<CellValues>(CellValues.String),
-                        "number" or "num" => null,
-                        "boolean" or "bool" => new EnumValue<CellValues>(CellValues.Boolean),
-                        _ => throw new ArgumentException($"Invalid cell 'type' value '{cellType}'. Valid types: string, number, boolean.")
-                    };
-                    // Convert boolean string values to OOXML-compliant 1/0
-                    if (cellType.Equals("boolean", StringComparison.OrdinalIgnoreCase) || cellType.Equals("bool", StringComparison.OrdinalIgnoreCase))
+                        // Build a SharedString rich text entry from run1=text:prop=val, run2=text, etc.
+                        var wbPart = _doc.WorkbookPart
+                            ?? throw new InvalidOperationException("Workbook not found");
+                        var sstPart = wbPart.GetPartsOfType<SharedStringTablePart>().FirstOrDefault()
+                            ?? wbPart.AddNewPart<SharedStringTablePart>();
+                        SharedStringTable sst;
+                        if (sstPart.SharedStringTable != null)
+                            sst = sstPart.SharedStringTable;
+                        else
+                        {
+                            sst = new SharedStringTable();
+                            sstPart.SharedStringTable = sst;
+                        }
+
+                        var ssi = new SharedStringItem();
+                        // Collect run1, run2, ... keys in order
+                        var runKeys = properties.Keys
+                            .Where(k => k.StartsWith("run", StringComparison.OrdinalIgnoreCase) && k.Length > 3 &&
+                                        int.TryParse(k.AsSpan(3), out _))
+                            .OrderBy(k => int.Parse(k.AsSpan(3).ToString()))
+                            .ToList();
+                        foreach (var runKey in runKeys)
+                        {
+                            var runVal = properties[runKey];
+                            // Format: "text:prop=val;prop=val" or just "text"
+                            var colonIdx = runVal.IndexOf(':');
+                            string runText;
+                            string[] runProps;
+                            if (colonIdx >= 0)
+                            {
+                                runText = runVal[..colonIdx];
+                                runProps = runVal[(colonIdx + 1)..].Split(';');
+                            }
+                            else
+                            {
+                                runText = runVal;
+                                runProps = [];
+                            }
+                            var run = new Run();
+                            var rp = new RunProperties();
+                            foreach (var prop in runProps)
+                            {
+                                var eqIdx = prop.IndexOf('=');
+                                if (eqIdx < 0) continue;
+                                var pKey = prop[..eqIdx].Trim().ToLowerInvariant();
+                                var pVal = prop[(eqIdx + 1)..].Trim();
+                                switch (pKey)
+                                {
+                                    case "bold" when ParseHelpers.IsTruthy(pVal): rp.AppendChild(new Bold()); break;
+                                    case "italic" when ParseHelpers.IsTruthy(pVal): rp.AppendChild(new Italic()); break;
+                                    case "strike" when ParseHelpers.IsTruthy(pVal): rp.AppendChild(new Strike()); break;
+                                    case "underline": rp.AppendChild(new Underline()); break;
+                                    case "size" or "fontsize":
+                                        if (double.TryParse(pVal.TrimEnd('p', 't'), out var sz))
+                                            rp.AppendChild(new FontSize { Val = sz });
+                                        break;
+                                    case "color":
+                                        rp.AppendChild(new Color { Rgb = new HexBinaryValue(ParseHelpers.SanitizeColorForOoxml(pVal).Rgb) });
+                                        break;
+                                    case "font" or "fontname":
+                                        rp.AppendChild(new RunFont { Val = pVal });
+                                        break;
+                                }
+                            }
+                            if (rp.HasChildren) run.AppendChild(rp);
+                            run.AppendChild(new Text(runText) { Space = SpaceProcessingModeValues.Preserve });
+                            ssi.AppendChild(run);
+                        }
+
+                        if (!ssi.HasChildren)
+                        {
+                            // No runs defined, fall back to plain text
+                            var textVal = cell.CellValue?.Text ?? "";
+                            ssi.AppendChild(new Text(textVal) { Space = SpaceProcessingModeValues.Preserve });
+                        }
+
+                        sst.AppendChild(ssi);
+                        sst.Count = (uint)sst.Elements<SharedStringItem>().Count();
+                        sst.UniqueCount = sst.Count;
+
+                        var newIdx = sst.Elements<SharedStringItem>().Count() - 1;
+                        cell.CellValue = new CellValue(newIdx.ToString());
+                        cell.DataType = new EnumValue<CellValues>(CellValues.SharedString);
+                    }
+                    else
                     {
-                        var boolText = cell.CellValue?.Text?.Trim().ToLowerInvariant();
-                        if (boolText == "true" || boolText == "yes" || boolText == "1")
-                            cell.CellValue = new CellValue("1");
-                        else if (boolText == "false" || boolText == "no" || boolText == "0")
-                            cell.CellValue = new CellValue("0");
+                        cell.DataType = cellType.ToLowerInvariant() switch
+                        {
+                            "string" or "str" => new EnumValue<CellValues>(CellValues.String),
+                            "number" or "num" => null,
+                            "boolean" or "bool" => new EnumValue<CellValues>(CellValues.Boolean),
+                            _ => throw new ArgumentException($"Invalid cell 'type' value '{cellType}'. Valid types: string, number, boolean, richtext.")
+                        };
+                        // Convert boolean string values to OOXML-compliant 1/0
+                        if (cellType.Equals("boolean", StringComparison.OrdinalIgnoreCase) || cellType.Equals("bool", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var boolText = cell.CellValue?.Text?.Trim().ToLowerInvariant();
+                            if (boolText == "true" || boolText == "yes" || boolText == "1")
+                                cell.CellValue = new CellValue("1");
+                            else if (boolText == "false" || boolText == "no" || boolText == "0")
+                                cell.CellValue = new CellValue("0");
+                        }
                     }
                 }
                 if (properties.TryGetValue("clear", out _))

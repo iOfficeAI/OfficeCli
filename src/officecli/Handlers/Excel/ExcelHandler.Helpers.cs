@@ -367,10 +367,9 @@ public partial class ExcelHandler
                                 var stops = gf.Elements<GradientStop>().ToList();
                                 if (stops.Count >= 2)
                                 {
-                                    var c1 = stops[0].Color?.Rgb?.Value ?? "";
-                                    var c2 = stops[^1].Color?.Rgb?.Value ?? "";
+                                    var colorParts = string.Join(";", stops.Select(s => ParseHelpers.FormatHexColor(s.Color?.Rgb?.Value ?? "")));
                                     int deg = (int)(gf.Degree?.Value ?? 0);
-                                    node.Format["fill"] = $"gradient;{ParseHelpers.FormatHexColor(c1)};{ParseHelpers.FormatHexColor(c2)};{deg}";
+                                    node.Format["fill"] = $"gradient;{colorParts};{deg}";
                                 }
                             }
                             else
