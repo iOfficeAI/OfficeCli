@@ -26,6 +26,9 @@ public partial class ExcelHandler
     /// </summary>
     internal static string NormalizeExcelPath(string path)
     {
+        // Handle "/Sheet1!A1" — strip leading '/' when '!' is present so native notation is parsed correctly
+        if (path.StartsWith('/') && path.Contains('!'))
+            path = path[1..];
         if (path.StartsWith('/')) return path;
         var bang = path.IndexOf('!');
         if (bang > 0)
@@ -141,6 +144,17 @@ public partial class ExcelHandler
         return null;
     }
 
+    private ArgumentException SheetNotFoundException(string sheetName)
+    {
+        var available = GetWorksheets().Select(w => w.Name).ToList();
+        var availableStr = available.Count > 0
+            ? string.Join(", ", available)
+            : "(none)";
+        return new ArgumentException(
+            $"Sheet not found: \"{sheetName}\". Available sheets: [{availableStr}]. " +
+            $"Use DOM path \"/{available.FirstOrDefault() ?? "SheetName"}/A1\" or Excel notation \"{available.FirstOrDefault() ?? "SheetName"}!A1\".");
+    }
+
     private string GetCellDisplayValue(Cell cell)
     {
         var value = cell.CellValue?.Text ?? "";
@@ -155,13 +169,8 @@ public partial class ExcelHandler
             }
         }
 
-        // Formula cells without cached value: show the formula
-        if (string.IsNullOrEmpty(value) && cell.CellFormula != null
-            && !string.IsNullOrEmpty(cell.CellFormula.Text))
-        {
-            return $"={cell.CellFormula.Text}";
-        }
-
+        // Formula cells: Text is always the cached value (or "" if none).
+        // The formula itself is exposed via Format["formula"] in CellToNode.
         return value;
     }
 
@@ -186,7 +195,7 @@ public partial class ExcelHandler
             {
                 foreach (var cell in row.Elements<Cell>())
                 {
-                    rowNode.Children.Add(CellToNode(sheetName, cell));
+                    rowNode.Children.Add(CellToNode(sheetName, cell, worksheetPart));
                 }
             }
 
@@ -246,7 +255,23 @@ public partial class ExcelHandler
         };
 
         node.Format["type"] = type;
-        if (formula != null) node.Format["formula"] = formula;
+        if (formula != null)
+        {
+            node.Format["formula"] = formula;
+            // Expose cached value separately so callers know whether the formula has been evaluated
+            var rawCached = cell.CellValue?.Text;
+            if (!string.IsNullOrEmpty(rawCached))
+                node.Format["cachedValue"] = rawCached;
+            else
+                node.Format["uncalculated"] = true;
+        }
+        // Array formula readback — keys match Set input
+        if (cell.CellFormula?.FormulaType?.Value == CellFormulaValues.Array)
+        {
+            node.Format["arrayformula"] = true;
+            if (cell.CellFormula.Reference?.Value != null)
+                node.Format["arrayref"] = cell.CellFormula.Reference.Value;
+        }
         if (string.IsNullOrEmpty(value)) node.Format["empty"] = true;
 
         // Hyperlink readback
@@ -303,6 +328,18 @@ public partial class ExcelHandler
                             {
                                 var themeName = ParseHelpers.ExcelThemeIndexToName(font.Color.Theme.Value);
                                 if (themeName != null) node.Format["font.color"] = themeName;
+                            }
+                            // vertAlign (superscript/subscript) readback — dual keys like bold/italic
+                            var vertAlign = font.GetFirstChild<VerticalTextAlignment>();
+                            if (vertAlign?.Val?.Value == VerticalAlignmentRunValues.Superscript)
+                            {
+                                node.Format["font.superscript"] = true;
+                                node.Format["superscript"] = true;
+                            }
+                            else if (vertAlign?.Val?.Value == VerticalAlignmentRunValues.Subscript)
+                            {
+                                node.Format["font.subscript"] = true;
+                                node.Format["subscript"] = true;
                             }
                             if (font.FontSize?.Val?.Value != null)
                                 node.Format["font.size"] = $"{font.FontSize.Val.Value:0.##}pt";
@@ -444,6 +481,16 @@ public partial class ExcelHandler
                         }
                         node.Format["numberformat"] = fmtVal;
                     }
+
+                    // Protection readback — always output locked state when protection is set
+                    var prot = xf.Protection;
+                    if (xf.ApplyProtection?.Value == true && prot != null)
+                    {
+                        // Always output locked state so agent can see it
+                        node.Format["locked"] = prot.Locked?.Value ?? true;
+                        if (prot.Hidden?.Value == true)
+                            node.Format["formulahidden"] = true;
+                    }
                 }
             }
 
@@ -455,7 +502,58 @@ public partial class ExcelHandler
                     .FirstOrDefault(m => IsCellInMergeRange(cellRef, m.Reference?.Value));
                 if (mergeCell != null)
                 {
-                    node.Format["merge"] = mergeCell.Reference?.Value ?? "";
+                    var mergeRef = mergeCell.Reference?.Value ?? "";
+                    node.Format["merge"] = mergeRef;
+                    // Indicate if this cell is the top-left anchor of the merged range
+                    if (mergeRef.Split(':')[0].Equals(cellRef, StringComparison.OrdinalIgnoreCase))
+                        node.Format["mergeAnchor"] = true;
+                }
+            }
+        }
+
+        // Rich text (SST runs) readback
+        if (cell.DataType?.Value == CellValues.SharedString &&
+            int.TryParse(cell.CellValue?.Text, out var sstIdx2))
+        {
+            var sst2 = _doc.WorkbookPart?.GetPartsOfType<SharedStringTablePart>().FirstOrDefault();
+            var ssi2 = sst2?.SharedStringTable?.Elements<SharedStringItem>().ElementAtOrDefault(sstIdx2);
+            if (ssi2 != null)
+            {
+                var runs = ssi2.Elements<Run>().ToList();
+                if (runs.Count > 0)
+                {
+                    node.Format["richtext"] = true;
+                    node.ChildCount = runs.Count;
+                    int runI = 1;
+                    foreach (var run in runs)
+                    {
+                        var runNode = new DocumentNode
+                        {
+                            Path = $"/{sheetName}/{cellRef}/run[{runI}]",
+                            Type = "run",
+                            Text = run.Text?.Text ?? ""
+                        };
+                        var rp = run.RunProperties;
+                        if (rp != null)
+                        {
+                            if (rp.GetFirstChild<Bold>() != null) runNode.Format["bold"] = true;
+                            if (rp.GetFirstChild<Italic>() != null) runNode.Format["italic"] = true;
+                            if (rp.GetFirstChild<Strike>() != null) runNode.Format["strike"] = true;
+                            var ul = rp.GetFirstChild<Underline>();
+                            if (ul != null) runNode.Format["underline"] = ul.Val?.InnerText == "double" ? "double" : "single";
+                            var va = rp.GetFirstChild<VerticalTextAlignment>();
+                            if (va?.Val?.Value == VerticalAlignmentRunValues.Superscript) runNode.Format["superscript"] = true;
+                            if (va?.Val?.Value == VerticalAlignmentRunValues.Subscript) runNode.Format["subscript"] = true;
+                            if (rp.GetFirstChild<FontSize>()?.Val?.Value != null)
+                                runNode.Format["size"] = $"{rp.GetFirstChild<FontSize>()!.Val!.Value:0.##}pt";
+                            if (rp.GetFirstChild<Color>()?.Rgb?.Value != null)
+                                runNode.Format["color"] = ParseHelpers.FormatHexColor(rp.GetFirstChild<Color>()!.Rgb!.Value!);
+                            if (rp.GetFirstChild<RunFont>()?.Val?.Value != null)
+                                runNode.Format["font"] = rp.GetFirstChild<RunFont>()!.Val!.Value!;
+                        }
+                        node.Children.Add(runNode);
+                        runI++;
+                    }
                 }
             }
         }
@@ -476,7 +574,7 @@ public partial class ExcelHandler
             && cellColIdx >= ColumnNameToIndex(startCol) && cellColIdx <= ColumnNameToIndex(endCol);
     }
 
-    private DocumentNode GetCellRange(string sheetName, SheetData sheetData, string range, int depth)
+    private DocumentNode GetCellRange(string sheetName, SheetData sheetData, string range, int depth, WorksheetPart? part = null)
     {
         var parts = range.Split(':');
         if (parts.Length != 2)
@@ -484,6 +582,8 @@ public partial class ExcelHandler
 
         var (startCol, startRow) = ParseCellReference(parts[0]);
         var (endCol, endRow) = ParseCellReference(parts[1]);
+        var startColIdx = ColumnNameToIndex(startCol);
+        var endColIdx = ColumnNameToIndex(endCol);
 
         var node = new DocumentNode
         {
@@ -492,23 +592,55 @@ public partial class ExcelHandler
             Preview = range
         };
 
+        // Build lookup of existing cells so we can fill empty stubs for missing positions
+        var existingCells = new Dictionary<string, Cell>(StringComparer.OrdinalIgnoreCase);
         foreach (var row in sheetData.Elements<Row>())
         {
-            var rowIdx = row.RowIndex?.Value ?? 0;
+            var rowIdx = (int)(row.RowIndex?.Value ?? 0);
             if (rowIdx < startRow || rowIdx > endRow) continue;
-
             foreach (var cell in row.Elements<Cell>())
             {
-                var (colName, _) = ParseCellReference(cell.CellReference?.Value ?? "A1");
-                var colIdx = ColumnNameToIndex(colName);
-                if (colIdx < ColumnNameToIndex(startCol) || colIdx > ColumnNameToIndex(endCol)) continue;
+                if (cell.CellReference?.Value != null)
+                    existingCells[cell.CellReference.Value] = cell;
+            }
+        }
 
-                node.Children.Add(CellToNode(sheetName, cell));
+        // Enumerate every position in the range in row-major order,
+        // materializing empty stubs for positions that have no cell element.
+        for (int r = startRow; r <= endRow; r++)
+        {
+            for (int c = startColIdx; c <= endColIdx; c++)
+            {
+                var cellRef = $"{IndexToColumnName(c)}{r}";
+                if (existingCells.TryGetValue(cellRef, out var existingCell))
+                    node.Children.Add(CellToNode(sheetName, existingCell, part));
+                else
+                    node.Children.Add(new DocumentNode
+                    {
+                        Path = $"/{sheetName}/{cellRef}",
+                        Type = "cell",
+                        Text = "",
+                        Preview = cellRef,
+                        Format = { ["type"] = "Number", ["empty"] = true }
+                    });
             }
         }
 
         node.ChildCount = node.Children.Count;
         return node;
+    }
+
+    /// <summary>
+    /// Parse a cell value for sorting: numeric values sort as numbers, strings sort as strings.
+    /// Returns IComparable that handles mixed numeric/string comparison.
+    /// </summary>
+    private static IComparable ParseSortValue(string value)
+    {
+        if (string.IsNullOrEmpty(value)) return "";
+        if (double.TryParse(value, System.Globalization.NumberStyles.Any,
+            System.Globalization.CultureInfo.InvariantCulture, out var num))
+            return num;
+        return value;
     }
 
     private static Cell? FindCell(SheetData sheetData, string cellRef)

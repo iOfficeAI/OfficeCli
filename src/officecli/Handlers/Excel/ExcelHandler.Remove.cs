@@ -25,7 +25,7 @@ public partial class ExcelHandler
             var sheet = sheets?.Elements<Sheet>()
                 .FirstOrDefault(s => s.Name?.Value?.Equals(sheetName, StringComparison.OrdinalIgnoreCase) == true);
             if (sheet == null)
-                throw new ArgumentException($"Sheet not found: {sheetName}");
+                throw SheetNotFoundException(sheetName);
 
             var sheetCount = sheets!.Elements<Sheet>().Count();
             if (sheetCount <= 1)
@@ -66,7 +66,7 @@ public partial class ExcelHandler
 
         var cellRef = segments[1];
         var worksheet = FindWorksheet(sheetName)
-            ?? throw new ArgumentException($"Sheet not found: {sheetName}");
+            ?? throw SheetNotFoundException(sheetName);
         var sheetData = GetSheet(worksheet).GetFirstChild<SheetData>()
             ?? throw new ArgumentException("Sheet has no data");
 
@@ -94,6 +94,46 @@ public partial class ExcelHandler
             ShiftColumnsLeft(worksheet, colName);
             SaveWorksheet(worksheet);
             return FormatFormulaWarning(affected);
+        }
+
+        // rowbreak[N] / colbreak[N]
+        var rbRemoveMatch = Regex.Match(cellRef, @"^rowbreak\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (rbRemoveMatch.Success)
+        {
+            var rbIdx = int.Parse(rbRemoveMatch.Groups[1].Value);
+            var rowBreaks = GetSheet(worksheet).GetFirstChild<RowBreaks>();
+            var breaks = rowBreaks?.Elements<Break>().ToList() ?? new();
+            if (rbIdx >= 1 && rbIdx <= breaks.Count)
+            {
+                breaks[rbIdx - 1].Remove();
+                if (rowBreaks != null)
+                {
+                    rowBreaks.Count = (uint)rowBreaks.Elements<Break>().Count();
+                    rowBreaks.ManualBreakCount = rowBreaks.Count;
+                    if (rowBreaks.Count == 0) rowBreaks.Remove();
+                }
+            }
+            SaveWorksheet(worksheet);
+            return null;
+        }
+        var cbRemoveMatch = Regex.Match(cellRef, @"^colbreak\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (cbRemoveMatch.Success)
+        {
+            var cbIdx = int.Parse(cbRemoveMatch.Groups[1].Value);
+            var colBreaks = GetSheet(worksheet).GetFirstChild<ColumnBreaks>();
+            var breaks = colBreaks?.Elements<Break>().ToList() ?? new();
+            if (cbIdx >= 1 && cbIdx <= breaks.Count)
+            {
+                breaks[cbIdx - 1].Remove();
+                if (colBreaks != null)
+                {
+                    colBreaks.Count = (uint)colBreaks.Elements<Break>().Count();
+                    colBreaks.ManualBreakCount = colBreaks.Count;
+                    if (colBreaks.Count == 0) colBreaks.Remove();
+                }
+            }
+            SaveWorksheet(worksheet);
+            return null;
         }
 
         // Single cell
@@ -436,7 +476,7 @@ public partial class ExcelHandler
                 var min = (int)(col.Min?.Value ?? 0);
                 var max = (int)(col.Max?.Value ?? 0);
 
-                if (min >= deletedColIdx && max <= deletedColIdx)
+                if (min == deletedColIdx && max == deletedColIdx)
                 {
                     col.Remove();
                 }
@@ -558,7 +598,7 @@ public partial class ExcelHandler
     /// <summary>
     /// Update workbook-level named ranges after a row deletion.
     /// Handles both relative (A1) and absolute ($A$1) references.
-    /// Note: formula expressions inside named ranges are not updated.
+    /// Row numbers in named range formula text are shifted via regex replacement.
     /// </summary>
     private void ShiftNamedRangeRows(WorksheetPart worksheet, int deletedRow)
     {

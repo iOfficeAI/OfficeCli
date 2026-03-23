@@ -94,7 +94,7 @@ public partial class ExcelHandler
         var sheetNameFromPath = segments[0];
         var worksheet = FindWorksheet(sheetNameFromPath);
         if (worksheet == null)
-            throw new ArgumentException($"Sheet not found: {sheetNameFromPath}");
+            throw SheetNotFoundException(sheetNameFromPath);
 
         var data = GetSheet(worksheet).GetFirstChild<SheetData>();
         if (data == null)
@@ -136,6 +136,75 @@ public partial class ExcelHandler
                 sheetNode.Format["autoFilter"] = autoFilter.Reference.Value;
             }
 
+            // Sheet protection readback
+            var sheetProtection = ws.GetFirstChild<SheetProtection>();
+            if (sheetProtection?.Sheet?.Value == true)
+                sheetNode.Format["protect"] = true;
+
+            // Print settings readback
+            var pageSetup = ws.GetFirstChild<PageSetup>();
+            if (pageSetup != null)
+            {
+                if (pageSetup.Orientation?.HasValue == true)
+                    sheetNode.Format["orientation"] = pageSetup.Orientation.InnerText;
+                if (pageSetup.PaperSize?.HasValue == true)
+                    sheetNode.Format["paperSize"] = pageSetup.PaperSize.Value;
+                if (pageSetup.FitToWidth?.HasValue == true)
+                    sheetNode.Format["fitToPage"] = $"{pageSetup.FitToWidth.Value}x{pageSetup.FitToHeight?.Value ?? 1}";
+            }
+
+            // Print area readback
+            var workbook = GetWorkbook();
+            var allSheets = workbook.GetFirstChild<Sheets>()?.Elements<Sheet>().ToList();
+            var sheetIdx = allSheets?.FindIndex(s =>
+                s.Name?.Value?.Equals(sheetNameFromPath, StringComparison.OrdinalIgnoreCase) == true) ?? -1;
+            var printAreaDn = workbook.GetFirstChild<DefinedNames>()?.Elements<DefinedName>()
+                .FirstOrDefault(d => d.Name == "_xlnm.Print_Area" && d.LocalSheetId?.Value == (uint)sheetIdx);
+            if (printAreaDn != null)
+            {
+                // Strip "SheetName!" prefix so Get output can round-trip to Set input
+                var paText = printAreaDn.Text ?? "";
+                var bangIdx = paText.IndexOf('!');
+                if (bangIdx >= 0) paText = paText[(bangIdx + 1)..];
+                sheetNode.Format["printArea"] = paText;
+            }
+
+            // Header/Footer readback
+            var headerFooter = ws.GetFirstChild<HeaderFooter>();
+            if (headerFooter?.OddHeader?.Text != null)
+                sheetNode.Format["header"] = headerFooter.OddHeader.Text;
+            if (headerFooter?.OddFooter?.Text != null)
+                sheetNode.Format["footer"] = headerFooter.OddFooter.Text;
+
+            // Sort state readback
+            var sortState = ws.GetFirstChild<SortState>();
+            if (sortState != null)
+            {
+                var sortConditions = sortState.Elements<SortCondition>().ToList();
+                var sortDesc = string.Join(",", sortConditions.Select(sc =>
+                {
+                    var colRef = sc.Reference?.Value?.Split(':')[0] ?? "";
+                    var colName = Regex.Match(colRef, @"^([A-Z]+)").Groups[1].Value;
+                    var dir = sc.Descending?.Value == true ? "desc" : "asc";
+                    return $"{colName}:{dir}";
+                }));
+                sheetNode.Format["sort"] = sortDesc;
+            }
+
+            // Page breaks readback
+            var rowBreaks = ws.GetFirstChild<RowBreaks>();
+            if (rowBreaks != null && rowBreaks.Elements<Break>().Any())
+            {
+                var breaks = rowBreaks.Elements<Break>().Select(b => b.Id?.Value.ToString() ?? "").ToList();
+                sheetNode.Format["rowBreaks"] = string.Join(",", breaks);
+            }
+            var colBreaks = ws.GetFirstChild<ColumnBreaks>();
+            if (colBreaks != null && colBreaks.Elements<Break>().Any())
+            {
+                var cbreaks = colBreaks.Elements<Break>().Select(b => b.Id?.Value.ToString() ?? "").ToList();
+                sheetNode.Format["colBreaks"] = string.Join(",", cbreaks);
+            }
+
             if (depth > 0)
             {
                 sheetNode.Children = GetSheetChildNodes(sheetNameFromPath, data, depth, worksheet);
@@ -144,6 +213,38 @@ public partial class ExcelHandler
         }
 
         var cellRef = segments[1];
+
+        // Page break path: /Sheet1/rowbreak[N] or /Sheet1/colbreak[N]
+        var rbMatch = Regex.Match(cellRef, @"^rowbreak\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (rbMatch.Success)
+        {
+            var rbIdx = int.Parse(rbMatch.Groups[1].Value);
+            var rowBreaks = GetSheet(worksheet).GetFirstChild<RowBreaks>();
+            var breaks = rowBreaks?.Elements<Break>().ToList() ?? new();
+            if (rbIdx < 1 || rbIdx > breaks.Count)
+                throw new ArgumentException($"Row break index {rbIdx} out of range (1-{breaks.Count})");
+            var brk = breaks[rbIdx - 1];
+            return new DocumentNode
+            {
+                Path = path, Type = "rowbreak",
+                Format = { ["row"] = brk.Id?.Value ?? 0u, ["manual"] = brk.ManualPageBreak?.Value ?? false }
+            };
+        }
+        var cbMatch = Regex.Match(cellRef, @"^colbreak\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (cbMatch.Success)
+        {
+            var cbIdx = int.Parse(cbMatch.Groups[1].Value);
+            var colBreaks = GetSheet(worksheet).GetFirstChild<ColumnBreaks>();
+            var breaks = colBreaks?.Elements<Break>().ToList() ?? new();
+            if (cbIdx < 1 || cbIdx > breaks.Count)
+                throw new ArgumentException($"Column break index {cbIdx} out of range (1-{breaks.Count})");
+            var brk = breaks[cbIdx - 1];
+            return new DocumentNode
+            {
+                Path = path, Type = "colbreak",
+                Format = { ["col"] = brk.Id?.Value ?? 0u, ["manual"] = brk.ManualPageBreak?.Value ?? false }
+            };
+        }
 
         // Validation path: /Sheet1/validation[N]
         var validationMatch = Regex.Match(cellRef, @"^validation\[(\d+)\]$", RegexOptions.IgnoreCase);
@@ -183,6 +284,22 @@ public partial class ExcelHandler
                         colNode.Format["outlineLevel"] = col.OutlineLevel.Value;
                     if (col.Collapsed?.Value == true) colNode.Format["collapsed"] = true;
                 }
+            }
+            // Include cells in this column as children (non-empty rows only)
+            if (depth > 0)
+            {
+                foreach (var row in data.Elements<Row>().OrderBy(r => r.RowIndex?.Value ?? 0))
+                {
+                    var cell = row.Elements<Cell>().FirstOrDefault(c =>
+                    {
+                        if (c.CellReference?.Value == null) return false;
+                        var (cn, _) = ParseCellReference(c.CellReference.Value);
+                        return cn.Equals(colName, StringComparison.OrdinalIgnoreCase);
+                    });
+                    if (cell != null)
+                        colNode.Children.Add(CellToNode(sheetNameFromPath, cell, worksheet));
+                }
+                colNode.ChildCount = colNode.Children.Count;
             }
             return colNode;
         }
@@ -274,6 +391,54 @@ public partial class ExcelHandler
                     cfNode.Format["formula"] = formula.Text ?? "";
                     if (rule.FormatId?.Value != null)
                         cfNode.Format["dxfId"] = rule.FormatId.Value;
+                }
+
+                // Top/Bottom N
+                if (rule.Type?.Value == ConditionalFormatValues.Top10)
+                {
+                    cfNode.Format["cfType"] = "topN";
+                    if (rule.Rank?.HasValue == true) cfNode.Format["rank"] = rule.Rank.Value;
+                    if (rule.Bottom?.Value == true) cfNode.Format["bottom"] = true;
+                    if (rule.Percent?.Value == true) cfNode.Format["percent"] = true;
+                    if (rule.FormatId?.Value != null) cfNode.Format["dxfId"] = rule.FormatId.Value;
+                }
+
+                // Above/Below Average
+                if (rule.Type?.Value == ConditionalFormatValues.AboveAverage)
+                {
+                    cfNode.Format["cfType"] = "aboveAverage";
+                    if (rule.AboveAverage?.HasValue == true) cfNode.Format["aboveAverage"] = rule.AboveAverage.Value;
+                    if (rule.FormatId?.Value != null) cfNode.Format["dxfId"] = rule.FormatId.Value;
+                }
+
+                // Duplicate Values
+                if (rule.Type?.Value == ConditionalFormatValues.DuplicateValues)
+                {
+                    cfNode.Format["cfType"] = "duplicateValues";
+                    if (rule.FormatId?.Value != null) cfNode.Format["dxfId"] = rule.FormatId.Value;
+                }
+
+                // Unique Values
+                if (rule.Type?.Value == ConditionalFormatValues.UniqueValues)
+                {
+                    cfNode.Format["cfType"] = "uniqueValues";
+                    if (rule.FormatId?.Value != null) cfNode.Format["dxfId"] = rule.FormatId.Value;
+                }
+
+                // Contains Text
+                if (rule.Type?.Value == ConditionalFormatValues.ContainsText)
+                {
+                    cfNode.Format["cfType"] = "containsText";
+                    if (rule.Text?.HasValue == true) cfNode.Format["text"] = rule.Text.Value;
+                    if (rule.FormatId?.Value != null) cfNode.Format["dxfId"] = rule.FormatId.Value;
+                }
+
+                // Time Period (date occurring)
+                if (rule.Type?.Value == ConditionalFormatValues.TimePeriod)
+                {
+                    cfNode.Format["cfType"] = "timePeriod";
+                    if (rule.TimePeriod?.HasValue == true) cfNode.Format["period"] = rule.TimePeriod.InnerText;
+                    if (rule.FormatId?.Value != null) cfNode.Format["dxfId"] = rule.FormatId.Value;
                 }
             }
             return cfNode;
@@ -390,7 +555,7 @@ public partial class ExcelHandler
             var rangeParts = cellRef.Split(':');
             ParseCellReference(rangeParts[0]);
             if (rangeParts.Length > 1) ParseCellReference(rangeParts[1]);
-            return GetCellRange(sheetNameFromPath, data, cellRef, depth);
+            return GetCellRange(sheetNameFromPath, data, cellRef, depth, worksheet);
         }
         else
         {
