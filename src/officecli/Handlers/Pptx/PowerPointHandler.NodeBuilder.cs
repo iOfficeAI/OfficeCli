@@ -126,7 +126,12 @@ public partial class PowerPointHandler
         var tblPr = table.GetFirstChild<Drawing.TableProperties>();
         var tableStyleId = tblPr?.GetFirstChild<Drawing.TableStyleId>()?.InnerText;
         if (!string.IsNullOrEmpty(tableStyleId))
+        {
             node.Format["tableStyleId"] = tableStyleId;
+            var styleName = TableStyleGuidToName(tableStyleId);
+            if (styleName != null)
+                node.Format["style"] = styleName;
+        }
 
         // Position
         var offset = gf.Transform?.Offset;
@@ -1044,5 +1049,24 @@ public partial class PowerPointHandler
         }
 
         return sb.ToString().Trim();
+    }
+
+    private static readonly Dictionary<string, string> _tableStyleGuidToName = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["{073A0DAA-6AF3-43AB-8588-CEC1D06C72B9}"] = "medium1",
+        ["{F5AB1C69-6EDB-4FF4-983F-18BD219EF322}"] = "medium2",
+        ["{3B4B98B0-60AC-42C2-AFA5-B58CD77FA1E5}"] = "medium3",
+        ["{D7AC3CCA-C797-4891-BE02-D94E43425B78}"] = "medium4",
+        ["{9D7B26C5-4107-4FEC-AEDC-1716B250A1EF}"] = "light1",
+        ["{ED083AE6-46FA-4A59-8FB0-9F97EB10719F}"] = "light2",
+        ["{C083E6E3-FA7D-4D7B-A595-EF9225AFEA82}"] = "light3",
+        ["{E8034E78-7F5D-4C2E-B375-FC64B27BC917}"] = "dark1",
+        ["{125E5076-3810-47DD-B79F-674D7AD40C01}"] = "dark2",
+        ["{2D5ABB26-0587-4C30-8999-92F81FD0307C}"] = "none",
+    };
+
+    private static string? TableStyleGuidToName(string guid)
+    {
+        return _tableStyleGuidToName.TryGetValue(guid, out var name) ? name : null;
     }
 }
