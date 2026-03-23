@@ -188,12 +188,12 @@ public class ExcelProactiveBugTests : IDisposable
 /// <summary>
 /// PowerPoint shadow=true bug test — same pattern as the Excel fix.
 /// </summary>
-public class PptxProactiveBugTests : IDisposable
+public class PptxShadowBugTests : IDisposable
 {
     private readonly string _path;
     private PowerPointHandler _handler;
 
-    public PptxProactiveBugTests()
+    public PptxShadowBugTests()
     {
         _path = Path.Combine(Path.GetTempPath(), $"test_{Guid.NewGuid():N}.pptx");
         BlankDocCreator.Create(_path);

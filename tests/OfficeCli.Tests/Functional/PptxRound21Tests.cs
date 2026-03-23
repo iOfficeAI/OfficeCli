@@ -304,10 +304,10 @@ public class PptxRound21Tests : IDisposable
         // Remove notes
         handler.Remove("/slide[1]/notes");
 
-        // After removal, notes should be empty or the notes part should not exist
+        // After removal, notes should not exist (Get returns null)
         var after = handler.Get("/slide[1]/notes");
-        after.Text.Should().BeNullOrEmpty(
-            "After Remove(/slide[1]/notes), the notes text should be cleared");
+        after.Should().BeNull(
+            "After Remove(/slide[1]/notes), Get should return null");
     }
 
     [Fact]
@@ -326,7 +326,7 @@ public class PptxRound21Tests : IDisposable
         // Reopen and verify notes are gone
         using var handler2 = new PowerPointHandler(path, editable: false);
         var node = handler2.Get("/slide[1]/notes");
-        node.Text.Should().BeNullOrEmpty(
+        node.Should().BeNull(
             "Notes removal must persist after file is closed and reopened");
     }
 }

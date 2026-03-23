@@ -305,7 +305,7 @@ public class PptxFinalTests : IDisposable
         var node = handler.Get("/slide[1]");
         node!.Format.Should().ContainKey("transition");
         var transition = node.Format["transition"]?.ToString();
-        transition.Should().NotContain("-l",
+        transition.Should().NotBe("cover-l",
             "direction 'l' must be expanded to 'left' in cover transition readback");
         transition.Should().Be("cover-left",
             "cover-left roundtrip must return 'cover-left', not 'cover-l'");
