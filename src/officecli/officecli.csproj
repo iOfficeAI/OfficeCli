@@ -28,4 +28,8 @@
     <EmbeddedResource Include="Resources/preview.js" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="../../SKILL.md" LogicalName="OfficeCli.Resources.skill-officecli.md" />
+  </ItemGroup>
+
 </Project>

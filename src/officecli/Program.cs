@@ -49,6 +49,19 @@ if (args.Length == 1 && args[0] == "mcp-serve")
     return 0;
 }
 
+// Skills commands: officecli skills <target>
+if (args.Length >= 1 && args[0] == "skills")
+{
+    if (args.Length == 2)
+    {
+        OfficeCli.Core.SkillInstaller.Install(args[1]);
+        return 0;
+    }
+    Console.Error.WriteLine("Usage: officecli skills <target>     Install skills");
+    Console.Error.WriteLine("Targets: claude (Claude Code)");
+    return 1;
+}
+
 // Config command: officecli config <key> [value]
 if (args.Length >= 2 && args[0] == "config")
 {

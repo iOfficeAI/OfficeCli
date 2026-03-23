@@ -94,7 +94,10 @@ public static class McpServer
 
         try
         {
-            var result = ExecuteTool(name, args);
+            // Unified tool: route by "command" arg; legacy: route by tool name
+            var toolName = name == "officecli" && args.ValueKind == JsonValueKind.Object && args.TryGetProperty("command", out var cmd)
+                ? cmd.GetString() ?? name : name;
+            var result = ExecuteTool(toolName, args);
             return WriteJson(w =>
             {
                 w.WriteStartObject();
@@ -268,6 +271,94 @@ public static class McpServer
                 using var handler = DocumentHandlerFactory.Open(file);
                 return handler.Raw(part, null, null, null);
             }
+            case "help":
+            {
+                var format = Arg("format").ToLowerInvariant();
+                const string strategy = @"## Strategy
+Use view (outline/stats/issues) to understand the document first, then get/query to inspect details, then set/add/remove to modify.
+For 3+ mutations on the same file, use batch (one open/save cycle) instead of separate calls.
+Get output keys can be used directly as Set input keys (round-trip safe).
+Colors: FF0000, red, rgb(255,0,0), accent1. Sizes: 24pt. Positions: 2cm, 1in, 72pt, or raw EMU.
+
+";
+                var reference = format switch
+                {
+                    "xlsx" => @"# XLSX Reference
+
+## Add types
+sheet, row, cell, col, run (rich text in cell), shape, chart, picture, comment, namedrange, table, validation, pivottable, autofilter, pagebreak, colbreak
+cf (conditional formatting): set type= to databar|colorscale|iconset|formula|topn|aboveaverage|duplicatevalues|uniquevalues|containstext|dateoccurring
+
+## Cell properties (Set/Add)
+value, formula, arrayformula, type (string|number|boolean), clear, link
+bold, italic, strike, underline (true|single|double), superscript, subscript
+font.color (#FF0000), font.size (14pt), font.name (Calibri), fill (#4472C4)
+border.all (thin|medium|thick), border.left/right/top/bottom, border.color
+alignment.horizontal (left|center|right), alignment.vertical, alignment.wrapText
+numfmt (0%|#,##0.00|...), rotation (0-180), indent, shrinktofit
+locked (true|false), formulahidden (true|false)
+
+## Sheet properties (Set)
+name, freeze (A2|B3|none), zoom (75-200), tabcolor (#FF0000|none)
+autofilter (A1:F100|none), merge (A1:D1), protect (true|false), password
+printarea ($A$1:$D$10|none), orientation (landscape|portrait), papersize (1=Letter|9=A4)
+fittopage (1x2|true), header (&CPage &P), footer (&LConfidential), sort (A:asc,B:desc|none)
+
+## Run properties (Set /Sheet/A1/run[N])
+text, bold, italic, strike, underline, superscript, subscript, size, color, font
+
+## CF properties
+sqref/range, color (font), fill, bold, italic, strike, underline, border (thin|medium), numfmt
+topn: rank, bottom (true), percent (true)
+aboveaverage: below (true)
+containstext: text
+dateoccurring: period (today|yesterday|tomorrow|last7days|thisweek|lastweek|thismonth|lastmonth)",
+
+                    "pptx" => @"# PPTX Reference
+
+## Add types
+slide, shape, textbox, picture, chart, table, row, cell, paragraph, run
+group, connector, animation, video, equation, notes, zoom
+
+## Shape properties (Set/Add)
+text, bold, italic, underline, strike, superscript, subscript
+color (#FF0000), font (Arial), size (24pt), align (left|center|right)
+fill (#4472C4|gradient), outline (#000000), rotation (45)
+x, y, width, height (in cm/in/pt/emu)
+shadow, glow, reflection, softedge, effect3d
+link (https://...), alt (alt text)
+
+## Slide properties (Set)
+layout, background, transition, notes",
+
+                    "docx" => @"# DOCX Reference
+
+## Add types
+paragraph, run, table, row, cell, picture, hyperlink, section
+style, chart, equation, footnote, endnote, bookmark, comment
+toc, pagebreak, header, footer, watermark, sdt
+
+## Run properties (Set/Add)
+text, bold, italic, underline, strike, superscript, subscript
+color (#FF0000), font (Arial), size (14pt), highlight
+caps, smallcaps, vanish
+
+## Paragraph properties (Set/Add)
+alignment (left|center|right|justify)
+spaceBefore (12pt), spaceAfter (6pt), lineSpacing (1.5x|18pt)
+indent, hanging, firstline
+pagebreakbefore (true|false)
+
+## Section properties
+pagewidth, pageheight, orientation (landscape|portrait)
+margintop, marginbottom, marginleft, marginright",
+
+                    _ => null
+                };
+                if (reference == null)
+                    return "Supported formats: xlsx, pptx, docx. Call help with one of these.";
+                return strategy + reference;
+            }
             default:
                 throw new ArgumentException($"Unknown tool: {name}");
         }
@@ -286,133 +377,64 @@ public static class McpServer
 
     // ==================== Tool Definitions ====================
 
+    private const string ToolDescription = @"Create, read, and modify Office documents (.docx, .xlsx, .pptx).
+
+Commands: create (file), view (file, mode: text|annotated|outline|stats|issues), get (file, path, depth), query (file, selector), set (file, path, props[]), add (file, parent, type, props[], index), remove (file, path), move (file, path, to, index), validate (file), batch (file, commands), raw (file, part), help (format: xlsx|pptx|docx).
+
+Paths are 1-based: /slide[1]/shape[2], /body/p[3], /Sheet1/A1. Props are key=value strings. Call help for detailed property reference per format.";
+
     private static void WriteToolDefinitions(Utf8JsonWriter w)
     {
-        WriteTool(w, "create", "Create a blank Office document (.docx, .xlsx, .pptx)",
-            s => { s.WriteProp("file", "string", "Output file path"); },
-            ["file"]);
-
-        WriteTool(w, "view", "View document content (text, annotated, outline, stats, issues, html)",
-            s => {
-                s.WriteProp("file", "string", "Document file path");
-                s.WriteEnum("mode", "View mode", ["text", "annotated", "outline", "stats", "issues", "html"]);
-                s.WriteProp("start", "number", "Start line number");
-                s.WriteProp("end", "number", "End line number");
-                s.WriteProp("max_lines", "number", "Maximum lines to output");
-            }, ["file", "mode"]);
-
-        WriteTool(w, "get", "Get a document node by DOM path with properties, text, format, and children",
-            s => {
-                s.WriteProp("file", "string", "Document file path");
-                s.WritePropDefault("path", "string", "DOM path (e.g. /body/p[1], /slide[1]/shape[2])", "/");
-                s.WritePropDefault("depth", "number", "Depth of child nodes", "1");
-            }, ["file"]);
-
-        WriteTool(w, "query", "Query elements with CSS-like selectors (e.g. shape[fill=#FF0000])",
-            s => {
-                s.WriteProp("file", "string", "Document file path");
-                s.WriteProp("selector", "string", "CSS-like selector");
-            }, ["file", "selector"]);
-
-        WriteTool(w, "set", "Modify a document node's properties",
-            s => {
-                s.WriteProp("file", "string", "Document file path");
-                s.WriteProp("path", "string", "DOM path to the element");
-                s.WriteArrayProp("props", "key=value pairs (e.g. bold=true, color=#FF0000)");
-            }, ["file", "path", "props"]);
-
-        WriteTool(w, "add", "Add a new element (slide, shape, paragraph, table, picture, chart, etc.)",
-            s => {
-                s.WriteProp("file", "string", "Document file path");
-                s.WriteProp("parent", "string", "Parent DOM path (e.g. /, /slide[1], /body)");
-                s.WriteProp("type", "string", "Element type (slide, shape, paragraph, table, picture, chart, row, cell, run, etc.)");
-                s.WriteArrayProp("props", "key=value pairs");
-                s.WriteProp("index", "number", "Insert position (0-based)");
-            }, ["file", "parent", "type"]);
-
-        WriteTool(w, "remove", "Remove an element from the document",
-            s => {
-                s.WriteProp("file", "string", "Document file path");
-                s.WriteProp("path", "string", "DOM path of the element to remove");
-            }, ["file", "path"]);
-
-        WriteTool(w, "move", "Move an element to a new position or parent",
-            s => {
-                s.WriteProp("file", "string", "Document file path");
-                s.WriteProp("path", "string", "DOM path of the element to move");
-                s.WriteProp("to", "string", "Target parent path");
-                s.WriteProp("index", "number", "Insert position (0-based)");
-            }, ["file", "path"]);
-
-        WriteTool(w, "validate", "Validate document against OpenXML schema",
-            s => { s.WriteProp("file", "string", "Document file path"); },
-            ["file"]);
-
-        WriteTool(w, "batch", "Execute multiple commands in one open/save cycle",
-            s => {
-                s.WriteProp("file", "string", "Document file path");
-                s.WriteProp("commands", "string", "JSON array of commands");
-            }, ["file", "commands"]);
-
-        WriteTool(w, "raw", "View raw XML of a document part",
-            s => {
-                s.WriteProp("file", "string", "Document file path");
-                s.WritePropDefault("part", "string", "Part path (e.g. /document, /styles, /slide[1])", "/document");
-            }, ["file"]);
-    }
-
-    private static void WriteTool(Utf8JsonWriter w, string name, string desc, Action<SchemaWriter> schema, string[] required)
-    {
         w.WriteStartObject();
-        w.WriteString("name", name);
-        w.WriteString("description", desc);
+        w.WriteString("name", "officecli");
+        w.WriteString("description", ToolDescription);
         w.WriteStartObject("inputSchema");
         w.WriteString("type", "object");
         w.WriteStartObject("properties");
-        schema(new SchemaWriter(w));
-        w.WriteEndObject();
-        w.WriteStartArray("required");
-        foreach (var r in required) w.WriteStringValue(r);
+        // command
+        w.WriteStartObject("command"); w.WriteString("type", "string");
+        w.WriteStartArray("enum");
+        foreach (var c in new[] { "create", "view", "get", "query", "set", "add", "remove", "move", "validate", "batch", "raw", "help" })
+            w.WriteStringValue(c);
         w.WriteEndArray();
+        w.WriteString("description", "Command to execute");
         w.WriteEndObject();
-        w.WriteEndObject();
-    }
-
-    private readonly ref struct SchemaWriter(Utf8JsonWriter w)
-    {
-        public void WriteProp(string name, string type, string desc)
-        {
-            w.WriteStartObject(name);
-            w.WriteString("type", type);
-            w.WriteString("description", desc);
-            w.WriteEndObject();
-        }
-        public void WritePropDefault(string name, string type, string desc, string def)
-        {
-            w.WriteStartObject(name);
-            w.WriteString("type", type);
-            w.WriteString("description", desc);
-            w.WriteString("default", def);
-            w.WriteEndObject();
-        }
-        public void WriteEnum(string name, string desc, string[] values)
-        {
-            w.WriteStartObject(name);
-            w.WriteString("type", "string");
-            w.WriteString("description", desc);
-            w.WriteStartArray("enum");
-            foreach (var v in values) w.WriteStringValue(v);
-            w.WriteEndArray();
-            w.WriteEndObject();
-        }
-        public void WriteArrayProp(string name, string desc)
-        {
-            w.WriteStartObject(name);
-            w.WriteString("type", "array");
-            w.WriteStartObject("items"); w.WriteString("type", "string"); w.WriteEndObject();
-            w.WriteString("description", desc);
-            w.WriteEndObject();
-        }
+        // file
+        w.WriteStartObject("file"); w.WriteString("type", "string"); w.WriteString("description", "Document file path"); w.WriteEndObject();
+        // path
+        w.WriteStartObject("path"); w.WriteString("type", "string"); w.WriteString("description", "DOM path (e.g. /slide[1]/shape[1], /Sheet1/A1, /body/p[1])"); w.WriteEndObject();
+        // parent
+        w.WriteStartObject("parent"); w.WriteString("type", "string"); w.WriteString("description", "Parent DOM path for add"); w.WriteEndObject();
+        // type
+        w.WriteStartObject("type"); w.WriteString("type", "string"); w.WriteString("description", "Element type for add (slide, shape, paragraph, run, table, picture, chart, etc.)"); w.WriteEndObject();
+        // selector
+        w.WriteStartObject("selector"); w.WriteString("type", "string"); w.WriteString("description", "CSS-like selector for query"); w.WriteEndObject();
+        // props
+        w.WriteStartObject("props"); w.WriteString("type", "array");
+        w.WriteStartObject("items"); w.WriteString("type", "string"); w.WriteEndObject();
+        w.WriteString("description", "key=value pairs (e.g. bold=true, color=FF0000, text=Hello)"); w.WriteEndObject();
+        // mode
+        w.WriteStartObject("mode"); w.WriteString("type", "string"); w.WriteString("description", "View mode: text, annotated, outline, stats, issues, html"); w.WriteEndObject();
+        // depth
+        w.WriteStartObject("depth"); w.WriteString("type", "number"); w.WriteString("description", "Child depth for get (default 1)"); w.WriteEndObject();
+        // index
+        w.WriteStartObject("index"); w.WriteString("type", "number"); w.WriteString("description", "Insert position (0-based) for add/move"); w.WriteEndObject();
+        // to
+        w.WriteStartObject("to"); w.WriteString("type", "string"); w.WriteString("description", "Target parent path for move"); w.WriteEndObject();
+        // start, end, max_lines
+        w.WriteStartObject("start"); w.WriteString("type", "number"); w.WriteString("description", "Start line for view"); w.WriteEndObject();
+        w.WriteStartObject("end"); w.WriteString("type", "number"); w.WriteString("description", "End line for view"); w.WriteEndObject();
+        w.WriteStartObject("max_lines"); w.WriteString("type", "number"); w.WriteString("description", "Max lines for view"); w.WriteEndObject();
+        // commands
+        w.WriteStartObject("commands"); w.WriteString("type", "string"); w.WriteString("description", "JSON array of batch commands"); w.WriteEndObject();
+        // part
+        w.WriteStartObject("part"); w.WriteString("type", "string"); w.WriteString("description", "Part path for raw (e.g. /document, /styles, /slide[1])"); w.WriteEndObject();
+        // format
+        w.WriteStartObject("format"); w.WriteString("type", "string"); w.WriteString("description", "Document format for help: xlsx, pptx, docx"); w.WriteEndObject();
+        w.WriteEndObject(); // end properties
+        w.WriteStartArray("required"); w.WriteStringValue("command"); w.WriteEndArray();
+        w.WriteEndObject(); // end inputSchema
+        w.WriteEndObject(); // end tool
     }
 
     // ==================== JSON-RPC Helpers ====================
