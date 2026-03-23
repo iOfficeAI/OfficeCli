@@ -103,8 +103,9 @@ public partial class PowerPointHandler
             if (notesSlideIdx < 1 || notesSlideIdx > slidePartsN.Count)
                 throw new ArgumentException($"Slide {notesSlideIdx} not found (total: {slidePartsN.Count})");
             var slidePartN = slidePartsN[notesSlideIdx - 1];
-            var notesText = slidePartN.NotesSlidePart != null
-                ? GetNotesText(slidePartN.NotesSlidePart) : "";
+            if (slidePartN.NotesSlidePart == null)
+                return null;
+            var notesText = GetNotesText(slidePartN.NotesSlidePart);
             return new DocumentNode { Path = path, Type = "notes", Text = notesText };
         }
 

@@ -819,6 +819,27 @@ public partial class PowerPointHandler
                         }
                         break;
                     }
+                    case "opacity":
+                    {
+                        if (!double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var opacityVal)
+                            || double.IsNaN(opacityVal) || double.IsInfinity(opacityVal))
+                            throw new ArgumentException($"Invalid 'opacity' value: '{value}'. Expected a finite decimal 0.0-1.0.");
+                        if (opacityVal > 1.0) opacityVal /= 100.0;
+                        var blip = pic.BlipFill?.GetFirstChild<Drawing.Blip>();
+                        if (blip != null)
+                        {
+                            blip.RemoveAllChildren<Drawing.AlphaModulationFixed>();
+                            var alphaVal = (int)(opacityVal * 100000); // 0.0-1.0 → 0-100000
+                            blip.AppendChild(new Drawing.AlphaModulationFixed { Amount = alphaVal });
+                        }
+                        break;
+                    }
+                    case "name":
+                    {
+                        var nvPr = pic.NonVisualPictureProperties?.NonVisualDrawingProperties;
+                        if (nvPr != null) nvPr.Name = value;
+                        break;
+                    }
                     default:
                         if (unsupported.Count == 0)
                             unsupported.Add($"{key} (valid picture props: path, src, x, y, width, height, rotation, opacity, name, crop, cropleft, croptop, cropright, cropbottom)");
@@ -1276,6 +1297,12 @@ public partial class PowerPointHandler
                         outline.RemoveAllChildren<Drawing.SolidFill>();
                         outline.PrependChild(new Drawing.SolidFill(
                             new Drawing.RgbColorModelHex { Val = rgb }));
+                        break;
+                    }
+                    case "fill":
+                    {
+                        var spPr = cxn.ShapeProperties ?? (cxn.ShapeProperties = new ShapeProperties());
+                        ApplyShapeFill(spPr, value);
                         break;
                     }
                     case "linedash" or "line.dash":

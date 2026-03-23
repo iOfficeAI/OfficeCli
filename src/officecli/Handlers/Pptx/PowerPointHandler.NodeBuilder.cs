@@ -815,6 +815,12 @@ public partial class PowerPointHandler
         if (picXfrm?.Rotation != null && picXfrm.Rotation.Value != 0)
             node.Format["rotation"] = $"{picXfrm.Rotation.Value / 60000.0:0.##}";
 
+        // Opacity (via AlphaModulateFixedEffect on blip)
+        var picBlip = pic.BlipFill?.GetFirstChild<Drawing.Blip>();
+        var alphaModFix = picBlip?.GetFirstChild<Drawing.AlphaModulationFixed>();
+        if (alphaModFix?.Amount?.HasValue == true)
+            node.Format["opacity"] = $"{alphaModFix.Amount.Value / 100000.0:0.##}";
+
         // Crop
         var srcRect = pic.BlipFill?.GetFirstChild<Drawing.SourceRectangle>();
         if (srcRect != null)
@@ -937,6 +943,11 @@ public partial class PowerPointHandler
             if (xfrm.Extents?.Cx != null) node.Format["width"] = FormatEmu(xfrm.Extents.Cx!);
             if (xfrm.Extents?.Cy != null) node.Format["height"] = FormatEmu(xfrm.Extents.Cy!);
         }
+
+        // Fill (solid fill on the connector shape itself, not on the outline)
+        var cxnFill = ReadColorFromFill(spPr?.GetFirstChild<Drawing.SolidFill>());
+        if (cxnFill != null) node.Format["fill"] = cxnFill;
+        if (spPr?.GetFirstChild<Drawing.NoFill>() != null) node.Format["fill"] = "none";
 
         var geom = spPr?.GetFirstChild<Drawing.PresetGeometry>();
         if (geom?.Preset?.HasValue == true)

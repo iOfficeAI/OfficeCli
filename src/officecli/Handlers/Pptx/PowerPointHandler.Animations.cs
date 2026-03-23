@@ -1373,9 +1373,9 @@ public partial class PowerPointHandler
         if (transElem is PushTransition push && push.Direction?.HasValue == true)
             return MapSlideDirection(push.Direction.Value);
         if (transElem is CoverTransition cover && cover.Direction != null)
-            return cover.Direction.Value?.ToLowerInvariant();
+            return ExpandDirectionAbbreviation(cover.Direction.Value?.ToLowerInvariant());
         if (transElem is PullTransition pull && pull.Direction != null)
-            return pull.Direction.Value?.ToLowerInvariant();
+            return ExpandDirectionAbbreviation(pull.Direction.Value?.ToLowerInvariant());
 
         // In/out direction: zoom (default: in)
         if (transElem is ZoomTransition zoom && zoom.Direction?.HasValue == true)
@@ -1436,6 +1436,22 @@ public partial class PowerPointHandler
         if (dir == TransitionSlideDirectionValues.Up) return "up";
         if (dir == TransitionSlideDirectionValues.Down) return "down";
         return "left";
+    }
+
+    /// <summary>
+    /// Expand OOXML single-letter direction abbreviations to full words.
+    /// Cover and pull transitions use "l", "r", "u", "d" in XML.
+    /// </summary>
+    private static string? ExpandDirectionAbbreviation(string? dir)
+    {
+        return dir switch
+        {
+            "l" => "left",
+            "r" => "right",
+            "u" => "up",
+            "d" => "down",
+            _ => dir
+        };
     }
 
     /// <summary>Returns a preset subtype for the given effect name, or 0 for default.</summary>

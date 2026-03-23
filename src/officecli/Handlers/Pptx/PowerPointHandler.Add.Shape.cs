@@ -362,12 +362,13 @@ public partial class PowerPointHandler
                       "textfill", "textgradient", "geometry",
                       "baseline", "superscript", "subscript",
                       "textwarp", "wordart", "autofit",
-                      "lineopacity", "line.opacity" };
+                      "lineopacity", "line.opacity",
+                      "image", "imagefill" };
                 var effectProps = properties
                     .Where(kv => effectKeys.Contains(kv.Key))
                     .ToDictionary(kv => kv.Key, kv => kv.Value);
                 if (effectProps.Count > 0)
-                    SetRunOrShapeProperties(effectProps, GetAllRuns(newShape), newShape);
+                    SetRunOrShapeProperties(effectProps, GetAllRuns(newShape), newShape, slidePart);
 
                 // Animation
                 if (properties.TryGetValue("animation", out var animVal) ||
