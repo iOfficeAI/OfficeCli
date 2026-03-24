@@ -1288,11 +1288,11 @@ static class CommandBuilder
             var html = ppt.RenderSlideHtml(slideNum);
             if (html != null)
             {
-                WatchNotifier.NotifyIfWatching(filePath, new WatchMessage { Action = "replace", Slide = slideNum, Html = html });
+                WatchNotifier.NotifyIfWatching(filePath, new WatchMessage { Action = "replace", Slide = slideNum, Html = html, FullHtml = ppt.ViewAsHtml() });
                 return;
             }
         }
-        WatchNotifier.NotifyIfWatching(filePath, new WatchMessage { Action = "full" });
+        WatchNotifier.NotifyIfWatching(filePath, new WatchMessage { Action = "full", FullHtml = ppt.ViewAsHtml() });
     }
 
     private static void NotifyWatchRoot(IDocumentHandler handler, string filePath, int oldSlideCount)

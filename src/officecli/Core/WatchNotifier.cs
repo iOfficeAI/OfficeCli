@@ -30,11 +30,15 @@ public static class WatchNotifier
                 using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
                 client.Connect(100); // fast fail if no watch
 
-                using var writer = new StreamWriter(client, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
-                using var reader = new StreamReader(client, Encoding.UTF8, leaveOpen: true);
-
                 var json = JsonSerializer.Serialize(message, WatchMessageJsonContext.Default.WatchMessage);
+
+                // Write first, then read. Creating StreamReader before writing
+                // causes a deadlock: StreamReader's constructor probes for BOM by
+                // reading from the pipe, but the server is waiting for our write.
+                using var writer = new StreamWriter(client, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
                 writer.WriteLine(json);
+
+                using var reader = new StreamReader(client, new UTF8Encoding(false), detectEncodingFromByteOrderMarks: false, leaveOpen: true);
                 reader.ReadLine(); // wait for ack
             }, PipeTimeout);
         }
@@ -59,10 +63,13 @@ public static class WatchNotifier
                 using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
                 client.Connect(200);
 
-                using var writer = new StreamWriter(client, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
-                using var reader = new StreamReader(client, Encoding.UTF8, leaveOpen: true);
-
+                // Write first, then read — same ordering as NotifyIfWatching
+                // to avoid BOM-detection deadlock on the pipe.
+                using var writer = new StreamWriter(client, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
                 writer.WriteLine("close");
+                writer.Flush();
+
+                using var reader = new StreamReader(client, new UTF8Encoding(false), detectEncodingFromByteOrderMarks: false, leaveOpen: true);
                 reader.ReadLine();
                 result = true;
             }, PipeTimeout);

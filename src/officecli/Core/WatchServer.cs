@@ -128,9 +128,11 @@ public class WatchServer : IDisposable
                 var pipeName = GetWatchPipeName(filePath);
                 using var client = new System.IO.Pipes.NamedPipeClientStream(".", pipeName, System.IO.Pipes.PipeDirection.InOut);
                 client.Connect(100);
-                using var writer = new StreamWriter(client, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
-                using var reader = new StreamReader(client, Encoding.UTF8, leaveOpen: true);
+                var noBom = new UTF8Encoding(false);
+                using var writer = new StreamWriter(client, noBom, leaveOpen: true) { AutoFlush = true };
                 writer.WriteLine("ping");
+                writer.Flush();
+                using var reader = new StreamReader(client, noBom, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
                 var response = reader.ReadLine();
                 result = int.TryParse(response, out var port) ? port : 0;
             });
@@ -211,8 +213,9 @@ public class WatchServer : IDisposable
             try
             {
                 await server.WaitForConnectionAsync(token);
-                using var reader = new StreamReader(server, Encoding.UTF8, leaveOpen: true);
-                using var writer = new StreamWriter(server, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+                var noBom = new UTF8Encoding(false);
+                using var reader = new StreamReader(server, noBom, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
+                using var writer = new StreamWriter(server, noBom, leaveOpen: true) { AutoFlush = true };
 
                 var message = await reader.ReadLineAsync(token);
                 _lastActivityTime = DateTime.UtcNow;
@@ -252,24 +255,21 @@ public class WatchServer : IDisposable
             var msg = JsonSerializer.Deserialize(json, WatchMessageJsonContext.Default.WatchMessage);
             if (msg == null) return;
 
-            // Update cached full HTML
+            // Always update cached full HTML when provided (authoritative snapshot)
             if (!string.IsNullOrEmpty(msg.FullHtml))
             {
                 _currentHtml = msg.FullHtml;
             }
-            else if (msg.Action == "replace" && msg.Slide > 0 && msg.Html != null)
+
+            // Apply incremental patch when no full HTML was provided
+            if (string.IsNullOrEmpty(msg.FullHtml))
             {
-                // Patch _currentHtml in-place: replace the matching slide fragment
-                _currentHtml = PatchSlideInHtml(_currentHtml, msg.Slide, msg.Html);
-            }
-            else if (msg.Action == "add" && msg.Html != null)
-            {
-                // Append new slide before closing </div> of .main
-                _currentHtml = AppendSlideToHtml(_currentHtml, msg.Html);
-            }
-            else if (msg.Action == "remove" && msg.Slide > 0)
-            {
-                _currentHtml = RemoveSlideFromHtml(_currentHtml, msg.Slide);
+                if (msg.Action == "replace" && msg.Slide > 0 && msg.Html != null)
+                    _currentHtml = PatchSlideInHtml(_currentHtml, msg.Slide, msg.Html);
+                else if (msg.Action == "add" && msg.Html != null)
+                    _currentHtml = AppendSlideToHtml(_currentHtml, msg.Html);
+                else if (msg.Action == "remove" && msg.Slide > 0)
+                    _currentHtml = RemoveSlideFromHtml(_currentHtml, msg.Slide);
             }
 
             // Forward to SSE clients
