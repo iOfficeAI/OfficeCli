@@ -304,6 +304,57 @@ public class WatchFunctionalTests : IDisposable
         receivedMessage.Should().Contain("\"Action\"");
     }
 
+    // ==================== Deadlock regression guard ====================
+
+    /// <summary>
+    /// Regression test for the BOM-detection deadlock.
+    /// StreamReader's constructor probes for a byte-order mark by reading from
+    /// the pipe. If the client creates StreamReader before writing, both sides
+    /// block waiting for data — a deadlock. This test enforces the write-first
+    /// protocol: the client must write before it attempts to read.
+    /// A 5-second timeout ensures the test fails fast instead of hanging forever.
+    /// </summary>
+    [Fact(Timeout = 5000)]
+    public async Task PipeRoundTrip_CompletesWithinTimeout_NoBomDeadlock()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+        var pipeName = WatchServer.GetWatchPipeName(_path);
+
+        // Server side: read message, write ack (mirrors WatchServer pipe listener)
+        var serverTask = Task.Run(async () =>
+        {
+            var server = new NamedPipeServerStream(
+                pipeName, PipeDirection.InOut,
+                NamedPipeServerStream.MaxAllowedServerInstances,
+                PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+            try
+            {
+                await server.WaitForConnectionAsync(cts.Token);
+                var noBom = new UTF8Encoding(false);
+                using var reader = new StreamReader(server, noBom, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
+                using var writer = new StreamWriter(server, noBom, leaveOpen: true) { AutoFlush = true };
+                var msg = await reader.ReadLineAsync(cts.Token);
+                await writer.WriteLineAsync("ok".AsMemory(), cts.Token);
+                return msg;
+            }
+            finally { await server.DisposeAsync(); }
+        }, cts.Token);
+
+        await Task.Delay(200, cts.Token);
+
+        // Client side: uses the real WatchNotifier (write-first protocol)
+        WatchNotifier.NotifyIfWatching(_path, new WatchMessage
+        {
+            Action = "replace", Slide = 1,
+            Html = "<div>deadlock-guard</div>",
+            FullHtml = "<html>full</html>"
+        });
+
+        var received = await serverTask;
+        received.Should().NotBeNull("pipe round-trip must complete — if this times out, BOM deadlock has regressed");
+        received.Should().Contain("deadlock-guard");
+    }
+
     // ==================== WatchMessage.ExtractSlideNum ====================
 
     [Fact]
