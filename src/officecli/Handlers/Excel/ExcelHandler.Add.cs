@@ -265,10 +265,10 @@ public partial class ExcelHandler
                     {
                         hyperlinksEl = new Hyperlinks();
                         // Insert in correct OOXML schema position: after conditionalFormatting, before printOptions/pageMargins/pageSetup/drawing etc.
-                        var insertBefore = ws.GetFirstChild<PrintOptions>()
-                            ?? ws.GetFirstChild<PageMargins>() as OpenXmlElement
-                            ?? ws.GetFirstChild<PageSetup>()
-                            ?? ws.GetFirstChild<Drawing>();
+                        OpenXmlElement? insertBefore = ws.GetFirstChild<PrintOptions>();
+                        insertBefore ??= ws.GetFirstChild<PageMargins>();
+                        insertBefore ??= ws.GetFirstChild<PageSetup>();
+                        insertBefore ??= ws.Elements().FirstOrDefault(e => e.LocalName == "drawing");
                         if (insertBefore != null)
                             ws.InsertBefore(hyperlinksEl, insertBefore);
                         else
