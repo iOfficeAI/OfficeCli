@@ -184,20 +184,30 @@ public partial class ExcelHandler
                                     case "bold" when ParseHelpers.IsTruthy(pVal): rp.AppendChild(new Bold()); break;
                                     case "italic" when ParseHelpers.IsTruthy(pVal): rp.AppendChild(new Italic()); break;
                                     case "strike" when ParseHelpers.IsTruthy(pVal): rp.AppendChild(new Strike()); break;
-                                    case "underline": rp.AppendChild(new Underline()); break;
+                                    case "underline":
+                                    {
+                                        var ul = new Underline();
+                                        if (pVal.Equals("double", StringComparison.OrdinalIgnoreCase)) ul.Val = UnderlineValues.Double;
+                                        rp.AppendChild(ul);
+                                        break;
+                                    }
                                     case "size" or "fontsize":
                                         if (double.TryParse(pVal.TrimEnd('p', 't'), out var sz))
                                             rp.AppendChild(new FontSize { Val = sz });
                                         break;
                                     case "color":
-                                        rp.AppendChild(new Color { Rgb = new HexBinaryValue(ParseHelpers.SanitizeColorForOoxml(pVal).Rgb) });
+                                        rp.AppendChild(new Color { Rgb = new HexBinaryValue(ParseHelpers.NormalizeArgbColor(pVal)) });
                                         break;
                                     case "font" or "fontname":
                                         rp.AppendChild(new RunFont { Val = pVal });
                                         break;
                                 }
                             }
-                            if (rp.HasChildren) run.AppendChild(rp);
+                            if (rp.HasChildren)
+                            {
+                                ReorderRunProperties(rp);
+                                run.AppendChild(rp);
+                            }
                             run.AppendChild(new Text(runText) { Space = SpaceProcessingModeValues.Preserve });
                             ssi.AppendChild(run);
                         }
@@ -1631,7 +1641,13 @@ public partial class ExcelHandler
                         case "strike" when ParseHelpers.IsTruthy(rVal):
                             newRunProps.AppendChild(new Strike()); break;
                         case "underline":
-                            newRunProps.AppendChild(new Underline()); break;
+                            if (!string.IsNullOrEmpty(rVal) && rVal != "false" && rVal != "none")
+                            {
+                                var ul = new Underline();
+                                if (rVal.ToLowerInvariant() == "double") ul.Val = UnderlineValues.Double;
+                                newRunProps.AppendChild(ul);
+                            }
+                            break;
                         case "superscript" when ParseHelpers.IsTruthy(rVal):
                             newRunProps.AppendChild(new VerticalTextAlignment { Val = VerticalAlignmentRunValues.Superscript }); break;
                         case "subscript" when ParseHelpers.IsTruthy(rVal):
@@ -1647,7 +1663,11 @@ public partial class ExcelHandler
                             newRunProps.AppendChild(new RunFont { Val = rVal }); break;
                     }
                 }
-                if (newRunProps.HasChildren) newRun.AppendChild(newRunProps);
+                if (newRunProps.HasChildren)
+                {
+                    ReorderRunProperties(newRunProps);
+                    newRun.AppendChild(newRunProps);
+                }
                 newRun.AppendChild(new Text(runText) { Space = SpaceProcessingModeValues.Preserve });
                 runSsi.AppendChild(newRun);
 

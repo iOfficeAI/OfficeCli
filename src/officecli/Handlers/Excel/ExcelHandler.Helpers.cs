@@ -1160,4 +1160,37 @@ public partial class ExcelHandler
             ParseHelpers.SafeParseInt(properties.GetValueOrDefault("height", defH) ?? defH, "height")
         );
     }
+
+    /// <summary>
+    /// Reorder RunProperties children to match CT_RPrElt schema order:
+    /// b, i, strike, condense, extend, outline, shadow, u, vertAlign, sz, color, rFont, family, charset, scheme
+    /// </summary>
+    private static void ReorderRunProperties(RunProperties rpr)
+    {
+        if (rpr == null || !rpr.HasChildren) return;
+        var children = rpr.ChildElements.ToList();
+        var ordered = children.OrderBy(c => GetRunPropertyOrder(c)).ToList();
+        rpr.RemoveAllChildren();
+        foreach (var child in ordered) rpr.AppendChild(child);
+    }
+
+    private static int GetRunPropertyOrder(DocumentFormat.OpenXml.OpenXmlElement element) => element switch
+    {
+        Bold => 0,
+        Italic => 1,
+        Strike => 2,
+        Condense => 3,
+        Extend => 4,
+        Outline => 5,
+        Shadow => 6,
+        Underline => 7,
+        VerticalTextAlignment => 8,
+        FontSize => 9,
+        Color => 10,
+        RunFont => 11,
+        FontFamily => 12,
+        RunPropertyCharSet => 13,
+        FontScheme => 14,
+        _ => 99
+    };
 }

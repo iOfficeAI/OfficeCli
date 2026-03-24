@@ -275,6 +275,51 @@ public partial class ExcelHandler
             return null;
         }
 
+        // run[N] — remove individual run from rich text cell
+        var runRemoveMatch = Regex.Match(cellRef, @"^([A-Z]+\d+)/run\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (runRemoveMatch.Success)
+        {
+            var runCellRef = runRemoveMatch.Groups[1].Value.ToUpperInvariant();
+            var runIdx = int.Parse(runRemoveMatch.Groups[2].Value);
+
+            var runCell = FindCell(sheetData, runCellRef)
+                ?? throw new ArgumentException($"Cell {runCellRef} not found");
+
+            if (runCell.DataType?.Value != CellValues.SharedString ||
+                !int.TryParse(runCell.CellValue?.Text, out var sstIdx))
+                throw new ArgumentException($"Cell {runCellRef} is not a rich text cell");
+
+            var sstPart = _doc.WorkbookPart?.GetPartsOfType<SharedStringTablePart>().FirstOrDefault();
+            var ssi = sstPart?.SharedStringTable?.Elements<SharedStringItem>().ElementAtOrDefault(sstIdx);
+            if (ssi == null) throw new ArgumentException($"SharedString entry {sstIdx} not found");
+
+            var runs = ssi.Elements<Run>().ToList();
+            if (runIdx < 1 || runIdx > runs.Count)
+                throw new ArgumentException($"Run index {runIdx} out of range (1-{runs.Count})");
+
+            runs[runIdx - 1].Remove();
+
+            // If only one run remains with no special formatting, convert back to plain <t> text
+            var remainingRuns = ssi.Elements<Run>().ToList();
+            if (remainingRuns.Count == 1)
+            {
+                var lastRun = remainingRuns[0];
+                var rProps = lastRun.RunProperties;
+                bool hasFormatting = rProps != null && rProps.HasChildren;
+                if (!hasFormatting)
+                {
+                    var plainText = lastRun.GetFirstChild<Text>()?.Text ?? "";
+                    lastRun.Remove();
+                    ssi.RemoveAllChildren<Text>();
+                    ssi.AppendChild(new Text(plainText) { Space = SpaceProcessingModeValues.Preserve });
+                }
+            }
+
+            sstPart!.SharedStringTable!.Save();
+            SaveWorksheet(worksheet);
+            return null;
+        }
+
         // Single cell
         var cell = FindCell(sheetData, cellRef)
             ?? throw new ArgumentException($"Cell {cellRef} not found");

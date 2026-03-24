@@ -691,6 +691,7 @@ public partial class ExcelHandler
                 }
             }
 
+            ReorderRunProperties(rProps);
             sstPart!.SharedStringTable!.Save();
             SaveWorksheet(worksheet);
             return unsupported;
