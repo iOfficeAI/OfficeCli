@@ -435,9 +435,6 @@ public partial class PowerPointHandler
                 ? AnimTrigger.AfterPrevious : AnimTrigger.OnClick;
         }
 
-        // Remove any existing animations for this shape before adding new one
-        RemoveShapeAnimations(slide, shapeId);
-
         // Get filter string, preset ID, and subtype from effect name
         var (presetId, filter) = GetAnimPreset(effectName, presetClass);
         var presetSubtype = GetAnimPresetSubtype(effectName, direction);

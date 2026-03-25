@@ -1251,7 +1251,13 @@ public partial class PowerPointHandler
                 var unsupported = SetRunOrShapeProperties(shapeProps, allRuns, shape, slidePart);
 
                 if (animValue != null)
+                {
+                    // Remove existing animations before applying new one (replace, not accumulate)
+                    var shapeId = shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value;
+                    if (shapeId.HasValue)
+                        RemoveShapeAnimations(slidePart.Slide!, shapeId.Value);
                     ApplyShapeAnimation(slidePart, shape, animValue);
+                }
                 if (motionPathValue != null)
                     ApplyMotionPathAnimation(slidePart, shape, motionPathValue);
                 if (linkValue != null)
