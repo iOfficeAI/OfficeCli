@@ -41,7 +41,13 @@ curl -fsSL https://officecli.ai/SKILL.md -o ~/.claude/skills/officecli.md
 
 将 `SKILL.md` 的内容添加到智能体的系统提示词或工具描述中。
 
-然后安装 CLI 二进制文件：
+## 安装
+
+OfficeCLI 是单一可执行文件 — 无运行时依赖。
+
+**方式一：一键安装脚本**
+
+macOS / Linux：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh | bash
@@ -51,6 +57,26 @@ Windows (PowerShell)：
 
 ```powershell
 irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex
+```
+
+**方式二：手动下载二进制文件**
+
+从 [GitHub Releases](https://github.com/iOfficeAI/OfficeCLI/releases) 下载对应平台的二进制文件：
+
+| 平台 | 文件名 |
+|------|--------|
+| macOS Apple Silicon | `officecli-mac-arm64` |
+| macOS Intel | `officecli-mac-x64` |
+| Linux x64 | `officecli-linux-x64` |
+| Linux ARM64 | `officecli-linux-arm64` |
+| Windows x64 | `officecli-win-x64.exe` |
+| Windows ARM64 | `officecli-win-arm64.exe` |
+
+下载后安装内置的 AI 智能体技能，让你的 AI 助手（Claude Code 等）能自动操作 Office 文档：
+
+```powershell
+# Windows 示例
+.\officecli-win-x64.exe skills all
 ```
 
 ## 为什么选择 OfficeCLI？
@@ -64,24 +90,6 @@ AI 智能体擅长处理文本，但 Office 文档是 XML 的二进制封装。O
 - **重组** 内容 — 添加、删除、移动、复制跨文档元素
 
 全部通过简单的 CLI 命令完成，支持结构化 JSON 输出，无需安装 Office。
-
-## 安装
-
-OfficeCLI 是单一可执行文件 — 无运行时依赖。一条命令即可安装：
-
-**macOS / Linux：**
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh | bash
-```
-
-**Windows (PowerShell)：**
-
-```powershell
-irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex
-```
-
-也可以从 [GitHub Releases](https://github.com/iOfficeAI/OfficeCLI/releases) 手动下载。
 
 ## 快速开始
 

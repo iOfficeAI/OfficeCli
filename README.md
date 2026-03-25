@@ -41,16 +41,42 @@ curl -fsSL https://officecli.ai/SKILL.md -o ~/.claude/skills/officecli.md
 
 Include the contents of that `SKILL.md` in your agent's system prompt or tool description.
 
-Then install the CLI binary:
+## Installation
+
+OfficeCLI is a single binary — no runtime, no dependencies.
+
+**Option 1: One-line install script**
+
+macOS / Linux:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh | bash
 ```
 
-For Windows (PowerShell):
+Windows (PowerShell):
 
 ```powershell
 irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex
+```
+
+**Option 2: Download binary manually**
+
+Download the binary for your platform from [GitHub Releases](https://github.com/iOfficeAI/OfficeCLI/releases):
+
+| Platform | Binary |
+|----------|--------|
+| macOS Apple Silicon | `officecli-mac-arm64` |
+| macOS Intel | `officecli-mac-x64` |
+| Linux x64 | `officecli-linux-x64` |
+| Linux ARM64 | `officecli-linux-arm64` |
+| Windows x64 | `officecli-win-x64.exe` |
+| Windows ARM64 | `officecli-win-arm64.exe` |
+
+After downloading, install the built-in AI agent skills so your AI assistant (Claude Code, etc.) can automatically work with Office documents:
+
+```powershell
+# Windows example
+.\officecli-win-x64.exe skills all
 ```
 
 ## Why OfficeCLI?
@@ -64,24 +90,6 @@ AI agents are great at text — but Office documents are binary blobs of XML. Of
 - **Reorganize** content — add, remove, move, copy elements across documents
 
 All through simple CLI commands, with structured JSON output, no Office installation needed.
-
-## Installation
-
-OfficeCLI is a single binary — no runtime, no dependencies. One command to install:
-
-**macOS / Linux:**
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh | bash
-```
-
-**Windows (PowerShell):**
-
-```powershell
-irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex
-```
-
-Or download manually from [GitHub Releases](https://github.com/iOfficeAI/OfficeCLI/releases).
 
 ## Quick Start
 
