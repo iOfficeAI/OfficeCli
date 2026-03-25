@@ -263,12 +263,27 @@ internal static partial class ChartHelper
         if (plotArea.GetFirstChild<C.LineChart>() != null) return "line";
         if (plotArea.GetFirstChild<C.PieChart>() != null) return "pie";
         if (plotArea.GetFirstChild<C.DoughnutChart>() != null) return "doughnut";
-        if (plotArea.GetFirstChild<C.AreaChart>() != null) return "area";
+        if (plotArea.GetFirstChild<C.AreaChart>() is C.AreaChart area)
+        {
+            var areaGrp = area.GetFirstChild<C.Grouping>()?.Val?.InnerText;
+            if (areaGrp == "stacked") return "area_stacked";
+            if (areaGrp == "percentStacked") return "area_percentStacked";
+            return "area";
+        }
         if (plotArea.GetFirstChild<C.ScatterChart>() != null) return "scatter";
         if (plotArea.GetFirstChild<C.BubbleChart>() != null) return "bubble";
         if (plotArea.GetFirstChild<C.RadarChart>() != null) return "radar";
         if (plotArea.GetFirstChild<C.StockChart>() != null) return "stock";
-        if (plotArea.GetFirstChild<C.Bar3DChart>() != null) return "bar3d";
+        if (plotArea.GetFirstChild<C.Bar3DChart>() is C.Bar3DChart bar3d)
+        {
+            var dir3d = bar3d.GetFirstChild<C.BarDirection>()?.Val?.Value;
+            var grp3d = bar3d.GetFirstChild<C.BarGrouping>()?.Val?.InnerText;
+            var prefix3d = dir3d == C.BarDirectionValues.Bar ? "bar" : "column";
+            var suffix3d = grp3d == "stacked" ? "_stacked"
+                : grp3d == "percentStacked" ? "_percentStacked"
+                : "";
+            return $"{prefix3d}3d{suffix3d}";
+        }
         if (plotArea.GetFirstChild<C.Line3DChart>() != null) return "line3d";
         if (plotArea.GetFirstChild<C.Pie3DChart>() != null) return "pie3d";
         return null;

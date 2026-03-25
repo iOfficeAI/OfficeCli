@@ -148,7 +148,17 @@ public partial class PowerPointHandler
         else if (is3D && (chartType.Contains("column") || chartType.Contains("bar")))
         {
             var isHorizontal = chartType.Contains("bar") && !chartType.Contains("column");
-            RenderBar3DSvg(sb, seriesList, categories, seriesColors, margin.left, margin.top, plotW, plotH, isHorizontal);
+            var is3DStacked = chartType.Contains("stacked") || chartType.Contains("Stacked");
+            if (is3DStacked)
+            {
+                // 3D stacked bars: fall through to 2D stacked renderer for correct stacking
+                var isPercent = chartType.Contains("percent") || chartType.Contains("Percent");
+                RenderBarChartSvg(sb, seriesList, categories, seriesColors, margin.left, margin.top, plotW, plotH, isHorizontal, true, isPercent);
+            }
+            else
+            {
+                RenderBar3DSvg(sb, seriesList, categories, seriesColors, margin.left, margin.top, plotW, plotH, isHorizontal);
+            }
         }
         else if (is3D && chartType.Contains("line"))
         {
