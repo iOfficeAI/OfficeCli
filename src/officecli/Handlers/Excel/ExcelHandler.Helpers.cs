@@ -282,7 +282,7 @@ public partial class ExcelHandler
             if (cell.CellFormula.Reference?.Value != null)
                 node.Format["arrayref"] = cell.CellFormula.Reference.Value;
         }
-        if (string.IsNullOrEmpty(value)) node.Format["empty"] = true;
+        if (string.IsNullOrEmpty(value) && formula == null) node.Format["empty"] = true;
 
         // Hyperlink readback
         if (part != null)
