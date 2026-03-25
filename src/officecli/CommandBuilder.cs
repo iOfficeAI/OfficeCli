@@ -1257,7 +1257,7 @@ static class CommandBuilder
         foreach (var prop in knownProps)
         {
             var dist = LevenshteinDistance(lower, prop.ToLowerInvariant());
-            if (dist < bestDist && dist <= Math.Max(2, input.Length / 3))
+            if (dist > 0 && dist < bestDist && dist <= Math.Max(2, input.Length / 3))
             {
                 bestDist = dist;
                 best = prop;
