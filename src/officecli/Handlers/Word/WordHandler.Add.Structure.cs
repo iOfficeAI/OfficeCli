@@ -58,11 +58,11 @@ public partial class WordHandler
         // Allow per-section overrides
         if (properties.TryGetValue("pagewidth", out var sw) || properties.TryGetValue("pageWidth", out sw) || properties.TryGetValue("width", out sw))
         {
-            (sectPr.GetFirstChild<PageSize>() ?? sectPr.AppendChild(new PageSize())).Width = ParseHelpers.SafeParseUint(sw, "pagewidth");
+            (sectPr.GetFirstChild<PageSize>() ?? sectPr.AppendChild(new PageSize())).Width = ParseTwips(sw);
         }
         if (properties.TryGetValue("pageheight", out var sh) || properties.TryGetValue("pageHeight", out sh) || properties.TryGetValue("height", out sh))
         {
-            (sectPr.GetFirstChild<PageSize>() ?? sectPr.AppendChild(new PageSize())).Height = ParseHelpers.SafeParseUint(sh, "pageheight");
+            (sectPr.GetFirstChild<PageSize>() ?? sectPr.AppendChild(new PageSize())).Height = ParseTwips(sh);
         }
         if (properties.TryGetValue("orientation", out var orient))
         {
@@ -442,7 +442,12 @@ public partial class WordHandler
             Id = mainPartF.GetIdOfPart(footerPart),
             Type = footerType
         };
-        fSectPr.PrependChild(footerRef);
+        // Insert footerReference after the last headerReference to maintain schema order
+        var lastHeaderRef = fSectPr.Elements<HeaderReference>().LastOrDefault();
+        if (lastHeaderRef != null)
+            fSectPr.InsertAfter(footerRef, lastHeaderRef);
+        else
+            fSectPr.PrependChild(footerRef);
 
         if (footerType == HeaderFooterValues.First)
         {
