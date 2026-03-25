@@ -1328,9 +1328,9 @@ public partial class PowerPointHandler
             : res <= 4 ? 0.5 * mag
             : res <= 8 ? 1.0 * mag
             : 2.0 * mag;
-        // Set niceMax to one tick above the highest data point
+        // Set niceMax with enough headroom above the highest data point
         var niceMax = Math.Ceiling(maxVal / tickStep) * tickStep;
-        if (niceMax <= maxVal) niceMax += tickStep; // ensure at least one tick of headroom
+        if (niceMax < maxVal * 1.05) niceMax += tickStep; // ensure at least ~5% headroom
         var nTicks = (int)Math.Round(niceMax / tickStep);
         if (nTicks < 2) nTicks = 2;
         return (niceMax, tickStep, nTicks);
