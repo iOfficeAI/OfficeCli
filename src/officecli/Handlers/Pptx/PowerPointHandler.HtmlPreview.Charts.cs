@@ -309,8 +309,8 @@ public partial class PowerPointHandler
             var plotOx = ox + hLabelMargin;
             var plotPw = pw - hLabelMargin;
             var groupH = (double)ph / Math.Max(catCount, 1);
-            var barH = stacked ? groupH * 0.5 : groupH * 0.5 / serCount;
-            var gap = groupH * 0.25;
+            var barH = stacked ? groupH * 0.35 : groupH * 0.5 / serCount;
+            var gap = stacked ? groupH * 0.325 : groupH * 0.25;
 
             // Gridlines
             for (int t = 1; t <= nTicks; t++)
