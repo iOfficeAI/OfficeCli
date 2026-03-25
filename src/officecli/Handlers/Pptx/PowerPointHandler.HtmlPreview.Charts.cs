@@ -226,9 +226,9 @@ public partial class PowerPointHandler
 
         // Axis titles inside SVG
         if (!string.IsNullOrEmpty(valAxisTitle))
-            sb.AppendLine($"        <text x=\"10\" y=\"{chartSvgH / 2}\" fill=\"{chartAxisColor}\" font-size=\"8\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"rotate(-90,10,{chartSvgH / 2})\">{HtmlEncode(valAxisTitle)}</text>");
+            sb.AppendLine($"        <text x=\"10\" y=\"{chartSvgH / 2}\" fill=\"{chartAxisColor}\" font-size=\"9\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"rotate(-90,10,{chartSvgH / 2})\">{HtmlEncode(valAxisTitle)}</text>");
         if (!string.IsNullOrEmpty(catAxisTitle))
-            sb.AppendLine($"        <text x=\"{svgW / 2}\" y=\"{chartSvgH - 2}\" fill=\"{chartAxisColor}\" font-size=\"8\" text-anchor=\"middle\">{HtmlEncode(catAxisTitle)}</text>");
+            sb.AppendLine($"        <text x=\"{svgW / 2}\" y=\"{chartSvgH - 2}\" fill=\"{chartAxisColor}\" font-size=\"9\" text-anchor=\"middle\">{HtmlEncode(catAxisTitle)}</text>");
 
         sb.AppendLine("      </svg>");
 
@@ -365,7 +365,7 @@ public partial class PowerPointHandler
                 var val = tickStep * t;
                 var label = percentStacked ? $"{(int)val}%" : (val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}");
                 var tx = plotOx + (double)plotPw * t / nTicks;
-                sb.AppendLine($"        <text x=\"{tx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{_chartAxisColor}\" font-size=\"8\" text-anchor=\"middle\">{label}</text>");
+                sb.AppendLine($"        <text x=\"{tx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{_chartAxisColor}\" font-size=\"9\" text-anchor=\"middle\">{label}</text>");
             }
         }
         else
@@ -425,7 +425,7 @@ public partial class PowerPointHandler
                 var val = tickStep * t;
                 var label = percentStacked ? $"{(int)val}%" : (val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}");
                 var ty = oy + ph - (double)ph * t / nTicks;
-                sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{_chartAxisColor}\" font-size=\"8\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
+                sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{_chartAxisColor}\" font-size=\"9\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
             }
         }
     }
@@ -494,7 +494,7 @@ public partial class PowerPointHandler
             var val = tickStep * t;
             var label = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
             var ty = oy + ph - (double)ph * t / nTicks;
-            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{_chartAxisColor}\" font-size=\"8\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
+            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{_chartAxisColor}\" font-size=\"9\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
         }
     }
 
@@ -564,7 +564,7 @@ public partial class PowerPointHandler
                 var pct = values[i] / total * 100;
                 var label = pct >= 5 ? $"{pct:0}%" : ""; // skip tiny slices
                 if (!string.IsNullOrEmpty(label))
-                    sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{ly:0.#}\" fill=\"#fff\" font-size=\"8\" font-weight=\"bold\" text-anchor=\"middle\" dominant-baseline=\"central\">{label}</text>");
+                    sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{ly:0.#}\" fill=\"#fff\" font-size=\"9\" font-weight=\"bold\" text-anchor=\"middle\" dominant-baseline=\"central\">{label}</text>");
                 labelAngle += sliceAngle;
             }
         }
@@ -673,7 +673,7 @@ public partial class PowerPointHandler
             var val = tickInterval * t;
             var label = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
             var ty = oy + ph - (double)ph * t / tickCount;
-            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{_chartAxisColor}\" font-size=\"8\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
+            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{_chartAxisColor}\" font-size=\"9\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
         }
     }
 
@@ -790,7 +790,7 @@ public partial class PowerPointHandler
             var val = maxVal * t / 4;
             var label = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
             var ty = oy + ph - (double)ph * t / 4;
-            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{_chartAxisColor}\" font-size=\"8\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
+            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{_chartAxisColor}\" font-size=\"9\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
         }
     }
 
@@ -938,7 +938,7 @@ public partial class PowerPointHandler
             var val = minX + (maxX - minX) * t / 4;
             var label = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
             var tx = ox + (double)pw * t / 4;
-            sb.AppendLine($"        <text x=\"{tx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{_chartCatColor}\" font-size=\"8\" text-anchor=\"middle\">{label}</text>");
+            sb.AppendLine($"        <text x=\"{tx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{_chartCatColor}\" font-size=\"9\" text-anchor=\"middle\">{label}</text>");
         }
 
         // Y axis labels
@@ -947,7 +947,7 @@ public partial class PowerPointHandler
             var val = minY + (maxY - minY) * t / 4;
             var label = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
             var ty = oy + ph - (double)ph * t / 4;
-            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{_chartAxisColor}\" font-size=\"8\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
+            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{_chartAxisColor}\" font-size=\"9\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
         }
     }
 
@@ -1031,7 +1031,7 @@ public partial class PowerPointHandler
             var val = minVal + range * t / 4;
             var label = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
             var ty = oy + ph - (double)ph * t / 4;
-            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{_chartAxisColor}\" font-size=\"8\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
+            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{_chartAxisColor}\" font-size=\"9\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
         }
     }
 
@@ -1111,7 +1111,7 @@ public partial class PowerPointHandler
                 var val = maxVal * t / 4;
                 var label = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
                 var tx = plotOx + (double)plotPw * t / 4;
-                sb.AppendLine($"        <text x=\"{tx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{_chartAxisColor}\" font-size=\"8\" text-anchor=\"middle\">{label}</text>");
+                sb.AppendLine($"        <text x=\"{tx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{_chartAxisColor}\" font-size=\"9\" text-anchor=\"middle\">{label}</text>");
             }
         }
         else
@@ -1162,7 +1162,7 @@ public partial class PowerPointHandler
                 var val = maxVal * t / 4;
                 var label = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
                 var ty = oy + ph - (double)ph * t / 4;
-                sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{_chartAxisColor}\" font-size=\"8\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
+                sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{_chartAxisColor}\" font-size=\"9\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
             }
         }
     }
