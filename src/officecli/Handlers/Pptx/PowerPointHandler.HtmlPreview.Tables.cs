@@ -83,7 +83,7 @@ public partial class PowerPointHandler
                 // Apply table-style-based colors when no explicit cell fill
                 if (!hasExplicitFill && tableStyleName != null)
                 {
-                    var (bg, fg) = GetTableStyleColors(tableStyleName, isHeaderRow, isBandedOdd);
+                    var (bg, fg) = GetTableStyleColors(tableStyleName, isHeaderRow, isBandedOdd, themeColors);
                     if (bg != null) cellStyles.Add($"background:{bg}");
                     if (fg != null) cellStyles.Add($"color:{fg}");
                 }
@@ -241,33 +241,77 @@ public partial class PowerPointHandler
 
     /// <summary>
     /// Returns (background, foreground) CSS colors for a table style based on row position.
+    /// Colors are derived from theme colors with lumMod/lumOff transforms matching PowerPoint's
+    /// built-in table style definitions (OOXML spec).
     /// </summary>
-    private static (string? bg, string? fg) GetTableStyleColors(string styleName, bool isHeader, bool isBandedOdd)
+    private static (string? bg, string? fg) GetTableStyleColors(string styleName, bool isHeader, bool isBandedOdd,
+        Dictionary<string, string> themeColors)
     {
+        // Helper: resolve a theme color key to hex, defaulting if missing
+        static string ThemeHex(Dictionary<string, string> tc, string key, string fallback)
+            => tc.TryGetValue(key, out var v) ? v : fallback;
+
+        var dk1 = ThemeHex(themeColors, "dk1", "000000");
+        var accent1 = ThemeHex(themeColors, "accent1", "4472C4");
+
         return styleName switch
         {
-            "medium1" => isHeader ? ("#4472C4", "#FFFFFF")
-                       : isBandedOdd ? ("#D6E4F0", null)
+            // Medium Style 2: header=dk1 lumMod50% lumOff50%, band1=dk1 lumMod20% lumOff80%, band2=dk1 lumMod10% lumOff90%
+            "medium2" => isHeader ? (ApplyLumModOff(dk1, 50000, 50000), "#FFFFFF")
+                       : isBandedOdd ? (ApplyLumModOff(dk1, 20000, 80000), null)
+                       : (ApplyLumModOff(dk1, 10000, 90000), null),
+
+            // Medium Style 1 - Accent 1: header=accent1, band1=accent1 tint40%
+            "medium1" => isHeader ? ($"#{accent1}", "#FFFFFF")
+                       : isBandedOdd ? (ApplyLumModOff(accent1, 20000, 80000), null)
                        : (null, null),
-            "medium2" => isHeader ? ("#404040", "#FFFFFF")
-                       : isBandedOdd ? ("#E0E0E0", null)
-                       : ("#F5F5F5", null),
-            "medium3" => isHeader ? ("#4472C4", "#FFFFFF")
-                       : isBandedOdd ? ("#B4C6E7", null)
+
+            // Medium Style 3 - Accent 1: header=accent1, band1=accent1 lumMod40% lumOff60%
+            "medium3" => isHeader ? ($"#{accent1}", "#FFFFFF")
+                       : isBandedOdd ? (ApplyLumModOff(accent1, 40000, 60000), null)
                        : (null, null),
-            "medium4" => isHeader ? ("#2F5496", "#FFFFFF")
-                       : isBandedOdd ? ("#B4C6E7", null)
-                       : ("#D6E4F0", null),
-            "dark1" => isHeader ? ("#000000", "#FFFFFF")
-                     : isBandedOdd ? ("#808080", "#FFFFFF")
-                     : ("#595959", "#FFFFFF"),
-            "dark2" => isHeader ? ("#4472C4", "#FFFFFF")
-                     : isBandedOdd ? ("#2F5496", "#FFFFFF")
-                     : ("#2A4A87", "#FFFFFF"),
+
+            // Medium Style 4 - Accent 1: header=accent1 lumMod75%, band1=accent1 lumMod40% lumOff60%, band2=accent1 lumMod20% lumOff80%
+            "medium4" => isHeader ? (ApplyLumModOff(accent1, 75000, 0), "#FFFFFF")
+                       : isBandedOdd ? (ApplyLumModOff(accent1, 40000, 60000), null)
+                       : (ApplyLumModOff(accent1, 20000, 80000), null),
+
+            // Dark Style 1: header=dk1 lumMod75% lumOff25%, band1=dk1 lumMod50% lumOff50%, band2=dk1 lumMod40% lumOff60%
+            "dark1" => isHeader ? (ApplyLumModOff(dk1, 75000, 25000), "#FFFFFF")
+                     : isBandedOdd ? (ApplyLumModOff(dk1, 50000, 50000), "#FFFFFF")
+                     : (ApplyLumModOff(dk1, 40000, 60000), "#FFFFFF"),
+
+            // Dark Style 2 - Accent 1: header=accent1, band1=accent1 lumMod75%, band2=accent1 lumMod85%
+            "dark2" => isHeader ? ($"#{accent1}", "#FFFFFF")
+                     : isBandedOdd ? (ApplyLumModOff(accent1, 75000, 0), "#FFFFFF")
+                     : (ApplyLumModOff(accent1, 85000, 0), "#FFFFFF"),
+
             "light1" => (null, null), // minimal styling, no fills
-            "light2" => isBandedOdd ? ("#D6E4F0", null) : (null, null),
-            "light3" => isBandedOdd ? ("#D6E4F0", null) : (null, null),
+            // Light Style 2/3: band1=accent1 lumMod20% lumOff80%
+            "light2" => isBandedOdd ? (ApplyLumModOff(accent1, 20000, 80000), null) : (null, null),
+            "light3" => isBandedOdd ? (ApplyLumModOff(accent1, 20000, 80000), null) : (null, null),
             _ => (null, null),
         };
+    }
+
+    /// <summary>
+    /// Apply OOXML lumMod/lumOff color transform in HSL space.
+    /// lumMod and lumOff are in 0–100000 units (percentage * 1000).
+    /// Formula: newL = clamp(L * lumMod/100000 + lumOff/100000, 0, 1)
+    /// </summary>
+    private static string ApplyLumModOff(string hex, int lumMod, int lumOff)
+    {
+        var r = Convert.ToInt32(hex[..2], 16);
+        var g = Convert.ToInt32(hex[2..4], 16);
+        var b = Convert.ToInt32(hex[4..6], 16);
+
+        RgbToHsl(r, g, b, out var h, out var s, out var l);
+        l = Math.Clamp(l * (lumMod / 100000.0) + (lumOff / 100000.0), 0, 1);
+        HslToRgb(h, s, l, out r, out g, out b);
+
+        r = Math.Clamp(r, 0, 255);
+        g = Math.Clamp(g, 0, 255);
+        b = Math.Clamp(b, 0, 255);
+        return $"#{r:X2}{g:X2}{b:X2}";
     }
 }

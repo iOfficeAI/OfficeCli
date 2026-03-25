@@ -116,19 +116,30 @@ public partial class PowerPointHandler
         }
         else
         {
-            // Has curves — use clip-path: path() with SVG path syntax
-            var svgPath = new StringBuilder();
+            // Has curves — approximate with polygon() by sampling bezier curves
+            // clip-path:path() uses pixel coordinates (not percentages), so we must
+            // flatten curves into polygon points with percentage coordinates instead.
+            var polyPoints = new List<string>();
+            double curX = 0, curY = 0;
+            const int bezierSegments = 8; // number of line segments per bezier curve
+
             foreach (var child in path.ChildElements)
             {
                 switch (child)
                 {
                     case Drawing.MoveTo moveTo:
                         if (TryParsePoint(moveTo.GetFirstChild<Drawing.Point>(), pathW, pathH, out var mx, out var my))
-                            svgPath.Append($"M {mx:0.##} {my:0.##} ");
+                        {
+                            polyPoints.Add($"{mx:0.##}% {my:0.##}%");
+                            curX = mx; curY = my;
+                        }
                         break;
                     case Drawing.LineTo lineTo:
                         if (TryParsePoint(lineTo.GetFirstChild<Drawing.Point>(), pathW, pathH, out var lx, out var ly))
-                            svgPath.Append($"L {lx:0.##} {ly:0.##} ");
+                        {
+                            polyPoints.Add($"{lx:0.##}% {ly:0.##}%");
+                            curX = lx; curY = ly;
+                        }
                         break;
                     case Drawing.CubicBezierCurveTo cubicBez:
                     {
@@ -137,7 +148,18 @@ public partial class PowerPointHandler
                             && TryParsePoint(pts[0], pathW, pathH, out var c1x, out var c1y)
                             && TryParsePoint(pts[1], pathW, pathH, out var c2x, out var c2y)
                             && TryParsePoint(pts[2], pathW, pathH, out var c3x, out var c3y))
-                            svgPath.Append($"C {c1x:0.##} {c1y:0.##},{c2x:0.##} {c2y:0.##},{c3x:0.##} {c3y:0.##} ");
+                        {
+                            // Sample cubic bezier: B(t) = (1-t)^3*P0 + 3(1-t)^2*t*P1 + 3(1-t)*t^2*P2 + t^3*P3
+                            for (int i = 1; i <= bezierSegments; i++)
+                            {
+                                double t = i / (double)bezierSegments;
+                                double u = 1 - t;
+                                double px = u * u * u * curX + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * c3x;
+                                double py = u * u * u * curY + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * c3y;
+                                polyPoints.Add($"{px:0.##}% {py:0.##}%");
+                            }
+                            curX = c3x; curY = c3y;
+                        }
                         break;
                     }
                     case Drawing.QuadraticBezierCurveTo quadBez:
@@ -146,17 +168,26 @@ public partial class PowerPointHandler
                         if (pts.Count >= 2
                             && TryParsePoint(pts[0], pathW, pathH, out var q1x, out var q1y)
                             && TryParsePoint(pts[1], pathW, pathH, out var q2x, out var q2y))
-                            svgPath.Append($"Q {q1x:0.##} {q1y:0.##},{q2x:0.##} {q2y:0.##} ");
+                        {
+                            // Sample quadratic bezier: B(t) = (1-t)^2*P0 + 2(1-t)*t*P1 + t^2*P2
+                            for (int i = 1; i <= bezierSegments; i++)
+                            {
+                                double t = i / (double)bezierSegments;
+                                double u = 1 - t;
+                                double px = u * u * curX + 2 * u * t * q1x + t * t * q2x;
+                                double py = u * u * curY + 2 * u * t * q1y + t * t * q2y;
+                                polyPoints.Add($"{px:0.##}% {py:0.##}%");
+                            }
+                            curX = q2x; curY = q2y;
+                        }
                         break;
                     }
                     case Drawing.CloseShapePath:
-                        svgPath.Append("Z ");
-                        break;
+                        break; // polygon implicitly closes
                 }
             }
-            var pathStr = svgPath.ToString().Trim();
-            if (!string.IsNullOrEmpty(pathStr))
-                return $"clip-path:path('{pathStr}')";
+            if (polyPoints.Count >= 3)
+                return $"clip-path:polygon({string.Join(",", polyPoints)})";
         }
 
         return "";
@@ -280,6 +311,42 @@ public partial class PowerPointHandler
         return $"box-shadow:{offsetX:0.##}pt {offsetY:0.##}pt {blurPt:0.##}pt {color}";
     }
 
+    // ==================== CSS Helper: Reflection ====================
+
+    /// <summary>
+    /// Generates CSS -webkit-box-reflect for an OOXML reflection effect.
+    /// Uses the reflection's StartOpacity, EndAlpha, EndPosition, Distance, and BlurRadius
+    /// to build an appropriate linear-gradient fade.
+    /// </summary>
+    private static string EffectListToReflectionCss(Drawing.EffectList? effectList)
+    {
+        if (effectList == null) return "";
+
+        var refl = effectList.GetFirstChild<Drawing.Reflection>();
+        if (refl == null) return "";
+
+        // Distance between shape bottom and reflection start (EMU → pt)
+        var distPt = refl.Distance?.HasValue == true ? refl.Distance.Value / 12700.0 : 0;
+
+        // StartOpacity: initial opacity of reflected image (thousandths of a percent)
+        var startOpacity = refl.StartOpacity?.HasValue == true ? refl.StartOpacity.Value / 100000.0 : 0.52;
+
+        // EndAlpha: final opacity (thousandths of a percent)
+        var endOpacity = refl.EndAlpha?.HasValue == true ? refl.EndAlpha.Value / 100000.0 : 0.0;
+
+        // EndPosition: how much of the shape height is reflected (thousandths of a percent → CSS percentage)
+        // This controls where the gradient reaches full transparency.
+        var endPos = refl.EndPosition?.HasValue == true ? refl.EndPosition.Value / 1000.0 : 90.0;
+
+        // Map endPos to the gradient: the transparent region starts at (100 - endPos)% of the reflected image
+        // For endPos=55 (tight): fade starts early → reflection visible ~55%
+        // For endPos=90 (half): fade occupies most → reflection visible ~90%
+        // For endPos=100 (full): full height reflection
+        var fadeStartPct = Math.Max(0, 100.0 - endPos);
+
+        return $"-webkit-box-reflect:below {distPt:0.##}pt linear-gradient(transparent {fadeStartPct:0.#}%,rgba(255,255,255,{startOpacity:0.##}) {100:0.#}%)";
+    }
+
     // ==================== CSS Helper: Preset Geometry ====================
 
     private static string PresetGeometryToCss(string preset) =>
@@ -355,7 +422,7 @@ public partial class PowerPointHandler
             // Arrows
             "rightArrow" => "clip-path:polygon(0 20%,70% 20%,70% 0,100% 50%,70% 100%,70% 80%,0 80%)",
             "leftArrow" => "clip-path:polygon(30% 0,30% 20%,100% 20%,100% 80%,30% 80%,30% 100%,0 50%)",
-            "upArrow" => "clip-path:polygon(20% 30%,50% 0,80% 30%,80% 100%,20% 100%)",
+            "upArrow" => "clip-path:polygon(50% 0,100% 30%,80% 30%,80% 100%,20% 100%,20% 30%,0 30%)",
             "downArrow" => "clip-path:polygon(20% 0,80% 0,80% 70%,100% 70%,50% 100%,0 70%,20% 70%)",
             "leftRightArrow" => "clip-path:polygon(0 50%,15% 20%,15% 35%,85% 35%,85% 20%,100% 50%,85% 80%,85% 65%,15% 65%,15% 80%)",
             "upDownArrow" => "clip-path:polygon(50% 0,80% 15%,65% 15%,65% 85%,80% 85%,50% 100%,20% 85%,35% 85%,35% 15%,20% 15%)",
@@ -365,9 +432,10 @@ public partial class PowerPointHandler
             "homePlate" => "clip-path:polygon(0 0,85% 0,100% 50%,85% 100%,0 100%)",
             "stripedRightArrow" => "clip-path:polygon(10% 20%,12% 20%,12% 80%,10% 80%,10% 20%,15% 20%,70% 20%,70% 0,100% 50%,70% 100%,70% 80%,15% 80%)",
 
-            // Callouts
-            "wedgeRoundRectCallout" => "border-radius:6px",
-            "wedgeRectCallout" or "wedgeEllipseCallout" => "",
+            // Callouts — rectangle/rounded-rect/ellipse body with a wedge tail pointing down-left
+            "wedgeRectCallout" => "clip-path:polygon(0 0,100% 0,100% 75%,40% 75%,10% 100%,30% 75%,0 75%)",
+            "wedgeRoundRectCallout" => "clip-path:polygon(8% 0%,92% 0%,95% 1%,98% 3%,100% 5%,100% 8%,100% 67%,100% 70%,98% 73%,95% 75%,92% 75%,40% 75%,10% 100%,30% 75%,8% 75%,5% 75%,2% 73%,1% 70%,0% 67%,0% 8%,0% 5%,1% 3%,2% 1%,5% 0%)",
+            "wedgeEllipseCallout" => "clip-path:polygon(50% 0%,60% 1%,70% 3%,78% 7%,85% 13%,90% 20%,94% 28%,97% 37%,98% 47%,97% 56%,95% 64%,91% 71%,40% 75%,10% 100%,35% 72%,27% 76%,19% 72%,12% 65%,7% 57%,3% 48%,2% 38%,3% 29%,6% 20%,11% 13%,18% 7%,26% 3%,35% 1%,42% 0%)",
 
             // Crosses and plus
             "plus" or "cross" => "clip-path:polygon(33% 0,67% 0,67% 33%,100% 33%,100% 67%,67% 67%,67% 100%,33% 100%,33% 67%,0 67%,0 33%,33% 33%)",
@@ -376,18 +444,24 @@ public partial class PowerPointHandler
             "heart" => "clip-path:polygon(50% 18%,65% 0,85% 0,100% 15%,100% 35%,50% 100%,0 35%,0 15%,15% 0,35% 0)",
 
             // Cloud — SVG-based clip-path for realistic cloud bumps
-            "cloud" => "clip-path:path('M 25 80 Q 0 80 5 60 Q 0 45 15 35 Q 10 15 30 15 Q 35 0 55 5 Q 70 0 78 15 Q 95 10 95 30 Q 100 45 90 55 Q 100 70 85 78 Q 80 95 60 90 Q 45 100 35 90 Z')",
-            "cloudCallout" => "clip-path:path('M 25 80 Q 0 80 5 60 Q 0 45 15 35 Q 10 15 30 15 Q 35 0 55 5 Q 70 0 78 15 Q 95 10 95 30 Q 100 45 90 55 Q 100 70 85 78 Q 80 95 60 90 Q 45 100 35 90 Z')",
+            "cloud" => "clip-path:polygon(25% 80%,18% 80%,12% 78%,7% 74%,5% 69%,4% 64%,5% 60%,3% 56%,1% 51%,1% 47%,3% 42%,7% 38%,11% 36%,15% 35%,14% 29%,14% 23%,17% 19%,21% 16%,26% 15%,30% 15%,31% 10%,34% 6%,38% 3%,43% 1%,48% 0%,55% 5%,61% 2%,67% 1%,72% 2%,76% 6%,78% 15%,82% 12%,87% 11%,91% 13%,94% 17%,95% 22%,95% 30%,97% 33%,99% 37%,100% 42%,99% 47%,97% 52%,93% 55%,90% 55%,93% 59%,96% 64%,97% 68%,96% 73%,92% 76%,88% 78%,85% 78%,84% 82%,82% 87%,78% 90%,73% 92%,68% 92%,63% 90%,60% 90%,56% 93%,51% 96%,46% 97%,41% 96%,38% 93%,35% 90%)",
+            "cloudCallout" => "clip-path:polygon(25% 80%,18% 80%,12% 78%,7% 74%,5% 69%,4% 64%,5% 60%,3% 56%,1% 51%,1% 47%,3% 42%,7% 38%,11% 36%,15% 35%,14% 29%,14% 23%,17% 19%,21% 16%,26% 15%,30% 15%,31% 10%,34% 6%,38% 3%,43% 1%,48% 0%,55% 5%,61% 2%,67% 1%,72% 2%,76% 6%,78% 15%,82% 12%,87% 11%,91% 13%,94% 17%,95% 22%,95% 30%,97% 33%,99% 37%,100% 42%,99% 47%,97% 52%,93% 55%,90% 55%,93% 59%,96% 64%,97% 68%,96% 73%,92% 76%,88% 78%,85% 78%,84% 82%,82% 87%,78% 90%,73% 92%,68% 92%,63% 90%,60% 90%,56% 93%,51% 96%,46% 97%,41% 96%,38% 93%,35% 90%)",
 
             // Smiley (circle)
             "smileyFace" or "smiley" => "border-radius:50%",
+
+            // Sun — circle with triangular rays
+            "sun" => "clip-path:polygon(50% 0,56% 15%,70% 3%,66% 19%,85% 15%,74% 27%,93% 30%,80% 38%,97% 45%,82% 48%,97% 55%,80% 62%,93% 70%,74% 73%,85% 85%,66% 81%,70% 97%,56% 85%,50% 100%,44% 85%,30% 97%,34% 81%,15% 85%,26% 73%,7% 70%,20% 62%,3% 55%,18% 48%,3% 45%,20% 38%,7% 30%,26% 27%,15% 15%,34% 19%,30% 3%,44% 15%)",
+
+            // Moon (crescent) — outer arc minus inner arc
+            "moon" => "clip-path:polygon(75% 0%,65% 5%,56% 12%,49% 21%,44% 31%,42% 42%,42% 50%,42% 58%,44% 69%,49% 79%,56% 88%,65% 95%,75% 100%,63% 100%,50% 98%,38% 93%,27% 86%,18% 77%,10% 66%,5% 54%,2% 42%,2% 30%,5% 18%,10% 9%,18% 3%,27% 0%,38% 0%,50% 0%,63% 0%)",
 
             // Gear (polygon approximation of 6-tooth gear)
             "gear6" => "clip-path:polygon(50% 0,61% 10%,75% 3%,80% 18%,97% 25%,88% 38%,100% 50%,88% 62%,97% 75%,80% 82%,75% 97%,61% 90%,50% 100%,39% 90%,25% 97%,20% 82%,3% 75%,12% 62%,0 50%,12% 38%,3% 25%,20% 18%,25% 3%,39% 10%)",
             "gear9" => "clip-path:polygon(50% 0,56% 8%,65% 2%,68% 12%,78% 9%,78% 20%,88% 20%,85% 30%,95% 35%,90% 44%,100% 50%,90% 56%,95% 65%,85% 70%,88% 80%,78% 80%,78% 91%,68% 88%,65% 98%,56% 92%,50% 100%,44% 92%,35% 98%,32% 88%,22% 91%,22% 80%,12% 80%,15% 70%,5% 65%,10% 56%,0 50%,10% 44%,5% 35%,15% 30%,12% 20%,22% 20%,22% 9%,32% 12%,35% 2%,44% 8%)",
 
             // 3D-like shapes (rendered flat)
-            "cube" => "",
+            "cube" => "clip-path:polygon(10% 0,100% 0,100% 85%,90% 100%,0 100%,0 15%)",
             "can" or "cylinder" => "border-radius:50%/10%",
             "bevel" => "border:3px outset currentColor",
             "foldedCorner" => "clip-path:polygon(0 0,85% 0,100% 15%,100% 100%,0 100%)",
@@ -395,7 +469,7 @@ public partial class PowerPointHandler
 
             // Misc shapes
             "frame" => "clip-path:polygon(0 0,100% 0,100% 100%,0 100%,0 12%,12% 12%,12% 88%,88% 88%,88% 12%,0 12%)",
-            "donut" => "border-radius:50%", // approximate — real donut has inner hole
+            "donut" => "border-radius:50%;-webkit-mask-image:radial-gradient(circle,transparent 38%,black 38%);mask-image:radial-gradient(circle,transparent 38%,black 38%)",
             "noSmoking" => "border-radius:50%",
             "halfFrame" => "clip-path:polygon(0 0,100% 0,100% 15%,15% 15%,15% 100%,0 100%)",
             "corner" => "clip-path:polygon(0 0,50% 0,50% 50%,100% 50%,100% 100%,0 100%)",
@@ -430,8 +504,11 @@ public partial class PowerPointHandler
             "flowChartMagneticDisk" => "border-radius:50%/20%",
             "flowChartConnector" or "flowChartOffpageConnector" => "border-radius:50%",
 
-            // Block arrows
-            "curvedRightArrow" or "curvedLeftArrow" or "curvedUpArrow" or "curvedDownArrow" => "",
+            // Block arrows (curved)
+            "curvedRightArrow" => "clip-path:polygon(0% 85%,0% 55%,2% 40%,6% 28%,12% 19%,20% 13%,30% 10%,70% 10%,70% 0%,100% 20%,70% 40%,70% 30%,40% 30%,32% 33%,26% 38%,22% 45%,20% 55%,20% 85%)",
+            "curvedLeftArrow" => "clip-path:polygon(100% 85%,100% 55%,98% 40%,94% 28%,88% 19%,80% 13%,70% 10%,30% 10%,30% 0%,0% 20%,30% 40%,30% 30%,60% 30%,68% 33%,74% 38%,78% 45%,80% 55%,80% 85%)",
+            "curvedUpArrow" => "clip-path:polygon(85% 100%,55% 100%,40% 98%,28% 94%,19% 88%,13% 80%,10% 70%,10% 30%,0% 30%,20% 0%,40% 30%,30% 30%,30% 60%,33% 68%,38% 74%,45% 78%,55% 80%,85% 80%)",
+            "curvedDownArrow" => "clip-path:polygon(85% 0%,55% 0%,40% 2%,28% 6%,19% 12%,13% 20%,10% 30%,10% 70%,0% 70%,20% 100%,40% 70%,30% 70%,30% 40%,33% 32%,38% 26%,45% 22%,55% 20%,85% 20%)",
             "circularArrow" => "border-radius:50%",
 
             // Math

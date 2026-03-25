@@ -147,6 +147,11 @@ public partial class PowerPointHandler
         if (!string.IsNullOrEmpty(shadowCss))
             styles.Add(shadowCss);
 
+        // Reflection → CSS -webkit-box-reflect
+        var reflectionCss = EffectListToReflectionCss(effectList);
+        if (!string.IsNullOrEmpty(reflectionCss))
+            styles.Add(reflectionCss);
+
         // Soft edge → fade out at edges using CSS mask-image
         // Unlike filter:blur() which blurs the entire element,
         // mask-image with edge gradients only affects the border region.
@@ -436,6 +441,12 @@ public partial class PowerPointHandler
         "heart" => 0.15,
         "plus" or "cross" => 0.10,
         "cloud" or "cloudCallout" => 0.12,
+        "sun" => 0.20,
+        "moon" => 0.15,
+        "cube" => 0.08,
+        "donut" => 0.25,
+        "wedgeRectCallout" or "wedgeRoundRectCallout" or "wedgeEllipseCallout" => 0.08,
+        "curvedRightArrow" or "curvedLeftArrow" or "curvedUpArrow" or "curvedDownArrow" => 0.12,
         _ => 0
     };
 
@@ -561,6 +572,11 @@ public partial class PowerPointHandler
         var shadowCss = EffectListToShadowCss(effectList, themeColors);
         if (!string.IsNullOrEmpty(shadowCss))
             styles.Add(shadowCss);
+
+        // Reflection → CSS -webkit-box-reflect
+        var reflectionCss = EffectListToReflectionCss(effectList);
+        if (!string.IsNullOrEmpty(reflectionCss))
+            styles.Add(reflectionCss);
 
         // Geometry (rounded corners)
         var presetGeom = pic.ShapeProperties?.GetFirstChild<Drawing.PresetGeometry>();

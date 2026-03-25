@@ -115,11 +115,11 @@ public partial class PowerPointHandler
 
         // Container with optional chart background
         var bgStyle = chartFillColor != null ? $"background:#{chartFillColor};" : "background:transparent;";
-        sb.AppendLine($"    <div class=\"shape\" style=\"left:{x}cm;top:{y}cm;width:{w}cm;height:{h}cm;{bgStyle}\">");
+        sb.AppendLine($"    <div class=\"shape\" style=\"left:{x}cm;top:{y}cm;width:{w}cm;height:{h}cm;{bgStyle}display:flex;flex-direction:column;overflow:hidden\">");
 
         // Title
         if (!string.IsNullOrEmpty(titleText))
-            sb.AppendLine($"      <div style=\"text-align:center;font-size:{titleSizeCss};font-weight:bold;padding:4px;color:{chartTextColor}\">{HtmlEncode(titleText)}</div>");
+            sb.AppendLine($"      <div style=\"text-align:center;font-size:{titleSizeCss};font-weight:bold;padding:4px;flex-shrink:0;color:{chartTextColor}\">{HtmlEncode(titleText)}</div>");
 
         // SVG chart area — proportional to actual shape dimensions
         var widthEmu = ext.Cx?.Value ?? 3600000;
@@ -134,8 +134,21 @@ public partial class PowerPointHandler
 
         var is3D = chartType.Contains("3d");
 
-        var legendH = (seriesList.Count > 1 || (chartType.Contains("pie") || chartType.Contains("doughnut"))) ? 18 : 0;
-        sb.AppendLine($"      <svg viewBox=\"0 0 {svgW} {chartSvgH}\" style=\"width:100%;height:calc(100% - {titleH + legendH + 4}px)\" preserveAspectRatio=\"xMidYMin meet\">");
+        // Show legend by default for multi-series or pie/doughnut charts.
+        // Only hide if the OOXML chart explicitly has <c:legend> with <c:delete val="1"/>.
+        var legendEl = chart?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.Legend>();
+        var isPieOrDoughnut = chartType.Contains("pie") || chartType.Contains("doughnut");
+        bool hasLegend;
+        if (legendEl != null)
+        {
+            var deleteEl = legendEl.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.Delete>();
+            hasLegend = deleteEl?.Val?.Value != true;
+        }
+        else
+        {
+            hasLegend = seriesList.Count > 1 || isPieOrDoughnut;
+        }
+        sb.AppendLine($"      <svg viewBox=\"0 0 {svgW} {chartSvgH}\" style=\"width:100%;flex:1;min-height:0\" preserveAspectRatio=\"xMidYMin meet\">");
 
         // Plot area background
         if (plotFillColor != null)
@@ -217,27 +230,25 @@ public partial class PowerPointHandler
 
         sb.AppendLine("      </svg>");
 
-        // Legend
-        var legend = chart?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.Legend>();
-        var legendFontSize = legend?.Descendants<Drawing.RunProperties>().FirstOrDefault()?.FontSize;
-        var legendSizeCss = legendFontSize?.HasValue == true ? $"{legendFontSize.Value / 100.0:0.##}pt" : "8px";
-        var isPieType = chartType.Contains("pie") || chartType.Contains("doughnut");
-        if (seriesList.Count > 1 || (isPieType && categories.Length > 1))
+        // Legend — render when the OOXML chart contains a <c:legend> element
+        var legendFontSize = legendEl?.Descendants<Drawing.RunProperties>().FirstOrDefault()?.FontSize;
+        var legendSizeCss = legendFontSize?.HasValue == true ? $"{legendFontSize.Value / 100.0:0.##}pt" : "11px";
+        if (hasLegend)
         {
-            sb.Append($"      <div style=\"display:flex;justify-content:center;gap:8px;font-size:{legendSizeCss};color:{chartLabelColor};padding:2px\">");
-            if (isPieType && categories.Length > 1)
+            sb.Append($"      <div class=\"chart-legend\" style=\"display:flex;flex-shrink:0;justify-content:center;gap:16px;padding:4px 0;font-size:{legendSizeCss};color:{chartLabelColor}\">");
+            if (isPieOrDoughnut && categories.Length > 0)
             {
                 for (int i = 0; i < categories.Length; i++)
                 {
                     var color = i < seriesColors.Count ? seriesColors[i] : ChartColors[i % ChartColors.Length];
-                    sb.Append($"<span><span style=\"display:inline-block;width:8px;height:8px;background:{color};margin-right:2px;border-radius:1px\"></span>{HtmlEncode(categories[i])}</span>");
+                    sb.Append($"<span style=\"display:inline-flex;align-items:center;gap:4px\"><span style=\"display:inline-block;width:12px;height:12px;background:{color};border-radius:1px\"></span>{HtmlEncode(categories[i])}</span>");
                 }
             }
             else
             {
                 for (int i = 0; i < seriesList.Count; i++)
                 {
-                    sb.Append($"<span><span style=\"display:inline-block;width:8px;height:8px;background:{seriesColors[i]};margin-right:2px;border-radius:1px\"></span>{HtmlEncode(seriesList[i].name)}</span>");
+                    sb.Append($"<span style=\"display:inline-flex;align-items:center;gap:4px\"><span style=\"display:inline-block;width:12px;height:12px;background:{seriesColors[i]};border-radius:1px\"></span>{HtmlEncode(seriesList[i].name)}</span>");
                 }
             }
             sb.AppendLine("</div>");
@@ -277,20 +288,11 @@ public partial class PowerPointHandler
         if (maxVal <= 0) maxVal = 1;
 
         // Compute nice axis scale for non-percent charts
-        double niceMax = maxVal;
-        int nTicks = 4;
-        double tickStep = maxVal / 4;
+        double niceMax, tickStep;
+        int nTicks;
         if (!percentStacked)
         {
-            var mag = Math.Pow(10, Math.Floor(Math.Log10(maxVal)));
-            var res = maxVal / mag;
-            tickStep = res <= 1.5 ? 0.2 * mag
-                : res <= 3 ? 0.5 * mag
-                : res <= 7 ? 1.0 * mag
-                : 2.0 * mag;
-            niceMax = Math.Ceiling(maxVal / tickStep) * tickStep;
-            nTicks = (int)Math.Round(niceMax / tickStep);
-            if (nTicks < 2) nTicks = 2;
+            (niceMax, tickStep, nTicks) = ComputeNiceAxis(maxVal);
         }
         else
         {
@@ -435,16 +437,8 @@ public partial class PowerPointHandler
         if (maxVal <= 0) maxVal = 1;
         var catCount = Math.Max(categories.Length, series.Max(s => s.values.Length));
 
-        // Nice axis scale
-        var mag = Math.Pow(10, Math.Floor(Math.Log10(maxVal)));
-        var res = maxVal / mag;
-        var tickStep = res <= 1.5 ? 0.2 * mag
-            : res <= 3 ? 0.5 * mag
-            : res <= 7 ? 1.0 * mag
-            : 2.0 * mag;
-        var niceMax = Math.Ceiling(maxVal / tickStep) * tickStep;
-        var nTicks = (int)Math.Round(niceMax / tickStep);
-        if (nTicks < 2) nTicks = 2;
+        // Nice axis scale with headroom
+        var (niceMax, tickStep, nTicks) = ComputeNiceAxis(maxVal);
 
         // Gridlines
         for (int t = 1; t <= nTicks; t++)
@@ -604,20 +598,8 @@ public partial class PowerPointHandler
             maxVal = series.SelectMany(s => s.values).DefaultIfEmpty(0).Max();
         }
         if (maxVal <= 0) maxVal = 1;
-        // Compute nice axis scale
-        double niceMax, tickInterval;
-        int tickCount;
-        {
-            var magnitude = Math.Pow(10, Math.Floor(Math.Log10(maxVal)));
-            var residual = maxVal / magnitude;
-            tickInterval = residual <= 1.5 ? 0.2 * magnitude
-                : residual <= 3 ? 0.5 * magnitude
-                : residual <= 7 ? 1.0 * magnitude
-                : 2.0 * magnitude;
-            niceMax = Math.Ceiling(maxVal / tickInterval) * tickInterval;
-            tickCount = (int)Math.Round(niceMax / tickInterval);
-            if (tickCount < 2) tickCount = 2;
-        }
+        // Compute nice axis scale with headroom
+        var (niceMax, tickInterval, tickCount) = ComputeNiceAxis(maxVal);
 
         // Gridlines
         for (int t = 1; t <= tickCount; t++)
@@ -720,8 +702,9 @@ public partial class PowerPointHandler
 
         var allValues = seriesList.SelectMany(s => s.values).ToArray();
         if (allValues.Length == 0) return;
-        var maxVal = allValues.Max();
-        if (maxVal <= 0) maxVal = 1;
+        var rawMax = allValues.Max();
+        if (rawMax <= 0) rawMax = 1;
+        var (maxVal, _, _) = ComputeNiceAxis(rawMax);
         var catCount = Math.Max(categories.Length, seriesList.Max(s => s.values.Length));
 
         // Axis lines
@@ -1073,8 +1056,7 @@ public partial class PowerPointHandler
     {
         var allValues = series.SelectMany(s => s.values).ToArray();
         if (allValues.Length == 0) return;
-        var maxVal = allValues.Max();
-        if (maxVal <= 0) maxVal = 1;
+        var (maxVal, _, _) = ComputeNiceAxis(allValues.Max());
         var catCount = Math.Max(categories.Length, series.Max(s => s.values.Length));
         var serCount = series.Count;
 
@@ -1279,8 +1261,7 @@ public partial class PowerPointHandler
     {
         var allValues = series.SelectMany(s => s.values).ToArray();
         if (allValues.Length == 0) return;
-        var maxVal = allValues.Max();
-        if (maxVal <= 0) maxVal = 1;
+        var (maxVal, _, _) = ComputeNiceAxis(allValues.Max());
         var catCount = Math.Max(categories.Length, series.Max(s => s.values.Length));
 
         // Axis lines
@@ -1327,5 +1308,28 @@ public partial class PowerPointHandler
             var lx = ox + (catCount > 1 ? (double)pw * c / (catCount - 1) : pw / 2.0);
             sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{oy + ph + 14}\" fill=\"{_chartCatColor}\" font-size=\"9\" text-anchor=\"middle\">{HtmlEncode(label)}</text>");
         }
+    }
+
+    /// <summary>
+    /// Compute a "nice" axis scale with ~10-15% headroom above the data max.
+    /// Returns (niceMax, tickStep, nTicks).
+    /// </summary>
+    private static (double niceMax, double tickStep, int nTicks) ComputeNiceAxis(double maxVal)
+    {
+        if (maxVal <= 0) maxVal = 1;
+        // Compute tick step based on raw max (no padding), then add one tick above max.
+        // This matches PowerPoint's behavior: e.g., 300→350 (step 50), 400→450, 500→600.
+        var mag = Math.Pow(10, Math.Floor(Math.Log10(maxVal)));
+        var res = maxVal / mag;
+        var tickStep = res <= 1.5 ? 0.2 * mag
+            : res <= 4 ? 0.5 * mag
+            : res <= 8 ? 1.0 * mag
+            : 2.0 * mag;
+        // Set niceMax to one tick above the highest data point
+        var niceMax = Math.Ceiling(maxVal / tickStep) * tickStep;
+        if (niceMax <= maxVal) niceMax += tickStep; // ensure at least one tick of headroom
+        var nTicks = (int)Math.Round(niceMax / tickStep);
+        if (nTicks < 2) nTicks = 2;
+        return (niceMax, tickStep, nTicks);
     }
 }
