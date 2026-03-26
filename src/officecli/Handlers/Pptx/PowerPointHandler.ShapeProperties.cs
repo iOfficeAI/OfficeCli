@@ -408,13 +408,36 @@ public partial class PowerPointHandler
                     if (!double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var opacityVal) || double.IsNaN(opacityVal) || double.IsInfinity(opacityVal))
                         throw new ArgumentException($"Invalid 'opacity' value: '{value}'. Expected a finite decimal 0.0-1.0 (e.g. 0.5 = 50% opacity).");
                     if (opacityVal > 1.0) opacityVal /= 100.0; // treat >1 as percentage (e.g. 30 → 0.30)
+                    var alphaPct = (int)(opacityVal * 100000); // 0.0-1.0 → 0-100000
+
+                    // Apply alpha to gradient fill stops if present
+                    var gradFill = spPr.GetFirstChild<Drawing.GradientFill>();
+                    if (gradFill != null)
+                    {
+                        var gradStops = gradFill.GradientStopList?.Elements<Drawing.GradientStop>();
+                        if (gradStops != null)
+                        {
+                            foreach (var stop in gradStops)
+                            {
+                                var stopColorEl = stop.GetFirstChild<Drawing.RgbColorModelHex>() as OpenXmlElement
+                                    ?? stop.GetFirstChild<Drawing.SchemeColor>();
+                                if (stopColorEl != null)
+                                {
+                                    stopColorEl.RemoveAllChildren<Drawing.Alpha>();
+                                    stopColorEl.AppendChild(new Drawing.Alpha { Val = alphaPct });
+                                }
+                            }
+                        }
+                        break;
+                    }
+
                     var solidFill = spPr.GetFirstChild<Drawing.SolidFill>();
                     if (solidFill == null)
                     {
                         // Auto-create a white fill (matching Apache POI behavior)
                         spPr.RemoveAllChildren<Drawing.NoFill>();
                         solidFill = new Drawing.SolidFill(new Drawing.RgbColorModelHex { Val = "FFFFFF" });
-                        spPr.InsertAfter(solidFill, spPr.Transform2D);
+                        InsertFillElement(spPr, solidFill);
                     }
                     {
                         var colorEl = solidFill.GetFirstChild<Drawing.RgbColorModelHex>() as OpenXmlElement
@@ -422,8 +445,7 @@ public partial class PowerPointHandler
                         if (colorEl != null)
                         {
                             colorEl.RemoveAllChildren<Drawing.Alpha>();
-                            var pct = (int)(opacityVal * 100000); // 0.0-1.0 → 0-100000
-                            colorEl.AppendChild(new Drawing.Alpha { Val = pct });
+                            colorEl.AppendChild(new Drawing.Alpha { Val = alphaPct });
                         }
                     }
                     break;
