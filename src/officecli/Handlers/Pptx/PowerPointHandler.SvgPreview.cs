@@ -460,7 +460,7 @@ public partial class PowerPointHandler
             }
 
             int? phDefaultFontSize = ResolvePlaceholderFontSize(shape, part);
-            RenderTextBodySvg(sb, shape.TextBody, themeColors, w, h,
+            RenderTextBodyFO(sb, shape.TextBody, themeColors, w, h,
                 lIns, tIns, rIns, bIns, valign, phDefaultFontSize);
 
             if (isFlipH || isFlipV)
@@ -1111,7 +1111,7 @@ public partial class PowerPointHandler
 
                     // Render text at cell position with offset
                     sb.Append($"<g transform=\"translate({currentX:0.##},{currentY:0.##})\">");
-                    RenderTextBodySvg(sb, textBody, themeColors, cellW, rowH,
+                    RenderTextBodyFO(sb, textBody, themeColors, cellW, rowH,
                         padL, padT, padR, padB, valign, null, textColorOverride);
                     sb.Append("</g>");
                 }
@@ -1124,6 +1124,156 @@ public partial class PowerPointHandler
         }
 
         sb.AppendLine("</g>");
+    }
+
+    // ==================== Text Rendering via foreignObject ====================
+
+    /// <summary>
+    /// Render text using foreignObject + HTML for automatic wrapping.
+    /// Can be swapped with RenderTextBodySvg for pure SVG output.
+    /// </summary>
+    private static void RenderTextBodyFO(StringBuilder sb, OpenXmlElement textBody,
+        Dictionary<string, string> themeColors,
+        double shapeW, double shapeH,
+        double lIns, double tIns, double rIns, double bIns,
+        string valign, int? defaultFontSizeHundredths, string? textColorOverride = null)
+    {
+        var paragraphs = textBody.Elements<Drawing.Paragraph>().ToList();
+        if (paragraphs.Count == 0) return;
+
+        double textW = shapeW - lIns - rIns;
+        double textH = shapeH - tIns - bIns;
+        if (textW <= 0 || textH <= 0) return;
+
+        const double ptToPx = 96.0 / 72.0;
+
+        // Vertical alignment via flexbox
+        var justifyContent = valign switch
+        {
+            "center" => "center",
+            "bottom" => "flex-end",
+            _ => "flex-start"
+        };
+
+        sb.Append($"<foreignObject x=\"{lIns:0.##}\" y=\"{tIns:0.##}\" width=\"{textW:0.##}\" height=\"{textH:0.##}\">");
+        sb.Append($"<div xmlns=\"http://www.w3.org/1999/xhtml\" style=\"width:100%;height:100%;overflow:hidden;display:flex;flex-direction:column;justify-content:{justifyContent};line-height:1\">");
+
+        foreach (var para in paragraphs)
+        {
+            var paraStyles = new List<string>();
+
+            var pProps = para.ParagraphProperties;
+
+            // Alignment
+            if (pProps?.Alignment?.HasValue == true)
+            {
+                var align = pProps.Alignment.InnerText switch
+                {
+                    "l" => "left",
+                    "ctr" => "center",
+                    "r" => "right",
+                    "just" or "dist" => "justify",
+                    _ => "left"
+                };
+                paraStyles.Add($"text-align:{align}");
+            }
+
+            // Paragraph spacing
+            var sbPts = pProps?.GetFirstChild<Drawing.SpaceBefore>()?.GetFirstChild<Drawing.SpacingPoints>()?.Val?.Value;
+            if (sbPts.HasValue) paraStyles.Add($"margin-top:{sbPts.Value / 100.0:0.##}pt");
+            var saPts = pProps?.GetFirstChild<Drawing.SpaceAfter>()?.GetFirstChild<Drawing.SpacingPoints>()?.Val?.Value;
+            if (saPts.HasValue) paraStyles.Add($"margin-bottom:{saPts.Value / 100.0:0.##}pt");
+
+            // Line spacing
+            var lsPct = pProps?.GetFirstChild<Drawing.LineSpacing>()?.GetFirstChild<Drawing.SpacingPercent>()?.Val?.Value;
+            if (lsPct.HasValue) paraStyles.Add($"line-height:{lsPct.Value / 100000.0:0.##}");
+            var lsPts = pProps?.GetFirstChild<Drawing.LineSpacing>()?.GetFirstChild<Drawing.SpacingPoints>()?.Val?.Value;
+            if (lsPts.HasValue) paraStyles.Add($"line-height:{lsPts.Value / 100.0:0.##}pt");
+
+            // Indent
+            if (pProps?.Indent?.HasValue == true)
+                paraStyles.Add($"text-indent:{EmuToPx(pProps.Indent.Value):0.##}px");
+            if (pProps?.LeftMargin?.HasValue == true)
+                paraStyles.Add($"margin-left:{EmuToPx(pProps.LeftMargin.Value):0.##}px");
+
+            sb.Append($"<div style=\"white-space:pre-wrap;word-wrap:break-word;margin:0;{string.Join(";", paraStyles)}\">");
+
+            // Bullet
+            var bulletChar = pProps?.GetFirstChild<Drawing.CharacterBullet>()?.Char?.Value;
+            var bulletAuto = pProps?.GetFirstChild<Drawing.AutoNumberedBullet>();
+            if (bulletChar != null || bulletAuto != null)
+            {
+                var bullet = bulletChar ?? "\u2022";
+                sb.Append($"<span>{HtmlEncode(bullet)} </span>");
+            }
+
+            var runs = para.Elements<Drawing.Run>().ToList();
+            if (runs.Count == 0)
+            {
+                sb.Append("&#160;"); // non-breaking space for empty paragraph
+            }
+            else
+            {
+                foreach (var run in runs)
+                {
+                    var text = run.Text?.Text ?? "";
+                    if (string.IsNullOrEmpty(text)) continue;
+
+                    var rp = run.RunProperties;
+                    var styles = new List<string>();
+
+                    // Font
+                    var font = rp?.GetFirstChild<Drawing.LatinFont>()?.Typeface?.Value
+                        ?? rp?.GetFirstChild<Drawing.EastAsianFont>()?.Typeface?.Value;
+                    if (font != null && !font.StartsWith("+", StringComparison.Ordinal))
+                        styles.Add($"font-family:'{HtmlEncode(font)}'");
+
+                    // Size
+                    double fontSizePt = defaultFontSizeHundredths.HasValue ? defaultFontSizeHundredths.Value / 100.0 : 18;
+                    if (rp?.FontSize?.HasValue == true)
+                        fontSizePt = rp.FontSize.Value / 100.0;
+                    styles.Add($"font-size:{fontSizePt:0.##}pt");
+
+                    // Bold / Italic
+                    if (rp?.Bold?.Value == true) styles.Add("font-weight:bold");
+                    if (rp?.Italic?.Value == true) styles.Add("font-style:italic");
+
+                    // Underline / Strikethrough
+                    var decos = new List<string>();
+                    if (rp?.Underline?.HasValue == true && rp.Underline.Value != Drawing.TextUnderlineValues.None)
+                        decos.Add("underline");
+                    if (rp?.Strike?.HasValue == true && rp.Strike.Value != Drawing.TextStrikeValues.NoStrike)
+                        decos.Add("line-through");
+                    if (decos.Count > 0)
+                        styles.Add($"text-decoration:{string.Join(" ", decos)}");
+
+                    // Color
+                    var runFill = rp?.GetFirstChild<Drawing.SolidFill>();
+                    var color = ResolveFillColor(runFill, themeColors) ?? textColorOverride ?? "#000000";
+                    styles.Add($"color:{color}");
+
+                    // Character spacing
+                    if (rp?.Spacing?.HasValue == true && rp.Spacing.Value != 0)
+                        styles.Add($"letter-spacing:{rp.Spacing.Value / 100.0:0.##}pt");
+
+                    // Superscript / Subscript
+                    if (rp?.Baseline?.HasValue == true && rp.Baseline.Value != 0)
+                    {
+                        styles.Add(rp.Baseline.Value > 0 ? "vertical-align:super;font-size:smaller" : "vertical-align:sub;font-size:smaller");
+                    }
+
+                    sb.Append($"<span style=\"{string.Join(";", styles)}\">{HtmlEncode(text)}</span>");
+                }
+            }
+
+            // Line breaks
+            foreach (var br in para.Elements<Drawing.Break>())
+                sb.Append("<br/>");
+
+            sb.Append("</div>");
+        }
+
+        sb.Append("</div></foreignObject>");
     }
 
     // ==================== SVG Preset Geometries ====================
