@@ -113,6 +113,26 @@ public partial class PowerPointHandler
         var catAxis = plotArea.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.CategoryAxis>();
         var catAxisTitle = catAxis?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.Title>()?.Descendants<Drawing.Text>().FirstOrDefault()?.Text;
 
+        // Read explicit axis parameters from OOXML (override auto-calculation when present)
+        var valScaling = valAxis?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.Scaling>();
+        double? ooxmlAxisMax = null, ooxmlAxisMin = null, ooxmlMajorUnit = null;
+        var maxEl = valScaling?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.MaxAxisValue>();
+        if (maxEl?.Val?.HasValue == true) ooxmlAxisMax = maxEl.Val.Value;
+        var minEl = valScaling?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.MinAxisValue>();
+        if (minEl?.Val?.HasValue == true) ooxmlAxisMin = minEl.Val.Value;
+        var majorUnitEl = valAxis?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.MajorUnit>();
+        if (majorUnitEl?.Val?.HasValue == true) ooxmlMajorUnit = majorUnitEl.Val.Value;
+
+        // Read gapWidth from bar/column chart
+        var gapWidthEl = plotArea.Descendants<DocumentFormat.OpenXml.Drawing.Charts.GapWidth>().FirstOrDefault();
+        int? ooxmlGapWidth = gapWidthEl?.Val?.HasValue == true ? (int)gapWidthEl.Val.Value : null;
+
+        // Read axis label font sizes from OOXML
+        var valAxisFontSize = valAxis?.Descendants<Drawing.RunProperties>().FirstOrDefault()?.FontSize;
+        var catAxisFontSize = catAxis?.Descendants<Drawing.RunProperties>().FirstOrDefault()?.FontSize;
+        int valLabelPx = valAxisFontSize?.HasValue == true ? (int)(valAxisFontSize.Value / 100.0 * 96 / 72) : 9;
+        int catLabelPx = catAxisFontSize?.HasValue == true ? (int)(catAxisFontSize.Value / 100.0 * 96 / 72) : 9;
+
         // Container with optional chart background
         var bgStyle = chartFillColor != null ? $"background:#{chartFillColor};" : "background:transparent;";
         sb.AppendLine($"    <div class=\"shape\" style=\"left:{x}cm;top:{y}cm;width:{w}cm;height:{h}cm;{bgStyle}display:flex;flex-direction:column;overflow:hidden\">");
@@ -224,7 +244,8 @@ public partial class PowerPointHandler
             var isHorizontal = chartType.Contains("bar") && !chartType.Contains("column");
             var isStacked = chartType.Contains("stacked") || chartType.Contains("Stacked");
             var isPercent = chartType.Contains("percent") || chartType.Contains("Percent");
-            RenderBarChartSvg(sb, seriesList, categories, seriesColors, margin.left, margin.top, plotW, plotH, isHorizontal, isStacked, isPercent);
+            RenderBarChartSvg(sb, seriesList, categories, seriesColors, margin.left, margin.top, plotW, plotH, isHorizontal, isStacked, isPercent,
+                ooxmlAxisMax, ooxmlAxisMin, ooxmlMajorUnit, ooxmlGapWidth, valLabelPx, catLabelPx);
         }
 
         // Axis titles inside SVG
@@ -264,7 +285,9 @@ public partial class PowerPointHandler
 
     private void RenderBarChartSvg(StringBuilder sb, List<(string name, double[] values)> series,
         string[] categories, List<string> colors, int ox, int oy, int pw, int ph,
-        bool horizontal, bool stacked = false, bool percentStacked = false)
+        bool horizontal, bool stacked = false, bool percentStacked = false,
+        double? ooxmlMax = null, double? ooxmlMin = null, double? ooxmlMajorUnit = null,
+        int? ooxmlGapWidth = null, int valFontSize = 9, int catFontSize = 9)
     {
         var allValues = series.SelectMany(s => s.values).ToArray();
         if (allValues.Length == 0) return;
@@ -292,12 +315,21 @@ public partial class PowerPointHandler
         }
         if (maxVal <= 0) maxVal = 1;
 
-        // Compute nice axis scale for non-percent charts
+        // Use OOXML axis values when available, fallback to auto-calculation
         double niceMax, tickStep;
         int nTicks;
         if (!percentStacked)
         {
-            (niceMax, tickStep, nTicks) = ComputeNiceAxis(maxVal);
+            if (ooxmlMax.HasValue && ooxmlMajorUnit.HasValue)
+            {
+                niceMax = ooxmlMax.Value;
+                tickStep = ooxmlMajorUnit.Value;
+                nTicks = (int)Math.Round(niceMax / tickStep);
+            }
+            else
+            {
+                (niceMax, tickStep, nTicks) = ComputeNiceAxis(ooxmlMax ?? maxVal);
+            }
         }
         else
         {
@@ -360,7 +392,7 @@ public partial class PowerPointHandler
                 var dataIdx = catCount - 1 - c;
                 var label = dataIdx < categories.Length ? categories[dataIdx] : "";
                 var ly = oy + c * groupH + groupH / 2;
-                sb.AppendLine($"        <text x=\"{plotOx - 4}\" y=\"{ly:0.#}\" fill=\"{_chartCatColor}\" font-size=\"9\" text-anchor=\"end\" dominant-baseline=\"middle\">{HtmlEncode(label)}</text>");
+                sb.AppendLine($"        <text x=\"{plotOx - 4}\" y=\"{ly:0.#}\" fill=\"{_chartCatColor}\" font-size=\"{catFontSize}\" text-anchor=\"end\" dominant-baseline=\"middle\">{HtmlEncode(label)}</text>");
             }
 
             // Value axis labels
@@ -369,7 +401,7 @@ public partial class PowerPointHandler
                 var val = tickStep * t;
                 var label = percentStacked ? $"{(int)val}%" : (val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}");
                 var tx = plotOx + (double)plotPw * t / nTicks;
-                sb.AppendLine($"        <text x=\"{tx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{_chartAxisColor}\" font-size=\"9\" text-anchor=\"middle\">{label}</text>");
+                sb.AppendLine($"        <text x=\"{tx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{_chartAxisColor}\" font-size=\"{valFontSize}\" text-anchor=\"middle\">{label}</text>");
             }
         }
         else
@@ -420,7 +452,7 @@ public partial class PowerPointHandler
             {
                 var label = c < categories.Length ? categories[c] : "";
                 var lx = ox + c * groupW + groupW / 2;
-                sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{_chartCatColor}\" font-size=\"9\" text-anchor=\"middle\">{HtmlEncode(label)}</text>");
+                sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{_chartCatColor}\" font-size=\"{catFontSize}\" text-anchor=\"middle\">{HtmlEncode(label)}</text>");
             }
 
             // Value axis labels
@@ -429,7 +461,7 @@ public partial class PowerPointHandler
                 var val = tickStep * t;
                 var label = percentStacked ? $"{(int)val}%" : (val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}");
                 var ty = oy + ph - (double)ph * t / nTicks;
-                sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{_chartAxisColor}\" font-size=\"9\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
+                sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{_chartAxisColor}\" font-size=\"{valFontSize}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
             }
         }
     }
