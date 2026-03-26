@@ -361,9 +361,24 @@ public partial class PowerPointHandler
                 };
             }
 
+            // Counter-flip text so it remains readable when shape is flipped
+            var isFlipH = xfrm?.HorizontalFlip?.Value == true;
+            var isFlipV = xfrm?.VerticalFlip?.Value == true;
+            if (isFlipH || isFlipV)
+            {
+                var sx = isFlipH ? -1 : 1;
+                var sy = isFlipV ? -1 : 1;
+                var tx = isFlipH ? w : 0;
+                var ty = isFlipV ? h : 0;
+                sb.Append($"<g transform=\"translate({tx:0.##},{ty:0.##}) scale({sx},{sy})\">");
+            }
+
             int? phDefaultFontSize = ResolvePlaceholderFontSize(shape, part);
             RenderTextBodySvg(sb, shape.TextBody, themeColors, w, h,
                 lIns, tIns, rIns, bIns, valign, phDefaultFontSize);
+
+            if (isFlipH || isFlipV)
+                sb.Append("</g>");
         }
 
         sb.AppendLine("</g>");
@@ -440,7 +455,7 @@ public partial class PowerPointHandler
         Dictionary<string, string> themeColors,
         double shapeW, double shapeH,
         double lIns, double tIns, double rIns, double bIns,
-        string valign, int? defaultFontSizeHundredths)
+        string valign, int? defaultFontSizeHundredths, string? textColorOverride = null)
     {
         var paragraphs = textBody.Elements<Drawing.Paragraph>().ToList();
         if (paragraphs.Count == 0) return;
@@ -527,7 +542,7 @@ public partial class PowerPointHandler
 
                 // Color
                 var runFill = rp?.GetFirstChild<Drawing.SolidFill>();
-                var runColorCss = ResolveFillColor(runFill, themeColors) ?? "#000000";
+                var runColorCss = ResolveFillColor(runFill, themeColors) ?? textColorOverride ?? "#000000";
                 ParseSvgColor(runColorCss, out var runColor, out var runOpacity);
                 tspanAttrs.Add($"fill=\"{SvgEncode(runColor)}\"");
                 if (runOpacity < 1.0)
@@ -773,6 +788,13 @@ public partial class PowerPointHandler
         double tw = EmuToPx(extents.Cx?.Value ?? 0);
         double th = EmuToPx(extents.Cy?.Value ?? 0);
 
+        // Table style
+        var tblPr = table.GetFirstChild<Drawing.TableProperties>();
+        var tableStyleId = tblPr?.GetFirstChild<Drawing.TableStyleId>()?.InnerText;
+        var tableStyleName = tableStyleId != null && _tableStyleGuidToName.TryGetValue(tableStyleId, out var sn) ? sn : null;
+        bool hasFirstRow = tblPr?.FirstRow?.Value == true;
+        bool hasBandRow = tblPr?.BandRow?.Value == true;
+
         // Column widths
         var gridCols = table.TableGrid?.Elements<Drawing.GridColumn>().ToList();
         long totalColWidth = gridCols?.Sum(gc => gc.Width?.Value ?? 0) ?? 0;
@@ -785,9 +807,6 @@ public partial class PowerPointHandler
 
         sb.Append($"<g transform=\"translate({tx:0.##},{ty:0.##})\">");
 
-        // Table border
-        sb.Append($"<rect width=\"{tw:0.##}\" height=\"{th:0.##}\" fill=\"none\" stroke=\"#D0D0D0\" stroke-width=\"0.5\"/>");
-
         double currentY = 0;
         int rowIndex = 0;
         foreach (var row in table.Elements<Drawing.TableRow>())
@@ -795,20 +814,32 @@ public partial class PowerPointHandler
             double rowH = EmuToPx(row.Height?.Value ?? 0);
             double currentX = 0;
             int colIndex = 0;
+            bool isHeaderRow = hasFirstRow && rowIndex == 0;
+            bool isBandedOdd = hasBandRow && (!hasFirstRow ? rowIndex % 2 == 0 : rowIndex > 0 && (rowIndex - 1) % 2 == 0);
 
             foreach (var cell in row.Elements<Drawing.TableCell>())
             {
                 double cellW = colIndex < colWidths.Count ? colWidths[colIndex] : tw / Math.Max(1, colWidths.Count);
 
-                // Cell fill
+                // Cell fill — explicit first, then table style
                 var tcPr = cell.TableCellProperties ?? cell.GetFirstChild<Drawing.TableCellProperties>();
                 var cellFill = ResolveFillColor(tcPr?.GetFirstChild<Drawing.SolidFill>(), themeColors);
                 string cellFillColor = "none";
                 double cellFillOpacity = 1.0;
-                if (cellFill != null)
-                    ParseSvgColor(cellFill, out cellFillColor, out cellFillOpacity);
+                string? textColorOverride = null;
 
-                // Cell rect
+                if (cellFill != null)
+                {
+                    ParseSvgColor(cellFill, out cellFillColor, out cellFillOpacity);
+                }
+                else if (tableStyleName != null)
+                {
+                    var (bg, fg) = GetTableStyleColors(tableStyleName, isHeaderRow, isBandedOdd, themeColors);
+                    if (bg != null) ParseSvgColor(bg, out cellFillColor, out cellFillOpacity);
+                    if (fg != null) textColorOverride = fg;
+                }
+
+                // Cell background
                 if (cellFillColor != "none")
                 {
                     var opAttr = cellFillOpacity < 1.0 ? $" fill-opacity=\"{cellFillOpacity:0.##}\"" : "";
@@ -822,9 +853,20 @@ public partial class PowerPointHandler
                 var textBody = cell.GetFirstChild<Drawing.TextBody>();
                 if (textBody != null)
                 {
-                    double padding = 4;
+                    double padL = EmuToPx(tcPr?.LeftMargin?.Value ?? 91440);
+                    double padT = EmuToPx(tcPr?.TopMargin?.Value ?? 45720);
+                    double padR = EmuToPx(tcPr?.RightMargin?.Value ?? 91440);
+                    double padB = EmuToPx(tcPr?.BottomMargin?.Value ?? 45720);
+
+                    var valign = "top";
+                    if (tcPr?.Anchor?.HasValue == true)
+                        valign = tcPr.Anchor.InnerText switch { "ctr" => "center", "b" => "bottom", _ => "top" };
+
+                    // Render text at cell position with offset
+                    sb.Append($"<g transform=\"translate({currentX:0.##},{currentY:0.##})\">");
                     RenderTextBodySvg(sb, textBody, themeColors, cellW, rowH,
-                        padding, padding, padding, padding, "top", null);
+                        padL, padT, padR, padB, valign, null, textColorOverride);
+                    sb.Append("</g>");
                 }
 
                 currentX += cellW;
@@ -907,6 +949,11 @@ public partial class PowerPointHandler
             // Cloud / callout - approximate with polygon
             "cloud" or "cloudCallout" => BuildCloudPath(w, h),
 
+            // Callout shapes with tail
+            "wedgeRectCallout" => $"0,0 {w:0.##},0 {w:0.##},{h * 0.75:0.##} {w * 0.55:0.##},{h * 0.75:0.##} {w * 0.35:0.##},{h:0.##} {w * 0.4:0.##},{h * 0.75:0.##} 0,{h * 0.75:0.##}",
+            "wedgeRoundRectCallout" => $"{w * 0.08:0.##},0 {w * 0.92:0.##},0 {w:0.##},{h * 0.08:0.##} {w:0.##},{h * 0.67:0.##} {w * 0.92:0.##},{h * 0.75:0.##} {w * 0.55:0.##},{h * 0.75:0.##} {w * 0.35:0.##},{h:0.##} {w * 0.4:0.##},{h * 0.75:0.##} {w * 0.08:0.##},{h * 0.75:0.##} 0,{h * 0.67:0.##} 0,{h * 0.08:0.##}",
+            "wedgeEllipseCallout" => BuildEllipseCalloutPath(w, h),
+
             _ => null
         };
     }
@@ -952,6 +999,29 @@ public partial class PowerPointHandler
             var hy = -(13 * Math.Cos(t) - 5 * Math.Cos(2 * t) - 2 * Math.Cos(3 * t) - Math.Cos(4 * t));
             var px = w / 2 + hx / 16 * w / 2;
             var py = h * 0.45 + hy / 17 * h / 2;
+            points.Add($"{px:0.##},{py:0.##}");
+        }
+        return string.Join(" ", points);
+    }
+
+    private static string BuildEllipseCalloutPath(double w, double h)
+    {
+        var points = new List<string>();
+        // Main ellipse (75% height)
+        int n = 24;
+        double eh = h * 0.75;
+        for (int i = 0; i <= n; i++)
+        {
+            var angle = 2 * Math.PI * i / n;
+            // Insert tail at bottom (~6 o'clock position)
+            if (i == n * 3 / 8) // ~135 degrees
+            {
+                points.Add($"{w * 0.55:0.##},{eh / 2 + eh / 2 * Math.Sin(angle):0.##}");
+                points.Add($"{w * 0.35:0.##},{h:0.##}"); // tail tip
+                points.Add($"{w * 0.4:0.##},{eh / 2 + eh / 2 * Math.Sin(angle):0.##}");
+            }
+            var px = w / 2 + w / 2 * Math.Cos(angle);
+            var py = eh / 2 + eh / 2 * Math.Sin(angle);
             points.Add($"{px:0.##},{py:0.##}");
         }
         return string.Join(" ", points);
