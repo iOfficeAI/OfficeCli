@@ -345,8 +345,18 @@ public partial class PowerPointHandler
             var plotOx = ox + hLabelMargin;
             var plotPw = pw - hLabelMargin;
             var groupH = (double)ph / Math.Max(catCount, 1);
-            var barH = stacked ? groupH * 0.35 : groupH * 0.4 / serCount;
-            var gap = stacked ? groupH * 0.325 : groupH * 0.25;
+            var gapPct = (ooxmlGapWidth ?? 150) / 100.0;
+            double barH, gap;
+            if (stacked)
+            {
+                barH = groupH / (1 + gapPct);
+                gap = (groupH - barH) / 2;
+            }
+            else
+            {
+                barH = groupH / (serCount + gapPct);
+                gap = barH * gapPct / 2;
+            }
 
             // Gridlines
             for (int t = 1; t <= nTicks; t++)
@@ -408,8 +418,20 @@ public partial class PowerPointHandler
         else
         {
             var groupW = (double)pw / Math.Max(catCount, 1);
-            var barW = stacked ? groupW * 0.45 : groupW * 0.5 / serCount;
-            var gap = stacked ? groupW * 0.275 : groupW * 0.25;
+            // OOXML gapWidth: gap between groups = gapWidth% of one bar width
+            // barW * serCount + barW * gapPct = groupW => barW = groupW / (serCount + gapPct)
+            var gapPct = (ooxmlGapWidth ?? 150) / 100.0;
+            double barW, gap;
+            if (stacked)
+            {
+                barW = groupW / (1 + gapPct);
+                gap = (groupW - barW) / 2;
+            }
+            else
+            {
+                barW = groupW / (serCount + gapPct);
+                gap = barW * gapPct / 2; // half gap on each side
+            }
 
             // Gridlines
             for (int t = 1; t <= nTicks; t++)
