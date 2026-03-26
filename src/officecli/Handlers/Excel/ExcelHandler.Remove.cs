@@ -261,6 +261,12 @@ public partial class ExcelHandler
             if (cmtList != null && !cmtList.HasChildren)
             {
                 worksheet.DeletePart(commentsPart);
+                // Also clean up VmlDrawingPart and legacyDrawing reference
+                var vmlPart = worksheet.VmlDrawingParts.FirstOrDefault();
+                if (vmlPart != null)
+                    worksheet.DeletePart(vmlPart);
+                var legacyDrawing = GetSheet(worksheet).Elements<LegacyDrawing>().FirstOrDefault();
+                legacyDrawing?.Remove();
             }
             else
             {
