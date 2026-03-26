@@ -108,7 +108,14 @@ public partial class PowerPointHandler
                 case Shape shape:
                     RenderShapeSvg(sb, defs, ref defId, shape, slidePart, themeColors);
                     break;
-                // TODO: Picture, GraphicFrame (table/chart), ConnectionShape, GroupShape
+                case ConnectionShape cxn:
+                    RenderConnectorSvg(sb, defs, ref defId, cxn, themeColors);
+                    break;
+                case GraphicFrame gf:
+                    if (gf.Descendants<Drawing.Table>().Any())
+                        RenderTableSvg(sb, defs, ref defId, gf, themeColors);
+                    break;
+                // TODO: Picture, GroupShape, Chart
             }
         }
     }
@@ -543,6 +550,171 @@ public partial class PowerPointHandler
             sb.Append("</text>");
             currentY += lineHeightPx;
         }
+    }
+
+    // ==================== Connector Rendering (SVG) ====================
+
+    private static void RenderConnectorSvg(StringBuilder sb, StringBuilder defs, ref int defId,
+        ConnectionShape cxn, Dictionary<string, string> themeColors)
+    {
+        var xfrm = cxn.ShapeProperties?.Transform2D;
+        if (xfrm?.Offset == null || xfrm?.Extents == null) return;
+
+        long xEmu = xfrm.Offset.X?.Value ?? 0;
+        long yEmu = xfrm.Offset.Y?.Value ?? 0;
+        long cxEmu = xfrm.Extents.Cx?.Value ?? 0;
+        long cyEmu = xfrm.Extents.Cy?.Value ?? 0;
+        var flipH = xfrm.HorizontalFlip?.Value == true;
+        var flipV = xfrm.VerticalFlip?.Value == true;
+
+        double px1 = EmuToPx(xEmu), py1 = EmuToPx(yEmu);
+        double px2 = EmuToPx(xEmu + cxEmu), py2 = EmuToPx(yEmu + cyEmu);
+
+        // Apply flips
+        double lx1 = flipH ? px2 : px1, ly1 = flipV ? py2 : py1;
+        double lx2 = flipH ? px1 : px2, ly2 = flipV ? py1 : py2;
+
+        // Outline
+        var outline = cxn.ShapeProperties?.GetFirstChild<Drawing.Outline>();
+        var defaultColor = themeColors.TryGetValue("tx1", out var txc) ? $"#{txc}"
+            : themeColors.TryGetValue("dk1", out var dkc) ? $"#{dkc}" : "#000000";
+        string strokeColor = defaultColor;
+        double strokeOpacity = 1.0;
+        double strokeWidth = 1.5; // px
+        if (outline != null)
+        {
+            var c = ResolveFillColor(outline.GetFirstChild<Drawing.SolidFill>(), themeColors);
+            if (c != null) ParseSvgColor(c, out strokeColor, out strokeOpacity);
+            if (outline.Width?.HasValue == true) strokeWidth = EmuToPx(outline.Width.Value);
+            if (strokeWidth < 0.5) strokeWidth = 0.5;
+        }
+
+        // Dash
+        string dashAttr = "";
+        var prstDash = outline?.GetFirstChild<Drawing.PresetDash>();
+        if (prstDash?.Val?.HasValue == true)
+        {
+            var sw = strokeWidth;
+            var dashArray = prstDash.Val.InnerText switch
+            {
+                "dash" or "lgDash" => $"{sw * 4:0.##},{sw * 3:0.##}",
+                "dot" or "sysDot" => $"{sw:0.##},{sw * 2:0.##}",
+                "dashDot" => $"{sw * 4:0.##},{sw * 2:0.##},{sw:0.##},{sw * 2:0.##}",
+                _ => ""
+            };
+            if (!string.IsNullOrEmpty(dashArray))
+                dashAttr = $" stroke-dasharray=\"{dashArray}\"";
+        }
+
+        // Arrow markers
+        var headEnd = outline?.GetFirstChild<Drawing.HeadEnd>();
+        var tailEnd = outline?.GetFirstChild<Drawing.TailEnd>();
+        var hasTail = tailEnd?.Type?.HasValue == true && tailEnd.Type.InnerText != "none";
+        var hasHead = headEnd?.Type?.HasValue == true && headEnd.Type.InnerText != "none";
+        string markerStartAttr = "", markerEndAttr = "";
+
+        if (hasTail)
+        {
+            var markerId = $"arrow{defId++}";
+            var s = Math.Max(4, strokeWidth * 3);
+            defs.AppendLine($"<marker id=\"{markerId}\" markerWidth=\"{s:0.#}\" markerHeight=\"{s:0.#}\" refX=\"0\" refY=\"{s / 2:0.#}\" orient=\"auto\">");
+            defs.AppendLine($"  <polygon points=\"0,0 {s:0.#},{s / 2:0.#} 0,{s:0.#}\" fill=\"{strokeColor}\"/>");
+            defs.AppendLine("</marker>");
+            markerEndAttr = $" marker-end=\"url(#{markerId})\"";
+        }
+        if (hasHead)
+        {
+            var markerId = $"arrow{defId++}";
+            var s = Math.Max(4, strokeWidth * 3);
+            defs.AppendLine($"<marker id=\"{markerId}\" markerWidth=\"{s:0.#}\" markerHeight=\"{s:0.#}\" refX=\"{s:0.#}\" refY=\"{s / 2:0.#}\" orient=\"auto-start-reverse\">");
+            defs.AppendLine($"  <polygon points=\"{s:0.#},0 0,{s / 2:0.#} {s:0.#},{s:0.#}\" fill=\"{strokeColor}\"/>");
+            defs.AppendLine("</marker>");
+            markerStartAttr = $" marker-start=\"url(#{markerId})\"";
+        }
+
+        var opacityAttr = strokeOpacity < 1.0 ? $" stroke-opacity=\"{strokeOpacity:0.##}\"" : "";
+        sb.AppendLine($"<line x1=\"{lx1:0.##}\" y1=\"{ly1:0.##}\" x2=\"{lx2:0.##}\" y2=\"{ly2:0.##}\" stroke=\"{strokeColor}\" stroke-width=\"{strokeWidth:0.##}\"{opacityAttr}{dashAttr}{markerStartAttr}{markerEndAttr}/>");
+    }
+
+    // ==================== Table Rendering (SVG) ====================
+
+    private static void RenderTableSvg(StringBuilder sb, StringBuilder defs, ref int defId,
+        GraphicFrame gf, Dictionary<string, string> themeColors)
+    {
+        var table = gf.Descendants<Drawing.Table>().FirstOrDefault();
+        if (table == null) return;
+
+        var offset = gf.Transform?.Offset;
+        var extents = gf.Transform?.Extents;
+        if (offset == null || extents == null) return;
+
+        double tx = EmuToPx(offset.X?.Value ?? 0);
+        double ty = EmuToPx(offset.Y?.Value ?? 0);
+        double tw = EmuToPx(extents.Cx?.Value ?? 0);
+        double th = EmuToPx(extents.Cy?.Value ?? 0);
+
+        // Column widths
+        var gridCols = table.TableGrid?.Elements<Drawing.GridColumn>().ToList();
+        long totalColWidth = gridCols?.Sum(gc => gc.Width?.Value ?? 0) ?? 0;
+        var colWidths = new List<double>();
+        if (gridCols != null && totalColWidth > 0)
+        {
+            foreach (var gc in gridCols)
+                colWidths.Add(tw * (gc.Width?.Value ?? 0) / totalColWidth);
+        }
+
+        sb.Append($"<g transform=\"translate({tx:0.##},{ty:0.##})\">");
+
+        // Table border
+        sb.Append($"<rect width=\"{tw:0.##}\" height=\"{th:0.##}\" fill=\"none\" stroke=\"#D0D0D0\" stroke-width=\"0.5\"/>");
+
+        double currentY = 0;
+        int rowIndex = 0;
+        foreach (var row in table.Elements<Drawing.TableRow>())
+        {
+            double rowH = EmuToPx(row.Height?.Value ?? 0);
+            double currentX = 0;
+            int colIndex = 0;
+
+            foreach (var cell in row.Elements<Drawing.TableCell>())
+            {
+                double cellW = colIndex < colWidths.Count ? colWidths[colIndex] : tw / Math.Max(1, colWidths.Count);
+
+                // Cell fill
+                var tcPr = cell.TableCellProperties ?? cell.GetFirstChild<Drawing.TableCellProperties>();
+                var cellFill = ResolveFillColor(tcPr?.GetFirstChild<Drawing.SolidFill>(), themeColors);
+                string cellFillColor = "none";
+                double cellFillOpacity = 1.0;
+                if (cellFill != null)
+                    ParseSvgColor(cellFill, out cellFillColor, out cellFillOpacity);
+
+                // Cell rect
+                if (cellFillColor != "none")
+                {
+                    var opAttr = cellFillOpacity < 1.0 ? $" fill-opacity=\"{cellFillOpacity:0.##}\"" : "";
+                    sb.Append($"<rect x=\"{currentX:0.##}\" y=\"{currentY:0.##}\" width=\"{cellW:0.##}\" height=\"{rowH:0.##}\" fill=\"{cellFillColor}\"{opAttr}/>");
+                }
+
+                // Cell border
+                sb.Append($"<rect x=\"{currentX:0.##}\" y=\"{currentY:0.##}\" width=\"{cellW:0.##}\" height=\"{rowH:0.##}\" fill=\"none\" stroke=\"#BFBFBF\" stroke-width=\"0.5\"/>");
+
+                // Cell text
+                var textBody = cell.GetFirstChild<Drawing.TextBody>();
+                if (textBody != null)
+                {
+                    double padding = 4;
+                    RenderTextBodySvg(sb, textBody, themeColors, cellW, rowH,
+                        padding, padding, padding, padding, "top", null);
+                }
+
+                currentX += cellW;
+                colIndex++;
+            }
+            currentY += rowH;
+            rowIndex++;
+        }
+
+        sb.AppendLine("</g>");
     }
 
     // ==================== SVG Preset Geometries ====================
