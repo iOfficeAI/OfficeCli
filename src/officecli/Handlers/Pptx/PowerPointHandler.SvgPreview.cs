@@ -1210,8 +1210,33 @@ public partial class PowerPointHandler
                 sb.Append($"<span>{HtmlEncode(bullet)} </span>");
             }
 
+            // OfficeMath detection
+            var paraXml = para.OuterXml;
+            if (paraXml.Contains("oMath"))
+            {
+                var mathMatch = System.Text.RegularExpressions.Regex.Match(paraXml,
+                    @"<m:oMathPara[^>]*>.*?</m:oMathPara>|<m:oMath[^>]*>.*?</m:oMath>",
+                    System.Text.RegularExpressions.RegexOptions.Singleline);
+                if (mathMatch.Success)
+                {
+                    try
+                    {
+                        var wrapper = new OpenXmlUnknownElement("wrapper");
+                        wrapper.InnerXml = mathMatch.Value;
+                        var oMath = wrapper.Descendants().FirstOrDefault(e => e.LocalName == "oMathPara" || e.LocalName == "oMath");
+                        if (oMath != null)
+                        {
+                            var latex = FormulaParser.ToLatex(oMath);
+                            // Render as LaTeX text with math font styling (no JS dependency)
+                            sb.Append($"<span style=\"font-family:'Cambria Math','Times New Roman',serif;font-style:italic;font-size:1.1em\">{HtmlEncode(latex)}</span>");
+                        }
+                    }
+                    catch { }
+                }
+            }
+
             var runs = para.Elements<Drawing.Run>().ToList();
-            if (runs.Count == 0)
+            if (runs.Count == 0 && !paraXml.Contains("oMath"))
             {
                 sb.Append("&#160;"); // non-breaking space for empty paragraph
             }
