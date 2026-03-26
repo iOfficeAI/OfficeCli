@@ -1408,16 +1408,17 @@ public partial class PowerPointHandler
 
     private static string BuildHeartPath(double w, double h)
     {
-        // Approximate heart as polygon
+        // Heart parametric equation with better proportions
         var points = new List<string>();
-        int n = 32;
+        int n = 48;
         for (int i = 0; i <= n; i++)
         {
             var t = 2 * Math.PI * i / n;
             var hx = 16 * Math.Pow(Math.Sin(t), 3);
             var hy = -(13 * Math.Cos(t) - 5 * Math.Cos(2 * t) - 2 * Math.Cos(3 * t) - Math.Cos(4 * t));
-            var px = w / 2 + hx / 16 * w / 2;
-            var py = h * 0.45 + hy / 17 * h / 2;
+            // Scale to fit bounding box: hx range is [-16,16], hy range is [-17,15]
+            var px = w / 2 + hx / 16 * w * 0.48;
+            var py = h * 0.4 + hy / 17 * h * 0.48;
             points.Add($"{px:0.##},{py:0.##}");
         }
         return string.Join(" ", points);
