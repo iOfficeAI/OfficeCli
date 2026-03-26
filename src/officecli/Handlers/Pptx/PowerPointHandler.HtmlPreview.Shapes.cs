@@ -141,16 +141,18 @@ public partial class PowerPointHandler
             }
         }
 
-        // Shadow
+        // Shadow + Glow → combine into single filter property
         var effectList = shape.ShapeProperties?.GetFirstChild<Drawing.EffectList>();
         var shadowCss = EffectListToShadowCss(effectList, themeColors);
-        if (!string.IsNullOrEmpty(shadowCss))
-            styles.Add(shadowCss);
-
-        // Glow → CSS filter:drop-shadow
         var glowCss = EffectListToGlowCss(effectList, themeColors);
+        // Merge multiple filter:drop-shadow into one filter property
+        var filterParts = new List<string>();
+        if (!string.IsNullOrEmpty(shadowCss))
+            filterParts.Add(shadowCss.Replace("filter:", ""));
         if (!string.IsNullOrEmpty(glowCss))
-            styles.Add(glowCss);
+            filterParts.Add(glowCss.Replace("filter:", ""));
+        if (filterParts.Count > 0)
+            styles.Add($"filter:{string.Join(" ", filterParts)}");
 
         // Reflection → CSS -webkit-box-reflect
         var reflectionCss = EffectListToReflectionCss(effectList);
@@ -325,15 +327,15 @@ public partial class PowerPointHandler
             else if (presetGeom?.Preset?.InnerText == "ellipse")
             {
                 // Ellipse — use SVG ellipse
-                sb.Append($"<svg style=\"position:absolute;inset:0;width:100%;height:100%;overflow:visible\">");
-                sb.Append($"<ellipse cx=\"50%\" cy=\"50%\" rx=\"calc(50% - {bw / 2:0.##}pt)\" ry=\"calc(50% - {bw / 2:0.##}pt)\" fill=\"none\" stroke=\"{safeColor}\" stroke-width=\"{bw:0.##}pt\" stroke-linecap=\"round\"{dashAttr}/>");
+                sb.Append($"<svg style=\"position:absolute;inset:0;width:100%;height:100%;overflow:visible\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\">");
+                sb.Append($"<ellipse cx=\"50\" cy=\"50\" rx=\"49\" ry=\"49\" fill=\"none\" stroke=\"{safeColor}\" stroke-width=\"{bw:0.##}\" vector-effect=\"non-scaling-stroke\" stroke-linecap=\"round\"{dashAttr}/>");
                 sb.Append("</svg>");
             }
             else
             {
                 // Plain rect — use SVG rect
-                sb.Append($"<svg style=\"position:absolute;inset:0;width:100%;height:100%;overflow:visible\">");
-                sb.Append($"<rect x=\"0\" y=\"0\" width=\"100%\" height=\"100%\" fill=\"none\" stroke=\"{safeColor}\" stroke-width=\"{bw:0.##}pt\" stroke-linecap=\"round\"{dashAttr}/>");
+                sb.Append($"<svg style=\"position:absolute;inset:0;width:100%;height:100%;overflow:visible\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\">");
+                sb.Append($"<rect x=\"0\" y=\"0\" width=\"100\" height=\"100\" fill=\"none\" stroke=\"{safeColor}\" stroke-width=\"{bw:0.##}\" vector-effect=\"non-scaling-stroke\" stroke-linecap=\"round\"{dashAttr}/>");
                 sb.Append("</svg>");
             }
         }

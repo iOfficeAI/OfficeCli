@@ -342,7 +342,7 @@ public partial class PowerPointHandler
         var offsetX = distPt * Math.Cos(angleRad);
         var offsetY = distPt * Math.Sin(angleRad);
 
-        return $"box-shadow:{offsetX:0.##}pt {offsetY:0.##}pt {blurPt:0.##}pt {color}";
+        return $"filter:drop-shadow({offsetX:0.##}pt {offsetY:0.##}pt {blurPt:0.##}pt {color})";
     }
 
     // ==================== CSS Helper: Glow ====================
