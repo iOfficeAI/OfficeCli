@@ -200,14 +200,15 @@ public partial class WordHandler
             properties.TryGetValue("bold", out _) || properties.TryGetValue("color", out _))
         {
             fieldRProps = new RunProperties();
+            // CT_RPr schema order: rFonts → b → ... → color → sz
             if (properties.TryGetValue("font", out var ff))
                 fieldRProps.AppendChild(new RunFonts { Ascii = ff, HighAnsi = ff, EastAsia = ff });
-            if (properties.TryGetValue("size", out var fs))
-                fieldRProps.AppendChild(new FontSize { Val = ((int)(ParseFontSize(fs) * 2)).ToString() });
             if (properties.TryGetValue("bold", out var fb) && IsTruthy(fb))
                 fieldRProps.AppendChild(new Bold());
             if (properties.TryGetValue("color", out var fc))
                 fieldRProps.AppendChild(new Color { Val = SanitizeHex(fc) });
+            if (properties.TryGetValue("size", out var fs))
+                fieldRProps.AppendChild(new FontSize { Val = ((int)(ParseFontSize(fs) * 2)).ToString() });
         }
 
         if (fieldRProps != null)
