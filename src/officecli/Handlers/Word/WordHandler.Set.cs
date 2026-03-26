@@ -38,13 +38,15 @@ public partial class WordHandler
             // Find & Replace: special handling before document properties
             if (properties.TryGetValue("find", out var findText) && properties.TryGetValue("replace", out var replaceText))
             {
-                var count = FindAndReplace(findText, replaceText, properties.GetValueOrDefault("scope", "all"));
-                properties.Remove("find");
-                properties.Remove("replace");
-                properties.Remove("scope");
+                var scope = properties.GetValueOrDefault("scope", "all");
+                var count = FindAndReplace(findText, replaceText, scope);
+                var remaining = new Dictionary<string, string>(properties, StringComparer.OrdinalIgnoreCase);
+                remaining.Remove("find");
+                remaining.Remove("replace");
+                remaining.Remove("scope");
                 // If there are remaining properties, apply them as document properties
-                if (properties.Count > 0)
-                    SetDocumentProperties(properties);
+                if (remaining.Count > 0)
+                    SetDocumentProperties(remaining);
                 _doc.MainDocumentPart?.Document?.Save();
                 return unsupported;
             }
@@ -498,7 +500,7 @@ public partial class WordHandler
                         break;
                     case "size":
                         var rPr2 = style.StyleRunProperties ?? style.AppendChild(new StyleRunProperties());
-                        rPr2.FontSize = new FontSize { Val = ((int)Math.Round(ParseFontSize(value) * 2)).ToString() };
+                        rPr2.FontSize = new FontSize { Val = ((int)Math.Round(ParseFontSize(value) * 2, MidpointRounding.AwayFromZero)).ToString() };
                         break;
                     case "bold":
                         var rPr3 = style.StyleRunProperties ?? style.AppendChild(new StyleRunProperties());
@@ -747,7 +749,7 @@ public partial class WordHandler
                     case "size":
                         EnsureRunProperties(run).FontSize = new FontSize
                         {
-                            Val = ((int)Math.Round(ParseFontSize(value) * 2)).ToString() // half-points
+                            Val = ((int)Math.Round(ParseFontSize(value) * 2, MidpointRounding.AwayFromZero)).ToString() // half-points
                         };
                         break;
                     case "highlight":
@@ -1088,7 +1090,7 @@ public partial class WordHandler
                                         rPr.RunFonts = new RunFonts { Ascii = value, HighAnsi = value, EastAsia = value };
                                         break;
                                     case "size":
-                                        rPr.FontSize = new FontSize { Val = ((int)Math.Round(ParseFontSize(value) * 2)).ToString() };
+                                        rPr.FontSize = new FontSize { Val = ((int)Math.Round(ParseFontSize(value) * 2, MidpointRounding.AwayFromZero)).ToString() };
                                         break;
                                     case "bold":
                                         rPr.Bold = IsTruthy(value) ? new Bold() : null;
@@ -1129,7 +1131,7 @@ public partial class WordHandler
                                     break;
                                 case "size":
                                     pmrp.RemoveAllChildren<FontSize>();
-                                    pmrp.AppendChild(new FontSize { Val = ((int)Math.Round(ParseFontSize(value) * 2)).ToString() });
+                                    pmrp.AppendChild(new FontSize { Val = ((int)Math.Round(ParseFontSize(value) * 2, MidpointRounding.AwayFromZero)).ToString() });
                                     break;
                                 case "bold":
                                     pmrp.RemoveAllChildren<Bold>();
