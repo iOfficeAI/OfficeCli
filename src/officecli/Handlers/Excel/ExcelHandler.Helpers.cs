@@ -534,7 +534,6 @@ public partial class ExcelHandler
                         if (alignment.Vertical?.HasValue == true)
                         {
                             node.Format["alignment.vertical"] = alignment.Vertical.InnerText;
-                            node.Format["valign"] = alignment.Vertical.InnerText;
                         }
                         if (alignment.TextRotation?.HasValue == true && alignment.TextRotation.Value != 0)
                             node.Format["alignment.textRotation"] = alignment.TextRotation.Value.ToString();
