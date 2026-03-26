@@ -117,6 +117,8 @@ public partial class PowerPointHandler
                 case GraphicFrame gf:
                     if (gf.Descendants<Drawing.Table>().Any())
                         RenderTableSvg(sb, defs, ref defId, gf, themeColors);
+                    else if (gf.Descendants().Any(e => e.LocalName == "chart" && e.NamespaceUri.Contains("chart")))
+                        RenderChartSvg(sb, gf, slidePart, themeColors);
                     break;
                 case GroupShape grp:
                     RenderGroupSvg(sb, defs, ref defId, grp, slidePart, themeColors);
@@ -571,6 +573,93 @@ public partial class PowerPointHandler
             sb.Append("</text>");
             currentY += lineHeightPx;
         }
+    }
+
+    // ==================== Chart Rendering (SVG) ====================
+
+    private void RenderChartSvg(StringBuilder sb, GraphicFrame gf, SlidePart slidePart, Dictionary<string, string> themeColors)
+    {
+        // Use the existing RenderChart which outputs HTML with embedded SVG.
+        // We'll capture its output, extract the SVG portion, and embed it.
+        var pxfrm = gf.GetFirstChild<DocumentFormat.OpenXml.Presentation.Transform>();
+        var off = pxfrm?.GetFirstChild<Drawing.Offset>();
+        var ext = pxfrm?.GetFirstChild<Drawing.Extents>();
+        if (off == null || ext == null) return;
+
+        double cx = EmuToPx(off.X?.Value ?? 0);
+        double cy = EmuToPx(off.Y?.Value ?? 0);
+        double cw = EmuToPx(ext.Cx?.Value ?? 0);
+        double ch = EmuToPx(ext.Cy?.Value ?? 0);
+
+        // Render the chart using the existing HTML+SVG renderer into a temporary buffer
+        var chartSb = new StringBuilder();
+        RenderChart(chartSb, gf, slidePart, themeColors);
+        var chartHtml = chartSb.ToString();
+
+        // Extract SVG content from the HTML output
+        // The HTML contains: <div ...><div>title</div><svg viewBox="...">...chart...</svg><div>legend</div></div>
+        var svgStart = chartHtml.IndexOf("<svg ", StringComparison.Ordinal);
+        var svgEnd = chartHtml.IndexOf("</svg>", StringComparison.Ordinal);
+        if (svgStart < 0 || svgEnd < 0) return;
+
+        var svgContent = chartHtml[svgStart..(svgEnd + 6)];
+
+        // Extract viewBox from the inner SVG
+        var vbMatch = System.Text.RegularExpressions.Regex.Match(svgContent, @"viewBox=""([^""]+)""");
+        var viewBox = vbMatch.Success ? vbMatch.Groups[1].Value : "0 0 360 252";
+
+        // Extract just the inner content (between <svg ...> and </svg>)
+        var innerStart = svgContent.IndexOf('>') + 1;
+        var innerEnd = svgContent.LastIndexOf("</svg>", StringComparison.Ordinal);
+        var innerSvg = svgContent[innerStart..innerEnd];
+
+        // Extract chart title from HTML
+        var titleMatch = System.Text.RegularExpressions.Regex.Match(chartHtml, @"font-weight:bold[^>]*>([^<]+)<");
+        var title = titleMatch.Success ? titleMatch.Groups[1].Value : "";
+
+        // Embed as nested SVG at the chart position
+        sb.Append($"<g transform=\"translate({cx:0.##},{cy:0.##})\">");
+
+        // Chart background
+        sb.Append($"<rect width=\"{cw:0.##}\" height=\"{ch:0.##}\" fill=\"white\" fill-opacity=\"0\"/>");
+
+        // Title
+        double titleH = 0;
+        if (!string.IsNullOrEmpty(title))
+        {
+            titleH = 16;
+            sb.Append($"<text x=\"{cw / 2:0.##}\" y=\"12\" text-anchor=\"middle\" font-size=\"11\" font-weight=\"bold\" fill=\"{_chartValueColor}\">{SvgEncode(title)}</text>");
+        }
+
+        // Nested SVG for chart content
+        sb.Append($"<svg x=\"0\" y=\"{titleH:0.##}\" width=\"{cw:0.##}\" height=\"{ch - titleH:0.##}\" viewBox=\"{viewBox}\" preserveAspectRatio=\"xMidYMid meet\">");
+        sb.Append(innerSvg);
+        sb.Append("</svg>");
+
+        // Legend extraction and rendering
+        var legendMatch = System.Text.RegularExpressions.Regex.Match(chartHtml,
+            @"chart-legend.*?>(.*?)</div>\s*$", System.Text.RegularExpressions.RegexOptions.Singleline);
+        if (legendMatch.Success)
+        {
+            // Extract legend items — parse <span> with background color and text
+            var legendItems = System.Text.RegularExpressions.Regex.Matches(legendMatch.Groups[1].Value,
+                @"background:(#[0-9A-Fa-f]+).*?</span>([^<]+)");
+            if (legendItems.Count > 0)
+            {
+                double legendY = ch - 14;
+                double legendX = cw / 2 - legendItems.Count * 40;
+                foreach (System.Text.RegularExpressions.Match item in legendItems)
+                {
+                    var color = item.Groups[1].Value;
+                    var label = item.Groups[2].Value.Trim();
+                    sb.Append($"<rect x=\"{legendX:0.##}\" y=\"{legendY:0.##}\" width=\"8\" height=\"8\" fill=\"{color}\"/>");
+                    sb.Append($"<text x=\"{legendX + 10:0.##}\" y=\"{legendY + 7:0.##}\" font-size=\"8\" fill=\"{_chartValueColor}\">{SvgEncode(label)}</text>");
+                    legendX += 80;
+                }
+            }
+        }
+
+        sb.AppendLine("</g>");
     }
 
     // ==================== Picture Rendering (SVG) ====================
