@@ -926,6 +926,54 @@ public partial class WordHandler
                 }
             }
         }
+        else if (element is Hyperlink hl)
+        {
+            foreach (var (key, value) in properties)
+            {
+                var k = key.ToLowerInvariant();
+                switch (k)
+                {
+                    case "url":
+                    case "link":
+                    case "href":
+                    {
+                        var mainPartHl = _doc.MainDocumentPart!;
+                        var uri = Uri.TryCreate(value, UriKind.Absolute, out var absUri)
+                            ? absUri
+                            : new Uri(value, UriKind.Relative);
+                        var newRelId = mainPartHl.AddHyperlinkRelationship(uri, isExternal: true).Id;
+                        hl.Id = newRelId;
+                        break;
+                    }
+                    case "text":
+                    {
+                        // Update text in all runs within the hyperlink
+                        var runs = hl.Elements<Run>().ToList();
+                        if (runs.Count > 0)
+                        {
+                            // Set text on the first run, remove the rest
+                            var firstRun = runs[0];
+                            var t = firstRun.GetFirstChild<Text>()
+                                ?? firstRun.AppendChild(new Text());
+                            t.Text = value;
+                            t.Space = SpaceProcessingModeValues.Preserve;
+                            for (int i = 1; i < runs.Count; i++)
+                                runs[i].Remove();
+                        }
+                        else
+                        {
+                            // No runs yet, create one
+                            var newRun = new Run(new Text(value) { Space = SpaceProcessingModeValues.Preserve });
+                            hl.AppendChild(newRun);
+                        }
+                        break;
+                    }
+                    default:
+                        unsupported.Add(key);
+                        break;
+                }
+            }
+        }
         else if (element is Paragraph para)
         {
             var pProps = para.ParagraphProperties ?? para.PrependChild(new ParagraphProperties());
