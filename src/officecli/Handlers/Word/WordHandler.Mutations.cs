@@ -157,7 +157,7 @@ public partial class WordHandler
 
             if (refCount == 0)
             {
-                try { ownerPart.DeletePart(embedId); } catch { }
+                try { mainPart.DeletePart(embedId); } catch { }
             }
         }
     }
