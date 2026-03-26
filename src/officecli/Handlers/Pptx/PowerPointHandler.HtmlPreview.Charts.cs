@@ -841,10 +841,11 @@ public partial class PowerPointHandler
         var maxVal = allValues.Max();
         if (maxVal <= 0) maxVal = 1;
 
-        var labelSize = catLabelFontSize > 0 ? catLabelFontSize : 9;
+        // Default radar label size: PowerPoint renders ~10pt when unspecified
+        var labelSize = catLabelFontSize > 0 ? catLabelFontSize : 11;
         var cx = svgW / 2.0;
         var cy = svgH / 2.0;
-        var r = Math.Min(svgW, svgH) * 0.30;
+        var r = Math.Min(svgW, svgH) * 0.33;
 
         // Grid lines (5 rings matching PowerPoint's 0/20/40/60/80/100 scale)
         var gridRings = 5;
@@ -954,7 +955,8 @@ public partial class PowerPointHandler
         // Read bubble scale from OOXML (default 100%)
         var bubbleScaleEl = plotArea.Descendants<DocumentFormat.OpenXml.Drawing.Charts.BubbleScale>().FirstOrDefault();
         var bubbleScale = bubbleScaleEl?.Val?.HasValue == true ? bubbleScaleEl.Val.Value / 100.0 : 1.0;
-        var maxRadius = Math.Min(pw, ph) * 0.08 * bubbleScale;
+        // PowerPoint default bubble size is larger than 8% — use 12% as base
+        var maxRadius = Math.Min(pw, ph) * 0.12 * bubbleScale;
 
         // Axis lines
         sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy}\" x2=\"{ox}\" y2=\"{oy + ph}\" stroke=\"{_chartAxisLineColor}\" stroke-width=\"1\"/>");
