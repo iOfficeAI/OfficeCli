@@ -41,17 +41,25 @@ internal static partial class ChartHelper
                     var tColor = ReadColorFromFill(titleFill);
                     if (tColor != null) node.Format["title.color"] = tColor;
                 }
-                if (titleRp.Bold?.HasValue == true && titleRp.Bold.Value)
-                    node.Format["title.bold"] = "true";
+                if (titleRp.Bold?.HasValue == true)
+                    node.Format["title.bold"] = titleRp.Bold.Value ? "true" : "false";
             }
         }
 
         var legend = chart.GetFirstChild<C.Legend>();
         if (legend != null)
         {
-            var pos = legend.GetFirstChild<C.LegendPosition>()?.Val?.HasValue == true
+            var posRaw = legend.GetFirstChild<C.LegendPosition>()?.Val?.HasValue == true
                 ? legend.GetFirstChild<C.LegendPosition>()!.Val!.InnerText : "b";
-            node.Format["legend"] = pos;
+            node.Format["legend"] = posRaw switch
+            {
+                "b" => "bottom",
+                "t" => "top",
+                "l" => "left",
+                "r" => "right",
+                "tr" => "topRight",
+                _ => posRaw
+            };
         }
 
         var dataLabels = plotArea.Descendants<C.DataLabels>().FirstOrDefault();
