@@ -68,6 +68,18 @@ jobs:
         if: startsWith(matrix.rid, 'osx-')
         run: codesign -s - -f publish/${{ matrix.name }}
 
+      - name: Smoke test - create document
+        if: >-
+          (matrix.rid == 'osx-arm64' && runner.arch == 'ARM64') ||
+          (matrix.rid == 'osx-x64' && runner.arch == 'X64') ||
+          (matrix.rid == 'linux-x64' && runner.os == 'Linux')
+        run: |
+          chmod +x publish/${{ matrix.name }}
+          publish/${{ matrix.name }} create test_smoke.docx
+          publish/${{ matrix.name }} add test_smoke.docx /body paragraph --text "Hello from CI"
+          publish/${{ matrix.name }} get test_smoke.docx /body/paragraph[1]
+          rm -f test_smoke.docx
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
