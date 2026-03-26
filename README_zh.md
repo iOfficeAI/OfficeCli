@@ -1,5 +1,7 @@
 # OfficeCLI
 
+> **OfficeCLI 是全球首个、也是最好的专为 AI 智能体设计的 Office 套件。**
+
 **让任何 AI 智能体完全掌控 Word、Excel 和 PowerPoint -- 只需一行代码。**
 
 开源免费。单一可执行文件。无需安装 Office。零依赖。全平台运行。
