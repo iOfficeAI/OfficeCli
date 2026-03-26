@@ -416,7 +416,7 @@ public partial class PowerPointHandler
             var maskId = $"rmask{defId++}";
             defs.AppendLine($"<mask id=\"{maskId}\"><rect width=\"{w:0.##}\" height=\"{h:0.##}\" fill=\"url(#{reflId})\"/></mask>");
 
-            sb.Append($"<g transform=\"translate(0,{h + reflDist:0.##}) scale(1,-1)\" mask=\"url(#{maskId})\" opacity=\"0.4\">");
+            sb.Append($"<g transform=\"translate(0,{2 * h + reflDist:0.##}) scale(1,-1)\" mask=\"url(#{maskId})\" opacity=\"0.4\">");
             // Re-draw the shape geometry for reflection
             if (presetName == "ellipse")
                 sb.Append($"<ellipse cx=\"{w / 2:0.##}\" cy=\"{h / 2:0.##}\" rx=\"{w / 2:0.##}\" ry=\"{h / 2:0.##}\" {fsStr}/>");
