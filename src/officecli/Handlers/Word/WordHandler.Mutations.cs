@@ -151,6 +151,7 @@ public partial class WordHandler
         }
 
         element.Remove();
+        _doc.MainDocumentPart?.WordprocessingCommentsPart?.Comments?.Save();
         _doc.MainDocumentPart?.Document?.Save();
         return null;
     }

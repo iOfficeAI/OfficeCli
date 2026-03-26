@@ -78,11 +78,10 @@ public class ResidentServer : IDisposable
 
     private void ResetIdleTimer()
     {
-        // Cancel the old idle CTS to restart the delay; Dispose is safe here because
-        // RunIdleWatchdogAsync snapshots the token before awaiting.
+        // Cancel the old idle CTS to restart the delay; do not Dispose because
+        // RunIdleWatchdogAsync may race between Volatile.Read and .Token access.
         var oldCts = Interlocked.Exchange(ref _idleCts, new CancellationTokenSource());
         oldCts.Cancel();
-        oldCts.Dispose();
     }
 
     private async Task RunIdleWatchdogAsync(CancellationToken token)
