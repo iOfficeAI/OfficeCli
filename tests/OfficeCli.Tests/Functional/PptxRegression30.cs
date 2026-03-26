@@ -648,12 +648,12 @@ public class PptxRegression30 : IDisposable
         var node2 = _handler.Get("/slide[1]/shape[1]", 2);
         var para2 = node2.Children[1];
         para2.Format.Should().ContainKey("align");
-        para2.Format["align"].ToString().Should().Be("r");
+        para2.Format["align"].ToString().Should().Be("right");
 
-        // Para 1 should NOT be "r"
+        // Para 1 should NOT be "right"
         var para1 = node2.Children[0];
         if (para1.Format.ContainsKey("align"))
-            para1.Format["align"].ToString().Should().NotBe("r");
+            para1.Format["align"].ToString().Should().NotBe("right");
     }
 
     // ===================== 17: Shape list style =====================
