@@ -114,18 +114,19 @@ internal static partial class ChartHelper
                 new C.NumericValue(refValue.ToString("G"))) { Index = (uint)i });
         refSer.AppendChild(new C.Values(numLitRef));
 
-        // Insert before ShowMarker
-        var showMarkerEl = lineChart.GetFirstChild<C.ShowMarker>();
-        if (showMarkerEl != null)
-            lineChart.InsertBefore(refSer, showMarkerEl);
+        // Insert ser before dLbls/dropLines/hiLowLines/upDownBars/marker/smooth/axId
+        // per CT_LineChart schema: grouping, varyColors, ser*, dLbls?, ...
+        var insertBeforeEl = lineChart.GetFirstChild<C.DataLabels>() as OpenXmlElement
+            ?? lineChart.GetFirstChild<C.DropLines>()
+            ?? lineChart.GetFirstChild<C.HighLowLines>()
+            ?? lineChart.GetFirstChild<C.UpDownBars>()
+            ?? lineChart.GetFirstChild<C.ShowMarker>()
+            ?? lineChart.GetFirstChild<C.Smooth>()
+            ?? (OpenXmlElement?)lineChart.GetFirstChild<C.AxisId>();
+        if (insertBeforeEl != null)
+            lineChart.InsertBefore(refSer, insertBeforeEl);
         else
-        {
-            var axisIdEl = lineChart.GetFirstChild<C.AxisId>();
-            if (axisIdEl != null)
-                lineChart.InsertBefore(refSer, axisIdEl);
-            else
-                lineChart.AppendChild(refSer);
-        }
+            lineChart.AppendChild(refSer);
     }
 
     /// <summary>

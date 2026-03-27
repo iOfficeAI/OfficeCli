@@ -429,6 +429,133 @@ public class DocxTablePropertiesTests : IDisposable
         fitText.Should().BeNull();
         _handler = new WordHandler(_path, editable: true);
     }
+
+    // ==================== Floating Table Position ====================
+
+    [Fact]
+    public void Set_Position_Floating_CreatesTablePositionProperties()
+    {
+        _handler.Set("/body/tbl[1]", new() { ["position"] = "floating" });
+        _handler.Dispose();
+        using var doc = WordprocessingDocument.Open(_path, false);
+        var tpp = doc.MainDocumentPart!.Document!.Body!
+            .Descendants<DocumentFormat.OpenXml.Wordprocessing.TablePositionProperties>().FirstOrDefault();
+        tpp.Should().NotBeNull();
+        _handler = new WordHandler(_path, editable: true);
+    }
+
+    [Fact]
+    public void Set_Position_None_RemovesTablePositionProperties()
+    {
+        _handler.Set("/body/tbl[1]", new() { ["position"] = "floating" });
+        _handler.Set("/body/tbl[1]", new() { ["position"] = "none" });
+        _handler.Dispose();
+        using var doc = WordprocessingDocument.Open(_path, false);
+        var tpp = doc.MainDocumentPart!.Document!.Body!
+            .Descendants<DocumentFormat.OpenXml.Wordprocessing.TablePositionProperties>().FirstOrDefault();
+        tpp.Should().BeNull();
+        _handler = new WordHandler(_path, editable: true);
+    }
+
+    [Fact]
+    public void Set_PositionX_Twips_SetsAbsolutePosition()
+    {
+        _handler.Set("/body/tbl[1]", new() { ["position.x"] = "2cm" });
+        _handler.Dispose();
+        using var doc = WordprocessingDocument.Open(_path, false);
+        var tpp = doc.MainDocumentPart!.Document!.Body!
+            .Descendants<DocumentFormat.OpenXml.Wordprocessing.TablePositionProperties>().First();
+        tpp.TablePositionX!.Value.Should().BeInRange(1130, 1140); // 2cm ≈ 1134 twips
+        _handler = new WordHandler(_path, editable: true);
+    }
+
+    [Fact]
+    public void Set_PositionY_Alignment_SetsNamedPosition()
+    {
+        _handler.Set("/body/tbl[1]", new() { ["position.y"] = "center" });
+        _handler.Dispose();
+        using var doc = WordprocessingDocument.Open(_path, false);
+        var tpp = doc.MainDocumentPart!.Document!.Body!
+            .Descendants<DocumentFormat.OpenXml.Wordprocessing.TablePositionProperties>().First();
+        tpp.TablePositionYAlignment!.Value.Should().Be(DocumentFormat.OpenXml.Wordprocessing.VerticalAlignmentValues.Center);
+        _handler = new WordHandler(_path, editable: true);
+    }
+
+    [Fact]
+    public void Set_PositionAnchors_SetsAnchorTypes()
+    {
+        _handler.Set("/body/tbl[1]", new()
+        {
+            ["position"] = "floating",
+            ["position.hAnchor"] = "margin",
+            ["position.vAnchor"] = "text"
+        });
+        _handler.Dispose();
+        using var doc = WordprocessingDocument.Open(_path, false);
+        var tpp = doc.MainDocumentPart!.Document!.Body!
+            .Descendants<DocumentFormat.OpenXml.Wordprocessing.TablePositionProperties>().First();
+        tpp.HorizontalAnchor!.Value.Should().Be(DocumentFormat.OpenXml.Wordprocessing.HorizontalAnchorValues.Margin);
+        tpp.VerticalAnchor!.Value.Should().Be(DocumentFormat.OpenXml.Wordprocessing.VerticalAnchorValues.Text);
+        _handler = new WordHandler(_path, editable: true);
+    }
+
+    [Fact]
+    public void Set_PositionFromText_SetsDistances()
+    {
+        _handler.Set("/body/tbl[1]", new()
+        {
+            ["position"] = "floating",
+            ["position.left"] = "0.5cm",
+            ["position.right"] = "0.5cm",
+            ["position.top"] = "0.3cm",
+            ["position.bottom"] = "0.3cm"
+        });
+        _handler.Dispose();
+        using var doc = WordprocessingDocument.Open(_path, false);
+        var tpp = doc.MainDocumentPart!.Document!.Body!
+            .Descendants<DocumentFormat.OpenXml.Wordprocessing.TablePositionProperties>().First();
+        // 0.5cm ≈ 283 twips, 0.3cm ≈ 170 twips
+        tpp.LeftFromText!.Value.Should().BeInRange((short)280, (short)290);
+        tpp.RightFromText!.Value.Should().BeInRange((short)280, (short)290);
+        tpp.TopFromText!.Value.Should().BeInRange((short)168, (short)172);
+        tpp.BottomFromText!.Value.Should().BeInRange((short)168, (short)172);
+        _handler = new WordHandler(_path, editable: true);
+    }
+
+    [Fact]
+    public void Set_Overlap_SetsTableOverlap()
+    {
+        _handler.Set("/body/tbl[1]", new() { ["position"] = "floating", ["overlap"] = "never" });
+        _handler.Dispose();
+        using var doc = WordprocessingDocument.Open(_path, false);
+        var overlap = doc.MainDocumentPart!.Document!.Body!
+            .Descendants<DocumentFormat.OpenXml.Wordprocessing.TableOverlap>().FirstOrDefault();
+        overlap.Should().NotBeNull();
+        overlap!.Val!.Value.Should().Be(DocumentFormat.OpenXml.Wordprocessing.TableOverlapValues.Never);
+        _handler = new WordHandler(_path, editable: true);
+    }
+
+    [Fact]
+    public void Set_FloatingTable_Persist_SurvivesReopen()
+    {
+        _handler.Set("/body/tbl[1]", new()
+        {
+            ["position.x"] = "3cm",
+            ["position.y"] = "5cm",
+            ["position.hAnchor"] = "page",
+            ["position.vAnchor"] = "page"
+        });
+        Reopen();
+        _handler.Dispose();
+        using var doc = WordprocessingDocument.Open(_path, false);
+        var tpp = doc.MainDocumentPart!.Document!.Body!
+            .Descendants<DocumentFormat.OpenXml.Wordprocessing.TablePositionProperties>().First();
+        tpp.TablePositionX!.Value.Should().BeInRange(1700, 1705); // 3cm ≈ 1701 twips
+        tpp.TablePositionY!.Value.Should().BeInRange(2833, 2838); // 5cm ≈ 2835 twips
+        tpp.HorizontalAnchor!.Value.Should().Be(DocumentFormat.OpenXml.Wordprocessing.HorizontalAnchorValues.Page);
+        tpp.VerticalAnchor!.Value.Should().Be(DocumentFormat.OpenXml.Wordprocessing.VerticalAnchorValues.Page);
+        _handler = new WordHandler(_path, editable: true);
+    }
 }
 
 // ==================== XLSX Table Properties Tests ====================

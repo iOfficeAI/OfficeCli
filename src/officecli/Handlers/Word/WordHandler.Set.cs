@@ -1538,6 +1538,144 @@ public partial class WordHandler
                         }
                         break;
                     }
+                    case "position" or "floating":
+                    {
+                        // Shorthand: "floating" or "none" to toggle floating table
+                        if (value.Equals("none", StringComparison.OrdinalIgnoreCase)
+                            || value.Equals("false", StringComparison.OrdinalIgnoreCase))
+                        {
+                            tblPr.RemoveAllChildren<TablePositionProperties>();
+                            tblPr.RemoveAllChildren<TableOverlap>();
+                        }
+                        else
+                        {
+                            // "floating" enables floating with defaults
+                            var tpp = tblPr.GetFirstChild<TablePositionProperties>();
+                            if (tpp == null)
+                            {
+                                tpp = new TablePositionProperties();
+                                tblPr.AppendChild(tpp);
+                            }
+                            if (tpp.VerticalAnchor == null)
+                                tpp.VerticalAnchor = VerticalAnchorValues.Page;
+                            if (tpp.HorizontalAnchor == null)
+                                tpp.HorizontalAnchor = HorizontalAnchorValues.Page;
+                        }
+                        break;
+                    }
+                    case "position.x" or "tblpx":
+                    {
+                        var tpp = EnsureTablePositionProperties(tblPr);
+                        var v = value.ToLowerInvariant();
+                        if (v is "left" or "center" or "right" or "inside" or "outside")
+                        {
+                            tpp.TablePositionXAlignment = v switch
+                            {
+                                "left" => HorizontalAlignmentValues.Left,
+                                "center" => HorizontalAlignmentValues.Center,
+                                "right" => HorizontalAlignmentValues.Right,
+                                "inside" => HorizontalAlignmentValues.Inside,
+                                "outside" => HorizontalAlignmentValues.Outside,
+                                _ => throw new ArgumentException($"Invalid position.x alignment: '{value}'")
+                            };
+                            tpp.TablePositionX = null;
+                        }
+                        else
+                        {
+                            tpp.TablePositionX = (int)ParseTwips(value);
+                            tpp.TablePositionXAlignment = null;
+                        }
+                        break;
+                    }
+                    case "position.y" or "tblpy":
+                    {
+                        var tpp = EnsureTablePositionProperties(tblPr);
+                        var v = value.ToLowerInvariant();
+                        if (v is "top" or "center" or "bottom" or "inside" or "outside")
+                        {
+                            tpp.TablePositionYAlignment = v switch
+                            {
+                                "top" => VerticalAlignmentValues.Top,
+                                "center" => VerticalAlignmentValues.Center,
+                                "bottom" => VerticalAlignmentValues.Bottom,
+                                "inside" => VerticalAlignmentValues.Inside,
+                                "outside" => VerticalAlignmentValues.Outside,
+                                _ => throw new ArgumentException($"Invalid position.y alignment: '{value}'")
+                            };
+                            tpp.TablePositionY = null;
+                        }
+                        else
+                        {
+                            tpp.TablePositionY = (int)ParseTwips(value);
+                            tpp.TablePositionYAlignment = null;
+                        }
+                        break;
+                    }
+                    case "position.hanchor" or "position.horizontalanchor":
+                    {
+                        var tpp = EnsureTablePositionProperties(tblPr);
+                        tpp.HorizontalAnchor = value.ToLowerInvariant() switch
+                        {
+                            "margin" => HorizontalAnchorValues.Margin,
+                            "page" => HorizontalAnchorValues.Page,
+                            "text" => HorizontalAnchorValues.Text,
+                            _ => throw new ArgumentException($"Invalid horizontalAnchor: '{value}'. Valid: margin, page, text.")
+                        };
+                        break;
+                    }
+                    case "position.vanchor" or "position.verticalanchor":
+                    {
+                        var tpp = EnsureTablePositionProperties(tblPr);
+                        tpp.VerticalAnchor = value.ToLowerInvariant() switch
+                        {
+                            "margin" => VerticalAnchorValues.Margin,
+                            "page" => VerticalAnchorValues.Page,
+                            "text" => VerticalAnchorValues.Text,
+                            _ => throw new ArgumentException($"Invalid verticalAnchor: '{value}'. Valid: margin, page, text.")
+                        };
+                        break;
+                    }
+                    case "position.leftfromtext" or "position.left":
+                    {
+                        var tpp = EnsureTablePositionProperties(tblPr);
+                        tpp.LeftFromText = (short)ParseTwips(value);
+                        break;
+                    }
+                    case "position.rightfromtext" or "position.right":
+                    {
+                        var tpp = EnsureTablePositionProperties(tblPr);
+                        tpp.RightFromText = (short)ParseTwips(value);
+                        break;
+                    }
+                    case "position.topfromtext" or "position.top":
+                    {
+                        var tpp = EnsureTablePositionProperties(tblPr);
+                        tpp.TopFromText = (short)ParseTwips(value);
+                        break;
+                    }
+                    case "position.bottomfromtext" or "position.bottom":
+                    {
+                        var tpp = EnsureTablePositionProperties(tblPr);
+                        tpp.BottomFromText = (short)ParseTwips(value);
+                        break;
+                    }
+                    case "overlap":
+                    {
+                        tblPr.RemoveAllChildren<TableOverlap>();
+                        if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
+                        {
+                            tblPr.AppendChild(new TableOverlap
+                            {
+                                Val = value.ToLowerInvariant() switch
+                                {
+                                    "overlap" or "true" or "always" => TableOverlapValues.Overlap,
+                                    "never" or "false" => TableOverlapValues.Never,
+                                    _ => throw new ArgumentException($"Invalid overlap: '{value}'. Valid: overlap, never, none.")
+                                }
+                            });
+                        }
+                        break;
+                    }
                     case "caption":
                         tblPr.RemoveAllChildren<TableCaption>();
                         if (!string.IsNullOrEmpty(value))
@@ -1967,6 +2105,21 @@ public partial class WordHandler
     /// Parse twips from a string with optional unit suffix: "1.5cm", "0.5in", "36pt", or raw twips.
     /// 1 inch = 1440 twips, 1 cm = 567 twips, 1 pt = 20 twips.
     /// </summary>
+    private static TablePositionProperties EnsureTablePositionProperties(TableProperties tblPr)
+    {
+        var tpp = tblPr.GetFirstChild<TablePositionProperties>();
+        if (tpp == null)
+        {
+            tpp = new TablePositionProperties
+            {
+                VerticalAnchor = VerticalAnchorValues.Page,
+                HorizontalAnchor = HorizontalAnchorValues.Page
+            };
+            tblPr.AppendChild(tpp);
+        }
+        return tpp;
+    }
+
     internal static uint ParseTwips(string value)
     {
         value = value.Trim();
