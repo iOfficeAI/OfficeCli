@@ -487,7 +487,7 @@ public class PptxChartReadbackTests : IDisposable
     // ==================== PlotArea Layout ====================
 
     [Fact]
-    public void Chart_PlotAreaLayout_SetsManualLayout()
+    public void Chart_PlotAreaLayout_IsReadBack()
     {
         AddBarChart();
         _pptx.Set("/slide[1]/chart[1]", new()
@@ -498,10 +498,11 @@ public class PptxChartReadbackTests : IDisposable
             ["plotArea.h"] = "0.78"
         });
 
-        // Verify the OOXML manualLayout was written by checking HTML output
-        // contains the adjusted margins (not the default 40px left margin)
-        var html = _pptx.ViewAsHtml();
-        html.Should().NotBeNullOrEmpty("HTML preview should render chart with manual layout");
+        var node = _pptx.Get("/slide[1]/chart[1]");
+        ((string)node.Format["plotArea.x"]).Should().Be("0.12");
+        ((string)node.Format["plotArea.y"]).Should().Be("0.08");
+        ((string)node.Format["plotArea.w"]).Should().Be("0.82");
+        ((string)node.Format["plotArea.h"]).Should().Be("0.78");
     }
 
     [Fact]
@@ -518,11 +519,122 @@ public class PptxChartReadbackTests : IDisposable
 
         Reopen();
 
-        // After reopen, the manualLayout should persist in the chart XML
-        // and affect HTML rendering with different margins than default
-        var html = _pptx.ViewAsHtml();
-        html.Should().NotBeNullOrEmpty();
-        // The manual layout changes plot area position, so SVG coordinates differ from default
-        html.Should().Contain("svg", "chart should render as SVG");
+        var node = _pptx.Get("/slide[1]/chart[1]");
+        ((string)node.Format["plotArea.x"]).Should().Be("0.15");
+        ((string)node.Format["plotArea.y"]).Should().Be("0.1");
+        ((string)node.Format["plotArea.w"]).Should().Be("0.8");
+        ((string)node.Format["plotArea.h"]).Should().Be("0.75");
+    }
+
+    // ==================== Title Layout ====================
+
+    [Fact]
+    public void Chart_TitleLayout_IsReadBack()
+    {
+        AddBarChart();
+        _pptx.Set("/slide[1]/chart[1]", new()
+        {
+            ["title.x"] = "0.3",
+            ["title.y"] = "0.02",
+            ["title.w"] = "0.4",
+            ["title.h"] = "0.08"
+        });
+
+        var node = _pptx.Get("/slide[1]/chart[1]");
+        ((string)node.Format["title.x"]).Should().Be("0.3");
+        ((string)node.Format["title.y"]).Should().Be("0.02");
+        ((string)node.Format["title.w"]).Should().Be("0.4");
+        ((string)node.Format["title.h"]).Should().Be("0.08");
+    }
+
+    [Fact]
+    public void Chart_TitleLayout_PersistsAcrossReopen()
+    {
+        AddBarChart();
+        _pptx.Set("/slide[1]/chart[1]", new()
+        {
+            ["title.x"] = "0.25",
+            ["title.y"] = "0.01",
+            ["title.w"] = "0.5",
+            ["title.h"] = "0.06"
+        });
+
+        Reopen();
+
+        var node = _pptx.Get("/slide[1]/chart[1]");
+        ((string)node.Format["title.x"]).Should().Be("0.25");
+        ((string)node.Format["title.y"]).Should().Be("0.01");
+        ((string)node.Format["title.w"]).Should().Be("0.5");
+        ((string)node.Format["title.h"]).Should().Be("0.06");
+    }
+
+    [Fact]
+    public void Chart_TitleLayout_NoTitleReturnsUnsupported()
+    {
+        AddBarChart();
+        // Remove title via Set
+        _pptx.Set("/slide[1]/chart[1]", new() { ["title"] = "none" });
+
+        // Setting title layout on chart with no title should not crash
+        _pptx.Set("/slide[1]/chart[1]", new() { ["title.x"] = "0.1" });
+
+        var node = _pptx.Get("/slide[1]/chart[1]");
+        node.Format.Should().NotContainKey("title.x");
+    }
+
+    // ==================== Legend Layout ====================
+
+    [Fact]
+    public void Chart_LegendLayout_IsReadBack()
+    {
+        AddBarChart();
+        _pptx.Set("/slide[1]/chart[1]", new()
+        {
+            ["legend.x"] = "0.7",
+            ["legend.y"] = "0.3",
+            ["legend.w"] = "0.25",
+            ["legend.h"] = "0.4"
+        });
+
+        var node = _pptx.Get("/slide[1]/chart[1]");
+        ((string)node.Format["legend.x"]).Should().Be("0.7");
+        ((string)node.Format["legend.y"]).Should().Be("0.3");
+        ((string)node.Format["legend.w"]).Should().Be("0.25");
+        ((string)node.Format["legend.h"]).Should().Be("0.4");
+    }
+
+    [Fact]
+    public void Chart_LegendLayout_PersistsAcrossReopen()
+    {
+        AddBarChart();
+        _pptx.Set("/slide[1]/chart[1]", new()
+        {
+            ["legend.x"] = "0.75",
+            ["legend.y"] = "0.25",
+            ["legend.w"] = "0.2",
+            ["legend.h"] = "0.5"
+        });
+
+        Reopen();
+
+        var node = _pptx.Get("/slide[1]/chart[1]");
+        ((string)node.Format["legend.x"]).Should().Be("0.75");
+        ((string)node.Format["legend.y"]).Should().Be("0.25");
+        ((string)node.Format["legend.w"]).Should().Be("0.2");
+        ((string)node.Format["legend.h"]).Should().Be("0.5");
+    }
+
+    [Fact]
+    public void Chart_LegendLayout_NoLegendReturnsUnsupported()
+    {
+        AddBarChart();
+        // Remove legend
+        _pptx.Set("/slide[1]/chart[1]", new() { ["legend"] = "none" });
+
+        // Setting legend layout on chart with no legend should not crash
+        _pptx.Set("/slide[1]/chart[1]", new() { ["legend.x"] = "0.1" });
+
+        var node = _pptx.Get("/slide[1]/chart[1]");
+        node.Format.Should().NotContainKey("legend.x");
     }
 }

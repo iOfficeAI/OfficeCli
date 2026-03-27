@@ -264,4 +264,59 @@ internal static partial class ChartHelper
             return colorsStr.Split(',').Select(c => c.Trim()).ToArray();
         return null;
     }
+
+    // ==================== ManualLayout Helpers ====================
+
+    /// <summary>
+    /// Ensures the given element has a Layout > ManualLayout child and sets the specified
+    /// positional property (x/y/w/h). Creates Layout and ManualLayout if missing.
+    /// For plotArea, LayoutTarget is set to Inner; for others it is omitted.
+    /// </summary>
+    internal static void SetManualLayoutProperty(OpenXmlCompositeElement parent, string prop, double value, bool isPlotArea = false)
+    {
+        var layout = parent.GetFirstChild<C.Layout>();
+        if (layout == null)
+        {
+            layout = new C.Layout();
+            parent.InsertAt(layout, 0);
+        }
+        var ml = layout.GetFirstChild<C.ManualLayout>();
+        if (ml == null)
+        {
+            ml = new C.ManualLayout();
+            if (isPlotArea)
+                ml.AppendChild(new C.LayoutTarget { Val = C.LayoutTargetValues.Inner });
+            ml.AppendChild(new C.LeftMode { Val = C.LayoutModeValues.Edge });
+            ml.AppendChild(new C.TopMode { Val = C.LayoutModeValues.Edge });
+            layout.AppendChild(ml);
+        }
+        switch (prop)
+        {
+            case "x": ml.RemoveAllChildren<C.Left>(); ml.AppendChild(new C.Left { Val = value }); break;
+            case "y": ml.RemoveAllChildren<C.Top>(); ml.AppendChild(new C.Top { Val = value }); break;
+            case "w": ml.RemoveAllChildren<C.Width>(); ml.AppendChild(new C.Width { Val = value }); break;
+            case "h": ml.RemoveAllChildren<C.Height>(); ml.AppendChild(new C.Height { Val = value }); break;
+        }
+    }
+
+    /// <summary>
+    /// Read ManualLayout x/y/w/h from an element that has Layout as a child.
+    /// Writes results into node.Format with the given prefix (e.g. "plotArea", "title", "legend").
+    /// </summary>
+    internal static void ReadManualLayout(OpenXmlCompositeElement parent, DocumentNode node, string prefix)
+    {
+        var layout = parent.GetFirstChild<C.Layout>();
+        var ml = layout?.GetFirstChild<C.ManualLayout>();
+        if (ml == null) return;
+
+        var x = ml.Left?.Val?.Value ?? ml.GetFirstChild<C.Left>()?.Val?.Value;
+        var y = ml.Top?.Val?.Value ?? ml.GetFirstChild<C.Top>()?.Val?.Value;
+        var w = ml.Width?.Val?.Value ?? ml.GetFirstChild<C.Width>()?.Val?.Value;
+        var h = ml.Height?.Val?.Value ?? ml.GetFirstChild<C.Height>()?.Val?.Value;
+
+        if (x != null) node.Format[$"{prefix}.x"] = x.Value.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
+        if (y != null) node.Format[$"{prefix}.y"] = y.Value.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
+        if (w != null) node.Format[$"{prefix}.w"] = w.Value.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
+        if (h != null) node.Format[$"{prefix}.h"] = h.Value.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
+    }
 }

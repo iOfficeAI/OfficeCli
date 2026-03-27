@@ -649,30 +649,54 @@ internal static partial class ChartHelper
                     if (!double.TryParse(value, System.Globalization.NumberStyles.Float,
                         System.Globalization.CultureInfo.InvariantCulture, out var layoutVal))
                     { unsupported.Add(key); break; }
-
                     var plotArea3 = chart.GetFirstChild<C.PlotArea>();
                     if (plotArea3 == null) { unsupported.Add(key); break; }
+                    SetManualLayoutProperty(plotArea3, key.Split('.')[1].ToLowerInvariant(), layoutVal, isPlotArea: true);
+                    break;
+                }
 
-                    var layout = plotArea3.GetFirstChild<C.Layout>();
-                    if (layout == null)
-                    {
-                        layout = new C.Layout();
-                        plotArea3.InsertAt(layout, 0);
-                    }
-                    var ml = layout.GetFirstChild<C.ManualLayout>();
-                    if (ml == null)
-                    {
-                        ml = new C.ManualLayout();
-                        ml.AppendChild(new C.LayoutTarget { Val = C.LayoutTargetValues.Inner });
-                        ml.AppendChild(new C.LeftMode { Val = C.LayoutModeValues.Edge });
-                        ml.AppendChild(new C.TopMode { Val = C.LayoutModeValues.Edge });
-                        layout.AppendChild(ml);
-                    }
-                    var prop = key.Split('.')[1].ToLowerInvariant();
-                    if (prop == "x") { ml.RemoveAllChildren<C.Left>(); ml.AppendChild(new C.Left { Val = layoutVal }); }
-                    else if (prop == "y") { ml.RemoveAllChildren<C.Top>(); ml.AppendChild(new C.Top { Val = layoutVal }); }
-                    else if (prop == "w") { ml.RemoveAllChildren<C.Width>(); ml.AppendChild(new C.Width { Val = layoutVal }); }
-                    else if (prop == "h") { ml.RemoveAllChildren<C.Height>(); ml.AppendChild(new C.Height { Val = layoutVal }); }
+                case "title.x" or "title.y" or "title.w" or "title.h":
+                {
+                    if (!double.TryParse(value, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var layoutVal))
+                    { unsupported.Add(key); break; }
+                    var titleEl = chart.GetFirstChild<C.Title>();
+                    if (titleEl == null) { unsupported.Add(key); break; }
+                    SetManualLayoutProperty(titleEl, key.Split('.')[1].ToLowerInvariant(), layoutVal);
+                    break;
+                }
+
+                case "legend.x" or "legend.y" or "legend.w" or "legend.h":
+                {
+                    if (!double.TryParse(value, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var layoutVal))
+                    { unsupported.Add(key); break; }
+                    var legendEl = chart.GetFirstChild<C.Legend>();
+                    if (legendEl == null) { unsupported.Add(key); break; }
+                    SetManualLayoutProperty(legendEl, key.Split('.')[1].ToLowerInvariant(), layoutVal);
+                    break;
+                }
+
+                case "trendlinelabel.x" or "trendlinelabel.y" or "trendlinelabel.w" or "trendlinelabel.h":
+                {
+                    if (!double.TryParse(value, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var layoutVal))
+                    { unsupported.Add(key); break; }
+                    var plotArea4 = chart.GetFirstChild<C.PlotArea>();
+                    var trendlineLbl = plotArea4?.Descendants<C.TrendlineLabel>().FirstOrDefault();
+                    if (trendlineLbl == null) { unsupported.Add(key); break; }
+                    SetManualLayoutProperty(trendlineLbl, key.Split('.')[1].ToLowerInvariant(), layoutVal);
+                    break;
+                }
+
+                case "displayunitslabel.x" or "displayunitslabel.y" or "displayunitslabel.w" or "displayunitslabel.h":
+                {
+                    if (!double.TryParse(value, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var layoutVal))
+                    { unsupported.Add(key); break; }
+                    var dispUnitsLbl = chart.Descendants<C.DisplayUnitsLabel>().FirstOrDefault();
+                    if (dispUnitsLbl == null) { unsupported.Add(key); break; }
+                    SetManualLayoutProperty(dispUnitsLbl, key.Split('.')[1].ToLowerInvariant(), layoutVal);
                     break;
                 }
 

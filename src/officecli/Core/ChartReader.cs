@@ -79,6 +79,15 @@ internal static partial class ChartHelper
         var style = chart.Parent?.GetFirstChild<C.Style>();
         if (style?.Val?.HasValue == true) node.Format["style"] = (int)style.Val.Value;
 
+        // ManualLayout readback: plotArea, title, legend, trendlineLabel, displayUnitsLabel
+        ReadManualLayout(plotArea, node, "plotArea");
+        if (titleEl != null) ReadManualLayout(titleEl, node, "title");
+        if (legend != null) ReadManualLayout(legend, node, "legend");
+        var trendlineLbl = plotArea.Descendants<C.TrendlineLabel>().FirstOrDefault();
+        if (trendlineLbl != null) ReadManualLayout(trendlineLbl, node, "trendlineLabel");
+        var dispUnitsLbl = chart.Descendants<C.DisplayUnitsLabel>().FirstOrDefault();
+        if (dispUnitsLbl != null) ReadManualLayout(dispUnitsLbl, node, "displayUnitsLabel");
+
         // Plot area fill (plotArea uses C.ShapeProperties, not C.ChartShapeProperties)
         var plotSpPr = plotArea.GetFirstChild<C.ShapeProperties>();
         var plotFill = plotSpPr?.GetFirstChild<Drawing.SolidFill>();
