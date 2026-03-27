@@ -16,12 +16,23 @@ public partial class WordHandler
 
     private static long ParseEmu(string value) => Core.EmuConverter.ParseEmu(value);
 
-    private static uint _nextImageId = 1;
-    private static uint NextImageId() => _nextImageId++;
-
-    private static Run CreateImageRun(string relationshipId, long cx, long cy, string altText)
+    private uint NextDocPropId()
     {
-        var docPropId = NextImageId();
+        uint maxId = 0;
+        var body = _doc.MainDocumentPart?.Document?.Body;
+        if (body != null)
+        {
+            foreach (var dp in body.Descendants<DW.DocProperties>())
+            {
+                if (dp.Id?.HasValue == true && dp.Id.Value > maxId)
+                    maxId = dp.Id.Value;
+            }
+        }
+        return maxId + 1;
+    }
+
+    private static Run CreateImageRun(string relationshipId, long cx, long cy, string altText, uint docPropId)
+    {
         var inline = new DW.Inline(
             new DW.Extent { Cx = cx, Cy = cy },
             new DW.EffectExtent { LeftEdge = 0, TopEdge = 0, RightEdge = 0, BottomEdge = 0 },
@@ -64,7 +75,7 @@ public partial class WordHandler
     private static Run CreateAnchorImageRun(string relationshipId, long cx, long cy, string altText,
         string wrap, long hPos, long vPos,
         DW.HorizontalRelativePositionValues hRel, DW.VerticalRelativePositionValues vRel,
-        bool behindText)
+        bool behindText, uint docPropId)
     {
         OpenXmlElement wrapElement = wrap.ToLowerInvariant() switch
         {
@@ -88,7 +99,7 @@ public partial class WordHandler
             _ => throw new ArgumentException($"Invalid wrap value: '{wrap}'. Valid values: none, square, tight, through, topandbottom.")
         };
 
-        var anchorDocPropId = NextImageId();
+        var anchorDocPropId = docPropId;
         var anchor = new DW.Anchor(
             new DW.SimplePosition { X = 0, Y = 0 },
             new DW.HorizontalPosition(new DW.PositionOffset(hPos.ToString()))

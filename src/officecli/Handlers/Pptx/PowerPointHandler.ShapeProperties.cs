@@ -1212,6 +1212,128 @@ public partial class PowerPointHandler
                     }
                     break;
                 }
+                case "margin" or "padding":
+                {
+                    var tcPrM = cell.TableCellProperties ?? (cell.TableCellProperties = new Drawing.TableCellProperties());
+                    var parts = value.Split(',');
+                    if (parts.Length == 1)
+                    {
+                        var emu = (int)ParseEmu(parts[0].Trim());
+                        tcPrM.LeftMargin = emu;
+                        tcPrM.RightMargin = emu;
+                        tcPrM.TopMargin = emu;
+                        tcPrM.BottomMargin = emu;
+                    }
+                    else if (parts.Length == 4)
+                    {
+                        tcPrM.LeftMargin = (int)ParseEmu(parts[0].Trim());
+                        tcPrM.TopMargin = (int)ParseEmu(parts[1].Trim());
+                        tcPrM.RightMargin = (int)ParseEmu(parts[2].Trim());
+                        tcPrM.BottomMargin = (int)ParseEmu(parts[3].Trim());
+                    }
+                    else if (parts.Length == 2)
+                    {
+                        var h = (int)ParseEmu(parts[0].Trim());
+                        var v = (int)ParseEmu(parts[1].Trim());
+                        tcPrM.LeftMargin = h;
+                        tcPrM.RightMargin = h;
+                        tcPrM.TopMargin = v;
+                        tcPrM.BottomMargin = v;
+                    }
+                    break;
+                }
+                case "margin.left" or "padding.left":
+                {
+                    var tcPrM = cell.TableCellProperties ?? (cell.TableCellProperties = new Drawing.TableCellProperties());
+                    tcPrM.LeftMargin = (int)ParseEmu(value);
+                    break;
+                }
+                case "margin.right" or "padding.right":
+                {
+                    var tcPrM = cell.TableCellProperties ?? (cell.TableCellProperties = new Drawing.TableCellProperties());
+                    tcPrM.RightMargin = (int)ParseEmu(value);
+                    break;
+                }
+                case "margin.top" or "padding.top":
+                {
+                    var tcPrM = cell.TableCellProperties ?? (cell.TableCellProperties = new Drawing.TableCellProperties());
+                    tcPrM.TopMargin = (int)ParseEmu(value);
+                    break;
+                }
+                case "margin.bottom" or "padding.bottom":
+                {
+                    var tcPrM = cell.TableCellProperties ?? (cell.TableCellProperties = new Drawing.TableCellProperties());
+                    tcPrM.BottomMargin = (int)ParseEmu(value);
+                    break;
+                }
+                case "textdirection" or "textdir" or "vert":
+                {
+                    var tcPrTd = cell.TableCellProperties ?? (cell.TableCellProperties = new Drawing.TableCellProperties());
+                    tcPrTd.Vertical = value.ToLowerInvariant() switch
+                    {
+                        "horizontal" or "horz" or "none" => Drawing.TextVerticalValues.Horizontal,
+                        "vertical" or "vert" or "vert270" => Drawing.TextVerticalValues.Vertical270,
+                        "vertical270" => Drawing.TextVerticalValues.Vertical270,
+                        "vertical90" or "vert90" => Drawing.TextVerticalValues.Vertical,
+                        "stacked" or "wordartvert" => Drawing.TextVerticalValues.WordArtVertical,
+                        _ => throw new ArgumentException($"Invalid textDirection: '{value}'. Valid: horizontal, vertical, vertical90, vertical270, stacked.")
+                    };
+                    break;
+                }
+                case "wordwrap" or "wrap":
+                {
+                    var bodyProps = cell.TextBody?.GetFirstChild<Drawing.BodyProperties>();
+                    if (bodyProps == null)
+                    {
+                        var tb = cell.TextBody ?? cell.PrependChild(new Drawing.TextBody(
+                            new Drawing.BodyProperties(), new Drawing.ListStyle(), new Drawing.Paragraph()));
+                        bodyProps = tb.GetFirstChild<Drawing.BodyProperties>()!;
+                    }
+                    bodyProps.Wrap = IsTruthy(value) ? Drawing.TextWrappingValues.Square : Drawing.TextWrappingValues.None;
+                    break;
+                }
+                case "linespacing":
+                {
+                    var (spcVal, isPct) = OfficeCli.Core.SpacingConverter.ParsePptLineSpacing(value);
+                    foreach (var para in cell.TextBody?.Elements<Drawing.Paragraph>() ?? Enumerable.Empty<Drawing.Paragraph>())
+                    {
+                        var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                        pProps.RemoveAllChildren<Drawing.LineSpacing>();
+                        var ls = new Drawing.LineSpacing();
+                        if (isPct)
+                            ls.AppendChild(new Drawing.SpacingPercent { Val = spcVal });
+                        else
+                            ls.AppendChild(new Drawing.SpacingPoints { Val = spcVal });
+                        pProps.AppendChild(ls);
+                    }
+                    break;
+                }
+                case "spacebefore":
+                {
+                    var sbVal = OfficeCli.Core.SpacingConverter.ParsePptSpacing(value);
+                    foreach (var para in cell.TextBody?.Elements<Drawing.Paragraph>() ?? Enumerable.Empty<Drawing.Paragraph>())
+                    {
+                        var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                        pProps.RemoveAllChildren<Drawing.SpaceBefore>();
+                        var sb = new Drawing.SpaceBefore();
+                        sb.AppendChild(new Drawing.SpacingPoints { Val = sbVal });
+                        pProps.AppendChild(sb);
+                    }
+                    break;
+                }
+                case "spaceafter":
+                {
+                    var saVal = OfficeCli.Core.SpacingConverter.ParsePptSpacing(value);
+                    foreach (var para in cell.TextBody?.Elements<Drawing.Paragraph>() ?? Enumerable.Empty<Drawing.Paragraph>())
+                    {
+                        var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                        pProps.RemoveAllChildren<Drawing.SpaceAfter>();
+                        var sa = new Drawing.SpaceAfter();
+                        sa.AppendChild(new Drawing.SpacingPoints { Val = saVal });
+                        pProps.AppendChild(sa);
+                    }
+                    break;
+                }
                 case "image":
                 {
                     // Validate before modifying (atomic: no data loss on invalid input)

@@ -531,6 +531,47 @@ public partial class PowerPointHandler
                         }
                         break;
                     }
+                    case "firstrow":
+                    case "lastrow":
+                    case "firstcol" or "firstcolumn":
+                    case "lastcol" or "lastcolumn":
+                    case "bandrow" or "bandedrows" or "bandrows":
+                    case "bandcol" or "bandedcols" or "bandcols":
+                    {
+                        var table = gf.Descendants<Drawing.Table>().FirstOrDefault();
+                        if (table != null)
+                        {
+                            var tblPr = table.GetFirstChild<Drawing.TableProperties>()
+                                ?? table.PrependChild(new Drawing.TableProperties());
+                            var bv = IsTruthy(value);
+                            switch (key.ToLowerInvariant())
+                            {
+                                case "firstrow": tblPr.FirstRow = bv; break;
+                                case "lastrow": tblPr.LastRow = bv; break;
+                                case "firstcol" or "firstcolumn": tblPr.FirstColumn = bv; break;
+                                case "lastcol" or "lastcolumn": tblPr.LastColumn = bv; break;
+                                case "bandrow" or "bandedrows" or "bandrows": tblPr.BandRow = bv; break;
+                                case "bandcol" or "bandedcols" or "bandcols": tblPr.BandColumn = bv; break;
+                            }
+                        }
+                        break;
+                    }
+                    case "colwidth" or "colwidths":
+                    {
+                        // Set individual column widths: "3cm,5cm,3cm" or single value for all
+                        var table = gf.Descendants<Drawing.Table>().FirstOrDefault();
+                        if (table != null)
+                        {
+                            var gridCols = table.TableGrid?.Elements<Drawing.GridColumn>().ToList();
+                            if (gridCols != null && gridCols.Count > 0)
+                            {
+                                var widths = value.Split(',').Select(w => ParseEmu(w.Trim())).ToArray();
+                                for (int ci = 0; ci < gridCols.Count; ci++)
+                                    gridCols[ci].Width = ci < widths.Length ? widths[ci] : widths[^1];
+                            }
+                        }
+                        break;
+                    }
                     case var k when k.StartsWith("border") || k is "text" or "bold" or "italic" or "size" or "font" or "color" or "underline" or "strike" or "valign" or "fill" or "baseline" or "charspacing":
                     {
                         // Apply cell-level properties to all cells in the table
@@ -549,7 +590,7 @@ public partial class PowerPointHandler
                         if (!GenericXmlQuery.SetGenericAttribute(gf, key, value))
                         {
                             if (unsupported.Count == 0)
-                                unsupported.Add($"{key} (valid table props: x, y, width, height, name, style, firstrow, lastrow, bandedrows, bandedcols)");
+                                unsupported.Add($"{key} (valid table props: x, y, width, height, name, style, firstRow, lastRow, firstCol, lastCol, bandedRows, bandedCols, colWidths)");
                             else
                                 unsupported.Add(key);
                         }

@@ -140,6 +140,17 @@ public partial class PowerPointHandler
             }
         }
 
+        // TableLook flags
+        if (tblPr != null)
+        {
+            if (tblPr.FirstRow is not null) node.Format["firstRow"] = tblPr.FirstRow.Value;
+            if (tblPr.LastRow is not null) node.Format["lastRow"] = tblPr.LastRow.Value;
+            if (tblPr.FirstColumn is not null) node.Format["firstCol"] = tblPr.FirstColumn.Value;
+            if (tblPr.LastColumn is not null) node.Format["lastCol"] = tblPr.LastColumn.Value;
+            if (tblPr.BandRow is not null) node.Format["bandedRows"] = tblPr.BandRow.Value;
+            if (tblPr.BandColumn is not null) node.Format["bandedCols"] = tblPr.BandColumn.Value;
+        }
+
         // Position
         var offset = gf.Transform?.Offset;
         if (offset != null)

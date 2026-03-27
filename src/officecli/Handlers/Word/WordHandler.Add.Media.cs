@@ -36,7 +36,7 @@ public partial class WordHandler
         long chartCx = properties.TryGetValue("width", out var chartWStr) ? ParseEmu(chartWStr) : 5400000;
         long chartCy = properties.TryGetValue("height", out var chStr) ? ParseEmu(chStr) : 3600000;
 
-        var docPropId = NextImageId();
+        var docPropId = NextDocPropId();
         var chartName = chartTitle ?? $"Chart {docPropId}";
 
         // Extended chart types (cx:chart) — funnel, treemap, sunburst, boxWhisker, histogram
@@ -161,6 +161,7 @@ public partial class WordHandler
 
         var altText = properties.GetValueOrDefault("alt", Path.GetFileName(imgPath));
 
+        var imgDocPropId = NextDocPropId();
         Run imgRun;
         if (properties.TryGetValue("anchor", out var anchorVal) && IsTruthy(anchorVal))
         {
@@ -174,11 +175,11 @@ public partial class WordHandler
                 ? ParseVerticalRelative(vRelStr)
                 : DW.VerticalRelativePositionValues.Margin;
             var behind = properties.TryGetValue("behindtext", out var behindStr) && IsTruthy(behindStr);
-            imgRun = CreateAnchorImageRun(relId, cxEmu, cyEmu, altText, wrapType, hPos, vPos, hRel, vRel, behind);
+            imgRun = CreateAnchorImageRun(relId, cxEmu, cyEmu, altText, wrapType, hPos, vPos, hRel, vRel, behind, imgDocPropId);
         }
         else
         {
-            imgRun = CreateImageRun(relId, cxEmu, cyEmu, altText);
+            imgRun = CreateImageRun(relId, cxEmu, cyEmu, altText, imgDocPropId);
         }
 
         string resultPath;
