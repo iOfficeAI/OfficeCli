@@ -947,6 +947,7 @@ public partial class WordHandler
     // ==================== Extended Chart Helpers ====================
 
     private const string WordChartExUri = "http://schemas.microsoft.com/office/drawing/2014/chartex";
+    private const string WordChartUri = "http://schemas.openxmlformats.org/drawingml/2006/chart";
 
     /// <summary>
     /// Count all charts (both standard ChartPart and ExtendedChartPart) in the document.
@@ -954,6 +955,59 @@ public partial class WordHandler
     private static int CountWordCharts(MainDocumentPart mainPart)
     {
         return mainPart.ChartParts.Count() + mainPart.ExtendedChartParts.Count();
+    }
+
+    /// <summary>
+    /// Represents a chart part in Word that could be either a standard ChartPart or an ExtendedChartPart.
+    /// </summary>
+    private class WordChartInfo
+    {
+        public ChartPart? StandardPart { get; set; }
+        public ExtendedChartPart? ExtendedPart { get; set; }
+        public bool IsExtended => ExtendedPart != null;
+    }
+
+    /// <summary>
+    /// Get all chart parts (standard + extended) in document order by walking Drawing/Inline elements.
+    /// </summary>
+    private List<WordChartInfo> GetAllWordCharts()
+    {
+        var result = new List<WordChartInfo>();
+        var mainPart = _doc.MainDocumentPart;
+        if (mainPart?.Document?.Body == null) return result;
+
+        foreach (var inline in mainPart.Document.Body.Descendants<DW.Inline>())
+        {
+            var graphicData = inline.Descendants<A.GraphicData>().FirstOrDefault();
+            if (graphicData == null) continue;
+
+            if (graphicData.Uri == WordChartUri)
+            {
+                // Standard chart
+                var chartRef = graphicData.Descendants<DocumentFormat.OpenXml.Drawing.Charts.ChartReference>().FirstOrDefault();
+                if (chartRef?.Id?.Value == null) continue;
+                try
+                {
+                    var chartPart = (ChartPart)mainPart.GetPartById(chartRef.Id.Value);
+                    result.Add(new WordChartInfo { StandardPart = chartPart });
+                }
+                catch { /* skip invalid references */ }
+            }
+            else if (graphicData.Uri == WordChartExUri)
+            {
+                // Extended chart (funnel, treemap, etc.)
+                var relId = GetWordExtendedChartRelId(inline);
+                if (relId == null) continue;
+                try
+                {
+                    var extPart = (ExtendedChartPart)mainPart.GetPartById(relId);
+                    result.Add(new WordChartInfo { ExtendedPart = extPart });
+                }
+                catch { /* skip invalid references */ }
+            }
+        }
+
+        return result;
     }
 
     /// <summary>

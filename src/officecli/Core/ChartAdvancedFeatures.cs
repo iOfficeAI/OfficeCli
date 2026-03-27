@@ -24,6 +24,9 @@ internal static partial class ChartHelper
         var plotArea = chart.GetFirstChild<C.PlotArea>();
         if (plotArea == null) return;
 
+        // Remove any existing reference line series before adding a new one
+        RemoveExistingReferenceLines(plotArea);
+
         var parts = spec.Split(':');
         if (!double.TryParse(parts[0].Trim(),
             System.Globalization.NumberStyles.Float,
@@ -35,7 +38,7 @@ internal static partial class ChartHelper
         var label = parts.Length > 2 ? parts[2].Trim() : $"Ref ({refValue})";
         var dash = parts.Length > 3 ? parts[3].Trim() : "dash";
 
-        // Find max data point count from existing series
+        // Find max data point count from existing series (after removing old ref lines)
         var existingSerCount = CountSeries(plotArea);
         var maxDataPoints = 0;
         foreach (var ser in plotArea.Descendants<OpenXmlCompositeElement>().Where(e => e.LocalName == "ser"))
@@ -123,6 +126,49 @@ internal static partial class ChartHelper
             else
                 lineChart.AppendChild(refSer);
         }
+    }
+
+    /// <summary>
+    /// Remove existing reference line series from a plot area.
+    /// A reference line series is identified as a LineChartSeries in a LineChart
+    /// where all data points have the same value (flat line), the series has a dashed
+    /// outline style, and the marker is set to None.
+    /// </summary>
+    internal static void RemoveExistingReferenceLines(C.PlotArea plotArea)
+    {
+        var lineChart = plotArea.GetFirstChild<C.LineChart>();
+        if (lineChart == null) return;
+
+        var toRemove = new List<C.LineChartSeries>();
+        foreach (var ser in lineChart.Elements<C.LineChartSeries>())
+        {
+            // Check for reference line markers: no marker (None) and dashed outline
+            var marker = ser.GetFirstChild<C.Marker>();
+            var markerSymbol = marker?.GetFirstChild<C.Symbol>()?.Val?.Value;
+            if (markerSymbol != C.MarkerStyleValues.None) continue;
+
+            var spPr = ser.GetFirstChild<C.ChartShapeProperties>();
+            var outline = spPr?.GetFirstChild<Drawing.Outline>();
+            var hasDash = outline?.GetFirstChild<Drawing.PresetDash>() != null;
+            if (!hasDash) continue;
+
+            // Check if all values are the same (flat line = reference line)
+            var vals = ser.GetFirstChild<C.Values>();
+            var numLit = vals?.GetFirstChild<C.NumberLiteral>();
+            if (numLit != null)
+            {
+                var points = numLit.Elements<C.NumericPoint>().Select(p => p.InnerText).Distinct().ToList();
+                if (points.Count == 1)
+                    toRemove.Add(ser);
+            }
+        }
+
+        foreach (var ser in toRemove)
+            ser.Remove();
+
+        // If the LineChart is now empty (no series left), remove it entirely
+        if (!lineChart.Elements<C.LineChartSeries>().Any())
+            lineChart.Remove();
     }
 
     // ==================== Conditional Coloring ====================

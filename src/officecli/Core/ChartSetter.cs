@@ -1441,7 +1441,13 @@ internal static partial class ChartHelper
                 case "referenceline" or "refline" or "targetline":
                 {
                     // Format: "value" or "value:color" or "value:color:label" or "value:color:label:dash"
-                    if (value.Equals("none", StringComparison.OrdinalIgnoreCase)) break;
+                    if (value.Equals("none", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                        if (plotArea2 != null)
+                            RemoveExistingReferenceLines(plotArea2);
+                        break;
+                    }
                     AddReferenceLine(chart, value);
                     break;
                 }

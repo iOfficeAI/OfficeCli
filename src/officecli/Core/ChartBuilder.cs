@@ -27,6 +27,7 @@ internal static partial class ChartHelper
         if (!string.IsNullOrEmpty(title))
             chart.AppendChild(BuildChartTitle(title));
 
+        var originalCategories = categories;
         if (categories == null && seriesData.Count > 0)
         {
             var maxLen = seriesData.Max(s => s.values.Length);
@@ -111,11 +112,26 @@ internal static partial class ChartHelper
             case "waterfall":
             {
                 // Waterfall chart via stacked bar simulation
-                var wfValues = seriesData.Count > 0 ? seriesData[0].values : Array.Empty<double>();
+                double[] wfValues;
+                string[]? wfCategories = categories;
+
+                if (seriesData.Count > 1 && seriesData.All(s => s.values.Length == 1))
+                {
+                    // User passed per-category name:value format (e.g. "Start:1000,Revenue:500,Expense:-200,Net:1300")
+                    // Flatten: use series names as categories, combine all single values into one array
+                    if (originalCategories == null)
+                        wfCategories = seriesData.Select(s => s.name).ToArray();
+                    wfValues = seriesData.Select(s => s.values[0]).ToArray();
+                }
+                else
+                {
+                    wfValues = seriesData.Count > 0 ? seriesData[0].values : Array.Empty<double>();
+                }
+
                 var incColor = properties.GetValueOrDefault("increaseColor", null);
                 var decColor = properties.GetValueOrDefault("decreaseColor", null);
                 var totColor = properties.GetValueOrDefault("totalColor", null);
-                var wfChartSpace = BuildWaterfallChart(title, categories, wfValues,
+                var wfChartSpace = BuildWaterfallChart(title, wfCategories, wfValues,
                     incColor, decColor, totColor, properties);
                 return wfChartSpace;
             }
