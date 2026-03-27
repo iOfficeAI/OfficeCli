@@ -149,6 +149,10 @@ internal static partial class ChartHelper
             node.Format["gridlines"] = "true";
             ReadGridlineDetail(majorGL, node, "gridline");
         }
+        else if (valAxisForGrid != null)
+        {
+            node.Format["gridlines"] = "false";
+        }
         var minorGL = valAxisForGrid?.GetFirstChild<C.MinorGridlines>();
         if (minorGL != null)
         {

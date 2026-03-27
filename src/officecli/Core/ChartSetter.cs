@@ -591,8 +591,7 @@ internal static partial class ChartHelper
                     if (plotArea2 == null) { unsupported.Add(key); break; }
                     foreach (var ser in plotArea2.Descendants<OpenXmlCompositeElement>().Where(e => e.LocalName == "ser"))
                     {
-                        var spPr = ser.GetFirstChild<C.ChartShapeProperties>();
-                        if (spPr == null) { spPr = new C.ChartShapeProperties(); ser.AppendChild(spPr); }
+                        var spPr = GetOrCreateSeriesShapeProperties(ser);
                         spPr.RemoveAllChildren<Drawing.SolidFill>();
                         spPr.RemoveAllChildren<Drawing.GradientFill>();
                         spPr.PrependChild(BuildFillElement(value));
@@ -608,8 +607,7 @@ internal static partial class ChartHelper
                     if (plotArea2 == null) { unsupported.Add(key); break; }
                     foreach (var ser in plotArea2.Descendants<OpenXmlCompositeElement>().Where(e => e.LocalName == "ser"))
                     {
-                        var spPr = ser.GetFirstChild<C.ChartShapeProperties>();
-                        if (spPr == null) { spPr = new C.ChartShapeProperties(); ser.AppendChild(spPr); }
+                        var spPr = GetOrCreateSeriesShapeProperties(ser);
                         var effectList = spPr.GetFirstChild<Drawing.EffectList>() ?? new Drawing.EffectList();
                         if (effectList.Parent == null)
                         {
@@ -634,8 +632,7 @@ internal static partial class ChartHelper
                     var outParts = value.Contains(':') ? value.Split(':') : value.Split('-');
                     foreach (var ser in plotArea2.Descendants<OpenXmlCompositeElement>().Where(e => e.LocalName == "ser"))
                     {
-                        var spPr = ser.GetFirstChild<C.ChartShapeProperties>();
-                        if (spPr == null) { spPr = new C.ChartShapeProperties(); ser.AppendChild(spPr); }
+                        var spPr = GetOrCreateSeriesShapeProperties(ser);
                         spPr.RemoveAllChildren<Drawing.Outline>();
                         if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
                         {

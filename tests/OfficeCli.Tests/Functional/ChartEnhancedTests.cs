@@ -140,7 +140,8 @@ public class ChartEnhancedTests : IDisposable
         _excel.Set(chartPath, new() { ["gridlines"] = "none" });
 
         var node = _excel.Get(chartPath, depth: 0);
-        node.Format.Should().NotContainKey("gridlines");
+        node.Format.Should().ContainKey("gridlines");
+        node.Format["gridlines"].Should().Be("false");
     }
 
     [Fact]
