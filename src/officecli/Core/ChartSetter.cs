@@ -1050,7 +1050,18 @@ internal static partial class ChartHelper
                     {
                         ser.RemoveAllChildren<C.Trendline>();
                         if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
-                            ser.AppendChild(BuildTrendline(value));
+                        {
+                            var tl = BuildTrendline(value);
+                            // CT_*Ser schema order: ..., dLbls, trendline, errBars, cat, val, ...
+                            // Insert trendline before <c:cat> or <c:val> if present
+                            var catEl = ser.GetFirstChild<C.CategoryAxisData>();
+                            var valEl = ser.GetFirstChild<C.Values>();
+                            var anchor = (OpenXmlElement?)catEl ?? valEl;
+                            if (anchor != null)
+                                anchor.InsertBeforeSelf(tl);
+                            else
+                                ser.AppendChild(tl);
+                        }
                     }
                     break;
                 }
@@ -1540,7 +1551,13 @@ internal static partial class ChartHelper
                             var le = new C.LegendEntry();
                             le.AppendChild(new C.Index { Val = (uint)(leIdx - 1) });
                             le.AppendChild(new C.Delete { Val = true });
-                            legendEl.PrependChild(le);
+                            // CT_Legend schema order: legendPos, legendEntry+, layout, overlay, spPr, txPr
+                            // Insert after legendPos (or at start if no legendPos), before overlay/layout
+                            var legendPos2 = legendEl.GetFirstChild<C.LegendPosition>();
+                            if (legendPos2 != null)
+                                legendPos2.InsertAfterSelf(le);
+                            else
+                                legendEl.PrependChild(le);
                         }
                         break;
                     }

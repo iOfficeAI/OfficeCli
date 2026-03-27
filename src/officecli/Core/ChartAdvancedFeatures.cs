@@ -302,10 +302,15 @@ internal static partial class ChartHelper
             new C.Overlay { Val = false }
         );
         // Delete legend entry for base series (index 0)
+        // CT_Legend schema order: legendPos, legendEntry+, layout, overlay — insert after legendPos
         var leBase = new C.LegendEntry();
         leBase.AppendChild(new C.Index { Val = 0 });
         leBase.AppendChild(new C.Delete { Val = true });
-        legend.PrependChild(leBase);
+        var legendPosEl = legend.GetFirstChild<C.LegendPosition>();
+        if (legendPosEl != null)
+            legendPosEl.InsertAfterSelf(leBase);
+        else
+            legend.PrependChild(leBase);
         chart.AppendChild(legend);
 
         chart.AppendChild(new C.PlotVisibleOnly { Val = true });

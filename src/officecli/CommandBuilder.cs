@@ -1441,7 +1441,12 @@ static class CommandBuilder
                 return string.Join("\n", lines);
             }
             default:
-                throw new InvalidOperationException($"Unknown command: {item.Command}");
+                if (string.IsNullOrEmpty(item.Command))
+                    throw new InvalidOperationException(
+                        "Batch item missing required 'command' field. " +
+                        "Valid commands: get, query, set, add, remove, move, view, raw, validate. " +
+                        "Example: {\"command\": \"set\", \"path\": \"/Sheet1/A1\", \"props\": {\"value\": \"hello\"}}");
+                throw new InvalidOperationException($"Unknown command: '{item.Command}'. Valid commands: get, query, set, add, remove, move, view, raw, validate.");
         }
     }
 

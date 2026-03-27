@@ -871,7 +871,8 @@ public partial class ExcelHandler
                 imgPart.FeedData(xlImgStream);
                 var imgRelId = picDrawingsPart.GetIdOfPart(imgPart);
 
-                var picId = (uint)(picDrawingsPart.WorksheetDrawing.Elements<XDR.TwoCellAnchor>().Count() + 1);
+                var picId = picDrawingsPart.WorksheetDrawing.Descendants<XDR.NonVisualDrawingProperties>()
+                    .Select(p => (uint?)p.Id?.Value ?? 0u).DefaultIfEmpty(0u).Max() + 1;
                 var anchor = new XDR.TwoCellAnchor(
                     new XDR.FromMarker(
                         new XDR.ColumnId(px.ToString()),
@@ -942,7 +943,8 @@ public partial class ExcelHandler
                     }
                 }
 
-                var shpId = (uint)(shpDrawingsPart.WorksheetDrawing.Elements<XDR.TwoCellAnchor>().Count() + 1);
+                var shpId = shpDrawingsPart.WorksheetDrawing.Descendants<XDR.NonVisualDrawingProperties>()
+                    .Select(p => (uint?)p.Id?.Value ?? 0u).DefaultIfEmpty(0u).Max() + 1;
                 if (string.IsNullOrEmpty(shpName)) shpName = $"Shape {shpId}";
 
                 // Build ShapeProperties
@@ -1357,10 +1359,16 @@ public partial class ExcelHandler
 
                 var chartRelId = drawingsPart.GetIdOfPart(chartPart);
                 var graphicFrame = new XDR.GraphicFrame();
+                // Compute a unique cNvPr ID: use max existing ID + 1 to avoid duplicates after deletion
+                var existingIds = drawingsPart.WorksheetDrawing.Descendants<XDR.NonVisualDrawingProperties>()
+                    .Select(p => (uint?)p.Id?.Value ?? 0u)
+                    .DefaultIfEmpty(1u)
+                    .Max();
+                var chartFrameId = existingIds + 1;
                 graphicFrame.NonVisualGraphicFrameProperties = new XDR.NonVisualGraphicFrameProperties(
                     new XDR.NonVisualDrawingProperties
                     {
-                        Id = (uint)(drawingsPart.WorksheetDrawing.ChildElements.Count + 2),
+                        Id = chartFrameId,
                         Name = chartTitle ?? "Chart"
                     },
                     new XDR.NonVisualGraphicFrameDrawingProperties()
