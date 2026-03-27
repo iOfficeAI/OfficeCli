@@ -673,10 +673,10 @@ public partial class ExcelHandler
             var drawingsPart = worksheet.DrawingsPart;
             if (drawingsPart == null)
                 throw new ArgumentException("No charts in this sheet");
-            var chartParts = drawingsPart.ChartParts.ToList();
-            if (chartIdx < 1 || chartIdx > chartParts.Count)
-                throw new ArgumentException($"Chart {chartIdx} not found");
-            var chartPart = chartParts[chartIdx - 1];
+            var excelCharts = GetExcelCharts(drawingsPart);
+            if (chartIdx < 1 || chartIdx > excelCharts.Count)
+                throw new ArgumentException($"Chart {chartIdx} not found (total: {excelCharts.Count})");
+            var chartInfo = excelCharts[chartIdx - 1];
 
             // If series sub-path, prefix all properties with series{N}. for ChartSetter
             var chartProps = properties;
@@ -688,9 +688,17 @@ public partial class ExcelHandler
                     chartProps[$"series{seriesIdx}.{key}"] = value;
             }
 
-            var unsup = ChartHelper.SetChartProperties(chartPart, chartProps);
-            chartPart.ChartSpace?.Save();
-            return unsup;
+            if (chartInfo.StandardPart != null)
+            {
+                var unsup = ChartHelper.SetChartProperties(chartInfo.StandardPart, chartProps);
+                chartInfo.StandardPart.ChartSpace?.Save();
+                return unsup;
+            }
+            else
+            {
+                // cx:chart — all chart-internal properties are unsupported
+                return chartProps.Keys.ToList();
+            }
         }
 
         // Handle /SheetName/pivottable[N]
