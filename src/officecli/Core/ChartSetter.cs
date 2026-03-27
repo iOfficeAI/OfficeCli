@@ -17,7 +17,10 @@ internal static partial class ChartHelper
         var chart = chartSpace?.GetFirstChild<C.Chart>();
         if (chart == null) { unsupported.AddRange(properties.Keys); return unsupported; }
 
-        foreach (var (key, value) in properties)
+        // Process structural properties (legend, title) before styling properties (legendFont, titleFont)
+        // to ensure the parent element exists before styling is applied.
+        var ordered = properties.OrderBy(kv => GetPropertyOrder(kv.Key));
+        foreach (var (key, value) in ordered)
         {
             switch (key.ToLowerInvariant())
             {
@@ -1987,5 +1990,24 @@ internal static partial class ChartHelper
             plotArea.AppendChild(secCatAxis);
             plotArea.AppendChild(secValAxis);
         }
+    }
+
+    /// <summary>
+    /// Returns a sort order for chart properties to ensure structural properties
+    /// (legend, title) are processed before their styling counterparts (legendFont, title.color).
+    /// </summary>
+    private static int GetPropertyOrder(string key)
+    {
+        var k = key.ToLowerInvariant();
+        // Presets first (they recursively call SetChartProperties)
+        if (k is "preset" or "style.preset" or "theme") return 0;
+        // Structural: create/position legend and title before styling them
+        if (k == "legend") return 1;
+        if (k == "title") return 1;
+        // Styling of legend/title after structural
+        if (k.StartsWith("legend")) return 2;
+        if (k.StartsWith("title")) return 2;
+        // Everything else at default priority
+        return 5;
     }
 }

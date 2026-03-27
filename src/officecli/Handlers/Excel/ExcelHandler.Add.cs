@@ -1940,7 +1940,8 @@ public partial class ExcelHandler
                 var spkCell = properties.GetValueOrDefault("cell")
                     ?? throw new ArgumentException("Sparkline requires 'cell' property (e.g. F1)");
                 var spkRange = properties.GetValueOrDefault("range")
-                    ?? throw new ArgumentException("Sparkline requires 'range' property (e.g. A1:E1)");
+                    ?? properties.GetValueOrDefault("data")
+                    ?? throw new ArgumentException("Sparkline requires 'range' (or 'data') property (e.g. A1:E1)");
 
                 // Determine sparkline type
                 var spkTypeStr = properties.GetValueOrDefault("type", "line").ToLowerInvariant();

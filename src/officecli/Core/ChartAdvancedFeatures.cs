@@ -276,9 +276,10 @@ internal static partial class ChartHelper
             if (i == n - 1 && properties.GetValueOrDefault("waterfallTotal", "true")
                 .Equals("true", StringComparison.OrdinalIgnoreCase))
             {
-                // Last bar = total (starts from 0)
+                // Last bar = total (starts from 0, shows cumulative running total)
+                // The user's value for the last point is ignored — the total is computed automatically.
                 baseVals[i] = 0;
-                incVals[i] = running + v;
+                incVals[i] = running;
                 decVals[i] = 0;
             }
             else if (v >= 0)

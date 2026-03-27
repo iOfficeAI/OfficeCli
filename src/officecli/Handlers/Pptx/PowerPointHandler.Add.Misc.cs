@@ -565,7 +565,13 @@ public partial class PowerPointHandler
                     if (remaining.Count > 0)
                     {
                         fbParent = GenericXmlQuery.NavigateByPath(fbParent, remaining)
-                            ?? throw new ArgumentException($"Parent element not found: {parentPath}");
+                            ?? throw new ArgumentException(
+                                parentPath.Contains("chart", StringComparison.OrdinalIgnoreCase) &&
+                                (parentPath.Contains("series", StringComparison.OrdinalIgnoreCase) ||
+                                 type.Equals("trendline", StringComparison.OrdinalIgnoreCase))
+                                    ? $"Cannot add child elements to chart sub-paths via Add. " +
+                                      $"To add trendlines, use: Set /slide[N]/chart[1] --prop series1.trendline=linear"
+                                    : $"Parent element not found: {parentPath}");
                     }
                 }
 
