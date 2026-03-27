@@ -277,13 +277,13 @@ internal static partial class ChartHelper
         {
             case "smooth":
                 ser.RemoveAllChildren<C.Smooth>();
-                ser.AppendChild(new C.Smooth { Val = ParseHelpers.IsTruthy(value) });
+                InsertSeriesChildInOrder(ser, new C.Smooth { Val = ParseHelpers.IsTruthy(value) });
                 break;
 
             case "trendline":
                 ser.RemoveAllChildren<C.Trendline>();
                 if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
-                    ser.AppendChild(BuildTrendline(value));
+                    InsertSeriesChildInOrder(ser, BuildTrendline(value));
                 break;
 
             case "marker":
@@ -333,7 +333,8 @@ internal static partial class ChartHelper
                 var spPr = ser.GetFirstChild<C.ChartShapeProperties>();
                 if (spPr == null) { spPr = new C.ChartShapeProperties(); ser.AppendChild(spPr); }
                 var effectList = spPr.GetFirstChild<Drawing.EffectList>() ?? new Drawing.EffectList();
-                if (effectList.Parent == null) spPr.AppendChild(effectList);
+                if (effectList.Parent == null)
+                    InsertEffectListInChartSpPr(spPr, effectList);
                 effectList.RemoveAllChildren<Drawing.OuterShadow>();
                 if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
                     effectList.AppendChild(DrawingEffectsHelper.BuildOuterShadow(value, BuildChartColorElement));
@@ -551,5 +552,104 @@ internal static partial class ChartHelper
         if (!int.TryParse(rest[..dotIdx], out entryIndex) || entryIndex < 1) return false;
         var prop = rest[(dotIdx + 1)..];
         return prop is "delete" or "hide";
+    }
+
+    // ==================== Schema-Order Insertion Helpers ====================
+
+    /// <summary>
+    /// Insert a child into a CT_ValAx or CT_CatAx element at the correct schema position.
+    /// Schema order (shared prefix): axId, scaling, delete, axPos, majorGridlines, minorGridlines,
+    /// title, numFmt, majorTickMark, minorTickMark, tickLblPos, spPr, txPr, crossAx, ...
+    /// </summary>
+    internal static void InsertAxisChildInOrder(OpenXmlCompositeElement axis, OpenXmlElement child)
+    {
+        // Elements that come AFTER majorTickMark/minorTickMark/tickLblPos in axis schema
+        string[] afterTickElements = ["spPr", "txPr", "crossAx", "crosses", "crossesAt",
+            "crossBetween", "auto", "lblAlgn", "lblOffset", "tickLblSkip", "tickMarkSkip",
+            "noMultiLvlLbl", "majorUnit", "minorUnit", "dispUnits", "extLst"];
+
+        // For majorTickMark: insert before minorTickMark, tickLblPos, or any afterTickElements
+        // For minorTickMark: insert before tickLblPos or any afterTickElements
+        // For tickLblPos: insert before spPr, txPr, crossAx, etc.
+        string[] insertBeforeNames = child.LocalName switch
+        {
+            "majorTickMark" => ["minorTickMark", "tickLblPos", ..afterTickElements],
+            "minorTickMark" => ["tickLblPos", ..afterTickElements],
+            "tickLblPos" => afterTickElements,
+            _ => afterTickElements
+        };
+
+        foreach (var sibling in axis.ChildElements)
+        {
+            if (insertBeforeNames.Contains(sibling.LocalName))
+            {
+                axis.InsertBefore(child, sibling);
+                return;
+            }
+        }
+        axis.AppendChild(child);
+    }
+
+    /// <summary>
+    /// Insert a child into a CT_LineChart at the correct schema position.
+    /// Schema: grouping, varyColors, ser+, dLbls, dropLines, hiLowLines, upDownBars, marker, smooth, axId+, extLst
+    /// </summary>
+    internal static void InsertLineChartChildInOrder(C.LineChart lc, OpenXmlElement child)
+    {
+        // smooth must come before axId elements
+        if (child.LocalName is "smooth" or "marker")
+        {
+            foreach (var sibling in lc.ChildElements)
+            {
+                if (sibling.LocalName is "axId" or "extLst" ||
+                    (child.LocalName == "marker" && sibling.LocalName == "smooth"))
+                {
+                    lc.InsertBefore(child, sibling);
+                    return;
+                }
+            }
+        }
+        lc.AppendChild(child);
+    }
+
+    /// <summary>
+    /// Insert a child into a chart series (CT_*Ser) at the correct schema position.
+    /// Common suffix order: ..., dLbls, trendline, errBars, cat/xVal, val/yVal, smooth, extLst
+    /// </summary>
+    internal static void InsertSeriesChildInOrder(OpenXmlCompositeElement ser, OpenXmlElement child)
+    {
+        string[] insertBeforeNames = child.LocalName switch
+        {
+            "trendline" => ["errBars", "cat", "val", "xVal", "yVal", "bubbleSize", "bubble3D", "smooth", "extLst"],
+            "smooth" => ["extLst"],
+            _ => ["extLst"]
+        };
+
+        foreach (var sibling in ser.ChildElements)
+        {
+            if (insertBeforeNames.Contains(sibling.LocalName))
+            {
+                ser.InsertBefore(child, sibling);
+                return;
+            }
+        }
+        ser.AppendChild(child);
+    }
+
+    /// <summary>
+    /// Insert effectLst into spPr respecting DrawingML schema: ..., ln, effectLst, effectDag, ...
+    /// </summary>
+    internal static void InsertEffectListInSpPr(Drawing.ShapeProperties spPr, Drawing.EffectList effectList)
+    {
+        var ln = spPr.GetFirstChild<Drawing.Outline>();
+        if (ln != null) ln.InsertAfterSelf(effectList);
+        else spPr.AppendChild(effectList);
+    }
+
+    internal static void InsertEffectListInChartSpPr(C.ChartShapeProperties spPr, Drawing.EffectList effectList)
+    {
+        var ln = spPr.GetFirstChild<Drawing.Outline>();
+        if (ln != null) ln.InsertAfterSelf(effectList);
+        else spPr.AppendChild(effectList);
     }
 }

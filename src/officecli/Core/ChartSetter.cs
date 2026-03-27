@@ -606,7 +606,13 @@ internal static partial class ChartHelper
                         var spPr = ser.GetFirstChild<C.ChartShapeProperties>();
                         if (spPr == null) { spPr = new C.ChartShapeProperties(); ser.AppendChild(spPr); }
                         var effectList = spPr.GetFirstChild<Drawing.EffectList>() ?? new Drawing.EffectList();
-                        if (effectList.Parent == null) spPr.AppendChild(effectList);
+                        if (effectList.Parent == null)
+                        {
+                            // DrawingML spPr schema: ..., ln, effectLst, ... — insert after Outline if present
+                            var ln = spPr.GetFirstChild<Drawing.Outline>();
+                            if (ln != null) ln.InsertAfterSelf(effectList);
+                            else spPr.AppendChild(effectList);
+                        }
                         effectList.RemoveAllChildren<Drawing.OuterShadow>();
                         if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
                             effectList.AppendChild(DrawingEffectsHelper.BuildOuterShadow(value, BuildChartColorElement));
@@ -780,9 +786,9 @@ internal static partial class ChartHelper
                     if (plotArea2 == null) { unsupported.Add(key); break; }
                     var tickVal = ParseTickMark(value);
                     foreach (var ax in plotArea2.Elements<C.ValueAxis>())
-                    { ax.RemoveAllChildren<C.MajorTickMark>(); ax.AppendChild(new C.MajorTickMark { Val = tickVal }); }
+                    { ax.RemoveAllChildren<C.MajorTickMark>(); InsertAxisChildInOrder(ax, new C.MajorTickMark { Val = tickVal }); }
                     foreach (var ax in plotArea2.Elements<C.CategoryAxis>())
-                    { ax.RemoveAllChildren<C.MajorTickMark>(); ax.AppendChild(new C.MajorTickMark { Val = tickVal }); }
+                    { ax.RemoveAllChildren<C.MajorTickMark>(); InsertAxisChildInOrder(ax, new C.MajorTickMark { Val = tickVal }); }
                     break;
                 }
 
@@ -792,9 +798,9 @@ internal static partial class ChartHelper
                     if (plotArea2 == null) { unsupported.Add(key); break; }
                     var tickVal = ParseTickMark(value);
                     foreach (var ax in plotArea2.Elements<C.ValueAxis>())
-                    { ax.RemoveAllChildren<C.MinorTickMark>(); ax.AppendChild(new C.MinorTickMark { Val = tickVal }); }
+                    { ax.RemoveAllChildren<C.MinorTickMark>(); InsertAxisChildInOrder(ax, new C.MinorTickMark { Val = tickVal }); }
                     foreach (var ax in plotArea2.Elements<C.CategoryAxis>())
-                    { ax.RemoveAllChildren<C.MinorTickMark>(); ax.AppendChild(new C.MinorTickMark { Val = tickVal }); }
+                    { ax.RemoveAllChildren<C.MinorTickMark>(); InsertAxisChildInOrder(ax, new C.MinorTickMark { Val = tickVal }); }
                     break;
                 }
 
@@ -810,9 +816,9 @@ internal static partial class ChartHelper
                         _ => C.TickLabelPositionValues.NextTo
                     };
                     foreach (var ax in plotArea2.Elements<C.ValueAxis>())
-                    { ax.RemoveAllChildren<C.TickLabelPosition>(); ax.AppendChild(new C.TickLabelPosition { Val = tlPos }); }
+                    { ax.RemoveAllChildren<C.TickLabelPosition>(); InsertAxisChildInOrder(ax, new C.TickLabelPosition { Val = tlPos }); }
                     foreach (var ax in plotArea2.Elements<C.CategoryAxis>())
-                    { ax.RemoveAllChildren<C.TickLabelPosition>(); ax.AppendChild(new C.TickLabelPosition { Val = tlPos }); }
+                    { ax.RemoveAllChildren<C.TickLabelPosition>(); InsertAxisChildInOrder(ax, new C.TickLabelPosition { Val = tlPos }); }
                     break;
                 }
 
@@ -962,16 +968,16 @@ internal static partial class ChartHelper
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
                     if (plotArea2 == null) { unsupported.Add(key); break; }
                     var smoothVal = ParseHelpers.IsTruthy(value);
-                    // Chart-level smooth on LineChart
+                    // Chart-level smooth on LineChart — insert before axId per CT_LineChart schema
                     foreach (var lc in plotArea2.Elements<C.LineChart>())
-                    { lc.RemoveAllChildren<C.Smooth>(); lc.AppendChild(new C.Smooth { Val = smoothVal }); }
+                    { lc.RemoveAllChildren<C.Smooth>(); InsertLineChartChildInOrder(lc, new C.Smooth { Val = smoothVal }); }
                     // Also set per-series smooth for line and scatter series
                     foreach (var ser in plotArea2.Descendants<OpenXmlCompositeElement>().Where(e => e.LocalName == "ser"))
                     {
                         if (ser.Parent is C.LineChart or C.ScatterChart)
                         {
                             ser.RemoveAllChildren<C.Smooth>();
-                            ser.AppendChild(new C.Smooth { Val = smoothVal });
+                            InsertSeriesChildInOrder(ser, new C.Smooth { Val = smoothVal });
                         }
                     }
                     break;
@@ -983,7 +989,7 @@ internal static partial class ChartHelper
                     if (plotArea2 == null) { unsupported.Add(key); break; }
                     var showVal = ParseHelpers.IsTruthy(value);
                     foreach (var lc in plotArea2.Elements<C.LineChart>())
-                    { lc.RemoveAllChildren<C.ShowMarker>(); lc.AppendChild(new C.ShowMarker { Val = showVal }); }
+                    { lc.RemoveAllChildren<C.ShowMarker>(); InsertLineChartChildInOrder(lc, new C.ShowMarker { Val = showVal }); }
                     break;
                 }
 
@@ -1068,15 +1074,7 @@ internal static partial class ChartHelper
                         if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
                         {
                             var tl = BuildTrendline(value);
-                            // CT_*Ser schema order: ..., dLbls, trendline, errBars, cat, val, ...
-                            // Insert trendline before <c:cat> or <c:val> if present
-                            var catEl = ser.GetFirstChild<C.CategoryAxisData>();
-                            var valEl = ser.GetFirstChild<C.Values>();
-                            var anchor = (OpenXmlElement?)catEl ?? valEl;
-                            if (anchor != null)
-                                anchor.InsertBeforeSelf(tl);
-                            else
-                                ser.AppendChild(tl);
+                            InsertSeriesChildInOrder(ser, tl);
                         }
                     }
                     break;
