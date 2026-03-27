@@ -7,6 +7,7 @@ using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using OfficeCli.Core;
 using Vml = DocumentFormat.OpenXml.Vml;
+using A = DocumentFormat.OpenXml.Drawing;
 using DW = DocumentFormat.OpenXml.Drawing.Wordprocessing;
 using M = DocumentFormat.OpenXml.Math;
 
@@ -941,5 +942,35 @@ public partial class WordHandler
                 }
             }
         }
+    }
+
+    // ==================== Extended Chart Helpers ====================
+
+    private const string WordChartExUri = "http://schemas.microsoft.com/office/drawing/2014/chartex";
+
+    /// <summary>
+    /// Count all charts (both standard ChartPart and ExtendedChartPart) in the document.
+    /// </summary>
+    private static int CountWordCharts(MainDocumentPart mainPart)
+    {
+        return mainPart.ChartParts.Count() + mainPart.ExtendedChartParts.Count();
+    }
+
+    /// <summary>
+    /// Get the relationship ID from an extended chart inline Drawing element.
+    /// </summary>
+    private static string? GetWordExtendedChartRelId(DW.Inline inline)
+    {
+        var gd = inline.Descendants<A.GraphicData>().FirstOrDefault(g => g.Uri == WordChartExUri);
+        if (gd == null) return null;
+        var typed = gd.Descendants<DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing.RelId>().FirstOrDefault();
+        if (typed?.Id?.Value != null) return typed.Id.Value;
+        foreach (var child in gd.ChildElements)
+        {
+            var rId = child.GetAttributes().FirstOrDefault(a =>
+                a.LocalName == "id" && a.NamespaceUri == "http://schemas.openxmlformats.org/officeDocument/2006/relationships");
+            if (rId.Value != null) return rId.Value;
+        }
+        return null;
     }
 }

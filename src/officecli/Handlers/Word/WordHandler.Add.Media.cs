@@ -32,6 +32,59 @@ public partial class WordHandler
             throw new ArgumentException("Chart requires data. Use: data=\"Series1:1,2,3;Series2:4,5,6\" " +
                 "or series1=\"Revenue:100,200,300\"");
 
+        // Dimensions (default: 15cm x 10cm)
+        long chartCx = properties.TryGetValue("width", out var chartWStr) ? ParseEmu(chartWStr) : 5400000;
+        long chartCy = properties.TryGetValue("height", out var chStr) ? ParseEmu(chStr) : 3600000;
+
+        var docPropId = NextImageId();
+        var chartName = chartTitle ?? $"Chart {docPropId}";
+
+        // Extended chart types (cx:chart) — funnel, treemap, sunburst, boxWhisker, histogram
+        if (Core.ChartExBuilder.IsExtendedChartType(chartType))
+        {
+            var cxChartSpace = Core.ChartExBuilder.BuildExtendedChartSpace(
+                chartType, chartTitle, categories, seriesData, properties);
+            var extChartPart = chartMainPart.AddNewPart<ExtendedChartPart>();
+            extChartPart.ChartSpace = cxChartSpace;
+            extChartPart.ChartSpace.Save();
+
+            var cxRelId = chartMainPart.GetIdOfPart(extChartPart);
+            var cxChartRef = new DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing.RelId { Id = cxRelId };
+
+            var cxInline = new DW.Inline(
+                new DW.Extent { Cx = chartCx, Cy = chartCy },
+                new DW.EffectExtent { LeftEdge = 0, TopEdge = 0, RightEdge = 0, BottomEdge = 0 },
+                new DW.DocProperties { Id = docPropId, Name = chartName },
+                new DW.NonVisualGraphicFrameDrawingProperties(),
+                new A.Graphic(
+                    new A.GraphicData(cxChartRef)
+                    { Uri = "http://schemas.microsoft.com/office/drawing/2014/chartex" }
+                )
+            )
+            {
+                DistanceFromTop = 0U,
+                DistanceFromBottom = 0U,
+                DistanceFromLeft = 0U,
+                DistanceFromRight = 0U
+            };
+
+            var cxRun = new Run(new Drawing(cxInline));
+            Paragraph cxPara;
+            if (parent is Paragraph existingCxPara)
+            {
+                existingCxPara.AppendChild(cxRun);
+                cxPara = existingCxPara;
+            }
+            else
+            {
+                cxPara = new Paragraph(cxRun);
+                AppendToParent(parent, cxPara);
+            }
+
+            var totalCharts = CountWordCharts(chartMainPart);
+            return $"/chart[{totalCharts}]";
+        }
+
         // Create ChartPart and build chart
         var chartPart = chartMainPart.AddNewPart<ChartPart>();
         chartPart.ChartSpace = Core.ChartHelper.BuildChartSpace(chartType, chartTitle, categories, seriesData, properties);
@@ -47,13 +100,6 @@ public partial class WordHandler
             chartPart.ChartSpace.Save();
 
         var chartRelId = chartMainPart.GetIdOfPart(chartPart);
-
-        // Dimensions (default: 15cm x 10cm)
-        long chartCx = properties.TryGetValue("width", out var chartWStr) ? ParseEmu(chartWStr) : 5400000;
-        long chartCy = properties.TryGetValue("height", out var chStr) ? ParseEmu(chStr) : 3600000;
-
-        var docPropId = NextImageId();
-        var chartName = chartTitle ?? $"Chart {docPropId}";
 
         // Build Drawing/Inline with ChartReference
         var inline = new DW.Inline(
@@ -88,8 +134,8 @@ public partial class WordHandler
             AppendToParent(parent, chartPara);
         }
 
-        var chartIdx = chartMainPart.ChartParts.ToList().IndexOf(chartPart) + 1;
-        return $"/chart[{chartIdx}]";
+        var totalChartIdx = CountWordCharts(chartMainPart);
+        return $"/chart[{totalChartIdx}]";
     }
 
     private string AddPicture(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)

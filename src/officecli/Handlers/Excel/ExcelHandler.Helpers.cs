@@ -1310,4 +1310,45 @@ public partial class ExcelHandler
         FontScheme => 14,
         _ => 99
     };
+
+    // ==================== Extended Chart Helpers ====================
+
+    private const string ExcelChartExUri = "http://schemas.microsoft.com/office/drawing/2014/chartex";
+
+    /// <summary>
+    /// Check if an XDR.GraphicFrame contains an extended chart (cx:chart).
+    /// </summary>
+    private static bool IsExtendedChartFrame(XDR.GraphicFrame gf)
+    {
+        return gf.Descendants<Drawing.GraphicData>()
+            .Any(gd => gd.Uri == ExcelChartExUri);
+    }
+
+    /// <summary>
+    /// Get the relationship ID from an extended chart GraphicFrame.
+    /// </summary>
+    private static string? GetExtendedChartRelId(XDR.GraphicFrame gf)
+    {
+        var gd = gf.Descendants<Drawing.GraphicData>().FirstOrDefault(g => g.Uri == ExcelChartExUri);
+        if (gd == null) return null;
+        var typed = gd.Descendants<DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing.RelId>().FirstOrDefault();
+        if (typed?.Id?.Value != null) return typed.Id.Value;
+        foreach (var child in gd.ChildElements)
+        {
+            var rId = child.GetAttributes().FirstOrDefault(a =>
+                a.LocalName == "id" && a.NamespaceUri == "http://schemas.openxmlformats.org/officeDocument/2006/relationships");
+            if (rId.Value != null) return rId.Value;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Count all charts (both standard ChartPart and ExtendedChartPart) in a DrawingsPart.
+    /// </summary>
+    private static int CountExcelCharts(DrawingsPart drawingsPart)
+    {
+        if (drawingsPart.WorksheetDrawing == null) return 0;
+        return drawingsPart.WorksheetDrawing.Descendants<XDR.GraphicFrame>()
+            .Count(gf => gf.Descendants<C.ChartReference>().Any() || IsExtendedChartFrame(gf));
+    }
 }

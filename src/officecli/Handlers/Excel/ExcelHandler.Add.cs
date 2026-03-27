@@ -1326,6 +1326,71 @@ public partial class ExcelHandler
                     }
                 }
 
+                // Position via TwoCellAnchor (shared by both standard and extended charts)
+                var fromCol = properties.TryGetValue("x", out var xStr) ? ParseHelpers.SafeParseInt(xStr, "x") : 0;
+                var fromRow = properties.TryGetValue("y", out var yStr) ? ParseHelpers.SafeParseInt(yStr, "y") : 0;
+                var toCol = properties.TryGetValue("width", out var wStr) ? fromCol + ParseHelpers.SafeParseInt(wStr, "width") : fromCol + 8;
+                var toRow = properties.TryGetValue("height", out var hStr) ? fromRow + ParseHelpers.SafeParseInt(hStr, "height") : fromRow + 15;
+
+                // Extended chart types (cx:chart) — funnel, treemap, sunburst, boxWhisker, histogram
+                if (ChartExBuilder.IsExtendedChartType(chartType))
+                {
+                    var cxChartSpace = ChartExBuilder.BuildExtendedChartSpace(
+                        chartType, chartTitle, categories, seriesData, properties);
+                    var extChartPart = drawingsPart.AddNewPart<ExtendedChartPart>();
+                    extChartPart.ChartSpace = cxChartSpace;
+                    extChartPart.ChartSpace.Save();
+
+                    var cxRelId = drawingsPart.GetIdOfPart(extChartPart);
+                    var cxAnchor = new XDR.TwoCellAnchor();
+                    cxAnchor.Append(new XDR.FromMarker(
+                        new XDR.ColumnId(fromCol.ToString()),
+                        new XDR.ColumnOffset("0"),
+                        new XDR.RowId(fromRow.ToString()),
+                        new XDR.RowOffset("0")));
+                    cxAnchor.Append(new XDR.ToMarker(
+                        new XDR.ColumnId(toCol.ToString()),
+                        new XDR.ColumnOffset("0"),
+                        new XDR.RowId(toRow.ToString()),
+                        new XDR.RowOffset("0")));
+
+                    var cxGraphicFrame = new XDR.GraphicFrame();
+                    var cxExistingIds = drawingsPart.WorksheetDrawing.Descendants<XDR.NonVisualDrawingProperties>()
+                        .Select(p => (uint?)p.Id?.Value ?? 0u)
+                        .DefaultIfEmpty(1u)
+                        .Max();
+                    var cxFrameId = cxExistingIds + 1;
+                    cxGraphicFrame.NonVisualGraphicFrameProperties = new XDR.NonVisualGraphicFrameProperties(
+                        new XDR.NonVisualDrawingProperties
+                        {
+                            Id = cxFrameId,
+                            Name = chartTitle ?? "Chart"
+                        },
+                        new XDR.NonVisualGraphicFrameDrawingProperties()
+                    );
+                    cxGraphicFrame.Transform = new XDR.Transform(
+                        new Drawing.Offset { X = 0, Y = 0 },
+                        new Drawing.Extents { Cx = 0, Cy = 0 }
+                    );
+
+                    var cxChartRef = new DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing.RelId { Id = cxRelId };
+                    cxGraphicFrame.Append(new Drawing.Graphic(
+                        new Drawing.GraphicData(cxChartRef)
+                        {
+                            Uri = "http://schemas.microsoft.com/office/drawing/2014/chartex"
+                        }
+                    ));
+
+                    cxAnchor.Append(cxGraphicFrame);
+                    cxAnchor.Append(new XDR.ClientData());
+                    drawingsPart.WorksheetDrawing.Append(cxAnchor);
+                    drawingsPart.WorksheetDrawing.Save();
+
+                    // Count all charts (both regular and extended)
+                    var totalCharts = CountExcelCharts(drawingsPart);
+                    return $"/{chartSheetName}/chart[{totalCharts}]";
+                }
+
                 // Build chart content BEFORE adding part (invalid type throws, must not leave empty part)
                 var chartSpace = ChartHelper.BuildChartSpace(chartType, chartTitle, categories, seriesData, properties);
                 var chartPart = drawingsPart.AddNewPart<ChartPart>();
@@ -1338,12 +1403,6 @@ public partial class ExcelHandler
                     .ToDictionary(kv => kv.Key, kv => kv.Value);
                 if (deferredProps.Count > 0)
                     ChartHelper.SetChartProperties(chartPart, deferredProps);
-
-                // Position via TwoCellAnchor
-                var fromCol = properties.TryGetValue("x", out var xStr) ? ParseHelpers.SafeParseInt(xStr, "x") : 0;
-                var fromRow = properties.TryGetValue("y", out var yStr) ? ParseHelpers.SafeParseInt(yStr, "y") : 0;
-                var toCol = properties.TryGetValue("width", out var wStr) ? fromCol + ParseHelpers.SafeParseInt(wStr, "width") : fromCol + 8;
-                var toRow = properties.TryGetValue("height", out var hStr) ? fromRow + ParseHelpers.SafeParseInt(hStr, "height") : fromRow + 15;
 
                 var anchor = new XDR.TwoCellAnchor();
                 anchor.Append(new XDR.FromMarker(
@@ -1391,11 +1450,9 @@ public partial class ExcelHandler
                 drawingsPart.WorksheetDrawing.Append(anchor);
                 drawingsPart.WorksheetDrawing.Save();
 
-                // Legend
-                var legendVal = properties.GetValueOrDefault("legend", "true");
-                // Legend is already handled inside ExcelChartBuildChartSpace
+                // Legend is already handled inside BuildChartSpace
 
-                var chartIdx = drawingsPart.ChartParts.ToList().IndexOf(chartPart) + 1;
+                var chartIdx = CountExcelCharts(drawingsPart);
                 return $"/{chartSheetName}/chart[{chartIdx}]";
             }
 
