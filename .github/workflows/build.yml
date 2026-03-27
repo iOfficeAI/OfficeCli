@@ -83,7 +83,7 @@ jobs:
           chmod +x publish/${{ matrix.name }}
           publish/${{ matrix.name }} create test_smoke.docx
           publish/${{ matrix.name }} add test_smoke.docx /body --type paragraph --prop text="Hello from CI"
-          publish/${{ matrix.name }} get test_smoke.docx /body/paragraph[1]
+          publish/${{ matrix.name }} get test_smoke.docx /body/p[1]
           rm -f test_smoke.docx
 
       - name: Upload artifact
