@@ -198,6 +198,12 @@ irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex
 
 Verify installation: `officecli --version`
 
+**Or self-install from a downloaded binary:**
+
+```bash
+officecli install
+```
+
 Updates are checked automatically in the background. Disable with `officecli config autoUpdate false` or skip per-invocation with `OFFICECLI_SKIP_UPDATE=1`. Configuration lives under `~/.officecli/config.json`.
 
 ## Key Features
@@ -431,6 +437,7 @@ OFFICECLI_SKIP_UPDATE=1 officecli ...          # Skip check for one invocation (
 | `add-part <file> <parent>` | Add a new document part (header, chart, etc.) |
 | `open <file>` | Start resident mode (keep document in memory) |
 | `close <file>` | Save and close resident mode |
+| `install [target]` | Install binary + skills + MCP (`all`, `claude`, `cursor`, etc.) |
 | `config <key> [value]` | Get or set configuration |
 | `<format> <command> [element]` | Built-in help (e.g. `officecli pptx set shape`) |
 
