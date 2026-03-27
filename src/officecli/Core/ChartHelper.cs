@@ -39,6 +39,7 @@ internal static partial class ChartHelper
             "radar" or "spider" => "radar",
             "stock" or "ohlc" => "stock",
             "combo" => "combo",
+            "waterfall" or "wf" => "waterfall",
             _ => throw new ArgumentException(
                 $"Unknown chart type: '{chartType}'. Supported types: " +
                 "column, bar, line, pie, doughnut, area, scatter, bubble, radar, stock, combo. " +

@@ -108,6 +108,17 @@ internal static partial class ChartHelper
                 chartElement = BuildStockChart(categories, seriesData, catAxisId, valAxisId);
                 needsAxes = true;
                 break;
+            case "waterfall":
+            {
+                // Waterfall chart via stacked bar simulation
+                var wfValues = seriesData.Count > 0 ? seriesData[0].values : Array.Empty<double>();
+                var incColor = properties.GetValueOrDefault("increaseColor", null);
+                var decColor = properties.GetValueOrDefault("decreaseColor", null);
+                var totColor = properties.GetValueOrDefault("totalColor", null);
+                var wfChartSpace = BuildWaterfallChart(title, categories, wfValues,
+                    incColor, decColor, totColor, properties);
+                return wfChartSpace;
+            }
             case "combo":
             {
                 int splitAt = 1;
@@ -155,7 +166,7 @@ internal static partial class ChartHelper
             }
             default:
                 throw new ArgumentException(
-                    $"Unknown chart type: '{kind}'. Supported: column, bar, line, pie, doughnut, area, scatter, bubble, radar, stock, combo. " +
+                    $"Unknown chart type: '{kind}'. Supported: column, bar, line, pie, doughnut, area, scatter, bubble, radar, stock, combo, waterfall. " +
                     "Add 'stacked' or 'percentstacked' suffix for variants (e.g. columnstacked).");
         }
 
@@ -287,7 +298,10 @@ internal static partial class ChartHelper
         "style", "styleid",
         "transparency", "opacity", "alpha",
         "gradient", "gradients",
-        "secondaryaxis", "secondary"
+        "secondaryaxis", "secondary",
+        "referenceline", "refline", "targetline",
+        "colorrule", "conditionalcolor",
+        "combotypes", "combo.types"
     };
 
     // ==================== Chart Type Builders ====================

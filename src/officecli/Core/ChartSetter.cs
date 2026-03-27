@@ -1369,6 +1369,32 @@ internal static partial class ChartHelper
                     break;
                 }
 
+                // ==================== Advanced Features ====================
+
+                case "referenceline" or "refline" or "targetline":
+                {
+                    // Format: "value" or "value:color" or "value:color:label" or "value:color:label:dash"
+                    if (value.Equals("none", StringComparison.OrdinalIgnoreCase)) break;
+                    AddReferenceLine(chart, value);
+                    break;
+                }
+
+                case "colorrule" or "colorRule" or "conditionalcolor":
+                {
+                    // Format: "threshold:belowColor:aboveColor" e.g. "0:FF0000:00AA00"
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    ApplyColorRule(plotArea2, value);
+                    break;
+                }
+
+                case "combotypes" or "combo.types":
+                {
+                    // Format: "column,column,line,area" — per-series chart type
+                    RebuildComboChart(chart, value);
+                    break;
+                }
+
                 // ==================== Legend Enhancements ====================
 
                 case "legend.overlay" or "legendoverlay":
