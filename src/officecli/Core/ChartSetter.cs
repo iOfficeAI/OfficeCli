@@ -884,7 +884,8 @@ internal static partial class ChartHelper
                             "hundredmillions" or "100000000" => C.BuiltInUnitValues.HundredMillions,
                             "billions" => C.BuiltInUnitValues.Billions,
                             "trillions" => C.BuiltInUnitValues.Trillions,
-                            _ => C.BuiltInUnitValues.Thousands
+                            _ => throw new ArgumentException(
+                                $"Invalid dispUnits '{value}'. Valid values: hundreds, thousands, tenThousands, hundredThousands, millions, tenMillions, hundredMillions, billions, trillions.")
                         };
                         var du = new C.DisplayUnits();
                         du.AppendChild(new C.BuiltInUnit { Val = builtInVal });
@@ -959,7 +960,8 @@ internal static partial class ChartHelper
                         "marker" or "markeronly" => C.ScatterStyleValues.Marker,
                         "smooth" or "smoothline" => C.ScatterStyleValues.Smooth,
                         "smoothmarker" => C.ScatterStyleValues.SmoothMarker,
-                        _ => C.ScatterStyleValues.LineMarker
+                        _ => throw new ArgumentException(
+                            $"Invalid scatterStyle '{value}'. Valid values: line, lineMarker, marker, smooth, smoothMarker.")
                     };
                     sc.PrependChild(new C.ScatterStyle { Val = ssVal });
                     break;
@@ -1231,7 +1233,9 @@ internal static partial class ChartHelper
                     {
                         "filled" or "fill" => C.RadarStyleValues.Filled,
                         "marker" => C.RadarStyleValues.Marker,
-                        _ => C.RadarStyleValues.Standard
+                        "standard" or "line" => C.RadarStyleValues.Standard,
+                        _ => throw new ArgumentException(
+                            $"Invalid radarStyle '{value}'. Valid values: standard, filled, marker.")
                     };
                     radar.PrependChild(new C.RadarStyle { Val = rsVal });
                     break;
@@ -1290,12 +1294,14 @@ internal static partial class ChartHelper
                     bar3d.RemoveAllChildren<C.Shape>();
                     var shapeVal = value.ToLowerInvariant() switch
                     {
+                        "box" or "cuboid" => C.ShapeValues.Box,
                         "cone" => C.ShapeValues.Cone,
                         "conetomax" => C.ShapeValues.ConeToMax,
                         "cylinder" => C.ShapeValues.Cylinder,
                         "pyramid" => C.ShapeValues.Pyramid,
                         "pyramidtomax" => C.ShapeValues.PyramidToMaximum,
-                        _ => C.ShapeValues.Box
+                        _ => throw new ArgumentException(
+                            $"Invalid bar shape '{value}'. Valid values: box, cone, coneToMax, cylinder, pyramid, pyramidToMax.")
                     };
                     bar3d.AppendChild(new C.Shape { Val = shapeVal });
                     break;
@@ -1507,7 +1513,20 @@ internal static partial class ChartHelper
                     }
                     else
                     {
-                        unsupported.Add(key);
+                        unsupported.Add(unsupported.Count == 0
+                            ? $"{key} (valid chart props: title, legend, dataLabels, labelPos, labelFont, " +
+                              "axisFont, axisTitle, catTitle, axisMin, axisMax, majorUnit, minorUnit, axisNumFmt, " +
+                              "axisVisible, majorTickMark, minorTickMark, tickLabelPos, crosses, crossBetween, " +
+                              "axisOrientation, logBase, dispUnits, gridlines, minorGridlines, " +
+                              "plotFill, chartFill, plotArea.border, chartArea.border, " +
+                              "colors, gradient, lineWidth, lineDash, marker, markerSize, transparency, " +
+                              "smooth, showMarker, scatterStyle, varyColors, dispBlanksAs, dataTable, " +
+                              "trendline, errBars, explosion, invertIfNeg, gapWidth, overlap, secondaryAxis, " +
+                              "firstSliceAngle, holeSize, radarStyle, bubbleScale, shape, " +
+                              "roundedCorners, legend.overlay, view3d, categories, data, " +
+                              "plotArea.x/y/w/h, title.x/y/w/h, legend.x/y/w/h, " +
+                              "series{N}=Name:1,2,3, series{N}.smooth/trendline/color/point{M}.color)"
+                            : key);
                     }
                     break;
             }

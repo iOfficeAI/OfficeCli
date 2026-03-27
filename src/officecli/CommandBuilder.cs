@@ -1560,6 +1560,26 @@ static class CommandBuilder
         "font.color", "font.size", "font.name", "font.bold", "font.italic",
         "hyperlink", "link", "tooltip", "alt", "description",
         "font.strike", "font.underline", "tabColor", "shadow", "glow",
+        // Chart properties
+        "chartType", "title", "legend", "dataLabels", "labelPos", "labelFont",
+        "axisFont", "axisTitle", "catTitle", "axisMin", "axisMax", "majorUnit", "minorUnit",
+        "axisNumFmt", "axisVisible", "majorTickMark", "minorTickMark", "tickLabelPos",
+        "axisPosition", "crosses", "crossesAt", "crossBetween", "axisOrientation", "logBase",
+        "dispUnits", "labelOffset", "tickLabelSkip",
+        "gridlines", "minorGridlines", "plotFill", "chartFill",
+        "colors", "gradient", "gradients", "lineWidth", "lineDash",
+        "marker", "markerSize", "transparency", "smooth", "showMarker",
+        "scatterStyle", "radarStyle", "varyColors", "dispBlanksAs",
+        "roundedCorners", "plotVisOnly", "trendline", "invertIfNeg", "explosion",
+        "errBars", "gapWidth", "overlap", "secondaryAxis", "dataTable",
+        "firstSliceAngle", "holeSize", "bubbleScale", "shape", "gapDepth",
+        "dropLines", "hiLowLines", "upDownBars", "serLines",
+        "plotArea.border", "chartArea.border", "legend.overlay",
+        "plotArea.x", "plotArea.y", "plotArea.w", "plotArea.h",
+        "title.x", "title.y", "title.w", "title.h",
+        "legend.x", "legend.y", "legend.w", "legend.h",
+        "datalabels.separator", "datalabels.numfmt", "leaderLines",
+        "view3d", "categories", "data",
     };
 
     internal static string? SuggestProperty(string input)

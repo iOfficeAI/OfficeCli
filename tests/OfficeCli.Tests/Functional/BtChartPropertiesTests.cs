@@ -271,11 +271,12 @@ public class BtChartPropertiesTests : IDisposable
     // ==================== Scenario 6: Invalid enum values do not crash ====================
 
     [Fact]
-    public void Excel_InvalidMajorTickMark_DoesNotCrash()
+    public void Excel_InvalidMajorTickMark_ThrowsWithValidValues()
     {
         var chartPath = AddExcelChart();
         var act = () => _excel.Set(chartPath, new() { ["majorTickMark"] = "invalid_value" });
-        act.Should().NotThrow("invalid majorTickMark enum should not cause an exception");
+        act.Should().Throw<ArgumentException>()
+            .WithMessage("*Valid values*none*in*out*cross*");
     }
 
     [Fact]
@@ -283,23 +284,25 @@ public class BtChartPropertiesTests : IDisposable
     {
         var chartPath = AddExcelChart();
         var act = () => _excel.Set(chartPath, new() { ["dataLabels"] = "value", ["labelPos"] = "not_a_real_position" });
-        act.Should().NotThrow("invalid labelPos should not crash");
+        act.Should().NotThrow("invalid labelPos has a sensible default (outsideEnd)");
     }
 
     [Fact]
-    public void Excel_InvalidDispUnits_DoesNotCrash()
+    public void Excel_InvalidDispUnits_ThrowsWithValidValues()
     {
         var chartPath = AddExcelChart();
         var act = () => _excel.Set(chartPath, new() { ["dispUnits"] = "not_a_unit" });
-        act.Should().NotThrow("invalid dispUnits falls back gracefully");
+        act.Should().Throw<ArgumentException>()
+            .WithMessage("*Valid values*hundreds*thousands*millions*billions*");
     }
 
     [Fact]
-    public void Excel_InvalidMinorTickMark_DoesNotCrash()
+    public void Excel_InvalidMinorTickMark_ThrowsWithValidValues()
     {
         var chartPath = AddExcelChart();
         var act = () => _excel.Set(chartPath, new() { ["minorTickMark"] = "GARBAGE" });
-        act.Should().NotThrow("invalid minorTickMark should not crash");
+        act.Should().Throw<ArgumentException>()
+            .WithMessage("*Valid values*none*in*out*cross*");
     }
 
     // ==================== Scenario 7: dispUnits + displayUnitsLabel position ====================

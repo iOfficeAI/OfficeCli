@@ -23,7 +23,8 @@ internal static partial class ChartHelper
             "in" or "inside" => C.TickMarkValues.Inside,
             "out" or "outside" => C.TickMarkValues.Outside,
             "cross" or "both" => C.TickMarkValues.Cross,
-            _ => C.TickMarkValues.None
+            _ => throw new ArgumentException(
+                $"Invalid tick mark value '{value}'. Valid values: none, in, out, cross.")
         };
     }
 
