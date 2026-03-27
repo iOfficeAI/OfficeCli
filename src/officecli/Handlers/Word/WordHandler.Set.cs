@@ -124,10 +124,13 @@ public partial class WordHandler
         if (chartMatch.Success)
         {
             var chartIdx = int.Parse(chartMatch.Groups[1].Value);
-            var chartParts = _doc.MainDocumentPart?.ChartParts.ToList()
-                ?? throw new ArgumentException("No charts in this document");
-            if (chartIdx < 1 || chartIdx > chartParts.Count)
-                throw new ArgumentException($"Chart {chartIdx} not found (total: {chartParts.Count})");
+            var allCharts = GetAllWordCharts();
+            if (allCharts.Count == 0)
+                throw new ArgumentException("No charts in this document");
+            if (chartIdx < 1 || chartIdx > allCharts.Count)
+                throw new ArgumentException($"Chart {chartIdx} not found (total: {allCharts.Count})");
+
+            var chartInfo = allCharts[chartIdx - 1];
 
             // If series sub-path, prefix all properties with series{N}. for ChartSetter
             var chartProps = properties;
@@ -139,7 +142,15 @@ public partial class WordHandler
                     chartProps[$"series{seriesIdx}.{key}"] = value;
             }
 
-            unsupported = Core.ChartHelper.SetChartProperties(chartParts[chartIdx - 1], chartProps);
+            if (chartInfo.IsExtended)
+            {
+                // Extended charts (cx:chart) — chart-internal properties are not supported
+                unsupported = chartProps.Keys.ToList();
+            }
+            else
+            {
+                unsupported = Core.ChartHelper.SetChartProperties(chartInfo.StandardPart!, chartProps);
+            }
             _doc.MainDocumentPart?.Document?.Save();
             return unsupported;
         }

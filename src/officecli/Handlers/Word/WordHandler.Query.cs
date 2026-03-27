@@ -146,15 +146,28 @@ public partial class WordHandler
         if (chartGetMatch.Success)
         {
             var chartIdx = int.Parse(chartGetMatch.Groups[1].Value);
-            var chartParts = _doc.MainDocumentPart?.ChartParts.ToList();
-            if (chartParts == null || chartIdx < 1 || chartIdx > chartParts.Count)
+            var allCharts = GetAllWordCharts();
+            if (chartIdx < 1 || chartIdx > allCharts.Count)
                 return new DocumentNode { Path = path, Type = "error", Text = $"Chart {chartIdx} not found" };
 
-            var chartPart = chartParts[chartIdx - 1];
-            var chart = chartPart.ChartSpace?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.Chart>();
+            var chartInfo = allCharts[chartIdx - 1];
             var chartNode = new DocumentNode { Path = $"/chart[{chartIdx}]", Type = "chart" };
-            if (chart != null)
-                Core.ChartHelper.ReadChartProperties(chart, chartNode, chartGetMatch.Groups[2].Success ? 1 : depth);
+
+            if (chartInfo.IsExtended)
+            {
+                // Extended chart (funnel, treemap, etc.)
+                var cxType = Core.ChartExBuilder.DetectExtendedChartType(chartInfo.ExtendedPart!.ChartSpace);
+                if (cxType != null) chartNode.Format["chartType"] = cxType;
+                var cxSeries = chartInfo.ExtendedPart!.ChartSpace
+                    .Descendants<DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing.Series>().ToList();
+                chartNode.Format["seriesCount"] = cxSeries.Count;
+            }
+            else
+            {
+                var chart = chartInfo.StandardPart!.ChartSpace?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.Chart>();
+                if (chart != null)
+                    Core.ChartHelper.ReadChartProperties(chart, chartNode, chartGetMatch.Groups[2].Success ? 1 : depth);
+            }
 
             // If series sub-path requested, extract the specific series child
             if (chartGetMatch.Groups[2].Success)
@@ -636,28 +649,38 @@ public partial class WordHandler
             return results;
         }
 
-        // Handle chart query
+        // Handle chart query (both standard and extended chart types)
         bool isChartSelector = parsed.ChildSelector == null && parsed.Element == "chart";
         if (isChartSelector)
         {
-            var chartParts = _doc.MainDocumentPart?.ChartParts.ToList();
-            if (chartParts != null)
+            var allCharts = GetAllWordCharts();
+            for (int i = 0; i < allCharts.Count; i++)
             {
-                for (int i = 0; i < chartParts.Count; i++)
+                var chartInfo = allCharts[i];
+                var node = new DocumentNode { Path = $"/chart[{i + 1}]", Type = "chart" };
+
+                if (chartInfo.IsExtended)
                 {
-                    var chart = chartParts[i].ChartSpace?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.Chart>();
-                    var node = new DocumentNode { Path = $"/chart[{i + 1}]", Type = "chart" };
+                    var cxType = Core.ChartExBuilder.DetectExtendedChartType(chartInfo.ExtendedPart!.ChartSpace);
+                    if (cxType != null) node.Format["chartType"] = cxType;
+                    var cxSeries = chartInfo.ExtendedPart!.ChartSpace
+                        .Descendants<DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing.Series>().ToList();
+                    node.Format["seriesCount"] = cxSeries.Count;
+                }
+                else
+                {
+                    var chart = chartInfo.StandardPart!.ChartSpace?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.Chart>();
                     if (chart != null)
                         Core.ChartHelper.ReadChartProperties(chart, node, 0);
-
-                    if (parsed.ContainsText != null)
-                    {
-                        var title = node.Format.TryGetValue("title", out var t) ? t?.ToString() : null;
-                        if (title == null || !title.Contains(parsed.ContainsText, StringComparison.OrdinalIgnoreCase))
-                            continue;
-                    }
-                    results.Add(node);
                 }
+
+                if (parsed.ContainsText != null)
+                {
+                    var title = node.Format.TryGetValue("title", out var t) ? t?.ToString() : null;
+                    if (title == null || !title.Contains(parsed.ContainsText, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                }
+                results.Add(node);
             }
             return results;
         }
