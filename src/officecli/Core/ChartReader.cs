@@ -319,11 +319,11 @@ internal static partial class ChartHelper
 
         var doughnutChart = plotArea.GetFirstChild<C.DoughnutChart>();
         var holeSize = doughnutChart?.GetFirstChild<C.HoleSize>()?.Val?.Value;
-        if (holeSize != null) node.Format["holeSize"] = holeSize;
+        if (holeSize != null) node.Format["holeSize"] = (int)holeSize;
 
         var bubbleChart = plotArea.GetFirstChild<C.BubbleChart>();
         var bubbleScale = bubbleChart?.GetFirstChild<C.BubbleScale>()?.Val?.Value;
-        if (bubbleScale != null && bubbleScale != 100) node.Format["bubbleScale"] = bubbleScale;
+        if (bubbleScale != null && bubbleScale != 100) node.Format["bubbleScale"] = (int)bubbleScale;
 
         // DataLabels additional detail
         if (dataLabels != null)
@@ -342,6 +342,16 @@ internal static partial class ChartHelper
 
         var catsRef = ReadCategoriesRef(plotArea);
         if (catsRef != null) node.Format["categoriesRef"] = catsRef;
+
+        // Trendline summary at chart level — scan first series with trendline
+        var firstTrendlineSer = plotArea.Descendants<OpenXmlCompositeElement>()
+            .Where(e => e.LocalName == "ser")
+            .FirstOrDefault(s => s.GetFirstChild<C.Trendline>() != null);
+        if (firstTrendlineSer != null)
+        {
+            var tlType = firstTrendlineSer.GetFirstChild<C.Trendline>()?.GetFirstChild<C.TrendlineType>()?.Val;
+            if (tlType?.HasValue == true) node.Format["trendline"] = tlType.InnerText;
+        }
 
         if (depth > 0)
         {

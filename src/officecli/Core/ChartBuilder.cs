@@ -298,6 +298,7 @@ internal static partial class ChartHelper
         "style", "styleid",
         "transparency", "opacity", "alpha",
         "gradient", "gradients",
+        "trendline",
         "secondaryaxis", "secondary",
         "referenceline", "refline", "targetline",
         "colorrule", "conditionalcolor",

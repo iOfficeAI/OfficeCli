@@ -139,7 +139,24 @@ internal static partial class ChartHelper
 
         if (properties.TryGetValue("data", out var dataStr))
         {
-            foreach (var seriesPart in dataStr.Split(';', StringSplitOptions.RemoveEmptyEntries))
+            // Determine series delimiter: use ';' if present, otherwise detect
+            // comma-separated name:value pairs (e.g. "Q1:40,Q2:55,Q3:70")
+            string[] seriesParts;
+            if (dataStr.Contains(';'))
+            {
+                seriesParts = dataStr.Split(';', StringSplitOptions.RemoveEmptyEntries);
+            }
+            else
+            {
+                // Check if comma-separated parts each contain a colon (name:value pairs)
+                var commaParts = dataStr.Split(',', StringSplitOptions.RemoveEmptyEntries);
+                if (commaParts.Length > 1 && commaParts.All(p => p.Contains(':')))
+                    seriesParts = commaParts;
+                else
+                    seriesParts = new[] { dataStr };
+            }
+
+            foreach (var seriesPart in seriesParts)
             {
                 var colonIdx = seriesPart.IndexOf(':');
                 if (colonIdx < 0) continue;
