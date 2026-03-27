@@ -156,10 +156,15 @@ public partial class WordHandler
             if (chartInfo.IsExtended)
             {
                 // Extended chart (funnel, treemap, etc.)
-                var cxType = Core.ChartExBuilder.DetectExtendedChartType(chartInfo.ExtendedPart!.ChartSpace);
+                var cxChartSpace = chartInfo.ExtendedPart!.ChartSpace;
+                var cxType = Core.ChartExBuilder.DetectExtendedChartType(cxChartSpace);
                 if (cxType != null) chartNode.Format["chartType"] = cxType;
-                var cxSeries = chartInfo.ExtendedPart!.ChartSpace
-                    .Descendants<DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing.Series>().ToList();
+                // Title
+                var cxTitle = cxChartSpace?.Descendants<DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing.ChartTitle>().FirstOrDefault();
+                var cxTitleText = cxTitle?.Descendants<DocumentFormat.OpenXml.Drawing.Text>().FirstOrDefault()?.Text;
+                if (cxTitleText != null) chartNode.Format["title"] = cxTitleText;
+                // Count series
+                var cxSeries = cxChartSpace!.Descendants<DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing.Series>().ToList();
                 chartNode.Format["seriesCount"] = cxSeries.Count;
             }
             else
@@ -661,10 +666,15 @@ public partial class WordHandler
 
                 if (chartInfo.IsExtended)
                 {
-                    var cxType = Core.ChartExBuilder.DetectExtendedChartType(chartInfo.ExtendedPart!.ChartSpace);
+                    var cxChartSpace = chartInfo.ExtendedPart!.ChartSpace;
+                    var cxType = Core.ChartExBuilder.DetectExtendedChartType(cxChartSpace);
                     if (cxType != null) node.Format["chartType"] = cxType;
-                    var cxSeries = chartInfo.ExtendedPart!.ChartSpace
-                        .Descendants<DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing.Series>().ToList();
+                    // Title
+                    var cxTitle = cxChartSpace?.Descendants<DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing.ChartTitle>().FirstOrDefault();
+                    var cxTitleText = cxTitle?.Descendants<DocumentFormat.OpenXml.Drawing.Text>().FirstOrDefault()?.Text;
+                    if (cxTitleText != null) node.Format["title"] = cxTitleText;
+                    // Count series
+                    var cxSeries = cxChartSpace!.Descendants<DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing.Series>().ToList();
                     node.Format["seriesCount"] = cxSeries.Count;
                 }
                 else

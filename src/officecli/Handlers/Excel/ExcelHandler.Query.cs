@@ -40,7 +40,7 @@ public partial class ExcelHandler
                 var sheetNode = new DocumentNode { Path = $"/{name}", Type = "sheet", Preview = name };
                 var sheetData = GetSheet(part).GetFirstChild<SheetData>();
                 var rowCount = sheetData?.Elements<Row>().Count() ?? 0;
-                var chartCount = part.DrawingsPart?.ChartParts.Count() ?? 0;
+                var chartCount = part.DrawingsPart != null ? CountExcelCharts(part.DrawingsPart) : 0;
                 sheetNode.ChildCount = rowCount + chartCount;
 
                 if (depth > 0 && sheetData != null)
@@ -123,7 +123,7 @@ public partial class ExcelHandler
                 Path = path,
                 Type = "sheet",
                 Preview = sheetNameFromPath,
-                ChildCount = data.Elements<Row>().Count() + (worksheet.DrawingsPart?.ChartParts.Count() ?? 0)
+                ChildCount = data.Elements<Row>().Count() + (worksheet.DrawingsPart != null ? CountExcelCharts(worksheet.DrawingsPart) : 0)
             };
 
             // Include freeze pane info
@@ -485,15 +485,31 @@ public partial class ExcelHandler
             if (drawingsPart == null)
                 throw new ArgumentException($"No charts found in sheet");
 
-            var chartParts = drawingsPart.ChartParts.ToList();
-            if (chartIdx < 1 || chartIdx > chartParts.Count)
-                throw new ArgumentException($"Chart index {chartIdx} out of range (1-{chartParts.Count})");
+            var allCharts = GetExcelCharts(drawingsPart);
+            if (chartIdx < 1 || chartIdx > allCharts.Count)
+                throw new ArgumentException($"Chart index {chartIdx} out of range (1-{allCharts.Count})");
 
-            var chartPart = chartParts[chartIdx - 1];
-            var chart = chartPart.ChartSpace?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.Chart>();
+            var chartInfo = allCharts[chartIdx - 1];
             var chartNode = new DocumentNode { Path = $"/{sheetNameFromPath}/chart[{chartIdx}]", Type = "chart" };
-            if (chart != null)
-                ChartHelper.ReadChartProperties(chart, chartNode, chartMatch.Groups[2].Success ? 1 : depth);
+            if (chartInfo.IsExtended)
+            {
+                var cxChartSpace = chartInfo.ExtendedPart!.ChartSpace;
+                var cxType = Core.ChartExBuilder.DetectExtendedChartType(cxChartSpace);
+                if (cxType != null) chartNode.Format["chartType"] = cxType;
+                // Title
+                var cxTitle = cxChartSpace?.Descendants<DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing.ChartTitle>().FirstOrDefault();
+                var cxTitleText = cxTitle?.Descendants<DocumentFormat.OpenXml.Drawing.Text>().FirstOrDefault()?.Text;
+                if (cxTitleText != null) chartNode.Format["title"] = cxTitleText;
+                // Count series
+                var cxSeries = cxChartSpace!.Descendants<DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing.Series>().ToList();
+                chartNode.Format["seriesCount"] = cxSeries.Count;
+            }
+            else
+            {
+                var chart = chartInfo.StandardPart!.ChartSpace?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.Chart>();
+                if (chart != null)
+                    ChartHelper.ReadChartProperties(chart, chartNode, chartMatch.Groups[2].Success ? 1 : depth);
+            }
 
             // If series sub-path requested, extract the specific series child
             if (chartMatch.Groups[2].Success)
@@ -733,13 +749,29 @@ public partial class ExcelHandler
                 var drawingsPart = worksheetPart.DrawingsPart;
                 if (drawingsPart == null) continue;
 
-                var chartParts = drawingsPart.ChartParts.ToList();
-                for (int i = 0; i < chartParts.Count; i++)
+                var allCharts = GetExcelCharts(drawingsPart);
+                for (int i = 0; i < allCharts.Count; i++)
                 {
-                    var chart = chartParts[i].ChartSpace?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.Chart>();
+                    var chartInfo = allCharts[i];
                     var node = new DocumentNode { Path = $"/{sheetName}/chart[{i + 1}]", Type = "chart" };
-                    if (chart != null)
-                        ChartHelper.ReadChartProperties(chart, node, 0);
+
+                    if (chartInfo.IsExtended)
+                    {
+                        var cxChartSpace = chartInfo.ExtendedPart!.ChartSpace;
+                        var cxType = Core.ChartExBuilder.DetectExtendedChartType(cxChartSpace);
+                        if (cxType != null) node.Format["chartType"] = cxType;
+                        var cxTitle = cxChartSpace?.Descendants<DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing.ChartTitle>().FirstOrDefault();
+                        var cxTitleText = cxTitle?.Descendants<DocumentFormat.OpenXml.Drawing.Text>().FirstOrDefault()?.Text;
+                        if (cxTitleText != null) node.Format["title"] = cxTitleText;
+                        var cxSeries = cxChartSpace!.Descendants<DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing.Series>().ToList();
+                        node.Format["seriesCount"] = cxSeries.Count;
+                    }
+                    else
+                    {
+                        var chart = chartInfo.StandardPart!.ChartSpace?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.Chart>();
+                        if (chart != null)
+                            ChartHelper.ReadChartProperties(chart, node, 0);
+                    }
 
                     // Filter by contains text (match on title)
                     if (parsed.ValueContains != null)
@@ -765,7 +797,7 @@ public partial class ExcelHandler
                 var sheetNode = new DocumentNode { Path = $"/{sheetName}", Type = "sheet", Preview = sheetName };
                 var sheetData = GetSheet(worksheetPart).GetFirstChild<SheetData>();
                 var rowCount = sheetData?.Elements<Row>().Count() ?? 0;
-                var chartCount = worksheetPart.DrawingsPart?.ChartParts.Count() ?? 0;
+                var chartCount = worksheetPart.DrawingsPart != null ? CountExcelCharts(worksheetPart.DrawingsPart) : 0;
                 sheetNode.ChildCount = rowCount + chartCount;
                 results.Add(sheetNode);
             }

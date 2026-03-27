@@ -1351,4 +1351,50 @@ public partial class ExcelHandler
         return drawingsPart.WorksheetDrawing.Descendants<XDR.GraphicFrame>()
             .Count(gf => gf.Descendants<C.ChartReference>().Any() || IsExtendedChartFrame(gf));
     }
+
+    /// <summary>
+    /// Represents a chart in Excel that could be either a standard ChartPart or an ExtendedChartPart.
+    /// </summary>
+    private class ExcelChartInfo
+    {
+        public ChartPart? StandardPart { get; set; }
+        public ExtendedChartPart? ExtendedPart { get; set; }
+        public bool IsExtended => ExtendedPart != null;
+    }
+
+    /// <summary>
+    /// Get all chart parts (standard + extended) in document order by walking GraphicFrame elements.
+    /// </summary>
+    private static List<ExcelChartInfo> GetExcelCharts(DrawingsPart drawingsPart)
+    {
+        var result = new List<ExcelChartInfo>();
+        if (drawingsPart.WorksheetDrawing == null) return result;
+
+        foreach (var gf in drawingsPart.WorksheetDrawing.Descendants<XDR.GraphicFrame>())
+        {
+            var chartRef = gf.Descendants<C.ChartReference>().FirstOrDefault();
+            if (chartRef?.Id?.Value != null)
+            {
+                try
+                {
+                    var chartPart = (ChartPart)drawingsPart.GetPartById(chartRef.Id.Value);
+                    result.Add(new ExcelChartInfo { StandardPart = chartPart });
+                }
+                catch { /* skip invalid references */ }
+            }
+            else if (IsExtendedChartFrame(gf))
+            {
+                var relId = GetExtendedChartRelId(gf);
+                if (relId == null) continue;
+                try
+                {
+                    var extPart = (ExtendedChartPart)drawingsPart.GetPartById(relId);
+                    result.Add(new ExcelChartInfo { ExtendedPart = extPart });
+                }
+                catch { /* skip invalid references */ }
+            }
+        }
+
+        return result;
+    }
 }
