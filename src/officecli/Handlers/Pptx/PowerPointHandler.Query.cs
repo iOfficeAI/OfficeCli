@@ -538,7 +538,7 @@ public partial class PowerPointHandler
         var slideIdx = int.Parse(match.Groups[1].Value);
         var slideParts = GetSlideParts().ToList();
         if (slideIdx < 1 || slideIdx > slideParts.Count)
-            return null;
+            throw new ArgumentException($"Slide {slideIdx} not found (total: {slideParts.Count})");
 
         var targetSlidePart = slideParts[slideIdx - 1];
 

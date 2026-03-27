@@ -370,24 +370,33 @@ public partial class PowerPointHandler
             return unsupported;
         }
 
-        // Try chart path: /slide[N]/chart[M]
-        var chartSetMatch = Regex.Match(path, @"^/slide\[(\d+)\]/chart\[(\d+)\]$");
+        // Try chart path: /slide[N]/chart[M] or /slide[N]/chart[M]/series[K]
+        var chartSetMatch = Regex.Match(path, @"^/slide\[(\d+)\]/chart\[(\d+)\](?:/series\[(\d+)\])?$");
         if (chartSetMatch.Success)
         {
             var slideIdx = int.Parse(chartSetMatch.Groups[1].Value);
             var chartIdx = int.Parse(chartSetMatch.Groups[2].Value);
+            var seriesIdx = chartSetMatch.Groups[3].Success ? int.Parse(chartSetMatch.Groups[3].Value) : 0;
 
             var (slidePart, chartGf, chartPart) = ResolveChart(slideIdx, chartIdx);
 
-            // Handle position/size properties on GraphicFrame
+            // If series sub-path, prefix all properties with series{N}. for ChartSetter
             var chartProps = new Dictionary<string, string>();
             var gfProps = new Dictionary<string, string>();
-            foreach (var (key, value) in properties)
+            if (seriesIdx > 0)
             {
-                if (key.ToLowerInvariant() is "x" or "y" or "width" or "height" or "name")
-                    gfProps[key] = value;
-                else
-                    chartProps[key] = value;
+                foreach (var (key, value) in properties)
+                    chartProps[$"series{seriesIdx}.{key}"] = value;
+            }
+            else
+            {
+                foreach (var (key, value) in properties)
+                {
+                    if (key.ToLowerInvariant() is "x" or "y" or "width" or "height" or "name")
+                        gfProps[key] = value;
+                    else
+                        chartProps[key] = value;
+                }
             }
 
             // Position/size

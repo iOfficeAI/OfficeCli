@@ -467,7 +467,8 @@ public class BtBlackBoxRound4 : IDisposable
             s2.Should().NotBeNull();
 
             // Verify slide 3 no longer exists
-            h.Get("/slide[3]").Should().BeNull("slide[3] should not exist after deletion");
+            var act = () => h.Get("/slide[3]");
+            act.Should().Throw<ArgumentException>("slide[3] should not exist after deletion");
         }
 
         AssertValidPptx(path, "delete-slide");

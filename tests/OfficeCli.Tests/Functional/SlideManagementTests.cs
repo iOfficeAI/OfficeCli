@@ -166,7 +166,8 @@ public class SlideManagementTests : IDisposable
         slide2.Should().NotBeNull();
 
         // Verify slide 3 no longer exists (we're down to 2 slides)
-        _handler.Get("/slide[3]").Should().BeNull("slide[3] should not exist after deletion");
+        var act = () => _handler.Get("/slide[3]");
+        act.Should().Throw<ArgumentException>("slide[3] should not exist after deletion");
     }
 
     [Fact]
@@ -201,7 +202,8 @@ public class SlideManagementTests : IDisposable
         slide4.Should().NotBeNull();
 
         // Verify slide 5 doesn't exist
-        _handler.Get("/slide[5]").Should().BeNull("slide[5] should not exist after deletion");
+        var act = () => _handler.Get("/slide[5]");
+        act.Should().Throw<ArgumentException>("slide[5] should not exist after deletion");
     }
 
     // ==============================================================
@@ -320,7 +322,8 @@ public class SlideManagementTests : IDisposable
         slide2.Should().NotBeNull();
 
         // Verify slide 3 is gone
-        handler2.Get("/slide[3]").Should().BeNull("slide[3] should not exist after removal");
+        var act = () => handler2.Get("/slide[3]");
+        act.Should().Throw<ArgumentException>("slide[3] should not exist after removal");
     }
 
     [Fact]

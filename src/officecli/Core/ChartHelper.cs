@@ -42,7 +42,8 @@ internal static partial class ChartHelper
             "waterfall" or "wf" => "waterfall",
             _ => throw new ArgumentException(
                 $"Unknown chart type: '{chartType}'. Supported types: " +
-                "column, bar, line, pie, doughnut, area, scatter, bubble, radar, stock, combo. " +
+                "column, bar, line, pie, doughnut, area, scatter, bubble, radar, stock, combo, waterfall, " +
+                "funnel, treemap, sunburst, boxWhisker, histogram. " +
                 "Modifiers: 3d (e.g. column3d), stacked (e.g. stackedColumn), percentStacked (e.g. percentStackedBar).")
         };
 

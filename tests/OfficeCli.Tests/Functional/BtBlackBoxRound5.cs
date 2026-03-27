@@ -257,7 +257,8 @@ public class BtBlackBoxRound5 : IDisposable
             h.Remove("/slide[1]");
 
             // After cascade remove, only 1 slide remains. slide[2] is gone.
-            h.Get("/slide[2]").Should().BeNull("only 1 slide should remain");
+            var act = () => h.Get("/slide[2]");
+            act.Should().Throw<ArgumentException>("only 1 slide should remain");
         }
 
         AssertValidPptx(path, "cascade-remove-slide");
@@ -283,7 +284,8 @@ public class BtBlackBoxRound5 : IDisposable
         var s2 = h2.Get("/slide[2]");
         s2.Should().NotBeNull();
 
-        h2.Get("/slide[3]").Should().BeNull("only 2 slides should remain after removal");
+        var act = () => h2.Get("/slide[3]");
+        act.Should().Throw<ArgumentException>("only 2 slides should remain after removal");
     }
 
     // ═══════════════════════════════════════════════════════

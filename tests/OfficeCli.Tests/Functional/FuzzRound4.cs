@@ -310,9 +310,9 @@ public class FuzzRound4 : IDisposable
     {
         var path = CreateTemp("pptx");
         using var handler = new PowerPointHandler(path, editable: false);
-        // Index 0 is invalid in 1-based system — returns null.
-        var result = handler.Get("/slide[0]");
-        result.Should().BeNull("index 0 is invalid in 1-based path system");
+        // Index 0 is invalid in 1-based system — throws ArgumentException.
+        var act = () => handler.Get("/slide[0]");
+        act.Should().Throw<ArgumentException>("index 0 is invalid in 1-based path system");
     }
 
     [Fact]
@@ -330,9 +330,9 @@ public class FuzzRound4 : IDisposable
     {
         var path = CreateTemp("pptx");
         using var handler = new PowerPointHandler(path, editable: false);
-        // Out-of-range index returns null.
-        var result = handler.Get("/slide[9999]");
-        result.Should().BeNull("out-of-range slide index should return null");
+        // Out-of-range index throws ArgumentException.
+        var act = () => handler.Get("/slide[9999]");
+        act.Should().Throw<ArgumentException>("out-of-range slide index should throw");
     }
 
     [Fact]
@@ -531,8 +531,9 @@ public class FuzzRound4 : IDisposable
             var node = handler.Get($"/slide[{i}]");
             node.Should().NotBeNull($"slide[{i}] should exist");
         }
-        // slide[6] should not exist — returns null for out-of-range
-        handler.Get("/slide[6]").Should().BeNull("slide[6] does not exist");
+        // slide[6] should not exist — throws for out-of-range
+        var act = () => handler.Get("/slide[6]");
+        act.Should().Throw<ArgumentException>("slide[6] does not exist");
     }
 
     [Fact]

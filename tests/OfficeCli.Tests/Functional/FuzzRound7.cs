@@ -205,12 +205,12 @@ public class FuzzRound7 : IDisposable
     }
 
     [Fact]
-    public void RP04_Pptx_OutOfRange_Slide999_ReturnsNull()
+    public void RP04_Pptx_OutOfRange_Slide999_Throws()
     {
         var path = CreateTemp("pptx");
         using var h = new PowerPointHandler(path, editable: false);
-        var node = h.Get("/slide[999]");
-        node.Should().BeNull("requesting a non-existent slide should return null, not throw");
+        var act = () => h.Get("/slide[999]");
+        act.Should().Throw<ArgumentException>("requesting a non-existent slide should throw");
     }
 
     // ==================== VB01–VB05: Value boundaries ====================

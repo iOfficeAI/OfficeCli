@@ -200,12 +200,12 @@ public class FuzzRound12 : IDisposable
     }
 
     [Fact]
-    public void EF07_Pptx_Get_NonexistentSlide_ReturnsNull()
+    public void EF07_Pptx_Get_NonexistentSlide_Throws()
     {
         var path = CreateTemp("pptx");
         using var h = new PowerPointHandler(path, editable: false);
-        // No slides added — get slide[1] must return null
-        var node = h.Get("/slide[1]");
-        node.Should().BeNull("Get on nonexistent slide must return null, not throw");
+        // No slides added — get slide[1] must throw
+        var act = () => h.Get("/slide[1]");
+        act.Should().Throw<ArgumentException>("Get on nonexistent slide must throw");
     }
 }

@@ -1580,6 +1580,8 @@ static class CommandBuilder
         "legend.x", "legend.y", "legend.w", "legend.h",
         "datalabels.separator", "datalabels.numfmt", "leaderLines",
         "view3d", "categories", "data",
+        "referenceLine", "refLine", "targetLine", "preset", "colorRule",
+        "conditionalColor", "comboTypes", "axisLine",
     };
 
     internal static string? SuggestProperty(string input)

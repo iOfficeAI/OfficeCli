@@ -491,7 +491,12 @@ internal static partial class ChartHelper
                 {
                     chartSpace!.RemoveAllChildren<C.Style>();
                     if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
-                        chartSpace.InsertBefore(new C.Style { Val = (byte)ParseHelpers.SafeParseInt(value, "style") }, chart);
+                    {
+                        var styleVal = ParseHelpers.SafeParseInt(value, "style");
+                        if (styleVal < 1 || styleVal > 48)
+                            throw new ArgumentException($"Invalid style: '{value}'. Valid range is 1-48.");
+                        chartSpace.InsertBefore(new C.Style { Val = (byte)styleVal }, chart);
+                    }
                     break;
                 }
 
@@ -629,6 +634,7 @@ internal static partial class ChartHelper
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
                     if (plotArea2 == null) { unsupported.Add(key); break; }
                     if (!int.TryParse(value, out var ov)) throw new ArgumentException($"Invalid overlap: '{value}'. Expected integer (-100 to 100).");
+                    if (ov < -100 || ov > 100) throw new ArgumentException($"Invalid overlap: '{value}'. Valid range is -100 to 100.");
                     foreach (var barChart in plotArea2.Elements<OpenXmlCompositeElement>().Where(e => e.LocalName.Contains("barChart") || e.LocalName.Contains("BarChart")))
                     {
                         var overlapEl = barChart.GetFirstChild<C.Overlap>();
