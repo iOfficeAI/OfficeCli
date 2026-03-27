@@ -6,10 +6,34 @@ $source = $null
 
 # Step 1: Try downloading from GitHub
 $url = "https://github.com/$repo/releases/latest/download/$asset"
+$checksumUrl = "https://github.com/$repo/releases/latest/download/SHA256SUMS"
 $tempFile = "$env:TEMP\$binary"
 Write-Host "Downloading OfficeCli..."
 try {
     Invoke-WebRequest -Uri $url -OutFile $tempFile
+    # Verify checksum if available
+    $checksumOk = $false
+    try {
+        $checksumFile = "$env:TEMP\officecli-SHA256SUMS"
+        Invoke-WebRequest -Uri $checksumUrl -OutFile $checksumFile
+        $checksumContent = Get-Content $checksumFile
+        $expectedLine = $checksumContent | Where-Object { $_ -match $asset }
+        if ($expectedLine) {
+            $expected = ($expectedLine -split '\s+')[0]
+            $actual = (Get-FileHash -Path $tempFile -Algorithm SHA256).Hash.ToLower()
+            if ($expected -eq $actual) {
+                $checksumOk = $true
+                Write-Host "Checksum verified."
+            } else {
+                Write-Host "Checksum mismatch! Expected: $expected, Got: $actual"
+                Remove-Item -Force $tempFile, $checksumFile -ErrorAction SilentlyContinue
+                exit 1
+            }
+        }
+        Remove-Item -Force $checksumFile -ErrorAction SilentlyContinue
+    } catch {
+        Write-Host "Checksum file not available, skipping verification."
+    }
     $output = & $tempFile --version 2>&1
     if ($LASTEXITCODE -eq 0) {
         $source = $tempFile

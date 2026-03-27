@@ -1,0 +1,36 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: 'preview'
+
+      - name: Restore
+        run: dotnet restore tests/OfficeCli.Tests/OfficeCli.Tests.csproj
+
+      - name: Build
+        run: dotnet build tests/OfficeCli.Tests/OfficeCli.Tests.csproj -c Release --no-restore
+
+      - name: Test
+        run: dotnet test tests/OfficeCli.Tests/OfficeCli.Tests.csproj -c Release --no-build --logger "trx;LogFileName=results.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: tests/OfficeCli.Tests/TestResults/results.trx
