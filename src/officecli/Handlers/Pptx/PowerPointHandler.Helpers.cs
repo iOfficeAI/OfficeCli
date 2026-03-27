@@ -818,4 +818,41 @@ public partial class PowerPointHandler
             default: return false;
         }
     }
+
+    private static readonly Dictionary<string, string> _tableStyleNameToGuid = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["medium1"] = "{073A0DAA-6AF3-43AB-8588-CEC1D06C72B9}",
+        ["mediumstyle1"] = "{073A0DAA-6AF3-43AB-8588-CEC1D06C72B9}",
+        ["medium2"] = "{F5AB1C69-6EDB-4FF4-983F-18BD219EF322}",
+        ["mediumstyle2"] = "{F5AB1C69-6EDB-4FF4-983F-18BD219EF322}",
+        ["medium3"] = "{3B4B98B0-60AC-42C2-AFA5-B58CD77FA1E5}",
+        ["mediumstyle3"] = "{3B4B98B0-60AC-42C2-AFA5-B58CD77FA1E5}",
+        ["medium4"] = "{D7AC3CCA-C797-4891-BE02-D94E43425B78}",
+        ["mediumstyle4"] = "{D7AC3CCA-C797-4891-BE02-D94E43425B78}",
+        ["light1"] = "{9D7B26C5-4107-4FEC-AEDC-1716B250A1EF}",
+        ["lightstyle1"] = "{9D7B26C5-4107-4FEC-AEDC-1716B250A1EF}",
+        ["light2"] = "{ED083AE6-46FA-4A59-8FB0-9F97EB10719F}",
+        ["lightstyle2"] = "{ED083AE6-46FA-4A59-8FB0-9F97EB10719F}",
+        ["light3"] = "{C083E6E3-FA7D-4D7B-A595-EF9225AFEA82}",
+        ["lightstyle3"] = "{C083E6E3-FA7D-4D7B-A595-EF9225AFEA82}",
+        ["dark1"] = "{E8034E78-7F5D-4C2E-B375-FC64B27BC917}",
+        ["darkstyle1"] = "{E8034E78-7F5D-4C2E-B375-FC64B27BC917}",
+        ["dark2"] = "{125E5076-3810-47DD-B79F-674D7AD40C01}",
+        ["darkstyle2"] = "{125E5076-3810-47DD-B79F-674D7AD40C01}",
+        ["none"] = "{2D5ABB26-0587-4C30-8999-92F81FD0307C}",
+    };
+
+    /// <summary>
+    /// Resolve a table style name or GUID to a valid OOXML GUID.
+    /// Throws ArgumentException for unrecognized style names.
+    /// </summary>
+    private static string ResolveTableStyleId(string value)
+    {
+        if (_tableStyleNameToGuid.TryGetValue(value, out var guid))
+            return guid;
+        if (value.StartsWith("{"))
+            return value; // Direct GUID passthrough
+        throw new ArgumentException(
+            $"Invalid table style: '{value}'. Valid values: medium1, medium2, medium3, medium4, light1, light2, light3, dark1, dark2, none, or a direct GUID like {{073A0DAA-...}}.");
+    }
 }

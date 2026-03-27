@@ -408,6 +408,19 @@ public partial class PowerPointHandler
                 if (fs.HasValue) cellNode.Format["size"] = $"{fs.Value / 100.0:0.##}pt";
                 if (firstRun.RunProperties.Bold?.Value == true) cellNode.Format["bold"] = true;
                 if (firstRun.RunProperties.Italic?.Value == true) cellNode.Format["italic"] = true;
+                if (firstRun.RunProperties.Underline?.HasValue == true && firstRun.RunProperties.Underline.Value != Drawing.TextUnderlineValues.None)
+                {
+                    cellNode.Format["underline"] = firstRun.RunProperties.Underline.InnerText switch
+                    {
+                        "sng" => "single",
+                        "dbl" => "double",
+                        _ => firstRun.RunProperties.Underline.InnerText
+                    };
+                }
+                if (firstRun.RunProperties.Strike?.HasValue == true && firstRun.RunProperties.Strike.Value != Drawing.TextStrikeValues.NoStrike)
+                {
+                    cellNode.Format["strike"] = firstRun.RunProperties.Strike.Value == Drawing.TextStrikeValues.DoubleStrike ? "double" : "single";
+                }
                 var colorHex = firstRun.RunProperties.GetFirstChild<Drawing.SolidFill>()
                     ?.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
                 if (colorHex != null) cellNode.Format["color"] = ParseHelpers.FormatHexColor(colorHex);

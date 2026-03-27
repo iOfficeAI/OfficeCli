@@ -107,21 +107,7 @@ public partial class PowerPointHandler
                 // Apply table style if specified
                 if (properties.TryGetValue("style", out var tblStyleVal))
                 {
-                    var styleId = tblStyleVal.ToLowerInvariant() switch
-                    {
-                        "medium1" or "mediumstyle1" => "{073A0DAA-6AF3-43AB-8588-CEC1D06C72B9}",
-                        "medium2" or "mediumstyle2" => "{F5AB1C69-6EDB-4FF4-983F-18BD219EF322}",
-                        "medium3" or "mediumstyle3" => "{3B4B98B0-60AC-42C2-AFA5-B58CD77FA1E5}",
-                        "medium4" or "mediumstyle4" => "{D7AC3CCA-C797-4891-BE02-D94E43425B78}",
-                        "light1" or "lightstyle1" => "{9D7B26C5-4107-4FEC-AEDC-1716B250A1EF}",
-                        "light2" or "lightstyle2" => "{ED083AE6-46FA-4A59-8FB0-9F97EB10719F}",
-                        "light3" or "lightstyle3" => "{C083E6E3-FA7D-4D7B-A595-EF9225AFEA82}",
-                        "dark1" or "darkstyle1" => "{E8034E78-7F5D-4C2E-B375-FC64B27BC917}",
-                        "dark2" or "darkstyle2" => "{125E5076-3810-47DD-B79F-674D7AD40C01}",
-                        "none" => "{2D5ABB26-0587-4C30-8999-92F81FD0307C}",
-                        _ when tblStyleVal.StartsWith("{") => tblStyleVal,
-                        _ => tblStyleVal
-                    };
+                    var styleId = ResolveTableStyleId(tblStyleVal);
                     tblProps.AppendChild(new Drawing.TableStyleId(styleId));
                 }
 
@@ -225,6 +211,15 @@ public partial class PowerPointHandler
                 else
                 {
                     rowTable.AppendChild(newTblRow);
+                }
+
+                // Update GraphicFrame container height to match sum of all row heights
+                var graphicFrame = rowTable.Ancestors<GraphicFrame>().FirstOrDefault();
+                if (graphicFrame?.Transform?.Extents != null)
+                {
+                    long totalRowHeight = rowTable.Elements<Drawing.TableRow>()
+                        .Sum(r => r.Height?.Value ?? 370840);
+                    graphicFrame.Transform.Extents.Cy = totalRowHeight;
                 }
 
                 GetSlide(rowSlidePart).Save();
