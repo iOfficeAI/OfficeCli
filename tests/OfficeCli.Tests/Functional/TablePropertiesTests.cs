@@ -569,6 +569,24 @@ public class DocxTablePropertiesTests : IDisposable
         _handler = new WordHandler(_path, editable: true);
     }
 
+    // ==================== CSV data import ====================
+
+    [Fact]
+    public void Add_Table_WithInlineData_PopulatesCells()
+    {
+        _handler.Add("/body", "table", null, new()
+        {
+            ["data"] = "Name,Score;Alice,95;Bob,88",
+            ["style"] = "TableGrid"
+        });
+        var node = _handler.Get("/body/tbl[2]", depth: 2);
+        node.Type.Should().Be("table");
+        // Verify cell text
+        node.Children[0].Children[0].Text.Should().Be("Name");
+        node.Children[0].Children[1].Text.Should().Be("Score");
+        node.Children[1].Children[0].Text.Should().Be("Alice");
+    }
+
     // ==================== Floating Table Position ====================
 
     [Fact]

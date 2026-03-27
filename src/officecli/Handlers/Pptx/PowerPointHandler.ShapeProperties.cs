@@ -1300,11 +1300,13 @@ public partial class PowerPointHandler
                         var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
                         pProps.RemoveAllChildren<Drawing.LineSpacing>();
                         var ls = new Drawing.LineSpacing();
-                        if (isPct)
-                            ls.AppendChild(new Drawing.SpacingPercent { Val = spcVal });
-                        else
-                            ls.AppendChild(new Drawing.SpacingPoints { Val = spcVal });
-                        pProps.AppendChild(ls);
+                        if (isPct) ls.AppendChild(new Drawing.SpacingPercent { Val = spcVal });
+                        else ls.AppendChild(new Drawing.SpacingPoints { Val = spcVal });
+                        // CT_TextParagraphProperties schema: lnSpc → spcBef → spcAft
+                        var insertBefore = (OpenXmlElement?)pProps.GetFirstChild<Drawing.SpaceBefore>()
+                            ?? pProps.GetFirstChild<Drawing.SpaceAfter>();
+                        if (insertBefore != null) pProps.InsertBefore(ls, insertBefore);
+                        else pProps.AppendChild(ls);
                     }
                     break;
                 }
@@ -1317,7 +1319,10 @@ public partial class PowerPointHandler
                         pProps.RemoveAllChildren<Drawing.SpaceBefore>();
                         var sb = new Drawing.SpaceBefore();
                         sb.AppendChild(new Drawing.SpacingPoints { Val = sbVal });
-                        pProps.AppendChild(sb);
+                        // CT_TextParagraphProperties schema: lnSpc → spcBef → spcAft
+                        var spcAftRef = pProps.GetFirstChild<Drawing.SpaceAfter>();
+                        if (spcAftRef != null) pProps.InsertBefore(sb, spcAftRef);
+                        else pProps.AppendChild(sb);
                     }
                     break;
                 }
@@ -1330,7 +1335,7 @@ public partial class PowerPointHandler
                         pProps.RemoveAllChildren<Drawing.SpaceAfter>();
                         var sa = new Drawing.SpaceAfter();
                         sa.AppendChild(new Drawing.SpacingPoints { Val = saVal });
-                        pProps.AppendChild(sa);
+                        pProps.AppendChild(sa); // spcAft is last, append is correct
                     }
                     break;
                 }
@@ -1340,8 +1345,9 @@ public partial class PowerPointHandler
                     var tcPrO = cell.TableCellProperties ?? cell.GetFirstChild<Drawing.TableCellProperties>();
                     if (tcPrO != null)
                     {
-                        var alphaVal = (int)Math.Round(ParseHelpers.SafeParseDouble(value, "opacity") * 1000);
-                        // Clamp to 0-100000
+                        var opacityVal = ParseHelpers.SafeParseDouble(value, "opacity");
+                        if (opacityVal > 1.0) opacityVal /= 100.0; // treat >1 as percentage (e.g. 50 → 0.50)
+                        var alphaVal = (int)Math.Round(opacityVal * 100000); // 0.0-1.0 → 0-100000
                         alphaVal = Math.Max(0, Math.Min(100000, alphaVal));
                         var solidFill = tcPrO.GetFirstChild<Drawing.SolidFill>();
                         if (solidFill != null)
