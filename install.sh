@@ -27,14 +27,14 @@ case "$OS" in
         case "$ARCH" in
             x86_64)
                 if [ "$LIBC" = "musl" ]; then
-                    ASSET="officecli-linux-musl-x64"
+                    ASSET="officecli-linux-alpine-x64"
                 else
                     ASSET="officecli-linux-x64"
                 fi
                 ;;
             aarch64|arm64)
                 if [ "$LIBC" = "musl" ]; then
-                    ASSET="officecli-linux-musl-arm64"
+                    ASSET="officecli-linux-alpine-arm64"
                 else
                     ASSET="officecli-linux-arm64"
                 fi
@@ -53,8 +53,33 @@ SOURCE=""
 
 # Step 1: Try downloading from GitHub
 DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/$ASSET"
+CHECKSUM_URL="https://github.com/$REPO/releases/latest/download/SHA256SUMS"
 echo "Downloading OfficeCli ($ASSET)..."
 if curl -fsSL "$DOWNLOAD_URL" -o "/tmp/$BINARY_NAME" 2>/dev/null; then
+    # Verify checksum if available
+    CHECKSUM_OK=false
+    if curl -fsSL "$CHECKSUM_URL" -o "/tmp/officecli-SHA256SUMS" 2>/dev/null; then
+        EXPECTED=$(grep "$ASSET" "/tmp/officecli-SHA256SUMS" | awk '{print $1}')
+        if [ -n "$EXPECTED" ]; then
+            if command -v sha256sum >/dev/null 2>&1; then
+                ACTUAL=$(sha256sum "/tmp/$BINARY_NAME" | awk '{print $1}')
+            else
+                ACTUAL=$(shasum -a 256 "/tmp/$BINARY_NAME" | awk '{print $1}')
+            fi
+            if [ "$EXPECTED" = "$ACTUAL" ]; then
+                CHECKSUM_OK=true
+                echo "Checksum verified."
+            else
+                echo "Checksum mismatch! Expected: $EXPECTED, Got: $ACTUAL"
+                rm -f "/tmp/$BINARY_NAME" "/tmp/officecli-SHA256SUMS"
+                exit 1
+            fi
+        fi
+        rm -f "/tmp/officecli-SHA256SUMS"
+    fi
+    if [ "$CHECKSUM_OK" = false ]; then
+        echo "Checksum file not available, skipping verification."
+    fi
     chmod +x "/tmp/$BINARY_NAME"
     if "/tmp/$BINARY_NAME" --version >/dev/null 2>&1; then
         SOURCE="/tmp/$BINARY_NAME"
