@@ -37,20 +37,44 @@ public partial class WordHandler
                 ApplyTableBorders(tblProps, bk, bv);
         }
 
-        int rows = 1;
-        if (properties.TryGetValue("rows", out var rowsStr))
+        // Parse data if provided: "H1,H2;R1C1,R1C2;R2C1,R2C2" or CSV file path
+        string[][]? tableData = null;
+        if (properties.TryGetValue("data", out var dataStr))
         {
-            if (!int.TryParse(rowsStr, out rows))
-                throw new ArgumentException($"Invalid 'rows' value: '{rowsStr}'. Expected a positive integer.");
-            if (rows <= 0)
-                throw new ArgumentException($"Invalid 'rows' value: '{rowsStr}'. Must be a positive integer (> 0).");
+            if (File.Exists(dataStr))
+                tableData = File.ReadAllLines(dataStr)
+                    .Where(l => !string.IsNullOrWhiteSpace(l))
+                    .Select(l => l.Split(',').Select(c => c.Trim()).ToArray())
+                    .ToArray();
+            else
+                tableData = dataStr.Split(';')
+                    .Select(r => r.Split(',').Select(c => c.Trim()).ToArray())
+                    .ToArray();
         }
-        int cols = 1;
-        if (properties.TryGetValue("cols", out var colsStr))
+
+        int rows, cols;
+        if (tableData != null)
         {
-            cols = ParseHelpers.SafeParseInt(colsStr, "cols");
-            if (cols <= 0)
-                throw new ArgumentException($"Invalid 'cols' value: '{colsStr}'. Must be a positive integer (> 0).");
+            rows = tableData.Length;
+            cols = tableData.Max(r => r.Length);
+        }
+        else
+        {
+            rows = 1;
+            if (properties.TryGetValue("rows", out var rowsStr))
+            {
+                if (!int.TryParse(rowsStr, out rows))
+                    throw new ArgumentException($"Invalid 'rows' value: '{rowsStr}'. Expected a positive integer.");
+                if (rows <= 0)
+                    throw new ArgumentException($"Invalid 'rows' value: '{rowsStr}'. Must be a positive integer (> 0).");
+            }
+            cols = 1;
+            if (properties.TryGetValue("cols", out var colsStr))
+            {
+                cols = ParseHelpers.SafeParseInt(colsStr, "cols");
+                if (cols <= 0)
+                    throw new ArgumentException($"Invalid 'cols' value: '{colsStr}'. Must be a positive integer (> 0).");
+            }
         }
 
         // Parse per-column widths: colWidths="3000,2000,5000"
@@ -139,8 +163,12 @@ public partial class WordHandler
             var row = new TableRow();
             for (int c = 0; c < cols; c++)
             {
+                var cellText = tableData != null && r < tableData.Length && c < tableData[r].Length
+                    ? tableData[r][c] : (properties.TryGetValue($"r{r + 1}c{c + 1}", out var rc) ? rc : "");
                 var cellPara = new Paragraph(new ParagraphProperties(
                     new SpacingBetweenLines { After = "0", Line = "240", LineRule = LineSpacingRuleValues.Auto }));
+                if (!string.IsNullOrEmpty(cellText))
+                    cellPara.AppendChild(new Run(new Text(cellText) { Space = SpaceProcessingModeValues.Preserve }));
                 var cell = new TableCell(cellPara);
                 if (colWidthArr != null && c < colWidthArr.Length)
                     cell.PrependChild(new TableCellProperties(new TableCellWidth { Width = colWidthArr[c].ToString(), Type = TableWidthUnitValues.Dxa }));

@@ -29,12 +29,42 @@ public partial class PowerPointHandler
                 var tblShapeTree = GetSlide(tblSlidePart).CommonSlideData?.ShapeTree
                     ?? throw new InvalidOperationException("Slide has no shape tree");
 
-                var rowsStr = properties.GetValueOrDefault("rows", "3");
-                var colsStr = properties.GetValueOrDefault("cols", "3");
-                if (!int.TryParse(rowsStr, out var rows))
-                    throw new ArgumentException($"Invalid 'rows' value: '{rowsStr}'. Expected a positive integer.");
-                if (!int.TryParse(colsStr, out var cols))
-                    throw new ArgumentException($"Invalid 'cols' value: '{colsStr}'. Expected a positive integer.");
+                // Parse data if provided: "H1,H2;R1C1,R1C2;R2C1,R2C2" or CSV file path
+                string[][]? tableData = null;
+                if (properties.TryGetValue("data", out var dataStr))
+                {
+                    if (File.Exists(dataStr))
+                    {
+                        // CSV file
+                        tableData = File.ReadAllLines(dataStr)
+                            .Where(l => !string.IsNullOrWhiteSpace(l))
+                            .Select(l => l.Split(',').Select(c => c.Trim()).ToArray())
+                            .ToArray();
+                    }
+                    else
+                    {
+                        // Inline: semicolons separate rows, commas separate cells
+                        tableData = dataStr.Split(';')
+                            .Select(r => r.Split(',').Select(c => c.Trim()).ToArray())
+                            .ToArray();
+                    }
+                }
+
+                int rows, cols;
+                if (tableData != null)
+                {
+                    rows = tableData.Length;
+                    cols = tableData.Max(r => r.Length);
+                }
+                else
+                {
+                    var rowsStr = properties.GetValueOrDefault("rows", "3");
+                    var colsStr = properties.GetValueOrDefault("cols", "3");
+                    if (!int.TryParse(rowsStr, out rows))
+                        throw new ArgumentException($"Invalid 'rows' value: '{rowsStr}'. Expected a positive integer.");
+                    if (!int.TryParse(colsStr, out cols))
+                        throw new ArgumentException($"Invalid 'cols' value: '{colsStr}'. Expected a positive integer.");
+                }
                 if (rows < 1 || cols < 1)
                     throw new ArgumentException("rows and cols must be >= 1");
 
@@ -108,10 +138,19 @@ public partial class PowerPointHandler
                     for (int c = 0; c < cols; c++)
                     {
                         var cell = new Drawing.TableCell();
+                        var cellText = tableData != null && r < tableData.Length && c < tableData[r].Length
+                            ? tableData[r][c] : (properties.TryGetValue($"r{r + 1}c{c + 1}", out var rc) ? rc : "");
+                        var cellPara = new Drawing.Paragraph();
+                        if (!string.IsNullOrEmpty(cellText))
+                            cellPara.Append(new Drawing.Run(
+                                new Drawing.RunProperties { Language = "en-US" },
+                                new Drawing.Text(cellText)));
+                        else
+                            cellPara.Append(new Drawing.EndParagraphRunProperties { Language = "en-US" });
                         cell.Append(new Drawing.TextBody(
                             new Drawing.BodyProperties(),
                             new Drawing.ListStyle(),
-                            new Drawing.Paragraph(new Drawing.EndParagraphRunProperties { Language = "en-US" })
+                            cellPara
                         ));
                         cell.Append(new Drawing.TableCellProperties());
                         tableRow.Append(cell);

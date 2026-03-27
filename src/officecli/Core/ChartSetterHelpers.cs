@@ -177,8 +177,10 @@ internal static partial class ChartHelper
         {
             dPt = new C.DataPoint();
             dPt.AppendChild(new C.Index { Val = (uint)pointIndex });
-            // Insert before c:dLbls, c:cat, c:val etc.
+            // Insert before c:dLbls, c:trendline, c:errBars, c:cat, c:val etc.
             var insertBefore = series.GetFirstChild<C.DataLabels>() as OpenXmlElement
+                ?? series.GetFirstChild<C.Trendline>() as OpenXmlElement
+                ?? series.GetFirstChild<C.ErrorBars>() as OpenXmlElement
                 ?? series.GetFirstChild<C.CategoryAxisData>() as OpenXmlElement
                 ?? series.GetFirstChild<C.Values>();
             if (insertBefore != null)
@@ -306,6 +308,33 @@ internal static partial class ChartHelper
             case "color":
                 ApplySeriesColor(ser, value);
                 break;
+
+            case "name":
+            {
+                var serText = ser.GetFirstChild<C.SeriesText>();
+                if (serText != null)
+                {
+                    serText.RemoveAllChildren();
+                    serText.AppendChild(new C.NumericValue(value));
+                }
+                break;
+            }
+
+            case "values":
+            {
+                var valEl = ser.GetFirstChild<C.Values>();
+                if (valEl != null)
+                {
+                    var nums = value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .Select(s => double.TryParse(s, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : 0.0)
+                        .ToArray();
+                    valEl.RemoveAllChildren();
+                    var builtVals = BuildValues(nums);
+                    foreach (var child in builtVals.ChildElements.ToList())
+                        valEl.AppendChild(child.CloneNode(true));
+                }
+                break;
+            }
 
             case "invertifneg" or "invertifnegative":
                 ser.RemoveAllChildren<C.InvertIfNegative>();

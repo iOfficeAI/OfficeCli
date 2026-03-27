@@ -572,7 +572,103 @@ public partial class PowerPointHandler
                         }
                         break;
                     }
-                    case var k when k.StartsWith("border") || k is "text" or "bold" or "italic" or "size" or "font" or "color" or "underline" or "strike" or "valign" or "fill" or "baseline" or "charspacing":
+                    case "autofit" or "autowidth":
+                    {
+                        // Heuristic auto column width: measure max text length per column
+                        if (!IsTruthy(value)) break;
+                        var table = gf.Descendants<Drawing.Table>().FirstOrDefault();
+                        if (table == null) break;
+                        var gridCols = table.TableGrid?.Elements<Drawing.GridColumn>().ToList();
+                        var tableRows = table.Elements<Drawing.TableRow>().ToList();
+                        if (gridCols == null || gridCols.Count == 0 || tableRows.Count == 0) break;
+
+                        var totalWidth = gridCols.Sum(gc => gc.Width?.Value ?? 0);
+                        var colCount = gridCols.Count;
+                        var maxLens = new int[colCount];
+                        foreach (var row in tableRows)
+                        {
+                            var cells = row.Elements<Drawing.TableCell>().ToList();
+                            for (int ci = 0; ci < Math.Min(cells.Count, colCount); ci++)
+                            {
+                                var text = cells[ci].TextBody?.InnerText ?? "";
+                                maxLens[ci] = Math.Max(maxLens[ci], text.Length);
+                            }
+                        }
+                        var totalLen = maxLens.Sum();
+                        if (totalLen == 0) break;
+                        // Minimum 10% per column, distribute rest by text length
+                        var minWidth = totalWidth * 0.1 / colCount;
+                        var distributable = totalWidth - minWidth * colCount;
+                        for (int ci = 0; ci < colCount; ci++)
+                            gridCols[ci].Width = (long)(minWidth + distributable * maxLens[ci] / totalLen);
+                        break;
+                    }
+                    case "shadow":
+                    {
+                        var table = gf.Descendants<Drawing.Table>().FirstOrDefault();
+                        if (table != null)
+                        {
+                            var tblPr = table.GetFirstChild<Drawing.TableProperties>()
+                                ?? table.PrependChild(new Drawing.TableProperties());
+                            var effectList = tblPr.GetFirstChild<Drawing.EffectList>();
+                            if (value.Equals("none", StringComparison.OrdinalIgnoreCase))
+                            {
+                                effectList?.RemoveAllChildren<Drawing.OuterShadow>();
+                                if (effectList?.ChildElements.Count == 0) effectList.Remove();
+                            }
+                            else
+                            {
+                                if (effectList == null) effectList = tblPr.AppendChild(new Drawing.EffectList());
+                                effectList.RemoveAllChildren<Drawing.OuterShadow>();
+                                var shadow = OfficeCli.Core.DrawingEffectsHelper.BuildOuterShadow(value, BuildColorElement);
+                                InsertEffectInOrder(effectList, shadow);
+                            }
+                        }
+                        break;
+                    }
+                    case "glow":
+                    {
+                        var table = gf.Descendants<Drawing.Table>().FirstOrDefault();
+                        if (table != null)
+                        {
+                            var tblPr = table.GetFirstChild<Drawing.TableProperties>()
+                                ?? table.PrependChild(new Drawing.TableProperties());
+                            var effectList = tblPr.GetFirstChild<Drawing.EffectList>();
+                            if (value.Equals("none", StringComparison.OrdinalIgnoreCase))
+                            {
+                                effectList?.RemoveAllChildren<Drawing.Glow>();
+                                if (effectList?.ChildElements.Count == 0) effectList.Remove();
+                            }
+                            else
+                            {
+                                if (effectList == null) effectList = tblPr.AppendChild(new Drawing.EffectList());
+                                effectList.RemoveAllChildren<Drawing.Glow>();
+                                var glow = OfficeCli.Core.DrawingEffectsHelper.BuildGlow(value, BuildColorElement);
+                                InsertEffectInOrder(effectList, glow);
+                            }
+                        }
+                        break;
+                    }
+                    case "bandcolor.odd" or "bandcolor.even":
+                    {
+                        var table = gf.Descendants<Drawing.Table>().FirstOrDefault();
+                        if (table != null)
+                        {
+                            var isOdd = key.ToLowerInvariant().EndsWith("odd");
+                            var rows = table.Elements<Drawing.TableRow>().ToList();
+                            for (int ri = 0; ri < rows.Count; ri++)
+                            {
+                                bool matchesOddEven = isOdd ? (ri % 2 == 0) : (ri % 2 == 1); // 0-based: odd rows are 0,2,4...
+                                if (matchesOddEven)
+                                {
+                                    foreach (var cell in rows[ri].Elements<Drawing.TableCell>())
+                                        SetTableCellProperties(cell, new Dictionary<string, string> { { "fill", value } });
+                                }
+                            }
+                        }
+                        break;
+                    }
+                    case var k when k.StartsWith("border") || k is "text" or "bold" or "italic" or "size" or "font" or "color" or "underline" or "strike" or "valign" or "fill" or "baseline" or "charspacing" or "opacity" or "bevel" or "margin" or "padding" or "textdirection" or "wordwrap" or "linespacing" or "spacebefore" or "spaceafter":
                     {
                         // Apply cell-level properties to all cells in the table
                         var table = gf.Descendants<Drawing.Table>().FirstOrDefault();

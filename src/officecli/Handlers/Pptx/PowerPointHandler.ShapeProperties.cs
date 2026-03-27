@@ -1334,6 +1334,67 @@ public partial class PowerPointHandler
                     }
                     break;
                 }
+                case "opacity" or "fill.opacity" or "alpha" or "fill.alpha":
+                {
+                    // Set fill opacity on the cell's existing fill element
+                    var tcPrO = cell.TableCellProperties ?? cell.GetFirstChild<Drawing.TableCellProperties>();
+                    if (tcPrO != null)
+                    {
+                        var alphaVal = (int)Math.Round(ParseHelpers.SafeParseDouble(value, "opacity") * 1000);
+                        // Clamp to 0-100000
+                        alphaVal = Math.Max(0, Math.Min(100000, alphaVal));
+                        var solidFill = tcPrO.GetFirstChild<Drawing.SolidFill>();
+                        if (solidFill != null)
+                        {
+                            var colorEl = solidFill.GetFirstChild<Drawing.RgbColorModelHex>()
+                                ?? solidFill.GetFirstChild<Drawing.SchemeColor>() as OpenXmlElement;
+                            if (colorEl != null)
+                            {
+                                colorEl.RemoveAllChildren<Drawing.Alpha>();
+                                colorEl.AppendChild(new Drawing.Alpha { Val = alphaVal });
+                            }
+                        }
+                    }
+                    break;
+                }
+                case "bevel" or "cell3d":
+                {
+                    // Cell3D bevel gives a subtle rounded/embossed look
+                    var tcPrB = cell.TableCellProperties ?? (cell.TableCellProperties = new Drawing.TableCellProperties());
+                    if (value.Equals("none", StringComparison.OrdinalIgnoreCase))
+                    {
+                        tcPrB.RemoveAllChildren<Drawing.Cell3DProperties>();
+                    }
+                    else
+                    {
+                        var cell3d = tcPrB.GetFirstChild<Drawing.Cell3DProperties>()
+                            ?? tcPrB.AppendChild(new Drawing.Cell3DProperties());
+                        cell3d.RemoveAllChildren<Drawing.Bevel>();
+
+                        // Parse: "circle" or "circle-6-6" (preset-width-height in pt)
+                        var bevelParts = value.Split('-');
+                        var preset = bevelParts[0].ToLowerInvariant() switch
+                        {
+                            "circle" => Drawing.BevelPresetValues.Circle,
+                            "relaxedinset" => Drawing.BevelPresetValues.RelaxedInset,
+                            "cross" => Drawing.BevelPresetValues.Cross,
+                            "coolslant" => Drawing.BevelPresetValues.CoolSlant,
+                            "angle" => Drawing.BevelPresetValues.Angle,
+                            "softround" => Drawing.BevelPresetValues.SoftRound,
+                            "convex" => Drawing.BevelPresetValues.Convex,
+                            "slope" => Drawing.BevelPresetValues.Slope,
+                            "artdeco" => Drawing.BevelPresetValues.ArtDeco,
+                            _ => Drawing.BevelPresetValues.Circle
+                        };
+                        var bevel = new Drawing.Bevel { Preset = preset };
+                        if (bevelParts.Length >= 2)
+                            bevel.Width = (long)(ParseHelpers.SafeParseDouble(bevelParts[1], "bevel width") * 12700); // pt to EMU
+                        if (bevelParts.Length >= 3)
+                            bevel.Height = (long)(ParseHelpers.SafeParseDouble(bevelParts[2], "bevel height") * 12700);
+                        cell3d.AppendChild(bevel);
+                    }
+                    break;
+                }
                 case "image":
                 {
                     // Validate before modifying (atomic: no data loss on invalid input)

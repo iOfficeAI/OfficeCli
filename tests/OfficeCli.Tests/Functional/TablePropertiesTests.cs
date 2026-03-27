@@ -258,6 +258,145 @@ public class PptxTablePropertiesTests : IDisposable
         sa.GetFirstChild<Drawing.SpacingPoints>()!.Val!.Value.Should().Be(600);
         _handler = new PowerPointHandler(_path, editable: true);
     }
+
+    // ==================== Cell fill opacity ====================
+
+    [Fact]
+    public void Set_CellOpacity_AddsAlphaToFill()
+    {
+        _handler.Set("/slide[1]/table[1]/tr[1]/tc[1]", new() { ["fill"] = "FF0000" });
+        _handler.Set("/slide[1]/table[1]/tr[1]/tc[1]", new() { ["opacity"] = "50" });
+        _handler.Dispose();
+        using var doc = PresentationDocument.Open(_path, false);
+        var tc = doc.PresentationPart!.SlideParts.First().Slide
+            .Descendants<Drawing.TableCell>().First();
+        var solid = tc.TableCellProperties!.GetFirstChild<Drawing.SolidFill>()!;
+        var alpha = solid.GetFirstChild<Drawing.RgbColorModelHex>()!
+            .GetFirstChild<Drawing.Alpha>();
+        alpha.Should().NotBeNull();
+        alpha!.Val!.Value.Should().Be(50000);
+        _handler = new PowerPointHandler(_path, editable: true);
+    }
+
+    // ==================== Cell 3D bevel ====================
+
+    [Fact]
+    public void Set_CellBevel_CreatesCell3DProperties()
+    {
+        _handler.Set("/slide[1]/table[1]/tr[1]/tc[1]", new() { ["bevel"] = "circle" });
+        _handler.Dispose();
+        using var doc = PresentationDocument.Open(_path, false);
+        var tc = doc.PresentationPart!.SlideParts.First().Slide
+            .Descendants<Drawing.TableCell>().First();
+        var cell3d = tc.TableCellProperties!.GetFirstChild<Drawing.Cell3DProperties>();
+        cell3d.Should().NotBeNull();
+        cell3d!.GetFirstChild<Drawing.Bevel>()!.Preset!.Value.Should().Be(Drawing.BevelPresetValues.Circle);
+        _handler = new PowerPointHandler(_path, editable: true);
+    }
+
+    [Fact]
+    public void Set_CellBevel_None_RemovesCell3D()
+    {
+        _handler.Set("/slide[1]/table[1]/tr[1]/tc[1]", new() { ["bevel"] = "circle" });
+        _handler.Set("/slide[1]/table[1]/tr[1]/tc[1]", new() { ["bevel"] = "none" });
+        _handler.Dispose();
+        using var doc = PresentationDocument.Open(_path, false);
+        var tc = doc.PresentationPart!.SlideParts.First().Slide
+            .Descendants<Drawing.TableCell>().First();
+        tc.TableCellProperties!.GetFirstChild<Drawing.Cell3DProperties>().Should().BeNull();
+        _handler = new PowerPointHandler(_path, editable: true);
+    }
+
+    // ==================== Table-level shadow/glow ====================
+
+    [Fact]
+    public void Set_TableShadow_CreatesEffectList()
+    {
+        _handler.Set("/slide[1]/table[1]", new() { ["shadow"] = "000000-4-135-3-50" });
+        _handler.Dispose();
+        using var doc = PresentationDocument.Open(_path, false);
+        var table = doc.PresentationPart!.SlideParts.First().Slide
+            .Descendants<Drawing.Table>().First();
+        var tblPr = table.GetFirstChild<Drawing.TableProperties>()!;
+        var effectList = tblPr.GetFirstChild<Drawing.EffectList>();
+        effectList.Should().NotBeNull();
+        effectList!.GetFirstChild<Drawing.OuterShadow>().Should().NotBeNull();
+        _handler = new PowerPointHandler(_path, editable: true);
+    }
+
+    [Fact]
+    public void Set_TableGlow_CreatesEffectList()
+    {
+        _handler.Set("/slide[1]/table[1]", new() { ["glow"] = "3B82F6-8-75" });
+        _handler.Dispose();
+        using var doc = PresentationDocument.Open(_path, false);
+        var table = doc.PresentationPart!.SlideParts.First().Slide
+            .Descendants<Drawing.Table>().First();
+        var tblPr = table.GetFirstChild<Drawing.TableProperties>()!;
+        var effectList = tblPr.GetFirstChild<Drawing.EffectList>();
+        effectList.Should().NotBeNull();
+        effectList!.GetFirstChild<Drawing.Glow>().Should().NotBeNull();
+        _handler = new PowerPointHandler(_path, editable: true);
+    }
+
+    // ==================== Custom banded row colors ====================
+
+    [Fact]
+    public void Set_BandColorOdd_AppliesFillToOddRows()
+    {
+        _handler.Set("/slide[1]/table[1]", new() { ["bandColor.odd"] = "4472C4" });
+        _handler.Dispose();
+        using var doc = PresentationDocument.Open(_path, false);
+        var table = doc.PresentationPart!.SlideParts.First().Slide
+            .Descendants<Drawing.Table>().First();
+        var rows = table.Elements<Drawing.TableRow>().ToList();
+        // Row 0 (odd) should have fill, row 1 (even) should not
+        var tc0 = rows[0].Elements<Drawing.TableCell>().First();
+        tc0.TableCellProperties!.GetFirstChild<Drawing.SolidFill>().Should().NotBeNull();
+        var tc1 = rows[1].Elements<Drawing.TableCell>().First();
+        tc1.TableCellProperties!.GetFirstChild<Drawing.SolidFill>().Should().BeNull();
+        _handler = new PowerPointHandler(_path, editable: true);
+    }
+
+    // ==================== CSV data import ====================
+
+    [Fact]
+    public void Add_Table_WithInlineData_PopulatesCells()
+    {
+        _handler.Add("/slide[1]", "table", null, new()
+        {
+            ["data"] = "Name,Score;Alice,95;Bob,88",
+            ["style"] = "medium2"
+        });
+        var node = _handler.Get("/slide[1]/table[2]", depth: 2);
+        node.Type.Should().Be("table");
+        node.Format["rows"].Should().Be(3);
+        // Verify cell text
+        node.Children[0].Children[0].Text.Should().Be("Name");
+        node.Children[0].Children[1].Text.Should().Be("Score");
+        node.Children[1].Children[0].Text.Should().Be("Alice");
+        node.Children[2].Children[1].Text.Should().Be("88");
+    }
+
+    // ==================== Autofit column width ====================
+
+    [Fact]
+    public void Set_Autofit_AdjustsColumnWidths()
+    {
+        // Set different text lengths so autofit produces unequal widths
+        _handler.Set("/slide[1]/table[1]/tr[1]/tc[1]", new() { ["text"] = "A" });
+        _handler.Set("/slide[1]/table[1]/tr[1]/tc[2]", new() { ["text"] = "Very Long Column Name Here" });
+        _handler.Set("/slide[1]/table[1]/tr[1]/tc[3]", new() { ["text"] = "Med" });
+        _handler.Set("/slide[1]/table[1]", new() { ["autofit"] = "true" });
+        _handler.Dispose();
+        using var doc = PresentationDocument.Open(_path, false);
+        var table = doc.PresentationPart!.SlideParts.First().Slide
+            .Descendants<Drawing.Table>().First();
+        var gridCols = table.TableGrid!.Elements<Drawing.GridColumn>().ToList();
+        // Column 2 (longest text) should be wider than column 1 (shortest)
+        gridCols[1].Width!.Value.Should().BeGreaterThan(gridCols[0].Width!.Value);
+        _handler = new PowerPointHandler(_path, editable: true);
+    }
 }
 
 // ==================== DOCX Table Properties Tests ====================
