@@ -159,10 +159,10 @@ public partial class PowerPointHandler
         if (manualLayout != null)
         {
             // ManualLayout x/y/w/h are fractions of the chart area (0.0 - 1.0)
-            var mlX = manualLayout.Left?.Val?.Value ?? manualLayout.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.Left>()?.Val?.Value ?? 0.0;
-            var mlY = manualLayout.Top?.Val?.Value ?? manualLayout.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.Top>()?.Val?.Value ?? 0.0;
-            var mlW = manualLayout.Width?.Val?.Value ?? manualLayout.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.Width>()?.Val?.Value ?? 1.0;
-            var mlH = manualLayout.Height?.Val?.Value ?? manualLayout.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.Height>()?.Val?.Value ?? 1.0;
+            var mlX = manualLayout.Left?.Val?.Value ?? 0.0;
+            var mlY = manualLayout.Top?.Val?.Value ?? 0.0;
+            var mlW = manualLayout.Width?.Val?.Value ?? 1.0;
+            var mlH = manualLayout.Height?.Val?.Value ?? 1.0;
             marginLeft = (int)(mlX * svgW);
             marginTop = (int)(mlY * chartSvgH);
             marginRight = (int)((1.0 - mlX - mlW) * svgW);

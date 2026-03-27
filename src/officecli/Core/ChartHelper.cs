@@ -285,17 +285,18 @@ internal static partial class ChartHelper
         {
             ml = new C.ManualLayout();
             if (isPlotArea)
-                ml.AppendChild(new C.LayoutTarget { Val = C.LayoutTargetValues.Inner });
-            ml.AppendChild(new C.LeftMode { Val = C.LayoutModeValues.Edge });
-            ml.AppendChild(new C.TopMode { Val = C.LayoutModeValues.Edge });
+                ml.LayoutTarget = new C.LayoutTarget { Val = C.LayoutTargetValues.Inner };
+            ml.LeftMode = new C.LeftMode { Val = C.LayoutModeValues.Edge };
+            ml.TopMode = new C.TopMode { Val = C.LayoutModeValues.Edge };
             layout.AppendChild(ml);
         }
+        // Use typed properties to guarantee schema order (OneSequence)
         switch (prop)
         {
-            case "x": ml.RemoveAllChildren<C.Left>(); ml.AppendChild(new C.Left { Val = value }); break;
-            case "y": ml.RemoveAllChildren<C.Top>(); ml.AppendChild(new C.Top { Val = value }); break;
-            case "w": ml.RemoveAllChildren<C.Width>(); ml.AppendChild(new C.Width { Val = value }); break;
-            case "h": ml.RemoveAllChildren<C.Height>(); ml.AppendChild(new C.Height { Val = value }); break;
+            case "x": ml.Left = new C.Left { Val = value }; break;
+            case "y": ml.Top = new C.Top { Val = value }; break;
+            case "w": ml.Width = new C.Width { Val = value }; break;
+            case "h": ml.Height = new C.Height { Val = value }; break;
         }
     }
 
@@ -309,10 +310,10 @@ internal static partial class ChartHelper
         var ml = layout?.GetFirstChild<C.ManualLayout>();
         if (ml == null) return;
 
-        var x = ml.Left?.Val?.Value ?? ml.GetFirstChild<C.Left>()?.Val?.Value;
-        var y = ml.Top?.Val?.Value ?? ml.GetFirstChild<C.Top>()?.Val?.Value;
-        var w = ml.Width?.Val?.Value ?? ml.GetFirstChild<C.Width>()?.Val?.Value;
-        var h = ml.Height?.Val?.Value ?? ml.GetFirstChild<C.Height>()?.Val?.Value;
+        var x = ml.Left?.Val?.Value;
+        var y = ml.Top?.Val?.Value;
+        var w = ml.Width?.Val?.Value;
+        var h = ml.Height?.Val?.Value;
 
         if (x != null) node.Format[$"{prefix}.x"] = x.Value.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
         if (y != null) node.Format[$"{prefix}.y"] = y.Value.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
