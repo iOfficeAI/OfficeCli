@@ -15,12 +15,24 @@ namespace OfficeCli.Handlers;
 
 public partial class WordHandler
 {
+    /// <summary>Rendering context passed through the HTML generation pipeline.</summary>
+    private class HtmlRenderContext
+    {
+        public List<int> FootnoteRefs { get; } = new();
+        public List<int> EndnoteRefs { get; } = new();
+        public PageLayout? CachedPageLayout { get; set; }
+    }
+
+    /// <summary>Current render context — set during ViewAsHtml, used by all render methods.</summary>
+    private HtmlRenderContext _ctx = null!;
+
     /// <summary>
     /// Generate a self-contained HTML file that previews the Word document
     /// with formatting, tables, images, and lists.
     /// </summary>
     public string ViewAsHtml()
     {
+        _ctx = new HtmlRenderContext();
         var body = _doc.MainDocumentPart?.Document?.Body;
         if (body == null) return "<html><body><p>(empty document)</p></body></html>";
 
@@ -51,9 +63,7 @@ public partial class WordHandler
         // Render header
         RenderHeaderFooterHtml(sb, isHeader: true);
 
-        // Render body elements (tracks footnote/endnote references)
-        _footnoteRefs = new List<int>();
-        _endnoteRefs = new List<int>();
+        // Render body elements (footnote/endnote refs tracked in _ctx)
         RenderBodyHtml(sb, body);
 
         // Render footnotes section
@@ -91,17 +101,20 @@ public partial class WordHandler
 
     private PageLayout GetPageLayout()
     {
+        if (_ctx?.CachedPageLayout != null) return _ctx.CachedPageLayout;
         var sectPr = _doc.MainDocumentPart?.Document?.Body?.GetFirstChild<SectionProperties>();
         var pgSz = sectPr?.GetFirstChild<PageSize>();
         var pgMar = sectPr?.GetFirstChild<PageMargin>();
         const double c = 2.54 / 1440.0; // twips → cm
-        return new PageLayout(
+        var result = new PageLayout(
             (pgSz?.Width?.Value ?? 11906) * c,
             (pgSz?.Height?.Value ?? 16838) * c,
             (double)(pgMar?.Top?.Value ?? 1440) * c,
             (double)(pgMar?.Bottom?.Value ?? 1440) * c,
             (pgMar?.Left?.Value ?? 1440u) * c,
             (pgMar?.Right?.Value ?? 1440u) * c);
+        if (_ctx != null) _ctx.CachedPageLayout = result;
+        return result;
     }
 
     private record DocDef(string Font, double SizePt, double LineHeight, string Color);
@@ -518,16 +531,16 @@ public partial class WordHandler
         if (fnRef?.Id?.HasValue == true && fnRef.Id.Value > 0)
         {
             var fnId = (int)fnRef.Id.Value;
-            _footnoteRefs?.Add(fnId);
-            var fnNum = _footnoteRefs?.Count ?? fnId;
+            _ctx.FootnoteRefs.Add(fnId);
+            var fnNum = _ctx.FootnoteRefs.Count;
             sb.Append($"<sup class=\"fn-ref\"><a href=\"#fn{fnId}\" id=\"fnref{fnId}\">{fnNum}</a></sup>");
         }
         var enRef = run.GetFirstChild<EndnoteReference>();
         if (enRef?.Id?.HasValue == true && enRef.Id.Value > 0)
         {
             var enId = (int)enRef.Id.Value;
-            _endnoteRefs?.Add(enId);
-            var enNum = _endnoteRefs?.Count ?? enId;
+            _ctx.EndnoteRefs.Add(enId);
+            var enNum = _ctx.EndnoteRefs.Count;
             sb.Append($"<sup class=\"en-ref\"><a href=\"#en{enId}\" id=\"enref{enId}\">{enNum}</a></sup>");
         }
         // FootnoteReferenceMark / EndnoteReferenceMark: don't skip the run, just ignore the mark element
@@ -1090,18 +1103,22 @@ public partial class WordHandler
                 titleText = string.Join("", titleRuns);
             }
 
-            // Read series colors from chart, fallback to defaults
+            // Read series colors: collect all ser elements from the specific chart type element
+            // (barChart/lineChart/pieChart etc.) to match order with ChartHelper.ReadAllSeries
+            var chartTypeEl = plotArea.Elements().FirstOrDefault(e =>
+                e.LocalName is "barChart" or "bar3DChart" or "lineChart" or "line3DChart"
+                    or "pieChart" or "pie3DChart" or "doughnutChart" or "areaChart" or "area3DChart"
+                    or "scatterChart" or "radarChart" or "bubbleChart" or "ofPieChart");
+            var serElements = chartTypeEl?.Elements().Where(e => e.LocalName == "ser").ToList() ?? [];
             var colors = new List<string>();
-            foreach (var series in seriesList)
+            for (int si = 0; si < seriesList.Count; si++)
             {
-                // Try to read color from the series' solidFill in the chart XML
                 string? seriesColor = null;
-                var idx = seriesList.IndexOf(series);
-                var seriesElements = plotArea.Descendants().Where(e => e.LocalName == "ser").ToList();
-                if (idx < seriesElements.Count)
+                if (si < serElements.Count)
                 {
-                    var solidFill = seriesElements[idx].Descendants()
-                        .FirstOrDefault(e => e.LocalName == "solidFill");
+                    // Look for solidFill in the series' spPr
+                    var spPr = serElements[si].Elements().FirstOrDefault(e => e.LocalName == "spPr");
+                    var solidFill = spPr?.Elements().FirstOrDefault(e => e.LocalName == "solidFill");
                     if (solidFill != null)
                     {
                         var srgb = solidFill.Elements().FirstOrDefault(e => e.LocalName == "srgbClr");
@@ -1109,7 +1126,7 @@ public partial class WordHandler
                         if (seriesColor != null) seriesColor = $"#{seriesColor}";
                     }
                 }
-                colors.Add(seriesColor ?? Core.ChartSvgRenderer.DefaultColors[idx % Core.ChartSvgRenderer.DefaultColors.Length]);
+                colors.Add(seriesColor ?? Core.ChartSvgRenderer.DefaultColors[si % Core.ChartSvgRenderer.DefaultColors.Length]);
             }
 
             // Render SVG chart (use dark label colors for white background)
@@ -1163,6 +1180,19 @@ public partial class WordHandler
             }
 
             sb.Append("</svg>");
+
+            // Render legend if multiple series
+            if (seriesList.Count > 1)
+            {
+                sb.Append("<div style=\"display:flex;justify-content:center;gap:16px;margin-top:4px;font-size:9pt\">");
+                for (int li = 0; li < seriesList.Count; li++)
+                {
+                    var lColor = li < seriesColors.Count ? seriesColors[li] : "#999";
+                    sb.Append($"<span><span style=\"display:inline-block;width:12px;height:12px;background:{lColor};margin-right:4px;vertical-align:middle\"></span>{HtmlEncode(seriesList[li].name)}</span>");
+                }
+                sb.Append("</div>");
+            }
+
             sb.Append("</div>");
         }
         catch (Exception ex)
@@ -1171,13 +1201,11 @@ public partial class WordHandler
         }
     }
 
-    // Footnote/endnote reference tracking
-    private List<int>? _footnoteRefs;
-    private List<int>? _endnoteRefs;
+    // Footnote/endnote reference tracking is in _ctx.FootnoteRefs / _ctx.EndnoteRefs
 
     private void RenderFootnotesHtml(StringBuilder sb)
     {
-        if (_footnoteRefs == null || _footnoteRefs.Count == 0) return;
+        if (_ctx.FootnoteRefs.Count == 0) return;
         var fnPart = _doc.MainDocumentPart?.FootnotesPart;
         if (fnPart?.Footnotes == null) return;
 
@@ -1185,20 +1213,18 @@ public partial class WordHandler
         sb.AppendLine("<div class=\"footnotes\" style=\"font-size:9pt;color:#555\">");
 
         int num = 0;
-        foreach (var fnId in _footnoteRefs)
+        foreach (var fnId in _ctx.FootnoteRefs)
         {
             num++;
             var fn = fnPart.Footnotes.Elements<Footnote>().FirstOrDefault(f => f.Id?.Value == fnId);
             if (fn == null) continue;
 
             sb.Append($"<div id=\"fn{fnId}\" style=\"margin:0.3em 0\"><sup>{num}</sup> ");
-            foreach (var para in fn.Elements<Paragraph>())
+            var fnParas = fn.Elements<Paragraph>().ToList();
+            for (int pi = 0; pi < fnParas.Count; pi++)
             {
-                foreach (var run in para.Descendants<Run>())
-                {
-                    var text = GetRunText(run);
-                    sb.Append(HtmlEncode(text));
-                }
+                RenderParagraphContentHtml(sb, fnParas[pi]);
+                if (pi < fnParas.Count - 1) sb.Append("<br>");
             }
             sb.AppendLine($" <a href=\"#fnref{fnId}\" style=\"text-decoration:none\">\u21A9</a></div>");
         }
@@ -1207,7 +1233,7 @@ public partial class WordHandler
 
     private void RenderEndnotesHtml(StringBuilder sb)
     {
-        if (_endnoteRefs == null || _endnoteRefs.Count == 0) return;
+        if (_ctx.EndnoteRefs.Count == 0) return;
         var enPart = _doc.MainDocumentPart?.EndnotesPart;
         if (enPart?.Endnotes == null) return;
 
@@ -1216,15 +1242,19 @@ public partial class WordHandler
         sb.AppendLine("<p style=\"font-weight:bold;margin-bottom:0.5em\">Endnotes</p>");
 
         int num = 0;
-        foreach (var enId in _endnoteRefs)
+        foreach (var enId in _ctx.EndnoteRefs)
         {
             num++;
             var en = enPart.Endnotes.Elements<Endnote>().FirstOrDefault(e => e.Id?.Value == enId);
             if (en == null) continue;
 
             sb.Append($"<div id=\"en{enId}\" style=\"margin:0.3em 0\"><sup>{num}</sup> ");
-            foreach (var para in en.Elements<Paragraph>())
-                RenderParagraphContentHtml(sb, para);
+            var enParas = en.Elements<Paragraph>().ToList();
+            for (int pi = 0; pi < enParas.Count; pi++)
+            {
+                RenderParagraphContentHtml(sb, enParas[pi]);
+                if (pi < enParas.Count - 1) sb.Append("<br>");
+            }
             sb.AppendLine($" <a href=\"#enref{enId}\" style=\"text-decoration:none\">\u21A9</a></div>");
         }
         sb.AppendLine("</div>");
@@ -1466,7 +1496,7 @@ public partial class WordHandler
                 var w = col.Width?.Value;
                 if (w != null)
                 {
-                    var px = (int)(double.Parse(w) / 1440.0 * 96); // twips to px
+                    var px = (int)(double.Parse(w, System.Globalization.CultureInfo.InvariantCulture) / 1440.0 * 96); // twips to px
                     sb.Append($"<col style=\"width:{px}px\">");
                 }
                 else
