@@ -698,6 +698,10 @@ public partial class ExcelHandler
         // Strip [Color] markers: [Red], [Blue], [Green], [Color N], etc.
         fmtCode = System.Text.RegularExpressions.Regex.Replace(fmtCode, @"\[(Red|Blue|Green|Yellow|White|Black|Cyan|Magenta|Color\s*\d+)\]", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
 
+        // Strip accounting format characters: _X (space placeholder) and *X (fill character)
+        fmtCode = System.Text.RegularExpressions.Regex.Replace(fmtCode, @"_.", "").Trim();
+        fmtCode = System.Text.RegularExpressions.Regex.Replace(fmtCode, @"\*.", "").Trim();
+
         // Strip condition markers: [>100], [<=0], etc.
         fmtCode = System.Text.RegularExpressions.Regex.Replace(fmtCode, @"\[[<>=!]+\d+\.?\d*\]", "").Trim();
 
@@ -762,13 +766,24 @@ public partial class ExcelHandler
             try
             {
                 var dt = DateTime.FromOADate(value);
+                // Context-sensitive m/mm: after h → minute, otherwise → month
+                // Strategy: mark minute 'm' as '\x01' placeholder, then convert remaining m→M
                 var dotnetFmt = fmtCode
-                    .Replace("yyyy", "yyyy").Replace("yy", "yy")
-                    .Replace("mmmm", "MMMM").Replace("mmm", "MMM").Replace("mm", "MM").Replace("m", "M")
-                    .Replace("dddd", "dddd").Replace("ddd", "ddd").Replace("dd", "dd").Replace("d", "d")
-                    .Replace("hh", "HH").Replace("h", "H")
-                    .Replace("ss", "ss").Replace("s", "s")
                     .Replace("AM/PM", "tt").Replace("am/pm", "tt");
+                // Step 1: Replace h:mm and h:m patterns → mark minutes as placeholder
+                dotnetFmt = System.Text.RegularExpressions.Regex.Replace(dotnetFmt, @"([hH]+)([:.])(mm?)", m =>
+                    m.Groups[1].Value + m.Groups[2].Value + new string('\x01', m.Groups[3].Value.Length));
+                // Also handle mm:ss (mm before ss is also minutes)
+                dotnetFmt = System.Text.RegularExpressions.Regex.Replace(dotnetFmt, @"(mm?)([:.])(ss?)", m =>
+                    new string('\x01', m.Groups[1].Value.Length) + m.Groups[2].Value + m.Groups[3].Value);
+                // Step 2: Convert remaining m/mm to M/MM (month)
+                dotnetFmt = dotnetFmt.Replace("mmmm", "MMMM").Replace("mmm", "MMM")
+                    .Replace("mm", "MM").Replace("m", "M");
+                // Step 3: Restore minute placeholders
+                dotnetFmt = dotnetFmt.Replace("\x01\x01", "mm").Replace("\x01", "m");
+                // Step 4: Other conversions
+                dotnetFmt = dotnetFmt.Replace("hh", "HH").Replace("h", "H")
+                    .Replace("dddd", "dddd").Replace("ddd", "ddd").Replace("dd", "dd");
                 return dt.ToString(dotnetFmt, System.Globalization.CultureInfo.InvariantCulture);
             }
             catch { return value.ToString(); }
