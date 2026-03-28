@@ -53,6 +53,7 @@ public partial class ExcelHandler
             var displayStyle = sheetIdx == 0 ? "" : " style=\"display:none\"";
             sb.AppendLine($"<div class=\"sheet-content\" data-sheet=\"{sheetIdx}\"{displayStyle}>");
             RenderSheetTable(sb, sheetName, worksheetPart, stylesheet);
+            RenderSheetCharts(sb, worksheetPart);
             sb.AppendLine("</div>");
         }
 
@@ -781,6 +782,16 @@ public partial class ExcelHandler
         }
         /* Frozen pane visual separator */
         tr:nth-child(1) td { border-top-color: #e0e0e0; }
+        /* Chart containers */
+        .chart-container {
+            margin: 16px auto;
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            padding: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        .chart-container svg { display: block; }
         """;
 
     // ==================== JavaScript ====================
