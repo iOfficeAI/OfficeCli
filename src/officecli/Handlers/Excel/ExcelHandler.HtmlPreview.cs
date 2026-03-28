@@ -166,7 +166,10 @@ public partial class ExcelHandler
         for (int c = 1; c <= maxCol; c++)
         {
             var width = colWidths.TryGetValue(c, out var w) ? w : 64.0; // default ~8.43 chars ≈ 64px
-            sb.Append($"<col style=\"width:{width:0.#}px\">");
+            if (width <= 0)
+                sb.Append("<col style=\"width:0;visibility:collapse\">");
+            else
+                sb.Append($"<col style=\"width:{width:0.#}px\">");
         }
         sb.AppendLine("</colgroup>");
 
@@ -360,6 +363,13 @@ public partial class ExcelHandler
             else
                 styles.Add("text-decoration:underline");
         }
+
+        // Superscript/Subscript via VerticalTextAlignment
+        var vertAlign = font.GetFirstChild<VerticalTextAlignment>();
+        if (vertAlign?.Val?.Value == VerticalAlignmentRunValues.Superscript)
+            styles.Add("vertical-align:super;font-size:smaller");
+        else if (vertAlign?.Val?.Value == VerticalAlignmentRunValues.Subscript)
+            styles.Add("vertical-align:sub;font-size:smaller");
 
         if (font.FontSize?.Val?.Value != null)
             styles.Add($"font-size:{font.FontSize.Val.Value:0.##}pt");
