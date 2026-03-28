@@ -243,6 +243,7 @@ This skill covers the officecli CLI basics. For complex scenarios, load the dedi
 | **Morph PPT** | `morph-ppt` | v1.0.24 | Morph-animated cinematic presentations |
 | **Excel** | `officecli-xlsx` | v1.0.23 | Create, read, edit .xlsx — financial models, trackers, formulas |
 | **Data dashboards** | `officecli-data-dashboard` | v1.0.24 | CSV/tabular data → Excel dashboards with KPI cards, charts, sparklines |
+| **Financial models** | `officecli-financial-model` | v1.0.24 | 3-statement models, DCF, cap tables, scenario analysis, sensitivity tables |
 
 > **How to load:** Ask your AI tool to enable the skill by name, or load the skill file from `skills/<skill-name>/SKILL.md`.
 
