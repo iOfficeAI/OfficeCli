@@ -603,6 +603,14 @@ public partial class ExcelHandler
                 System.Globalization.CultureInfo.InvariantCulture, out var numVal))
             return rawValue;
 
+        // Clean up floating point artifacts for display (e.g. 25300000.000000004 → 25300000)
+        var cleanVal = numVal;
+        var rounded = Math.Round(numVal, 10);
+        if (Math.Abs(rounded - Math.Round(rounded)) < 1e-9)
+            cleanVal = Math.Round(rounded);
+        rawValue = cleanVal == numVal ? rawValue
+            : cleanVal.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
         // Look up number format
         var styleIndex = cell.StyleIndex?.Value ?? 0;
         if (styleIndex == 0 || stylesheet == null) return rawValue;

@@ -33,10 +33,17 @@ internal record FormulaResult
     public string AsString() => StringValue ?? NumericValue?.ToString(CultureInfo.InvariantCulture)
         ?? (BoolValue.HasValue ? (BoolValue.Value ? "TRUE" : "FALSE") : ErrorValue ?? "");
 
-    public string ToCellValueText() => NumericValue.HasValue
-        ? NumericValue.Value.ToString(CultureInfo.InvariantCulture)
-        : BoolValue.HasValue ? (BoolValue.Value ? "1" : "0")
-        : StringValue ?? "";
+    public string ToCellValueText()
+    {
+        if (NumericValue.HasValue)
+        {
+            var v = NumericValue.Value;
+            // Round to 15 significant digits to avoid floating point artifacts (e.g. 25300000.000000004)
+            if (v != 0) v = Math.Round(v, 15 - (int)Math.Floor(Math.Log10(Math.Abs(v))) - 1);
+            return v.ToString(CultureInfo.InvariantCulture);
+        }
+        return BoolValue.HasValue ? (BoolValue.Value ? "1" : "0") : StringValue ?? "";
+    }
 }
 
 /// <summary>
