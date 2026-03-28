@@ -183,6 +183,7 @@ public partial class ExcelHandler
         // Start table
         sb.AppendLine("<div class=\"table-wrapper\">");
         sb.AppendLine("<table>");
+        sb.AppendLine($"<caption class=\"sr-only\">{HtmlEncode(sheetName)}</caption>");
 
         // Colgroup for column widths + header column
         sb.Append("<colgroup><col class=\"row-header-col\">");
@@ -233,8 +234,15 @@ public partial class ExcelHandler
                     var cell = cellMap.TryGetValue((r, c), out var mc) ? mc : null;
                     var style = GetCellStyleCss(cell, stylesheet, frozenRows, frozenCols, r, c);
                     var value = cell != null ? GetFormattedCellValue(cell, stylesheet) : "";
+                    // Adjust colspan to exclude hidden columns within the merge range
+                    var adjColSpan = mergeInfo.ColSpan;
+                    if (adjColSpan > 1 && hiddenCols.Count > 0)
+                    {
+                        for (int hc = c + 1; hc < c + mergeInfo.ColSpan; hc++)
+                            if (hiddenCols.Contains(hc)) adjColSpan--;
+                    }
                     var spanAttrs = "";
-                    if (mergeInfo.ColSpan > 1) spanAttrs += $" colspan=\"{mergeInfo.ColSpan}\"";
+                    if (adjColSpan > 1) spanAttrs += $" colspan=\"{adjColSpan}\"";
                     if (mergeInfo.RowSpan > 1) spanAttrs += $" rowspan=\"{mergeInfo.RowSpan}\"";
 
                     sb.Append($"<td{spanAttrs}{style}>{CellHtml(value)}</td>");
@@ -250,8 +258,6 @@ public partial class ExcelHandler
             sb.AppendLine("</tr>");
         }
         sb.AppendLine("</tbody>");
-        // Add table caption for accessibility
-        sb.AppendLine($"<caption class=\"sr-only\">{HtmlEncode(sheetName)}</caption>");
         sb.AppendLine("</table>");
         // Truncation warning
         if (truncated)
