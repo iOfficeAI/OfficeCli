@@ -772,7 +772,7 @@ public partial class WordHandler
         .page-body {{ flex: 1; }}
         .doc-header, .doc-footer {{ color: #888; font-size: 9pt; }}
         .doc-header {{ border-bottom: 1px solid #e0e0e0; margin-bottom: 1em; padding-bottom: 0.5em; }}
-        .doc-footer {{ position: absolute; bottom: 0.5cm; left: {mL}; right: {mR};
+        .doc-footer {{ position: absolute; bottom: {pg.FooterDistanceCm:0.##}cm; left: {mL}; right: {mR};
             border-top: 1px solid #e0e0e0; padding-top: 0.3em; }}
         h1, h2, h3, h4, h5, h6 {{ line-height: 1.4; }}
         p {{ margin: 0; }}

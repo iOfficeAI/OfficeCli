@@ -145,7 +145,8 @@ public partial class WordHandler
     // ==================== Page Layout + Doc Defaults from OOXML ====================
 
     private record PageLayout(double WidthCm, double HeightCm,
-        double MarginTopCm, double MarginBottomCm, double MarginLeftCm, double MarginRightCm);
+        double MarginTopCm, double MarginBottomCm, double MarginLeftCm, double MarginRightCm,
+        double FooterDistanceCm);
 
     private PageLayout GetPageLayout()
     {
@@ -160,7 +161,8 @@ public partial class WordHandler
             (double)(pgMar?.Top?.Value ?? 1440) * c,
             (double)(pgMar?.Bottom?.Value ?? 1440) * c,
             (pgMar?.Left?.Value ?? 1440u) * c,
-            (pgMar?.Right?.Value ?? 1440u) * c);
+            (pgMar?.Right?.Value ?? 1440u) * c,
+            (pgMar?.Footer?.Value ?? 992u) * c);
         if (_ctx != null) _ctx.CachedPageLayout = result;
         return result;
     }
