@@ -352,46 +352,42 @@ public partial class WordHandler
 
     private void RenderParagraphContentHtml(StringBuilder sb, Paragraph para)
     {
-        // Check if paragraph has text box drawings — if so, skip fallback text runs
-        bool hasTextBoxDrawing = HasTextBoxContent(para);
-        bool textBoxRendered = false;
-
-        // Collect standalone images that precede text box groups (they overlay the group in Word)
-        var preGroupImages = new List<Drawing>();
+        // Collect standalone images that precede a text box group (they overlay the group in Word)
+        bool hasTextBoxGroup = HasTextBoxContent(para);
+        var preGroupImages = hasTextBoxGroup ? new List<Drawing>() : null;
+        bool textBoxSeen = false;
 
         foreach (var child in para.ChildElements)
         {
             if (child is Run run)
             {
-                // If this run contains a drawing with group/shape, render it
+                // Find drawing (direct child or inside mc:AlternateContent Choice)
+                // SDK's Descendants<Drawing>() naturally skips mc:Fallback (VML w:pict)
                 var drawing = run.GetFirstChild<Drawing>() ?? run.Descendants<Drawing>().FirstOrDefault();
+
                 if (drawing != null && HasGroupOrShape(drawing))
                 {
-                    bool hasTextBoxInDrawing = HasTextBox(drawing);
-                    // Render group with any preceding images overlaid
-                    if (hasTextBoxInDrawing)
+                    bool hasTextBox = HasTextBox(drawing);
+                    if (hasTextBox && preGroupImages != null)
                     {
+                        // Render group with preceding images overlaid into text box
                         RenderDrawingWithOverlaidImages(sb, drawing, preGroupImages);
                         preGroupImages.Clear();
+                        textBoxSeen = true;
                     }
                     else
                     {
                         RenderDrawingHtml(sb, drawing);
                     }
-                    if (hasTextBoxInDrawing) textBoxRendered = true;
                     continue;
                 }
 
-                // Collect standalone images before text box group
-                if (hasTextBoxDrawing && !textBoxRendered && drawing != null)
+                // Collect standalone images before text box group for overlay
+                if (hasTextBoxGroup && !textBoxSeen && drawing != null)
                 {
-                    preGroupImages.Add(drawing);
+                    preGroupImages!.Add(drawing);
                     continue;
                 }
-
-                // Skip fallback text runs only after a TEXT BOX has been rendered
-                if (hasTextBoxDrawing && textBoxRendered)
-                    continue;
 
                 RenderRunHtml(sb, run, para);
             }
