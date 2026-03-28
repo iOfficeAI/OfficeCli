@@ -1494,36 +1494,36 @@ public partial class WordHandler
         return $@"
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{ background: #f0f0f0; font-family: {font}; color: {dd.Color}; padding: 20px; }}
-        .page {{ background: white; margin: 0 auto 40px; padding: {mT} 0 {mB} 0;
+        .page {{ background: white; margin: 0 auto 40px; padding: {mT} {mR} {mB} {mL};
             box-shadow: 0 2px 8px rgba(0,0,0,0.15); border-radius: 4px;
             min-height: {pageH}; line-height: {lh}; font-size: {sz}; }}
-        .doc-header, .doc-footer {{ padding: 0 {lr}; color: #888; font-size: 9pt;
+        .doc-header, .doc-footer {{ color: #888; font-size: 9pt;
             border-bottom: 1px solid #e0e0e0; margin-bottom: 1em; padding-bottom: 0.5em; }}
         .doc-footer {{ border-bottom: none; border-top: 1px solid #e0e0e0;
             margin-top: 1em; padding-top: 0.5em; margin-bottom: 0; }}
-        h1, h2, h3, h4, h5, h6 {{ padding: 0.3em {lr}; line-height: 1.4; }}
+        h1, h2, h3, h4, h5, h6 {{ line-height: 1.4; }}
         h1 {{ font-size: 22pt; margin-top: 0.5em; margin-bottom: 0.3em; }}
         h2 {{ font-size: 16pt; margin-top: 0.4em; margin-bottom: 0.2em; }}
         h3 {{ font-size: 13pt; margin-top: 0.3em; margin-bottom: 0.2em; }}
         h4 {{ font-size: 11pt; margin-top: 0.2em; margin-bottom: 0.1em; }}
         h5 {{ font-size: 10pt; }} h6 {{ font-size: 9pt; }}
-        p {{ padding: 0 {lr}; margin: 0.1em 0; }}
-        p.empty {{ margin: 0; padding: 0 {lr}; line-height: 0.8; font-size: 6pt; }}
+        p {{ margin: 0.1em 0; }}
+        p.empty {{ margin: 0; line-height: 0.8; font-size: 6pt; }}
         a {{ color: #2B579A; }} a:hover {{ color: #1a3c6e; }}
-        ul, ol {{ padding-left: 2em; margin: 0.2em 0 0.2em {mL}; }}
+        ul, ol {{ padding-left: 2em; margin: 0.2em 0; }}
         li {{ margin: 0.1em 0; }}
-        .equation {{ text-align: center; padding: 0.5em {lr}; overflow-x: auto; }}
+        .equation {{ text-align: center; padding: 0.5em 0; overflow-x: auto; }}
         img {{ max-width: 100%; height: auto; }}
         .img-error {{ color: #999; font-style: italic; }}
-        table {{ border-collapse: collapse; margin: 0.3em {lr}; font-size: {sz}; width: {tblW}; }}
-        .wg {{ margin: 0.3em auto; }}
+        table {{ border-collapse: collapse; font-size: {sz}; width: 100%; }}
+        .wg {{ margin: 0.3em 0; }}
         .wg p {{ padding: 0; margin: 0.05em 0; }}
         table.borderless {{ border: none; }}
         table.borderless td, table.borderless th {{ border: none; padding: 2px 6px; }}
         th, td {{ border: 1px solid #bbb; padding: 4px 8px; text-align: left; vertical-align: top; }}
         th {{ background: #f0f0f0; font-weight: 600; }}
         .header-row td, .header-row th {{ background: #f0f0f0; font-weight: 600; }}
-        hr.page-break {{ border: none; border-top: 2px dashed #ccc; margin: 2em {lr}; }}
+        hr.page-break {{ border: none; border-top: 2px dashed #ccc; margin: 2em 0; }}
         @media print {{ body {{ background: white; padding: 0; }}
             .page {{ box-shadow: none; margin: 0; max-width: none; }}
             hr.page-break {{ page-break-after: always; border: none; margin: 0; }} }}";
