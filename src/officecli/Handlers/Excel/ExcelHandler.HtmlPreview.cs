@@ -825,6 +825,17 @@ public partial class ExcelHandler
             return $"{mantissa.ToString($"F{decimals}")}E{expStr}";
         }
 
+        // Trailing comma scaling: each trailing comma divides value by 1000
+        // e.g. "#," = ÷1000, "#,," = ÷1000000, "#,##0," = thousands + ÷1000
+        var trailingCommas = 0;
+        var fmtTrimmed = fmtCode.TrimEnd();
+        while (fmtTrimmed.EndsWith(',')) { trailingCommas++; fmtTrimmed = fmtTrimmed[..^1]; }
+        if (trailingCommas > 0)
+        {
+            value /= Math.Pow(1000, trailingCommas);
+            fmtCode = fmtTrimmed;
+        }
+
         // Numeric with thousands separator and/or decimals
         bool hasThousands = fmtCode.Contains(',') && (fmtCode.Contains('#') || fmtCode.Contains('0'));
         var numDecimals = CountDecimalPlaces(fmtCode);
