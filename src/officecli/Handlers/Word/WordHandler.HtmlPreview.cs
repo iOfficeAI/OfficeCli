@@ -146,26 +146,55 @@ public partial class WordHandler
         sb.AppendLine("      {left:'$$',right:'$$',display:true}");
         sb.AppendLine("    ],throwOnError:false});");
         sb.AppendLine("  }");
-        // CJK punctuation compression (~25% per JIS X4051): negative margin on punctuation
+        // CJK text shaping: punctuation compression + autoSpaceDN/autoSpaceDE
         sb.AppendLine("  (function(){");
-        sb.AppendLine("  var re=/([\\u3000-\\u303F\\uFF01-\\uFF60\\uFE30-\\uFE4F\\u2014\\u2015\\u2026\\u2018\\u2019\\u201C\\u201D])/;");
+        // Character classification helpers
+        sb.AppendLine("  var P=/[\\u3000-\\u303F\\uFF01-\\uFF60\\uFE30-\\uFE4F\\u2014\\u2015\\u2026\\u2018\\u2019\\u201C\\u201D]/;");
+        sb.AppendLine("  function isCJK(c){var v=c.charCodeAt(0);return(v>=0x4E00&&v<=0x9FFF)||(v>=0x3400&&v<=0x4DBF)||(v>=0xF900&&v<=0xFAFF)||(v>=0x2E80&&v<=0x2FDF)||P.test(c);}");
+        sb.AppendLine("  function isLatin(c){return/[a-zA-Z0-9]/.test(c);}");
         sb.AppendLine("  document.querySelectorAll('.page-body').forEach(function(body){");
-        sb.AppendLine("    var w=document.createTreeWalker(body,NodeFilter.SHOW_TEXT);");
-        sb.AppendLine("    var nodes=[];while(w.nextNode())nodes.push(w.currentNode);");
+        sb.AppendLine("    var walker=document.createTreeWalker(body,NodeFilter.SHOW_TEXT);");
+        sb.AppendLine("    var nodes=[];while(walker.nextNode())nodes.push(walker.currentNode);");
         sb.AppendLine("    nodes.forEach(function(nd){");
-        sb.AppendLine("      if(!re.test(nd.textContent))return;");
-        sb.AppendLine("      var parts=nd.textContent.split(re);");
-        sb.AppendLine("      if(parts.length<=1)return;");
-        sb.AppendLine("      var frag=document.createDocumentFragment();");
-        sb.AppendLine("      for(var i=0;i<parts.length;i++){");
-        sb.AppendLine("        if(!parts[i])continue;");
-        sb.AppendLine("        if(re.test(parts[i])){");
-        sb.AppendLine("          var sp=document.createElement('span');");
-        sb.AppendLine("          sp.textContent=parts[i];");
-        sb.AppendLine("          sp.style.marginRight='-0.2em';");
-        sb.AppendLine("          frag.appendChild(sp);");
-        sb.AppendLine("        }else frag.appendChild(document.createTextNode(parts[i]));");
+        sb.AppendLine("      var txt=nd.textContent;");
+        sb.AppendLine("      if(!txt||txt.length<1)return;");
+        // Check if any processing needed (CJK punct or CJK↔Latin boundary)
+        sb.AppendLine("      var needProc=false;");
+        sb.AppendLine("      for(var i=0;i<txt.length;i++){");
+        sb.AppendLine("        if(P.test(txt[i])){needProc=true;break;}");
+        sb.AppendLine("        if(i>0&&((isCJK(txt[i-1])&&isLatin(txt[i]))||(isLatin(txt[i-1])&&isCJK(txt[i])))){needProc=true;break;}");
         sb.AppendLine("      }");
+        sb.AppendLine("      if(!needProc)return;");
+        // Process character by character
+        sb.AppendLine("      var frag=document.createDocumentFragment();");
+        sb.AppendLine("      var buf='';");
+        sb.AppendLine("      for(var i=0;i<txt.length;i++){");
+        sb.AppendLine("        var ch=txt[i];");
+        // 1) CJK punctuation → inline-block compressed box
+        sb.AppendLine("        if(P.test(ch)){");
+        sb.AppendLine("          if(buf){frag.appendChild(document.createTextNode(buf));buf='';}");
+        sb.AppendLine("          var sp=document.createElement('span');");
+        sb.AppendLine("          sp.textContent=ch;");
+        sb.AppendLine("          sp.style.cssText='display:inline-block;width:0.8em;text-align:center';");
+        sb.AppendLine("          frag.appendChild(sp);");
+        sb.AppendLine("          continue;");
+        sb.AppendLine("        }");
+        // 2) autoSpaceDN/DE: CJK↔Latin boundary → insert thin space
+        sb.AppendLine("        if(i>0){");
+        sb.AppendLine("          var prev=txt[i-1];");
+        sb.AppendLine("          if(!P.test(prev)){");  // skip if prev was punct (already handled)
+        sb.AppendLine("            if((isCJK(prev)&&isLatin(ch))||(isLatin(prev)&&isCJK(ch))){");
+        sb.AppendLine("              if(buf){frag.appendChild(document.createTextNode(buf));buf='';}");
+        sb.AppendLine("              var gap=document.createElement('span');");
+        sb.AppendLine("              gap.style.cssText='margin-left:0.12em';");
+        sb.AppendLine("              gap.textContent='';");
+        sb.AppendLine("              frag.appendChild(gap);");
+        sb.AppendLine("            }");
+        sb.AppendLine("          }");
+        sb.AppendLine("        }");
+        sb.AppendLine("        buf+=ch;");
+        sb.AppendLine("      }");
+        sb.AppendLine("      if(buf)frag.appendChild(document.createTextNode(buf));");
         sb.AppendLine("      nd.parentNode.replaceChild(frag,nd);");
         sb.AppendLine("    });");
         sb.AppendLine("  });");
