@@ -36,7 +36,8 @@ internal class ChartSvgRenderer
         string[] categories, List<string> colors, int ox, int oy, int pw, int ph,
         bool horizontal, bool stacked = false, bool percentStacked = false,
         double? ooxmlMax = null, double? ooxmlMin = null, double? ooxmlMajorUnit = null,
-        int? ooxmlGapWidth = null, int valFontSize = 9, int catFontSize = 9)
+        int? ooxmlGapWidth = null, int valFontSize = 9, int catFontSize = 9,
+        bool showDataLabels = false)
     {
         var allValues = series.SelectMany(s => s.values).ToArray();
         if (allValues.Length == 0) return;
@@ -168,6 +169,11 @@ internal class ChartSvgRenderer
                         var bx = ox + c * groupW + gap + s * barW;
                         var by = oy + ph - barH;
                         sb.AppendLine($"        <rect x=\"{bx:0.#}\" y=\"{by:0.#}\" width=\"{barW:0.#}\" height=\"{barH:0.#}\" fill=\"{colors[s % colors.Count]}\" opacity=\"0.85\"/>");
+                        if (showDataLabels)
+                        {
+                            var vlabel = rawVal % 1 == 0 ? $"{(int)rawVal}" : $"{rawVal:0.#}";
+                            sb.AppendLine($"        <text x=\"{bx + barW / 2:0.#}\" y=\"{by - 3:0.#}\" fill=\"{ValueColor}\" font-size=\"8\" text-anchor=\"middle\">{vlabel}</text>");
+                        }
                     }
                 }
             }

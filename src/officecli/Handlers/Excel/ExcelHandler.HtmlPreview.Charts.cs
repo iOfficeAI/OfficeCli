@@ -59,17 +59,39 @@ public partial class ExcelHandler
         var seriesList = ChartHelper.ReadAllSeries(plotArea);
         if (seriesList.Count == 0) return;
 
-        // 3. Read series colors
+        // 3. Read series colors (and per-point colors for pie/doughnut)
         var seriesColors = new List<string>();
         var serElements = plotArea.Descendants<OpenXmlCompositeElement>()
             .Where(e => e.LocalName == "ser").ToList();
-        for (int i = 0; i < seriesList.Count; i++)
+        var isPieType = chartType.Contains("pie") || chartType.Contains("doughnut");
+
+        if (isPieType && serElements.Count > 0)
         {
-            var serEl = i < serElements.Count ? serElements[i] : null;
-            var spPr = serEl?.GetFirstChild<C.ChartShapeProperties>();
-            var fill = spPr?.GetFirstChild<Drawing.SolidFill>();
-            var rgb = fill?.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
-            seriesColors.Add(rgb != null ? $"#{rgb}" : ChartSvgRenderer.DefaultColors[i % ChartSvgRenderer.DefaultColors.Length]);
+            // Pie/doughnut: colors are per data point (dPt), not per series
+            var ser = serElements[0];
+            var dPts = ser.Elements<OpenXmlCompositeElement>().Where(e => e.LocalName == "dPt").ToList();
+            var catCount = seriesList.FirstOrDefault().values?.Length ?? 0;
+            for (int i = 0; i < catCount; i++)
+            {
+                var dPt = dPts.FirstOrDefault(d =>
+                    d.Elements<OpenXmlCompositeElement>().FirstOrDefault(e => e.LocalName == "idx")
+                    ?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value == i.ToString());
+                var spPr = dPt?.GetFirstChild<C.ChartShapeProperties>();
+                var fill = spPr?.GetFirstChild<Drawing.SolidFill>();
+                var rgb = fill?.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
+                seriesColors.Add(rgb != null ? $"#{rgb}" : ChartSvgRenderer.DefaultColors[i % ChartSvgRenderer.DefaultColors.Length]);
+            }
+        }
+        else
+        {
+            for (int i = 0; i < seriesList.Count; i++)
+            {
+                var serEl = i < serElements.Count ? serElements[i] : null;
+                var spPr = serEl?.GetFirstChild<C.ChartShapeProperties>();
+                var fill = spPr?.GetFirstChild<Drawing.SolidFill>();
+                var rgb = fill?.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
+                seriesColors.Add(rgb != null ? $"#{rgb}" : ChartSvgRenderer.DefaultColors[i % ChartSvgRenderer.DefaultColors.Length]);
+            }
         }
 
         // 4. Estimate chart dimensions from TwoCellAnchor
@@ -207,7 +229,7 @@ public partial class ExcelHandler
             var isStacked = chartType.Contains("stacked") || chartType.Contains("Stacked");
             var isPercent = chartType.Contains("percent") || chartType.Contains("Percent");
             renderer.RenderBarChartSvg(sb, seriesList, categories, seriesColors, marginLeft, marginTop, plotW, plotH,
-                isHorizontal, isStacked, isPercent, ooxmlAxisMax, ooxmlAxisMin, ooxmlMajorUnit, ooxmlGapWidth, valLabelPx, catLabelPx);
+                isHorizontal, isStacked, isPercent, ooxmlAxisMax, ooxmlAxisMin, ooxmlMajorUnit, ooxmlGapWidth, valLabelPx, catLabelPx, showValues);
         }
 
         // Axis titles inside SVG
