@@ -1004,6 +1004,38 @@ public partial class WordHandler
 
     // ==================== Color Math Helpers ====================
 
+    /// <summary>Apply themeTint/themeShade to a base theme color hex.</summary>
+    private static string ApplyTintShade(string hex, string? tintHex, string? shadeHex)
+    {
+        if (hex.Length < 6) return $"#{hex}";
+        var r = Convert.ToInt32(hex[..2], 16);
+        var g = Convert.ToInt32(hex[2..4], 16);
+        var b = Convert.ToInt32(hex[4..6], 16);
+
+        // themeTint: blend toward white (tint value is hex 00-FF)
+        if (tintHex != null && int.TryParse(tintHex, System.Globalization.NumberStyles.HexNumber, null, out var tint))
+        {
+            var t = tint / 255.0;
+            r = (int)(r * t + 255 * (1 - t));
+            g = (int)(g * t + 255 * (1 - t));
+            b = (int)(b * t + 255 * (1 - t));
+        }
+
+        // themeShade: blend toward black
+        if (shadeHex != null && int.TryParse(shadeHex, System.Globalization.NumberStyles.HexNumber, null, out var shade))
+        {
+            var s = shade / 255.0;
+            r = (int)(r * s);
+            g = (int)(g * s);
+            b = (int)(b * s);
+        }
+
+        r = Math.Clamp(r, 0, 255);
+        g = Math.Clamp(g, 0, 255);
+        b = Math.Clamp(b, 0, 255);
+        return $"#{r:X2}{g:X2}{b:X2}";
+    }
+
     private static long GetLongAttr(OpenXmlElement? el, string attrName, long defaultVal = 0)
     {
         if (el == null) return defaultVal;
@@ -1354,7 +1386,7 @@ public partial class WordHandler
         return string.Join(";", parts);
     }
 
-    private static string GetRunInlineCss(RunProperties? rProps)
+    private string GetRunInlineCss(RunProperties? rProps)
     {
         if (rProps == null) return "";
         var parts = new List<string>();
@@ -1400,10 +1432,23 @@ public partial class WordHandler
             }
         }
 
-        // Color (direct or theme)
-        var color = rProps.Color?.Val?.Value;
-        if (color != null && color != "auto")
-            parts.Add($"color:#{color}");
+        // Color: w:color val is the pre-computed color (already has themeColor+themeTint applied).
+        // Use val directly; only fall back to theme resolution if val is missing.
+        var colorVal = rProps.Color?.Val?.Value;
+        if (colorVal != null && colorVal != "auto")
+        {
+            parts.Add($"color:#{colorVal}");
+        }
+        else if (rProps.Color?.ThemeColor?.InnerText is string tcName)
+        {
+            var tc = GetThemeColors();
+            if (tc.TryGetValue(tcName, out var tcHex))
+            {
+                var tint = rProps.Color?.GetAttributes().FirstOrDefault(a => a.LocalName == "themeTint").Value;
+                var shade = rProps.Color?.GetAttributes().FirstOrDefault(a => a.LocalName == "themeShade").Value;
+                parts.Add($"color:{ApplyTintShade(tcHex, tint, shade)}");
+            }
+        }
 
         // Highlight
         var highlight = rProps.Highlight?.Val?.InnerText;
