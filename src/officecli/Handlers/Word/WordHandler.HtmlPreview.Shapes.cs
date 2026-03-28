@@ -120,7 +120,14 @@ public partial class WordHandler
                     return;
                 }
                 // Standalone shape — render as inline block, not absolute positioned
+                // Check anchor horizontal alignment for centering (e.g., footer page numbers)
+                var hAlignEl = drawing.Descendants().FirstOrDefault(e => e.LocalName == "align" &&
+                    e.Parent?.LocalName == "positionH");
+                var hAlign = hAlignEl?.InnerText;
+                if (hAlign == "center") sb.Append("<div style=\"text-align:center\">");
+                else if (hAlign == "right") sb.Append("<div style=\"text-align:right\">");
                 RenderStandaloneShapeHtml(sb, shape, shapeWidth, shapeHeight, floatImages);
+                if (hAlign is "center" or "right") sb.Append("</div>");
                 return;
             }
         }
