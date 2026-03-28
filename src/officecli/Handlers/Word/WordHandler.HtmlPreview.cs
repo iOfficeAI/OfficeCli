@@ -345,14 +345,22 @@ public partial class WordHandler
         {
             if (child is Run run)
             {
-                // If this run contains a text box drawing, render it
+                // If this run contains a drawing with group/shape, render it
                 var drawing = run.GetFirstChild<Drawing>() ?? run.Descendants<Drawing>().FirstOrDefault();
                 if (drawing != null && HasGroupOrShape(drawing))
                 {
+                    bool hasTextBoxInDrawing = HasTextBox(drawing);
                     // Render group with any preceding images overlaid
-                    RenderDrawingWithOverlaidImages(sb, drawing, preGroupImages);
-                    preGroupImages.Clear();
-                    textBoxRendered = true;
+                    if (hasTextBoxInDrawing)
+                    {
+                        RenderDrawingWithOverlaidImages(sb, drawing, preGroupImages);
+                        preGroupImages.Clear();
+                    }
+                    else
+                    {
+                        RenderDrawingHtml(sb, drawing);
+                    }
+                    if (hasTextBoxInDrawing) textBoxRendered = true;
                     continue;
                 }
 
@@ -363,7 +371,7 @@ public partial class WordHandler
                     continue;
                 }
 
-                // Skip fallback text runs after text box has been rendered
+                // Skip fallback text runs only after a TEXT BOX has been rendered
                 if (hasTextBoxDrawing && textBoxRendered)
                     continue;
 
@@ -475,22 +483,34 @@ public partial class WordHandler
 
     // ==================== Drawing Rendering (images, groups, shapes) ====================
 
-    /// <summary>Check if a paragraph contains text box drawings.</summary>
+    /// <summary>Check if a paragraph contains drawings with actual text box content (txbxContent).</summary>
     private static bool HasTextBoxContent(Paragraph para)
     {
         foreach (var run in para.Elements<Run>())
         {
             var drawing = run.GetFirstChild<Drawing>() ?? run.Descendants<Drawing>().FirstOrDefault();
-            if (drawing != null && HasGroupOrShape(drawing))
+            if (drawing != null && HasTextBox(drawing))
                 return true;
         }
         return false;
     }
 
-    /// <summary>Check if a drawing contains groups or shapes with text boxes.</summary>
+    /// <summary>Check if a drawing contains groups or shapes (for rendering).</summary>
     private static bool HasGroupOrShape(Drawing drawing)
     {
         return drawing.Descendants().Any(e => e.LocalName == "wgp" || e.LocalName == "wsp");
+    }
+
+    /// <summary>Check if a drawing contains actual text box content with text (not empty decorative shapes).</summary>
+    private static bool HasTextBox(Drawing drawing)
+    {
+        foreach (var txbx in drawing.Descendants().Where(e => e.LocalName == "txbxContent"))
+        {
+            // Check if any paragraph inside has actual text
+            if (txbx.Descendants<Text>().Any(t => !string.IsNullOrWhiteSpace(t.Text)))
+                return true;
+        }
+        return false;
     }
 
     private void RenderDrawingHtml(StringBuilder sb, Drawing drawing)
