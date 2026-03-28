@@ -46,7 +46,30 @@ public partial class WordHandler
             }
         }
 
-        // 3. Apply run's own rPr (highest priority)
+        // 3. Resolve character style (rStyle) from the run's rPr
+        var rStyleId = run.RunProperties?.GetFirstChild<RunStyle>()?.Val?.Value;
+        if (rStyleId != null)
+        {
+            var rStyleChain = new List<Style>();
+            var rVisited = new HashSet<string>();
+            var curRStyleId = rStyleId;
+            while (curRStyleId != null && rVisited.Add(curRStyleId))
+            {
+                var rStyle = _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles
+                    ?.Elements<Style>().FirstOrDefault(s => s.StyleId?.Value == curRStyleId);
+                if (rStyle == null) break;
+                rStyleChain.Add(rStyle);
+                curRStyleId = rStyle.BasedOn?.Val?.Value;
+            }
+            for (int i = rStyleChain.Count - 1; i >= 0; i--)
+            {
+                var sRPr = rStyleChain[i].StyleRunProperties;
+                if (sRPr != null)
+                    MergeRunProperties(effective, sRPr);
+            }
+        }
+
+        // 4. Apply run's own direct rPr (highest priority, excluding rStyle which was resolved above)
         if (run.RunProperties != null)
             MergeRunProperties(effective, run.RunProperties);
 
@@ -80,6 +103,10 @@ public partial class WordHandler
         if (srcStrike != null)
             target.Strike = srcStrike.CloneNode(true) as Strike;
 
+        var srcDStrike = source.GetFirstChild<DoubleStrike>();
+        if (srcDStrike != null)
+            target.DoubleStrike = srcDStrike.CloneNode(true) as DoubleStrike;
+
         var srcColor = source.GetFirstChild<Color>();
         if (srcColor != null)
             target.Color = srcColor.CloneNode(true) as Color;
@@ -87,6 +114,22 @@ public partial class WordHandler
         var srcHighlight = source.GetFirstChild<Highlight>();
         if (srcHighlight != null)
             target.Highlight = srcHighlight.CloneNode(true) as Highlight;
+
+        var srcVertAlign = source.GetFirstChild<VerticalTextAlignment>();
+        if (srcVertAlign != null)
+            target.VerticalTextAlignment = srcVertAlign.CloneNode(true) as VerticalTextAlignment;
+
+        var srcSmallCaps = source.GetFirstChild<SmallCaps>();
+        if (srcSmallCaps != null)
+            target.SmallCaps = srcSmallCaps.CloneNode(true) as SmallCaps;
+
+        var srcCaps = source.GetFirstChild<Caps>();
+        if (srcCaps != null)
+            target.Caps = srcCaps.CloneNode(true) as Caps;
+
+        var srcRtl = source.GetFirstChild<RightToLeftText>();
+        if (srcRtl != null)
+            target.RightToLeftText = srcRtl.CloneNode(true) as RightToLeftText;
     }
 
     private static string? GetFontFromProperties(RunProperties? rProps)
@@ -102,6 +145,161 @@ public partial class WordHandler
         var size = rProps.FontSize?.Val?.Value;
         if (size == null) return null;
         return $"{int.Parse(size) / 2}pt";
+    }
+
+    // ==================== Effective Properties Resolution ====================
+
+    /// <summary>
+    /// Populates effective.* format keys on a paragraph node for properties not explicitly set.
+    /// Resolves from: paragraph style chain → document defaults.
+    /// </summary>
+    private void PopulateEffectiveParagraphProperties(DocumentNode node, Paragraph para)
+    {
+        // Resolve effective run properties from the first run (or an empty run for style-only resolution)
+        var firstRun = para.Elements<Run>().FirstOrDefault(r => r.GetFirstChild<Text>() != null)
+            ?? new Run();
+        var effective = ResolveEffectiveRunProperties(firstRun, para);
+
+        // font.size
+        if (!node.Format.ContainsKey("size") && effective.FontSize?.Val?.Value != null)
+        {
+            var sz = int.Parse(effective.FontSize.Val.Value) / 2.0;
+            node.Format["effective.size"] = $"{sz:0.##}pt";
+        }
+
+        // font.name
+        if (!node.Format.ContainsKey("font"))
+        {
+            var font = effective.RunFonts?.Ascii?.Value ?? effective.RunFonts?.HighAnsi?.Value
+                ?? effective.RunFonts?.EastAsia?.Value;
+            if (font != null)
+                node.Format["effective.font"] = font;
+        }
+
+        // bold
+        if (!node.Format.ContainsKey("bold") && effective.Bold != null)
+            node.Format["effective.bold"] = true;
+
+        // italic
+        if (!node.Format.ContainsKey("italic") && effective.Italic != null)
+            node.Format["effective.italic"] = true;
+
+        // color
+        if (!node.Format.ContainsKey("color"))
+        {
+            if (effective.Color?.Val?.Value != null)
+                node.Format["effective.color"] = ParseHelpers.FormatHexColor(effective.Color.Val.Value);
+            else if (effective.Color?.ThemeColor?.HasValue == true)
+                node.Format["effective.color"] = effective.Color.ThemeColor.InnerText;
+        }
+
+        // underline
+        if (!node.Format.ContainsKey("underline") && effective.Underline?.Val != null)
+            node.Format["effective.underline"] = effective.Underline.Val.InnerText;
+
+        // Resolve effective paragraph properties from style chain
+        ResolveEffectiveParagraphStyleProperties(node, para);
+    }
+
+    /// <summary>
+    /// Populates effective.* format keys on a run node for properties not explicitly set.
+    /// </summary>
+    private void PopulateEffectiveRunProperties(DocumentNode node, Run run, Paragraph para)
+    {
+        var effective = ResolveEffectiveRunProperties(run, para);
+
+        if (!node.Format.ContainsKey("size") && effective.FontSize?.Val?.Value != null)
+        {
+            var sz = int.Parse(effective.FontSize.Val.Value) / 2.0;
+            node.Format["effective.size"] = $"{sz:0.##}pt";
+        }
+
+        if (!node.Format.ContainsKey("font"))
+        {
+            var font = effective.RunFonts?.Ascii?.Value ?? effective.RunFonts?.HighAnsi?.Value
+                ?? effective.RunFonts?.EastAsia?.Value;
+            if (font != null)
+                node.Format["effective.font"] = font;
+        }
+
+        if (!node.Format.ContainsKey("bold") && effective.Bold != null)
+            node.Format["effective.bold"] = true;
+
+        if (!node.Format.ContainsKey("italic") && effective.Italic != null)
+            node.Format["effective.italic"] = true;
+
+        if (!node.Format.ContainsKey("color"))
+        {
+            if (effective.Color?.Val?.Value != null)
+                node.Format["effective.color"] = ParseHelpers.FormatHexColor(effective.Color.Val.Value);
+            else if (effective.Color?.ThemeColor?.HasValue == true)
+                node.Format["effective.color"] = effective.Color.ThemeColor.InnerText;
+        }
+
+        if (!node.Format.ContainsKey("underline") && effective.Underline?.Val != null)
+            node.Format["effective.underline"] = effective.Underline.Val.InnerText;
+
+        if (!node.Format.ContainsKey("strike") && effective.Strike != null)
+            node.Format["effective.strike"] = true;
+
+        if (!node.Format.ContainsKey("highlight") && effective.Highlight?.Val != null)
+            node.Format["effective.highlight"] = effective.Highlight.Val.InnerText;
+    }
+
+    /// <summary>
+    /// Resolves paragraph-level properties (alignment, spacing) from the paragraph style chain.
+    /// </summary>
+    private void ResolveEffectiveParagraphStyleProperties(DocumentNode node, Paragraph para)
+    {
+        var styleId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+        if (styleId == null) return;
+
+        var chain = new List<Style>();
+        var visited = new HashSet<string>();
+        var currentStyleId = styleId;
+        while (currentStyleId != null && visited.Add(currentStyleId))
+        {
+            var style = _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles
+                ?.Elements<Style>().FirstOrDefault(s => s.StyleId?.Value == currentStyleId);
+            if (style == null) break;
+            chain.Add(style);
+            currentStyleId = style.BasedOn?.Val?.Value;
+        }
+
+        // Apply from base to derived (reverse order), collecting effective paragraph properties
+        string? alignment = null;
+        string? spaceBefore = null;
+        string? spaceAfter = null;
+        string? lineSpacing = null;
+
+        for (int i = chain.Count - 1; i >= 0; i--)
+        {
+            var ppr = chain[i].StyleParagraphProperties;
+            if (ppr == null) continue;
+
+            if (ppr.Justification?.Val != null)
+            {
+                var txt = ppr.Justification.Val.InnerText;
+                alignment = txt == "both" ? "justify" : txt;
+            }
+            if (ppr.SpacingBetweenLines?.Before?.Value != null)
+                spaceBefore = SpacingConverter.FormatWordSpacing(ppr.SpacingBetweenLines.Before.Value);
+            if (ppr.SpacingBetweenLines?.After?.Value != null)
+                spaceAfter = SpacingConverter.FormatWordSpacing(ppr.SpacingBetweenLines.After.Value);
+            if (ppr.SpacingBetweenLines?.Line?.Value != null)
+                lineSpacing = SpacingConverter.FormatWordLineSpacing(
+                    ppr.SpacingBetweenLines.Line.Value,
+                    ppr.SpacingBetweenLines.LineRule?.InnerText);
+        }
+
+        if (!node.Format.ContainsKey("alignment") && alignment != null)
+            node.Format["effective.alignment"] = alignment;
+        if (!node.Format.ContainsKey("spaceBefore") && spaceBefore != null)
+            node.Format["effective.spaceBefore"] = spaceBefore;
+        if (!node.Format.ContainsKey("spaceAfter") && spaceAfter != null)
+            node.Format["effective.spaceAfter"] = spaceAfter;
+        if (!node.Format.ContainsKey("lineSpacing") && lineSpacing != null)
+            node.Format["effective.lineSpacing"] = lineSpacing;
     }
 
     // ==================== List / Numbering ====================

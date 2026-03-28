@@ -287,8 +287,11 @@ public partial class ExcelHandler
             }
         }
 
-        // Formula cells: Text is always the cached value (or "" if none).
-        // The formula itself is exposed via Format["formula"] in CellToNode.
+        // Formula cells: if there's a cached value, return it.
+        // If not, show the formula expression so view text doesn't show blank.
+        if (string.IsNullOrEmpty(value) && cell.CellFormula?.Text != null)
+            return "=" + cell.CellFormula.Text;
+
         return value;
     }
 

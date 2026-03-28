@@ -23,7 +23,7 @@ public partial class ExcelHandler
         var stylesheet = wbStylesPart?.Stylesheet;
 
         sb.AppendLine("<!DOCTYPE html>");
-        sb.AppendLine("<html lang=\"en\">");
+        sb.AppendLine("<html>");
         sb.AppendLine("<head>");
         sb.AppendLine("<meta charset=\"UTF-8\">");
         sb.AppendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">");
@@ -37,24 +37,38 @@ public partial class ExcelHandler
         // File title
         sb.AppendLine($"<div class=\"file-title\">{HtmlEncode(Path.GetFileName(_filePath))}</div>");
 
-        // Sheet tabs
-        sb.AppendLine("<div class=\"sheet-tabs\">");
-        for (int i = 0; i < sheets.Count; i++)
-        {
-            var activeClass = i == 0 ? " active" : "";
-            sb.AppendLine($"  <div class=\"sheet-tab{activeClass}\" data-sheet=\"{i}\" onclick=\"switchSheet({i})\">{HtmlEncode(sheets[i].Name)}</div>");
-        }
-        sb.AppendLine("</div>");
-
-        // Sheet content areas
+        // Sheet content areas (tabs moved to bottom)
         for (int sheetIdx = 0; sheetIdx < sheets.Count; sheetIdx++)
         {
             var (sheetName, worksheetPart) = sheets[sheetIdx];
             var displayStyle = sheetIdx == 0 ? "" : " style=\"display:none\"";
-            sb.AppendLine($"<div class=\"sheet-content\" data-sheet=\"{sheetIdx}\"{displayStyle}>");
+            // Check if sheet is RTL
+            var sheetView = GetSheet(worksheetPart).GetFirstChild<SheetViews>()?.GetFirstChild<SheetView>();
+            var isRtl = sheetView?.RightToLeft?.Value == true;
+            var dirAttr = isRtl ? " dir=\"rtl\"" : "";
+            sb.AppendLine($"<div class=\"sheet-content\" data-sheet=\"{sheetIdx}\"{displayStyle}{dirAttr}>");
             RenderSheetTable(sb, sheetName, worksheetPart, stylesheet);
+            RenderSheetCharts(sb, worksheetPart);
             sb.AppendLine("</div>");
         }
+
+        // Sheet tabs at bottom (like real Excel)
+        sb.AppendLine("<div class=\"sheet-tabs\" role=\"tablist\">");
+        for (int i = 0; i < sheets.Count; i++)
+        {
+            var activeClass = i == 0 ? " active" : "";
+            var tabColorStyle = "";
+            var sheetProps = GetSheet(sheets[i].Part).GetFirstChild<SheetProperties>();
+            var tabColorEl = sheetProps?.TabColor;
+            if (tabColorEl?.Rgb?.Value != null)
+            {
+                var rgb = tabColorEl.Rgb.Value;
+                if (rgb.Length > 6) rgb = rgb[^6..];
+                tabColorStyle = $" style=\"border-bottom:3px solid #{rgb}\"";
+            }
+            sb.AppendLine($"  <div class=\"sheet-tab{activeClass}\"{tabColorStyle} data-sheet=\"{i}\" role=\"tab\" tabindex=\"0\" onclick=\"switchSheet({i})\" onkeydown=\"if(event.key==='Enter'||event.key===' ')switchSheet({i})\">{HtmlEncode(sheets[i].Name)}</div>");
+        }
+        sb.AppendLine("</div>");
 
         // Sheet switching JavaScript
         sb.AppendLine("<script>");
@@ -80,7 +94,9 @@ public partial class ExcelHandler
         var sheetData = ws.GetFirstChild<SheetData>();
         if (sheetData == null)
         {
-            sb.AppendLine("<div class=\"empty-sheet\">Empty sheet</div>");
+            // Don't show "Empty sheet" if there are charts
+            if (worksheetPart.DrawingsPart?.WorksheetDrawing == null)
+                sb.AppendLine("<div class=\"empty-sheet\">Empty sheet</div>");
             return;
         }
 
@@ -92,6 +108,19 @@ public partial class ExcelHandler
 
         // Detect frozen panes
         var (frozenRows, frozenCols) = GetFrozenPanes(ws);
+
+        // Compute cumulative left offsets for frozen columns (for sticky positioning)
+        // Index 0 = row header width (40px), index 1 = col 1 left offset, etc.
+        var frozenLeftOffsets = new Dictionary<int, double>();
+        if (frozenCols > 0)
+        {
+            double cumLeft = 40; // row header width
+            for (int fc = 1; fc <= frozenCols; fc++)
+            {
+                frozenLeftOffsets[fc] = cumLeft;
+                cumLeft += colWidths.TryGetValue(fc, out var w) ? w : 64.0;
+            }
+        }
 
         // Determine grid dimensions
         var rows = sheetData.Elements<Row>().ToList();
@@ -116,13 +145,17 @@ public partial class ExcelHandler
         // Empty sheet (SheetData exists but no rows/cells)
         if (maxRow == 0 || maxCol == 0)
         {
-            sb.AppendLine("<div class=\"empty-sheet\">Empty sheet</div>");
+            if (worksheetPart.DrawingsPart?.WorksheetDrawing == null)
+                sb.AppendLine("<div class=\"empty-sheet\">Empty sheet</div>");
             return;
         }
 
         // Limit rendering to reasonable size
+        var actualRow = maxRow;
+        var actualCol = maxCol;
         maxRow = Math.Min(maxRow, 5000);
         maxCol = Math.Min(maxCol, 200);
+        var truncated = actualRow > maxRow || actualCol > maxCol;
 
         // Build cell lookup: (row, col) → Cell
         var cellMap = new Dictionary<(int row, int col), Cell>();
@@ -141,25 +174,39 @@ public partial class ExcelHandler
             }
         }
 
-        // Row height lookup
+        // Row height and hidden row lookup
         var rowHeights = new Dictionary<int, double>();
+        var hiddenRows = new HashSet<int>();
         foreach (var row in rows)
         {
             var rowIdx = (int)(row.RowIndex?.Value ?? 0);
             if (row.CustomHeight?.Value == true && row.Height?.Value != null)
                 rowHeights[rowIdx] = row.Height.Value;
+            if (row.Hidden?.Value == true)
+                hiddenRows.Add(rowIdx);
+        }
+
+        // Collect hidden columns
+        var hiddenCols = new HashSet<int>();
+        foreach (var (colIdx, widthPx) in colWidths)
+        {
+            if (widthPx <= 0) hiddenCols.Add(colIdx);
         }
 
         // Start table
         sb.AppendLine("<div class=\"table-wrapper\">");
         sb.AppendLine("<table>");
+        sb.AppendLine($"<caption class=\"sr-only\">{HtmlEncode(sheetName)}</caption>");
 
         // Colgroup for column widths + header column
         sb.Append("<colgroup><col class=\"row-header-col\">");
         for (int c = 1; c <= maxCol; c++)
         {
             var width = colWidths.TryGetValue(c, out var w) ? w : 64.0; // default ~8.43 chars ≈ 64px
-            sb.Append($"<col style=\"width:{width:0.#}px\">");
+            if (width <= 0)
+                sb.Append("<col style=\"width:0;visibility:collapse\">");
+            else
+                sb.Append($"<col style=\"width:{width:0.#}px\">");
         }
         sb.AppendLine("</colgroup>");
 
@@ -169,8 +216,24 @@ public partial class ExcelHandler
         sb.Append("></th>");
         for (int c = 1; c <= maxCol; c++)
         {
+            if (hiddenCols.Contains(c)) continue;
             var colName = IndexToColumnName(c);
-            var stickyStyle = frozenRows > 0 ? " style=\"position:sticky;top:0;z-index:3\"" : "";
+            var isFrozenColHeader = frozenCols > 0 && c <= frozenCols;
+            string stickyStyle;
+            if (frozenRows > 0 && isFrozenColHeader)
+            {
+                var leftPx = frozenLeftOffsets.TryGetValue(c, out var lf) ? lf : 0;
+                stickyStyle = $" style=\"position:sticky;top:0;left:{leftPx:0.#}px;z-index:4\"";
+            }
+            else if (frozenRows > 0)
+                stickyStyle = " style=\"position:sticky;top:0;z-index:3\"";
+            else if (isFrozenColHeader)
+            {
+                var leftPx = frozenLeftOffsets.TryGetValue(c, out var lf2) ? lf2 : 0;
+                stickyStyle = $" style=\"position:sticky;left:{leftPx:0.#}px;z-index:3\"";
+            }
+            else
+                stickyStyle = "";
             sb.Append($"<th class=\"col-header\"{stickyStyle}>{colName}</th>");
         }
         sb.AppendLine("</tr></thead>");
@@ -179,7 +242,8 @@ public partial class ExcelHandler
         sb.AppendLine("<tbody>");
         for (int r = 1; r <= maxRow; r++)
         {
-            var rowH = rowHeights.TryGetValue(r, out var rh) ? $" style=\"height:{rh:0.#}px\"" : "";
+            if (hiddenRows.Contains(r)) { sb.AppendLine("<tr style=\"display:none\"></tr>"); continue; }
+            var rowH = rowHeights.TryGetValue(r, out var rh) ? $" style=\"height:{rh * 1.33:0.#}px\"" : "";
             sb.Append($"<tr{rowH}>");
 
             // Row header
@@ -188,6 +252,7 @@ public partial class ExcelHandler
 
             for (int c = 1; c <= maxCol; c++)
             {
+                if (hiddenCols.Contains(c)) continue;
                 // Check if this cell is hidden by a merge (non-anchor cell in merged range)
                 var cellRef = $"{IndexToColumnName(c)}{r}";
                 if (mergeMap.TryGetValue(cellRef, out var mergeInfo))
@@ -195,26 +260,36 @@ public partial class ExcelHandler
                     if (!mergeInfo.IsAnchor) continue; // skip non-anchor cells
 
                     var cell = cellMap.TryGetValue((r, c), out var mc) ? mc : null;
-                    var style = GetCellStyleCss(cell, stylesheet, frozenRows, frozenCols, r, c);
+                    var style = GetCellStyleCss(cell, stylesheet, frozenRows, frozenCols, r, c, frozenLeftOffsets);
                     var value = cell != null ? GetFormattedCellValue(cell, stylesheet) : "";
+                    // Adjust colspan to exclude hidden columns within the merge range
+                    var adjColSpan = mergeInfo.ColSpan;
+                    if (adjColSpan > 1 && hiddenCols.Count > 0)
+                    {
+                        for (int hc = c + 1; hc < c + mergeInfo.ColSpan; hc++)
+                            if (hiddenCols.Contains(hc)) adjColSpan--;
+                    }
                     var spanAttrs = "";
-                    if (mergeInfo.ColSpan > 1) spanAttrs += $" colspan=\"{mergeInfo.ColSpan}\"";
+                    if (adjColSpan > 1) spanAttrs += $" colspan=\"{adjColSpan}\"";
                     if (mergeInfo.RowSpan > 1) spanAttrs += $" rowspan=\"{mergeInfo.RowSpan}\"";
 
-                    sb.Append($"<td{spanAttrs}{style}>{HtmlEncode(value)}</td>");
+                    sb.Append($"<td{spanAttrs}{style}>{CellHtml(value)}</td>");
                 }
                 else
                 {
                     var cell = cellMap.TryGetValue((r, c), out var nc) ? nc : null;
-                    var style = GetCellStyleCss(cell, stylesheet, frozenRows, frozenCols, r, c);
+                    var style = GetCellStyleCss(cell, stylesheet, frozenRows, frozenCols, r, c, frozenLeftOffsets);
                     var value = cell != null ? GetFormattedCellValue(cell, stylesheet) : "";
-                    sb.Append($"<td{style}>{HtmlEncode(value)}</td>");
+                    sb.Append($"<td{style}>{CellHtml(value)}</td>");
                 }
             }
             sb.AppendLine("</tr>");
         }
         sb.AppendLine("</tbody>");
         sb.AppendLine("</table>");
+        // Truncation warning
+        if (truncated)
+            sb.AppendLine($"<div class=\"truncation-warning\">Showing {maxRow} of {actualRow} rows, {maxCol} of {actualCol} columns</div>");
         sb.AppendLine("</div>");
     }
 
@@ -238,12 +313,15 @@ public partial class ExcelHandler
             var (endCol, endRow) = ParseCellReference(parts[1]);
             var startColIdx = ColumnNameToIndex(startCol);
             var endColIdx = ColumnNameToIndex(endCol);
-            var rowSpan = endRow - startRow + 1;
-            var colSpan = endColIdx - startColIdx + 1;
+            // Clamp merge range to rendering limits to prevent memory explosion
+            var clampedEndRow = Math.Min(endRow, 5000);
+            var clampedEndCol = Math.Min(endColIdx, 200);
+            var rowSpan = clampedEndRow - startRow + 1;
+            var colSpan = clampedEndCol - startColIdx + 1;
 
-            for (int r = startRow; r <= endRow; r++)
+            for (int r = startRow; r <= clampedEndRow; r++)
             {
-                for (int ci = startColIdx; ci <= endColIdx; ci++)
+                for (int ci = startColIdx; ci <= clampedEndCol; ci++)
                 {
                     var cellRef = $"{IndexToColumnName(ci)}{r}";
                     bool isAnchor = (r == startRow && ci == startColIdx);
@@ -266,10 +344,10 @@ public partial class ExcelHandler
         foreach (var col in columns.Elements<Column>())
         {
             if (col.Width?.Value == null) continue;
-            // Excel column width is in character units; convert to approximate pixels (1 char ≈ 7.5px + 5px padding)
-            var widthPx = col.Width.Value == 0 ? 0 : col.Width.Value * 7.5 + 5;
             var min = (int)(col.Min?.Value ?? 1u);
             var max = (int)(col.Max?.Value ?? (uint)min);
+            // Hidden columns get width 0
+            var widthPx = col.Hidden?.Value == true ? 0 : (col.Width.Value == 0 ? 0 : col.Width.Value * 7.5 + 5);
             for (int c = min; c <= max; c++)
                 result[c] = widthPx;
         }
@@ -297,27 +375,27 @@ public partial class ExcelHandler
 
     // ==================== Cell Style to CSS ====================
 
-    private string GetCellStyleCss(Cell? cell, Stylesheet? stylesheet, int frozenRows, int frozenCols, int row, int col)
+    private string GetCellStyleCss(Cell? cell, Stylesheet? stylesheet, int frozenRows, int frozenCols, int row, int col, Dictionary<int, double>? frozenLeftOffsets = null)
     {
         var styles = new List<string>();
 
         // Frozen pane sticky positioning
         bool isFrozenRow = frozenRows > 0 && row <= frozenRows;
         bool isFrozenCol = frozenCols > 0 && col <= frozenCols;
+        // z-index layering: corner-cell=4, col-header=3, frozen-row+col=2, frozen-col=1
+        var frozenLeft = frozenLeftOffsets?.TryGetValue(col, out var fl) == true ? fl : 0;
         if (isFrozenRow && isFrozenCol)
-            styles.Add("position:sticky;top:0;left:0;z-index:3");
+            styles.Add($"position:sticky;top:0;left:{frozenLeft:0.#}px;z-index:2");
         else if (isFrozenRow)
-            styles.Add("position:sticky;top:0;z-index:2");
+            styles.Add("position:sticky;top:0;z-index:1");
         else if (isFrozenCol)
-            styles.Add("position:sticky;left:0;z-index:2");
+            styles.Add($"position:sticky;left:{frozenLeft:0.#}px;z-index:1");
 
         if (cell == null || stylesheet == null)
             return styles.Count > 0 ? $" style=\"{string.Join(";", styles)}\"" : "";
 
         var styleIndex = cell.StyleIndex?.Value ?? 0;
-        if (styleIndex == 0 && styles.Count == 0) return "";
 
-        if (styleIndex > 0)
         {
             var cellFormats = stylesheet.CellFormats;
             if (cellFormats != null && styleIndex < (uint)cellFormats.Elements<CellFormat>().Count())
@@ -352,6 +430,13 @@ public partial class ExcelHandler
             else
                 styles.Add("text-decoration:underline");
         }
+
+        // Superscript/Subscript via VerticalTextAlignment
+        var vertAlign = font.GetFirstChild<VerticalTextAlignment>();
+        if (vertAlign?.Val?.Value == VerticalAlignmentRunValues.Superscript)
+            styles.Add("vertical-align:super;font-size:smaller");
+        else if (vertAlign?.Val?.Value == VerticalAlignmentRunValues.Subscript)
+            styles.Add("vertical-align:sub;font-size:smaller");
 
         if (font.FontSize?.Val?.Value != null)
             styles.Add($"font-size:{font.FontSize.Val.Value:0.##}pt");
@@ -478,13 +563,30 @@ public partial class ExcelHandler
         if (alignment.TextRotation?.HasValue == true && alignment.TextRotation.Value != 0)
         {
             var rot = alignment.TextRotation.Value;
-            // Excel: 0-90 = counter-clockwise, 91-180 = clockwise (91=1°CW, 180=90°CW)
-            int cssDeg = rot <= 90 ? -(int)rot : 90 - (int)rot;
-            styles.Add($"writing-mode:vertical-lr;transform:rotate({cssDeg}deg)");
+            if (rot == 255)
+            {
+                // 255 = stacked vertical text (each char on its own line)
+                styles.Add("writing-mode:vertical-rl;text-orientation:upright;letter-spacing:-2px");
+            }
+            else
+            {
+                // Excel: 0-90 = counter-clockwise, 91-180 = clockwise (91=1°CW, 180=90°CW)
+                // Excel: 1-90 = CCW (CSS negative), 91-180 = CW (CSS positive, 91=1°, 180=90°)
+                int cssDeg = rot <= 90 ? -(int)rot : (int)rot - 90;
+                styles.Add($"transform:rotate({cssDeg}deg);white-space:nowrap");
+            }
         }
 
         if (alignment.Indent?.HasValue == true && alignment.Indent.Value > 0)
             styles.Add($"padding-left:{alignment.Indent.Value * 8}px");
+
+        // Reading order: 1=LTR, 2=RTL (for mixed-direction content)
+        if (alignment.ReadingOrder?.HasValue == true)
+        {
+            var ro = alignment.ReadingOrder.Value;
+            if (ro == 2) styles.Add("direction:rtl;unicode-bidi:embed");
+            else if (ro == 1) styles.Add("direction:ltr;unicode-bidi:embed");
+        }
     }
 
     // ==================== Color Resolution ====================
@@ -510,22 +612,44 @@ public partial class ExcelHandler
         return null;
     }
 
+    // Standard Excel indexed color palette (first 64 colors)
+    private static readonly string[] IndexedColors = [
+        "#000000","#FFFFFF","#FF0000","#00FF00","#0000FF","#FFFF00","#FF00FF","#00FFFF",
+        "#000000","#FFFFFF","#FF0000","#00FF00","#0000FF","#FFFF00","#FF00FF","#00FFFF",
+        "#800000","#008000","#000080","#808000","#800080","#008080","#C0C0C0","#808080",
+        "#9999FF","#993366","#FFFFCC","#CCFFFF","#660066","#FF8080","#0066CC","#CCCCFF",
+        "#000080","#FF00FF","#FFFF00","#00FFFF","#800080","#800000","#008080","#0000FF",
+        "#00CCFF","#CCFFFF","#CCFFCC","#FFFF99","#99CCFF","#FF99CC","#CC99FF","#FFCC99",
+        "#3366FF","#33CCCC","#99CC00","#FFCC00","#FF9900","#FF6600","#666699","#969696",
+        "#003366","#339966","#003300","#333300","#993300","#993366","#333399","#333333"
+    ];
+
     private static string? ResolveColorRgb(ColorType? color)
     {
         if (color?.Rgb?.Value != null)
             return FormatColorForCss(color.Rgb.Value);
+        if (color?.Indexed?.Value != null)
+        {
+            var idx = (int)color.Indexed.Value;
+            if (idx >= 0 && idx < IndexedColors.Length)
+                return IndexedColors[idx];
+            if (idx == 64) return null; // system foreground (context dependent)
+            if (idx == 65) return null; // system background
+        }
         if (color?.Theme?.Value != null)
         {
             return color.Theme.Value switch
             {
-                0 => "#FFFFFF",
-                1 => "#000000",
-                4 => "#4472C4",
-                5 => "#ED7D31",
-                6 => "#A5A5A5",
-                7 => "#FFC000",
-                8 => "#5B9BD5",
-                9 => "#70AD47",
+                0 => "#FFFFFF", // lt1
+                1 => "#000000", // dk1
+                2 => "#E7E6E6", // lt2
+                3 => "#44546A", // dk2
+                4 => "#4472C4", // accent1
+                5 => "#ED7D31", // accent2
+                6 => "#A5A5A5", // accent3
+                7 => "#FFC000", // accent4
+                8 => "#5B9BD5", // accent5
+                9 => "#70AD47", // accent6
                 _ => null
             };
         }
@@ -553,17 +677,28 @@ public partial class ExcelHandler
         var rawValue = GetCellDisplayValue(cell);
         if (string.IsNullOrEmpty(rawValue)) return rawValue;
 
+        // Boolean: convert 1/0 to TRUE/FALSE
+        if (cell.DataType?.Value == CellValues.Boolean)
+            return rawValue == "1" ? "TRUE" : "FALSE";
+
         // Only format numeric values (not strings, shared strings, etc.)
         if (cell.DataType?.Value == CellValues.SharedString ||
             cell.DataType?.Value == CellValues.InlineString ||
             cell.DataType?.Value == CellValues.String ||
-            cell.DataType?.Value == CellValues.Boolean ||
             cell.DataType?.Value == CellValues.Error)
             return rawValue;
 
         if (!double.TryParse(rawValue, System.Globalization.NumberStyles.Any,
                 System.Globalization.CultureInfo.InvariantCulture, out var numVal))
             return rawValue;
+
+        // Clean up floating point artifacts for display (e.g. 25300000.000000004 → 25300000)
+        var cleanVal = numVal;
+        var rounded = Math.Round(numVal, 10);
+        if (Math.Abs(rounded - Math.Round(rounded)) < 1e-9)
+            cleanVal = Math.Round(rounded);
+        rawValue = cleanVal == numVal ? rawValue
+            : cleanVal.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
         // Look up number format
         var styleIndex = cell.StyleIndex?.Value ?? 0;
@@ -619,6 +754,91 @@ public partial class ExcelHandler
 
     private static string ApplyNumberFormat(double value, string fmtCode)
     {
+        // Handle multi-section format codes: positive;negative;zero
+        if (fmtCode.Contains(';'))
+        {
+            var sections = fmtCode.Split(';');
+            if (value < 0 && sections.Length >= 2)
+            {
+                var negFmt = sections[1].Trim();
+                // If format already handles negative (has parens or minus), don't add extra minus
+                return ApplyNumberFormat(Math.Abs(value), negFmt);
+            }
+            if (value == 0 && sections.Length >= 3)
+            {
+                var zeroFmt = sections[2].Trim();
+                // Quoted literal for zero section: "zero" → zero
+                if (zeroFmt.StartsWith('"') && zeroFmt.EndsWith('"'))
+                    return zeroFmt[1..^1];
+                return ApplyNumberFormat(value, zeroFmt);
+            }
+            fmtCode = sections[0].Trim();
+        }
+
+        // Strip [Color] markers: [Red], [Blue], [Green], [Color N], etc.
+        fmtCode = System.Text.RegularExpressions.Regex.Replace(fmtCode, @"\[(Red|Blue|Green|Yellow|White|Black|Cyan|Magenta|Color\s*\d+)\]", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
+
+        // Strip [$...] locale/currency specifiers (e.g. [$-409], [$€-407], [$¥-411])
+        fmtCode = System.Text.RegularExpressions.Regex.Replace(fmtCode, @"\[\$[^\]]*\]", "").Trim();
+
+        // Strip Excel numfmt special characters:
+        // _X = space placeholder, *X = fill character, \X = literal character escape
+        fmtCode = System.Text.RegularExpressions.Regex.Replace(fmtCode, @"_.", "").Trim();
+        fmtCode = System.Text.RegularExpressions.Regex.Replace(fmtCode, @"\*.", "").Trim();
+        fmtCode = System.Text.RegularExpressions.Regex.Replace(fmtCode, @"\\(.)", "$1").Trim();
+
+        // Strip condition markers: [>100], [<=0], etc.
+        fmtCode = System.Text.RegularExpressions.Regex.Replace(fmtCode, @"\[[<>=!]+\d+\.?\d*\]", "").Trim();
+
+        // Handle parenthesis wrapping: ($#,##0.00) → prefix="(" suffix=")"
+        if (fmtCode.StartsWith('(') && fmtCode.EndsWith(')'))
+        {
+            var inner = fmtCode[1..^1];
+            return "(" + ApplyNumberFormat(value, inner) + ")";
+        }
+
+        var fmt = fmtCode.ToLowerInvariant();
+
+        // Extract currency/text prefix and suffix (e.g. "$", "€", "¥", or quoted strings like "USD ")
+        var prefix = "";
+        var suffix = "";
+        var cleanFmt = fmtCode;
+        // Handle literal characters: $, ¥, €, £
+        foreach (var sym in new[] { "$", "¥", "€", "£", "₹" })
+        {
+            if (cleanFmt.Contains(sym))
+            {
+                var idx = cleanFmt.IndexOf(sym);
+                var hashIdx = cleanFmt.IndexOf('#');
+                var zeroIdx = cleanFmt.IndexOf('0');
+                var firstDigit = (hashIdx >= 0 && zeroIdx >= 0) ? Math.Min(hashIdx, zeroIdx)
+                    : Math.Max(hashIdx, zeroIdx);
+                if (firstDigit < 0 || idx <= firstDigit)
+                    prefix = sym;
+                else
+                    suffix = sym;
+                cleanFmt = cleanFmt.Replace(sym, "");
+            }
+        }
+        // Handle quoted prefix/suffix: "USD "
+        var quoteMatch = System.Text.RegularExpressions.Regex.Match(cleanFmt, "^\"([^\"]+)\"");
+        if (quoteMatch.Success) { prefix += quoteMatch.Groups[1].Value; cleanFmt = cleanFmt[quoteMatch.Length..]; }
+        var quoteSuffix = System.Text.RegularExpressions.Regex.Match(cleanFmt, "\"([^\"]+)\"$");
+        if (quoteSuffix.Success) { suffix = quoteSuffix.Groups[1].Value + suffix; cleanFmt = cleanFmt[..^quoteSuffix.Length]; }
+
+        // Handle +/- prefix in format (e.g. "+0.0%", "-#,##0")
+        cleanFmt = cleanFmt.Trim();
+        if (cleanFmt.StartsWith('+'))
+        { prefix += "+"; cleanFmt = cleanFmt[1..]; }
+        else if (cleanFmt.StartsWith('-'))
+        { prefix += "-"; cleanFmt = cleanFmt[1..]; }
+
+        var formatted = ApplyNumberFormatCore(value, cleanFmt.Trim());
+        return prefix + formatted + suffix;
+    }
+
+    private static string ApplyNumberFormatCore(double value, string fmtCode)
+    {
         var fmt = fmtCode.ToLowerInvariant();
 
         // Percentage formats
@@ -629,19 +849,45 @@ public partial class ExcelHandler
             return pctVal.ToString($"F{decimals}") + "%";
         }
 
+        // Elapsed time format: [h]:mm:ss or [mm]:ss (total hours/minutes, can exceed 24/60)
+        var elapsedMatch = System.Text.RegularExpressions.Regex.Match(fmtCode, @"\[(h+)\]:?(mm)?:?(ss)?");
+        if (elapsedMatch.Success)
+        {
+            var totalHours = (int)(value * 24);
+            var totalMinutes = (int)(value * 24 * 60) % 60;
+            var totalSeconds = (int)(value * 24 * 3600) % 60;
+            var parts = new List<string> { totalHours.ToString() };
+            if (elapsedMatch.Groups[2].Success) parts.Add(totalMinutes.ToString("D2"));
+            if (elapsedMatch.Groups[3].Success) parts.Add(totalSeconds.ToString("D2"));
+            return string.Join(":", parts);
+        }
+
         // Date formats (serial number → DateTime)
         if (fmt.Contains('y') || fmt.Contains('m') || fmt.Contains('d') || fmt.Contains('h'))
         {
             try
             {
                 var dt = DateTime.FromOADate(value);
+                // Context-sensitive m/mm: after h → minute, otherwise → month
+                // Strategy: mark minute 'm' as '\x01' placeholder, then convert remaining m→M
                 var dotnetFmt = fmtCode
-                    .Replace("yyyy", "yyyy").Replace("yy", "yy")
-                    .Replace("mmmm", "MMMM").Replace("mmm", "MMM").Replace("mm", "MM").Replace("m", "M")
-                    .Replace("dddd", "dddd").Replace("ddd", "ddd").Replace("dd", "dd").Replace("d", "d")
-                    .Replace("hh", "HH").Replace("h", "H")
-                    .Replace("ss", "ss").Replace("s", "s")
                     .Replace("AM/PM", "tt").Replace("am/pm", "tt");
+                // Step 1: Replace h:mm and h:m patterns → mark minutes as placeholder
+                dotnetFmt = System.Text.RegularExpressions.Regex.Replace(dotnetFmt, @"([hH]+)([:.])(mm?)", m =>
+                    m.Groups[1].Value + m.Groups[2].Value + new string('\x01', m.Groups[3].Value.Length));
+                // Also handle mm:ss (mm before ss is also minutes)
+                dotnetFmt = System.Text.RegularExpressions.Regex.Replace(dotnetFmt, @"(mm?)([:.])(ss?)", m =>
+                    new string('\x01', m.Groups[1].Value.Length) + m.Groups[2].Value + m.Groups[3].Value);
+                // Step 2: Convert remaining m/mm to M/MM (month)
+                dotnetFmt = dotnetFmt.Replace("mmmm", "MMMM").Replace("mmm", "MMM")
+                    .Replace("mm", "MM").Replace("m", "M");
+                // Step 3: Restore minute placeholders
+                dotnetFmt = dotnetFmt.Replace("\x01\x01", "mm").Replace("\x01", "m");
+                // Step 4: Other conversions
+                // If AM/PM format (has 'tt'), use h (12h); otherwise use H (24h)
+                if (!dotnetFmt.Contains("tt"))
+                    dotnetFmt = dotnetFmt.Replace("hh", "HH").Replace("h", "H");
+                dotnetFmt = dotnetFmt.Replace("dddd", "dddd").Replace("ddd", "ddd").Replace("dd", "dd");
                 return dt.ToString(dotnetFmt, System.Globalization.CultureInfo.InvariantCulture);
             }
             catch { return value.ToString(); }
@@ -651,11 +897,29 @@ public partial class ExcelHandler
         if (fmt.Contains("e+") || fmt.Contains("e-"))
         {
             var decimals = CountDecimalPlaces(fmtCode);
-            return value.ToString($"E{decimals}");
+            if (value == 0) return decimals > 0 ? $"0.{new string('0', decimals)}E+00" : "0E+00";
+            var eIdx = fmt.IndexOf("e+", StringComparison.Ordinal);
+            if (eIdx < 0) eIdx = fmt.IndexOf("e-", StringComparison.Ordinal);
+            var expDigits = eIdx >= 0 ? fmtCode[(eIdx + 2)..].Count(c => c == '0') : 2;
+            var exp = (int)Math.Floor(Math.Log10(Math.Abs(value)));
+            var mantissa = value / Math.Pow(10, exp);
+            var expStr = exp >= 0 ? $"+{exp.ToString().PadLeft(expDigits, '0')}" : $"-{Math.Abs(exp).ToString().PadLeft(expDigits, '0')}";
+            return $"{mantissa.ToString($"F{decimals}")}E{expStr}";
+        }
+
+        // Trailing comma scaling: each trailing comma divides value by 1000
+        // e.g. "#," = ÷1000, "#,," = ÷1000000, "#,##0," = thousands + ÷1000
+        var trailingCommas = 0;
+        var fmtTrimmed = fmtCode.TrimEnd();
+        while (fmtTrimmed.EndsWith(',')) { trailingCommas++; fmtTrimmed = fmtTrimmed[..^1]; }
+        if (trailingCommas > 0)
+        {
+            value /= Math.Pow(1000, trailingCommas);
+            fmtCode = fmtTrimmed;
         }
 
         // Numeric with thousands separator and/or decimals
-        bool hasThousands = fmtCode.Contains(',') && fmtCode.Contains('#');
+        bool hasThousands = fmtCode.Contains(',') && (fmtCode.Contains('#') || fmtCode.Contains('0'));
         var numDecimals = CountDecimalPlaces(fmtCode);
 
         if (hasThousands)
@@ -689,10 +953,14 @@ public partial class ExcelHandler
 
     private static string GenerateExcelCss() => """
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; }
         body {
             font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
             background: #f0f0f0;
             color: #333;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
         }
         .file-title {
             padding: 12px 20px;
@@ -707,16 +975,20 @@ public partial class ExcelHandler
             border-top: 1px solid #ccc;
             overflow-x: auto;
             padding: 0 8px;
+            flex-shrink: 0;
+            position: sticky;
+            bottom: 0;
+            z-index: 10;
         }
         .sheet-tab {
             padding: 8px 16px;
             font-size: 12px;
             cursor: pointer;
             border: 1px solid transparent;
-            border-bottom: none;
+            border-top: none;
             background: #e8e8e8;
-            margin-top: 4px;
-            border-radius: 4px 4px 0 0;
+            margin-bottom: 4px;
+            border-radius: 0 0 4px 4px;
             white-space: nowrap;
             user-select: none;
         }
@@ -726,7 +998,7 @@ public partial class ExcelHandler
             border-color: #ccc;
             font-weight: 600;
         }
-        .sheet-content { background: #fff; }
+        .sheet-content { background: #fff; flex: 1; }
         .table-wrapper {
             overflow: auto;
             max-height: calc(100vh - 90px);
@@ -770,8 +1042,8 @@ public partial class ExcelHandler
             overflow: hidden;
             text-overflow: ellipsis;
             vertical-align: bottom;
-            max-width: 300px;
-            height: 20px;
+            max-width: 500px;
+            word-break: break-all; /* CJK text wrapping support */
         }
         .empty-sheet {
             padding: 40px;
@@ -781,6 +1053,36 @@ public partial class ExcelHandler
         }
         /* Frozen pane visual separator */
         tr:nth-child(1) td { border-top-color: #e0e0e0; }
+        /* Chart containers */
+        .chart-container {
+            margin: 16px auto;
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            padding: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        .chart-container svg { display: block; }
+        /* Truncation warning */
+        .truncation-warning {
+            padding: 8px 16px;
+            background: #FFF3CD;
+            color: #856404;
+            border: 1px solid #FFEEBA;
+            font-size: 12px;
+            text-align: center;
+            margin: 4px 0;
+        }
+        /* Screen reader only */
+        .sr-only { position:absolute; clip:rect(0 0 0 0); width:1px; height:1px; overflow:hidden; }
+        /* Print styles */
+        @media print {
+            .file-title, .sheet-tabs { display: none !important; }
+            .table-wrapper { max-height: none !important; overflow: visible !important; }
+            body { background: #fff !important; min-height: auto !important; }
+            .sheet-content { display: block !important; }
+            td { max-width: none !important; white-space: normal !important; overflow: visible !important; }
+        }
         """;
 
     // ==================== JavaScript ====================
@@ -793,6 +1095,7 @@ public partial class ExcelHandler
             document.querySelectorAll('.sheet-content').forEach(function(c) {
                 c.style.display = parseInt(c.getAttribute('data-sheet')) === idx ? '' : 'none';
             });
+            window.scrollTo(0, 0);
         }
         """;
 
@@ -808,9 +1111,17 @@ public partial class ExcelHandler
             .Replace("'", "&#39;");
     }
 
+    /// <summary>HtmlEncode + convert newlines to br for cell display</summary>
+    private static string CellHtml(string text)
+    {
+        var encoded = HtmlEncode(text);
+        return encoded.Contains('\n') ? encoded.Replace("\n", "<br>") : encoded;
+    }
+
     private static string CssSanitize(string value)
     {
         // Strip characters that could break CSS context
         return Regex.Replace(value, @"[;:{}()\\""']", "");
     }
+
 }

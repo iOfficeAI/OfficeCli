@@ -50,29 +50,35 @@ public static class ResidentClient
     /// Send a command to the resident server in a single connection.
     /// Returns null if no resident is running or the file doesn't match.
     /// </summary>
-    public static ResidentResponse? TrySend(string filePath, ResidentRequest request)
+    public static ResidentResponse? TrySend(string filePath, ResidentRequest request, int maxRetries = 2)
     {
         var pipeName = ResidentServer.GetPipeName(filePath);
-        try
+        for (int attempt = 0; attempt <= maxRetries; attempt++)
         {
-            using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
-            client.Connect(200); // 200ms timeout
+            try
+            {
+                using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
+                client.Connect(1000); // 1s timeout (was 200ms — too short under load)
 
-            using var reader = new StreamReader(client, Encoding.UTF8, leaveOpen: true);
-            using var writer = new StreamWriter(client, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+                using var reader = new StreamReader(client, Encoding.UTF8, leaveOpen: true);
+                using var writer = new StreamWriter(client, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
 
-            var json = System.Text.Json.JsonSerializer.Serialize(request, ResidentJsonContext.Default.ResidentRequest);
-            writer.WriteLine(json);
+                var json = System.Text.Json.JsonSerializer.Serialize(request, ResidentJsonContext.Default.ResidentRequest);
+                writer.WriteLine(json);
 
-            var responseLine = reader.ReadLine();
-            if (responseLine == null) return null;
+                var responseLine = reader.ReadLine();
+                if (responseLine == null) continue;
 
-            return System.Text.Json.JsonSerializer.Deserialize<ResidentResponse>(responseLine, ResidentJsonContext.Default.ResidentResponse);
+                var response = System.Text.Json.JsonSerializer.Deserialize<ResidentResponse>(responseLine, ResidentJsonContext.Default.ResidentResponse);
+                if (response != null) return response;
+            }
+            catch
+            {
+                if (attempt == maxRetries) return null;
+                Thread.Sleep(50 * (attempt + 1)); // brief backoff before retry
+            }
         }
-        catch
-        {
-            return null;
-        }
+        return null;
     }
 
     /// <summary>

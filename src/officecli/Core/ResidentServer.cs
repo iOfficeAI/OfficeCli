@@ -384,8 +384,15 @@ public class ResidentServer : IDisposable
 
     private void NotifyWatchFullRefresh()
     {
-        if (_handler is not OfficeCli.Handlers.PowerPointHandler ppt) return;
-        WatchNotifier.NotifyIfWatching(_filePath, new WatchMessage { Action = "full", FullHtml = ppt.ViewAsHtml() });
+        string? fullHtml = null;
+        if (_handler is OfficeCli.Handlers.PowerPointHandler ppt)
+            fullHtml = ppt.ViewAsHtml();
+        else if (_handler is OfficeCli.Handlers.ExcelHandler excel)
+            fullHtml = excel.ViewAsHtml();
+        else if (_handler is OfficeCli.Handlers.WordHandler word)
+            fullHtml = word.ViewAsHtml();
+        if (fullHtml != null)
+            WatchNotifier.NotifyIfWatching(_filePath, new WatchMessage { Action = "full", FullHtml = fullHtml });
     }
 
     private void ExecuteView(ResidentRequest req, OutputFormat format)
@@ -400,10 +407,16 @@ public class ResidentServer : IDisposable
 
         if (mode!.ToLowerInvariant() is "html" or "h")
         {
+            string? html = null;
             if (_handler is OfficeCli.Handlers.PowerPointHandler pptHandler)
-            {
-                var html = pptHandler.ViewAsHtml(start, end);
+                html = pptHandler.ViewAsHtml(start, end);
+            else if (_handler is OfficeCli.Handlers.ExcelHandler excelHandler)
+                html = excelHandler.ViewAsHtml();
+            else if (_handler is OfficeCli.Handlers.WordHandler wordHandler)
+                html = wordHandler.ViewAsHtml();
 
+            if (html != null)
+            {
                 if (req.Json)
                 {
                     Console.Write(html);
@@ -423,7 +436,7 @@ public class ResidentServer : IDisposable
             }
             else
             {
-                Console.Error.WriteLine("HTML preview is only supported for .pptx files.");
+                Console.Error.WriteLine("HTML preview is only supported for .pptx, .xlsx, and .docx files.");
             }
             return;
         }

@@ -157,8 +157,15 @@ public static class McpServer
                 var end = ArgIntOpt("end");
                 var maxLines = ArgIntOpt("max_lines");
                 using var handler = DocumentHandlerFactory.Open(file);
-                if (mode is "html" or "h" && handler is Handlers.PowerPointHandler pptH)
-                    return pptH.ViewAsHtml(start, end);
+                if (mode is "html" or "h")
+                {
+                    if (handler is Handlers.PowerPointHandler pptH)
+                        return pptH.ViewAsHtml(start, end);
+                    if (handler is Handlers.ExcelHandler excelH)
+                        return excelH.ViewAsHtml();
+                    if (handler is Handlers.WordHandler wordH)
+                        return wordH.ViewAsHtml();
+                }
                 if (mode is "svg" or "g" && handler is Handlers.PowerPointHandler pptSvg)
                     return pptSvg.ViewAsSvg(start ?? 1);
                 return mode.ToLowerInvariant() switch

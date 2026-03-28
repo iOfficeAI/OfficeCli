@@ -230,6 +230,26 @@ Run `officecli <format> raw` for available parts per format.
 
 ---
 
+## Specialized Skills
+
+This skill covers the officecli CLI basics. For complex scenarios, load the dedicated skill for better results:
+
+| Scenario | Skill | Min Version | When to Use |
+|----------|-------|:-----------:|-------------|
+| **Word documents** | `officecli-docx` | v1.0.23 | Create, read, edit .docx — reports, letters, memos, proposals |
+| **Academic papers** | `officecli-academic-paper` | v1.0.24 | Research papers, white papers with TOC, equations, footnotes, bibliography |
+| **Presentations** | `officecli-pptx` | v1.0.23 | Create, read, edit .pptx — general slide decks |
+| **Pitch decks** | `officecli-pitch-deck` | v1.0.24 | Investor decks, product launches, sales decks with charts and stat callouts |
+| **Morph PPT** | `morph-ppt` | v1.0.24 | Morph-animated cinematic presentations |
+| **Excel** | `officecli-xlsx` | v1.0.23 | Create, read, edit .xlsx — financial models, trackers, formulas |
+| **Data dashboards** | `officecli-data-dashboard` | v1.0.24 | CSV/tabular data → Excel dashboards with KPI cards, charts, sparklines |
+| **Financial models** | `officecli-financial-model` | v1.0.24 | 3-statement models, DCF, cap tables, scenario analysis, sensitivity tables |
+
+> **How to load:** If the skill is not already installed, run `officecli skills install <skill-name>` to install it, then use it.
+> Example: `officecli skills install morph-ppt`
+
+---
+
 ## Notes
 
 - Paths are **1-based** (XPath convention): `'/body/p[3]'` = third paragraph

@@ -793,6 +793,15 @@ officecli add data.xlsx /Sheet1 --type chart --prop chartType=combo --prop categ
 officecli add data.xlsx /Sheet1 --type chart --prop chartType=scatter --prop title="Correlation" --prop categories="1,2,3,4,5" --prop data="Values:10,25,18,30,22"
 ```
 
+**Post-chart QA (MANDATORY after every `add chart`):**
+
+```bash
+# Verify chart has data -- an empty chart is a BLOCKER
+officecli get data.xlsx '/Sheet1/chart[1]' --json
+# Check: each series MUST have non-empty "values" (inline) or "valuesRef" (cell range).
+# If both are empty → the add chart command was missing data params. Remove and re-add.
+```
+
 Chart types: column, columnStacked, columnPercentStacked, column3d, bar, barStacked, barPercentStacked, bar3d, line, lineStacked, linePercentStacked, line3d, pie, pie3d, doughnut, area, areaStacked, areaPercentStacked, area3d, scatter, bubble, radar, stock, combo
 
 Chart styling properties: `plotFill`, `chartFill`, `gridlines`, `dataLabels`, `labelPos`, `labelFont`, `axisFont`, `legendFont`, `title.font`, `title.size`, `title.color`, `series.outline`, `gapwidth`, `overlap`, `lineWidth`, `lineDash`, `marker`, `axisMin`, `axisMax`, `majorUnit`, `minorUnit`

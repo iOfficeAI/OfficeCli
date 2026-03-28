@@ -58,16 +58,39 @@ if (args.Length == 1 && args[0] == "mcp-serve")
     return 0;
 }
 
-// Skills commands: officecli skills <target>
+// Skills commands: officecli skills install [skill-name]
 if (args.Length >= 1 && args[0] == "skills")
 {
+    if (args.Length == 2 && args[1] == "list")
+    {
+        // officecli skills list → list all available skills
+        OfficeCli.Core.SkillInstaller.ListSkills();
+        return 0;
+    }
+    if (args.Length == 2 && args[1] == "install")
+    {
+        // officecli skills install → base SKILL.md to all detected agents
+        OfficeCli.Core.SkillInstaller.Install("install");
+        return 0;
+    }
+    if (args.Length == 3 && args[1] == "install")
+    {
+        // officecli skills install morph-ppt → specific skill to all detected agents
+        var result = OfficeCli.Core.SkillInstaller.InstallSkill(args[2]);
+        return result.Count > 0 ? 0 : 1;
+    }
     if (args.Length == 2)
     {
+        // Legacy: officecli skills claude → base SKILL.md to specific agent
         OfficeCli.Core.SkillInstaller.Install(args[1]);
         return 0;
     }
-    Console.Error.WriteLine("Usage: officecli skills <target>     Install skills");
-    Console.Error.WriteLine("Targets: claude, copilot, codex, cursor, windsurf, minimax, openclaw, nanobot, zeroclaw, all");
+    Console.Error.WriteLine("Usage:");
+    Console.Error.WriteLine("  officecli skills install                Install base SKILL.md to all detected agents");
+    Console.Error.WriteLine("  officecli skills install <skill-name>   Install a specific skill to all detected agents");
+    Console.Error.WriteLine("  officecli skills <agent>                Install base SKILL.md to a specific agent");
+    Console.Error.WriteLine($"Skills: {string.Join(", ", new[] { "pptx", "word", "excel", "morph-ppt", "pitch-deck", "academic-paper", "data-dashboard", "financial-model" })}");
+    Console.Error.WriteLine("Agents: claude, copilot, codex, cursor, windsurf, minimax, openclaw, nanobot, zeroclaw, all");
     return 1;
 }
 

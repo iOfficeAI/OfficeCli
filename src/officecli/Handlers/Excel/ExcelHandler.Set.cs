@@ -953,31 +953,90 @@ public partial class ExcelHandler
             switch (key.ToLowerInvariant())
             {
                 case "value":
+                    var cellValue = value.Replace("\\n", "\n"); // Support escaped newlines
                     cell.CellFormula = null; // Clear formula when explicit value is set
                     // If cell is already boolean type, convert true/false to 1/0
                     if (cell.DataType?.Value == CellValues.Boolean)
                     {
-                        var bv = value.Trim().ToLowerInvariant();
+                        var bv = cellValue.Trim().ToLowerInvariant();
                         if (bv is "true" or "yes") cell.CellValue = new CellValue("1");
                         else if (bv is "false" or "no") cell.CellValue = new CellValue("0");
-                        else cell.CellValue = new CellValue(value);
+                        else cell.CellValue = new CellValue(cellValue);
                     }
                     else
                     {
-                        cell.CellValue = new CellValue(value);
-                        // Auto-detect type: number or string (boolean only via explicit type=boolean)
-                        if (double.TryParse(value, out _))
-                            cell.DataType = null; // Number is default
+                        // Check if user explicitly set type
+                        var hasExplicitType = properties.Any(p => p.Key.Equals("type", StringComparison.OrdinalIgnoreCase));
+                        var explicitTypeIsString = hasExplicitType && properties
+                            .Where(p => p.Key.Equals("type", StringComparison.OrdinalIgnoreCase))
+                            .Select(p => p.Value?.ToLowerInvariant())
+                            .Any(v => v is "string" or "str");
+                        var explicitTypeIsNumber = hasExplicitType && properties
+                            .Where(p => p.Key.Equals("type", StringComparison.OrdinalIgnoreCase))
+                            .Select(p => p.Value?.ToLowerInvariant())
+                            .Any(v => v is "number" or "num");
+
+                        // Auto-detect ISO date (only if user did NOT explicitly set type=string)
+                        if (!explicitTypeIsString && DateTime.TryParseExact(cellValue,
+                            new[] { "yyyy-MM-dd", "yyyy/MM/dd", "yyyy-MM-dd HH:mm:ss" },
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            System.Globalization.DateTimeStyles.None, out var dt))
+                        {
+                            cell.CellValue = new CellValue(dt.ToOADate().ToString(System.Globalization.CultureInfo.InvariantCulture));
+                            cell.DataType = null;
+                            if (!properties.ContainsKey("numberformat") && !properties.ContainsKey("numfmt") && !properties.ContainsKey("format"))
+                                styleProps["numberformat"] = "yyyy-mm-dd";
+                        }
+                        // Auto-detect strings that look like numbers but should be text
+                        else if (!explicitTypeIsNumber
+                            && ((cellValue.Length > 1 && cellValue.StartsWith('0') && !cellValue.StartsWith("0.") && !cellValue.StartsWith("0,") && cellValue.All(c => char.IsDigit(c)))
+                                || (cellValue.All(char.IsDigit) && cellValue.Length > 15)))
+                        {
+                            cell.CellValue = new CellValue(cellValue);
+                            cell.DataType = new EnumValue<CellValues>(CellValues.String);
+                        }
                         else
                         {
-                            cell.DataType = new EnumValue<CellValues>(CellValues.String);
+                            cell.CellValue = new CellValue(cellValue);
+                            if (double.TryParse(cellValue, out _))
+                                cell.DataType = null;
+                            else
+                                cell.DataType = new EnumValue<CellValues>(CellValues.String);
                         }
                     }
                     break;
                 case "formula":
                     cell.CellFormula = new CellFormula(value.TrimStart('='));
-                    cell.CellValue = null;
-                    cell.DataType = null; // Formula cells should not retain DataType
+                    // Try to evaluate and cache the result immediately
+                    var evalSheetData = GetSheet(worksheet).GetFirstChild<SheetData>();
+                    var evaluator = new Core.FormulaEvaluator(evalSheetData!, _doc.WorkbookPart);
+                    var evalResult = evaluator.TryEvaluateFull(value.TrimStart('='));
+                    if (evalResult is { IsNumeric: true })
+                    {
+                        cell.CellValue = new CellValue(evalResult.ToCellValueText());
+                        cell.DataType = null;
+                    }
+                    else if (evalResult is { IsString: true })
+                    {
+                        cell.CellValue = new CellValue(evalResult.StringValue!);
+                        cell.DataType = new DocumentFormat.OpenXml.EnumValue<CellValues>(CellValues.String);
+                    }
+                    else if (evalResult is { IsBool: true })
+                    {
+                        cell.CellValue = new CellValue(evalResult.ToCellValueText());
+                        cell.DataType = new DocumentFormat.OpenXml.EnumValue<CellValues>(CellValues.Boolean);
+                    }
+                    else if (evalResult is { IsError: true })
+                    {
+                        cell.CellValue = new CellValue(evalResult.ErrorValue!);
+                        cell.DataType = new DocumentFormat.OpenXml.EnumValue<CellValues>(CellValues.Error);
+                    }
+                    else
+                    {
+                        cell.CellValue = null;
+                        cell.DataType = null;
+                        unsupported.Add($"formula not evaluated (unsupported): {value.TrimStart('=')}");
+                    }
                     break;
                 case "type":
                     cell.DataType = value.ToLowerInvariant() switch
