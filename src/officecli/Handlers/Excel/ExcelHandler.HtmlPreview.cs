@@ -715,7 +715,7 @@ public partial class ExcelHandler
         if (fmt.Contains("e+") || fmt.Contains("e-"))
         {
             var decimals = CountDecimalPlaces(fmtCode);
-            // Count exponent digits (number of 0s after E+)
+            if (value == 0) return decimals > 0 ? $"0.{new string('0', decimals)}E+00" : "0E+00";
             var eIdx = fmt.IndexOf("e+", StringComparison.Ordinal);
             if (eIdx < 0) eIdx = fmt.IndexOf("e-", StringComparison.Ordinal);
             var expDigits = eIdx >= 0 ? fmtCode[(eIdx + 2)..].Count(c => c == '0') : 2;
