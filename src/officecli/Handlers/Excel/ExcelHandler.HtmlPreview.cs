@@ -724,7 +724,11 @@ public partial class ExcelHandler
             if (cleanFmt.Contains(sym))
             {
                 var idx = cleanFmt.IndexOf(sym);
-                if (idx <= cleanFmt.IndexOf('#') && idx <= cleanFmt.IndexOf('0'))
+                var hashIdx = cleanFmt.IndexOf('#');
+                var zeroIdx = cleanFmt.IndexOf('0');
+                var firstDigit = (hashIdx >= 0 && zeroIdx >= 0) ? Math.Min(hashIdx, zeroIdx)
+                    : Math.Max(hashIdx, zeroIdx);
+                if (firstDigit < 0 || idx <= firstDigit)
                     prefix = sym;
                 else
                     suffix = sym;
