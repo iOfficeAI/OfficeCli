@@ -351,12 +351,13 @@ public partial class ExcelHandler
         // Frozen pane sticky positioning
         bool isFrozenRow = frozenRows > 0 && row <= frozenRows;
         bool isFrozenCol = frozenCols > 0 && col <= frozenCols;
+        // z-index layering: corner-cell=4, col-header=3, frozen-row+col=2, frozen-col=1
         if (isFrozenRow && isFrozenCol)
-            styles.Add("position:sticky;top:0;left:0;z-index:3");
+            styles.Add("position:sticky;top:0;left:0;z-index:2");
         else if (isFrozenRow)
-            styles.Add("position:sticky;top:0;z-index:2");
+            styles.Add("position:sticky;top:0;z-index:1");
         else if (isFrozenCol)
-            styles.Add("position:sticky;left:0;z-index:2");
+            styles.Add("position:sticky;left:0;z-index:1");
 
         if (cell == null || stylesheet == null)
             return styles.Count > 0 ? $" style=\"{string.Join(";", styles)}\"" : "";
