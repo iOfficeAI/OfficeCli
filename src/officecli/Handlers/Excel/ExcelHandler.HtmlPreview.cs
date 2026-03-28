@@ -817,10 +817,10 @@ public partial class ExcelHandler
             }
         }
         // Handle quoted prefix/suffix: "USD "
-        var quoteMatch = System.Text.RegularExpressions.Regex.Match(fmtCode, "^\"([^\"]+)\"");
-        if (quoteMatch.Success) { prefix = quoteMatch.Groups[1].Value; cleanFmt = cleanFmt[quoteMatch.Length..]; }
-        var quoteSuffix = System.Text.RegularExpressions.Regex.Match(fmtCode, "\"([^\"]+)\"$");
-        if (quoteSuffix.Success) { suffix = quoteSuffix.Groups[1].Value; cleanFmt = cleanFmt[..^quoteSuffix.Length]; }
+        var quoteMatch = System.Text.RegularExpressions.Regex.Match(cleanFmt, "^\"([^\"]+)\"");
+        if (quoteMatch.Success) { prefix += quoteMatch.Groups[1].Value; cleanFmt = cleanFmt[quoteMatch.Length..]; }
+        var quoteSuffix = System.Text.RegularExpressions.Regex.Match(cleanFmt, "\"([^\"]+)\"$");
+        if (quoteSuffix.Success) { suffix = quoteSuffix.Groups[1].Value + suffix; cleanFmt = cleanFmt[..^quoteSuffix.Length]; }
 
         // Handle +/- prefix in format (e.g. "+0.0%", "-#,##0")
         cleanFmt = cleanFmt.Trim();
