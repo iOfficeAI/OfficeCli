@@ -21,6 +21,7 @@ public partial class WordHandler
         public List<int> FootnoteRefs { get; } = new();
         public List<int> EndnoteRefs { get; } = new();
         public PageLayout? CachedPageLayout { get; set; }
+        public bool RenderingBody { get; set; }
     }
 
     /// <summary>Current render context — set during ViewAsHtml, used by all render methods.</summary>
@@ -58,7 +59,9 @@ public partial class WordHandler
         // Render body into temporary buffer, then split on page breaks
         var maxW = $"max-width:{pgLayout.WidthCm:0.##}cm";
         var bodySb = new StringBuilder();
+        _ctx.RenderingBody = true;
         RenderBodyHtml(bodySb, body);
+        _ctx.RenderingBody = false;
 
         // Render header/footer into reusable strings
         var headerSb = new StringBuilder();
@@ -80,17 +83,6 @@ public partial class WordHandler
 
         // Split body content on page breaks into pages
         var bodyContent = bodySb.ToString();
-        // Remove footer content that leaked into body (from floating text boxes rendered as body paragraphs)
-        bodyContent = Regex.Replace(bodyContent,
-            @"<p[^>]*>[^<]*<span[^>]*>[^<]*</div><div class=""doc-footer"">[\s\S]*?</div>\s*</div>\s*</div>",
-            "", RegexOptions.Singleline);
-        // Fallback: if doc-footer still in body, strip from that point to end of its block
-        var leakIdx = bodyContent.IndexOf("doc-footer");
-        if (leakIdx >= 0)
-        {
-            var cutFrom = bodyContent.LastIndexOf("<p", leakIdx);
-            if (cutFrom >= 0) bodyContent = bodyContent[..cutFrom];
-        }
         var pages = bodyContent.Split("<!--PAGE_BREAK-->");
 
         // Filter out truly empty trailing page (empty string after final page break)
