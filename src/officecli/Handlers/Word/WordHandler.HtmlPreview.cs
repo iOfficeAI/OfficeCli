@@ -408,6 +408,14 @@ public partial class WordHandler
 
     private void RenderParagraphContentHtml(StringBuilder sb, Paragraph para)
     {
+        // Render bookmark anchors for internal hyperlink targets
+        foreach (var bm in para.Elements<BookmarkStart>())
+        {
+            var bmName = bm.Name?.Value;
+            if (!string.IsNullOrEmpty(bmName) && !bmName.StartsWith("_GoBack"))
+                sb.Append($"<a id=\"{HtmlEncode(bmName)}\"></a>");
+        }
+
         // Collect standalone images that precede a text box group (they overlay the group in Word)
         bool hasTextBoxGroup = HasTextBoxContent(para);
         var preGroupImages = hasTextBoxGroup ? new List<Drawing>() : null;
@@ -622,14 +630,15 @@ public partial class WordHandler
     /// <summary>Check if paragraph contains any drawing that renders as block-level HTML (text box, chart, shape).</summary>
     private static bool HasBlockLevelDrawing(Paragraph para)
     {
-        foreach (var run in para.Elements<Run>())
+        // Check all descendants (including inside mc:AlternateContent)
+        foreach (var drawing in para.Descendants<Drawing>())
         {
-            var drawing = run.GetFirstChild<Drawing>() ?? run.Descendants<Drawing>().FirstOrDefault();
-            if (drawing == null) continue;
             if (HasGroupOrShape(drawing)) return true;
-            // Chart reference
             if (drawing.Descendants().Any(e => e.LocalName == "chart")) return true;
         }
+        // Also check for text box content via localName (catches mc:AlternateContent cases)
+        if (para.Descendants().Any(e => e.LocalName == "txbxContent"))
+            return true;
         return false;
     }
 
@@ -748,15 +757,34 @@ public partial class WordHandler
             string widthAttr = widthPx > 0 ? $" width=\"{widthPx}\"" : "";
             string heightAttr = heightPx > 0 ? $" height=\"{heightPx}\"" : "";
 
+            // Detect anchored/floating positioning
+            var anchor = drawing.Descendants<DW.Anchor>().FirstOrDefault();
+            var floatCss = "";
+            if (anchor != null)
+            {
+                // Check wrap type for float direction
+                var wrapLeft = anchor.Elements().Any(e => e.LocalName == "wrapSquare" || e.LocalName == "wrapTight");
+                if (wrapLeft)
+                {
+                    var hPosFrom = anchor.GetFirstChild<DW.HorizontalPosition>()?.RelativeFrom?.Value;
+                    floatCss = hPosFrom == DW.HorizontalRelativePositionValues.RightMargin
+                        ? "float:right;margin:0 0 8px 8px"
+                        : "float:left;margin:0 8px 8px 0";
+                }
+            }
+
             // Crop support: container-based cropping
             var crop = GetCropPercents(drawing);
+            var styleParts = new List<string> { "max-width:100%", "height:auto" };
+            if (!string.IsNullOrEmpty(floatCss)) styleParts.Add(floatCss);
+
             if (crop.HasValue)
             {
-                RenderCroppedImage(sb, dataUri, widthPx, heightPx, crop.Value.l, crop.Value.t, crop.Value.r, crop.Value.b, HtmlEncode(alt));
+                RenderCroppedImage(sb, dataUri, widthPx, heightPx, crop.Value.l, crop.Value.t, crop.Value.r, crop.Value.b, HtmlEncode(alt), floatCss);
             }
             else
             {
-                sb.Append($"<img src=\"{dataUri}\" alt=\"{HtmlEncode(alt)}\"{widthAttr}{heightAttr} style=\"max-width:100%;height:auto\">");
+                sb.Append($"<img src=\"{dataUri}\" alt=\"{HtmlEncode(alt)}\"{widthAttr}{heightAttr} style=\"{string.Join(";", styleParts)}\">");
             }
         }
         catch
@@ -790,7 +818,7 @@ public partial class WordHandler
     /// The image is scaled to its original size and positioned to show only the cropped region.
     /// </summary>
     private static void RenderCroppedImage(StringBuilder sb, string dataUri, long displayWidthPx, long displayHeightPx,
-        double cropL, double cropT, double cropR, double cropB, string alt)
+        double cropL, double cropT, double cropR, double cropB, string alt, string extraStyle = "")
     {
         // The display size is the cropped result size.
         // Original image visible fraction: (1 - cropL/100 - cropR/100) horizontally, (1 - cropT/100 - cropB/100) vertically.
@@ -805,7 +833,9 @@ public partial class WordHandler
         var offsetX = -imgW * (cropL / 100.0);
         var offsetY = -imgH * (cropT / 100.0);
 
-        sb.Append($"<div style=\"display:inline-block;width:{displayWidthPx}px;height:{displayHeightPx}px;overflow:hidden\">");
+        var containerStyle = $"display:inline-block;width:{displayWidthPx}px;height:{displayHeightPx}px;overflow:hidden";
+        if (!string.IsNullOrEmpty(extraStyle)) containerStyle += $";{extraStyle}";
+        sb.Append($"<div style=\"{containerStyle}\">");
         sb.Append($"<img src=\"{dataUri}\" alt=\"{alt}\" style=\"width:{imgW:0}px;height:{imgH:0}px;margin-left:{offsetX:0}px;margin-top:{offsetY:0}px\">");
         sb.Append("</div>");
     }
@@ -1515,7 +1545,7 @@ public partial class WordHandler
             foreach (var cell in row.Elements<TableCell>())
             {
                 var tag = isHeader ? "th" : "td";
-                var cellStyle = GetTableCellInlineCss(cell, tableBordersNone);
+                var cellStyle = GetTableCellInlineCss(cell, tableBordersNone, tblBorders);
 
                 // Merge attributes
                 var attrs = new StringBuilder();
@@ -1904,14 +1934,21 @@ public partial class WordHandler
         return string.Join(";", parts);
     }
 
-    private string GetTableCellInlineCss(TableCell cell, bool tableBordersNone)
+    private string GetTableCellInlineCss(TableCell cell, bool tableBordersNone, TableBorders? tblBorders = null)
     {
         var parts = new List<string>();
         var tcPr = cell.TableCellProperties;
 
-        // If table-level borders are none, explicitly set border:none on cells
-        if (tableBordersNone)
-            parts.Add("border:none");
+        // Apply table-level borders to cells (since CSS default is now border:none)
+        if (!tableBordersNone && tblBorders != null)
+        {
+            RenderBorderCss(parts, tblBorders.TopBorder, "border-top");
+            RenderBorderCss(parts, tblBorders.BottomBorder, "border-bottom");
+            RenderBorderCss(parts, tblBorders.LeftBorder, "border-left");
+            RenderBorderCss(parts, tblBorders.RightBorder, "border-right");
+            RenderBorderCss(parts, tblBorders.InsideHorizontalBorder, "border-bottom");
+            RenderBorderCss(parts, tblBorders.InsideVerticalBorder, "border-right");
+        }
 
         if (tcPr == null) return string.Join(";", parts);
 
@@ -1933,13 +1970,10 @@ public partial class WordHandler
             if (va != null) parts.Add($"vertical-align:{va}");
         }
 
-        // Cell borders (override table-level setting if cell has its own)
+        // Cell-level borders override table-level
         var tcBorders = tcPr.TableCellBorders;
         if (tcBorders != null)
         {
-            // Remove the table-level border:none if cell has specific borders
-            if (tableBordersNone)
-                parts.Remove("border:none");
             RenderBorderCss(parts, tcBorders.TopBorder, "border-top");
             RenderBorderCss(parts, tcBorders.BottomBorder, "border-bottom");
             RenderBorderCss(parts, tcBorders.LeftBorder, "border-left");
@@ -2088,7 +2122,7 @@ public partial class WordHandler
         .wg p {{ padding: 0; margin: 0.05em 0; }}
         table.borderless {{ border: none; }}
         table.borderless td, table.borderless th {{ border: none; padding: 2px 6px; }}
-        th, td {{ border: 1px solid #bbb; padding: 4px 8px; text-align: left; vertical-align: top; }}
+        th, td {{ border: none; padding: 4px 8px; text-align: left; vertical-align: top; }}
         th {{ background: #f0f0f0; font-weight: 600; }}
         .header-row td, .header-row th {{ background: #f0f0f0; font-weight: 600; }}
         hr.page-break {{ border: none; border-top: 2px dashed #ccc; margin: 2em 0; }}
