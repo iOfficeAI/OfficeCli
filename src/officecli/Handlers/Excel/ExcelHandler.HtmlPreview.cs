@@ -81,7 +81,9 @@ public partial class ExcelHandler
         var sheetData = ws.GetFirstChild<SheetData>();
         if (sheetData == null)
         {
-            sb.AppendLine("<div class=\"empty-sheet\">Empty sheet</div>");
+            // Don't show "Empty sheet" if there are charts
+            if (worksheetPart.DrawingsPart?.WorksheetDrawing == null)
+                sb.AppendLine("<div class=\"empty-sheet\">Empty sheet</div>");
             return;
         }
 
@@ -117,7 +119,8 @@ public partial class ExcelHandler
         // Empty sheet (SheetData exists but no rows/cells)
         if (maxRow == 0 || maxCol == 0)
         {
-            sb.AppendLine("<div class=\"empty-sheet\">Empty sheet</div>");
+            if (worksheetPart.DrawingsPart?.WorksheetDrawing == null)
+                sb.AppendLine("<div class=\"empty-sheet\">Empty sheet</div>");
             return;
         }
 
