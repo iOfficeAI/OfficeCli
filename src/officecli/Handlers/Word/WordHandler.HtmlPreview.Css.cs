@@ -260,13 +260,13 @@ public partial class WordHandler
             if (indent != null)
             {
                 if (indent.Left?.Value is string leftTwips && leftTwips != "0")
-                    parts.Add($"margin-left:{TwipsToPx(leftTwips)}px");
+                    parts.Add($"margin-left:{TwipsToPx(leftTwips):0.#}px");
                 if (indent.Right?.Value is string rightTwips && rightTwips != "0")
-                    parts.Add($"margin-right:{TwipsToPx(rightTwips)}px");
+                    parts.Add($"margin-right:{TwipsToPx(rightTwips):0.#}px");
                 if (indent.FirstLine?.Value is string firstLineTwips && firstLineTwips != "0")
-                    parts.Add($"text-indent:{TwipsToPx(firstLineTwips)}px");
+                    parts.Add($"text-indent:{TwipsToPx(firstLineTwips):0.#}px");
                 if (indent.Hanging?.Value is string hangTwips && hangTwips != "0")
-                    parts.Add($"text-indent:-{TwipsToPx(hangTwips)}px");
+                    parts.Add($"text-indent:-{TwipsToPx(hangTwips):0.#}px");
             }
         }
 
@@ -275,9 +275,9 @@ public partial class WordHandler
         if (spacing != null)
         {
             if (spacing.Before?.Value is string beforeTwips && beforeTwips != "0")
-                parts.Add($"margin-top:{TwipsToPx(beforeTwips)}px");
+                parts.Add($"margin-top:{TwipsToPx(beforeTwips):0.#}px");
             if (spacing.After?.Value is string afterTwips && afterTwips != "0")
-                parts.Add($"margin-bottom:{TwipsToPx(afterTwips)}px");
+                parts.Add($"margin-bottom:{TwipsToPx(afterTwips):0.#}px");
             if (spacing.Line?.Value is string lineVal)
             {
                 var rule = spacing.LineRule?.InnerText;
@@ -289,7 +289,7 @@ public partial class WordHandler
                 }
                 else if (rule == "exact" || rule == "atLeast")
                 {
-                    parts.Add($"line-height:{TwipsToPx(lineVal)}px");
+                    parts.Add($"line-height:{TwipsToPx(lineVal):0.#}px");
                 }
             }
         }
@@ -379,9 +379,9 @@ public partial class WordHandler
                 if (spacing != null)
                 {
                     if (spacing.Before?.Value is string b && b != "0" && !parts.Any(p => p.StartsWith("margin-top")))
-                        parts.Add($"margin-top:{TwipsToPx(b)}px");
+                        parts.Add($"margin-top:{TwipsToPx(b):0.#}px");
                     if (spacing.After?.Value is string a && a != "0" && !parts.Any(p => p.StartsWith("margin-bottom")))
-                        parts.Add($"margin-bottom:{TwipsToPx(a)}px");
+                        parts.Add($"margin-bottom:{TwipsToPx(a):0.#}px");
                     if (spacing.Line?.Value is string lv && !parts.Any(p => p.StartsWith("line-height")))
                     {
                         var rule = spacing.LineRule?.InnerText;
@@ -408,7 +408,13 @@ public partial class WordHandler
         // Font
         var fonts = rProps.RunFonts;
         var font = fonts?.EastAsia?.Value ?? fonts?.Ascii?.Value ?? fonts?.HighAnsi?.Value;
-        if (font != null) parts.Add($"font-family:'{CssSanitize(font)}'");
+        if (font != null)
+        {
+            var fallback = GetChineseFontFallback(font);
+            parts.Add(fallback != null
+                ? $"font-family:'{CssSanitize(font)}',{fallback}"
+                : $"font-family:'{CssSanitize(font)}'");
+        }
 
         // Size (stored as half-points)
         var size = rProps.FontSize?.Val?.Value;
@@ -607,15 +613,15 @@ public partial class WordHandler
         parts.Add($"{cssProp}:{width} {style} {cssColor}");
     }
 
-    private static int TwipsToPx(string twipsStr)
+    private static double TwipsToPx(string twipsStr)
     {
         if (!int.TryParse(twipsStr, out var twips)) return 0;
-        return (int)(twips / 1440.0 * 96);
+        return Math.Round(twips / 1440.0 * 96, 1);
     }
 
     private static string TwipsToPxStr(string twipsStr)
     {
-        return $"{TwipsToPx(twipsStr)}px";
+        return $"{TwipsToPx(twipsStr):0.#}px";
     }
 
     private static string? HighlightToCssColor(string highlight) => highlight.ToLowerInvariant() switch
@@ -639,17 +645,34 @@ public partial class WordHandler
         _ => null
     };
 
+    /// <summary>
+    /// Returns CSS fallback fonts for common Windows Chinese fonts that are unavailable on Mac.
+    /// </summary>
+    private static string? GetChineseFontFallback(string font) => font switch
+    {
+        "仿宋_GB2312" => "'仿宋',FangSong,STFangsong",
+        "楷体_GB2312" => "'楷体',KaiTi,STKaiti",
+        "长城小标宋体" => "'华文中宋',STZhongsong,'宋体',SimSun",
+        "黑体" => "'Heiti SC',STHeiti",
+        _ => null
+    };
+
     private static string CssSanitize(string value) =>
         Regex.Replace(value, @"[""'\\<>&;{}]", "");
 
     private static string HtmlEncode(string? text)
     {
         if (string.IsNullOrEmpty(text)) return "";
-        return text
+        var encoded = text
             .Replace("&", "&amp;")
             .Replace("<", "&lt;")
             .Replace(">", "&gt;")
             .Replace("\"", "&quot;");
+        // Preserve consecutive spaces (HTML collapses them by default)
+        // Replace runs of 2+ spaces: keep first as normal space, rest as &nbsp;
+        encoded = Regex.Replace(encoded, @"  +", m =>
+            " " + new string('\u00A0', m.Length - 1)); // space + (n-1) × &nbsp;
+        return encoded;
     }
 
     // ==================== CSS Stylesheet ====================
@@ -684,7 +707,7 @@ public partial class WordHandler
         h4 {{ margin-top: 0.2em; margin-bottom: 0.1em; }}
         h5, h6 {{ margin-top: 0.1em; margin-bottom: 0.1em; }}
         p {{ margin: 0.1em 0; }}
-        p.empty {{ margin: 0; line-height: 0.8; font-size: 6pt; }}
+        p.empty {{ margin: 0; min-height: 1em; }}
         a {{ color: #2B579A; }} a:hover {{ color: #1a3c6e; }}
         ul, ol {{ padding-left: 2em; margin: 0.2em 0; }}
         li {{ margin: 0.1em 0; }}
