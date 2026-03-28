@@ -75,8 +75,45 @@ public partial class WordHandler
         return false;
     }
 
+    /// <summary>
+    /// Check if a drawing is an anchored text box whose content is exclusively header/footer styled paragraphs.
+    /// Such text boxes are used by some documents to simulate headers/footers in the body area,
+    /// which would cause duplicate rendering since we also render from HeaderParts/FooterParts.
+    /// </summary>
+    private bool IsHeaderFooterTextBox(Drawing drawing)
+    {
+        // Must be an anchor (floating), not inline
+        var anchor = drawing.Descendants<DW.Anchor>().FirstOrDefault();
+        if (anchor == null) return false;
+
+        // Must contain a text box
+        var txbxContent = drawing.Descendants().FirstOrDefault(e => e.LocalName == "txbxContent");
+        if (txbxContent == null) return false;
+
+        // All paragraphs inside must have header/footer style
+        var paragraphs = txbxContent.Descendants<Paragraph>().ToList();
+        if (paragraphs.Count == 0) return false;
+
+        foreach (var para in paragraphs)
+        {
+            var styleId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+            if (styleId == null) return false;
+
+            var styleName = GetStyleName(para);
+            var lower = styleName.ToLowerInvariant();
+            if (!lower.Contains("header") && !lower.Contains("footer")
+                && !lower.Contains("页眉") && !lower.Contains("页脚"))
+                return false;
+        }
+
+        return true;
+    }
+
     private void RenderDrawingHtml(StringBuilder sb, Drawing drawing, List<Drawing>? floatImages = null)
     {
+        // Skip header/footer text boxes in body rendering (they duplicate HeaderParts/FooterParts content)
+        if (_ctx.RenderingBody && IsHeaderFooterTextBox(drawing)) return;
+
         // Check for chart (c:chart inside a:graphicData)
         var chartRef = drawing.Descendants().FirstOrDefault(e => e.LocalName == "chart" &&
             e.GetAttributes().Any(a => a.LocalName == "id"));
