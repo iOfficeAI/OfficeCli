@@ -166,6 +166,13 @@ public partial class ExcelHandler
                 hiddenRows.Add(rowIdx);
         }
 
+        // Collect hidden columns
+        var hiddenCols = new HashSet<int>();
+        foreach (var (colIdx, widthPx) in colWidths)
+        {
+            if (widthPx <= 0) hiddenCols.Add(colIdx);
+        }
+
         // Start table
         sb.AppendLine("<div class=\"table-wrapper\">");
         sb.AppendLine("<table>");
@@ -188,6 +195,7 @@ public partial class ExcelHandler
         sb.Append("></th>");
         for (int c = 1; c <= maxCol; c++)
         {
+            if (hiddenCols.Contains(c)) continue;
             var colName = IndexToColumnName(c);
             var stickyStyle = frozenRows > 0 ? " style=\"position:sticky;top:0;z-index:3\"" : "";
             sb.Append($"<th class=\"col-header\"{stickyStyle}>{colName}</th>");
@@ -208,6 +216,7 @@ public partial class ExcelHandler
 
             for (int c = 1; c <= maxCol; c++)
             {
+                if (hiddenCols.Contains(c)) continue;
                 // Check if this cell is hidden by a merge (non-anchor cell in merged range)
                 var cellRef = $"{IndexToColumnName(c)}{r}";
                 if (mergeMap.TryGetValue(cellRef, out var mergeInfo))
@@ -723,6 +732,13 @@ public partial class ExcelHandler
         if (quoteMatch.Success) { prefix = quoteMatch.Groups[1].Value; cleanFmt = cleanFmt[quoteMatch.Length..]; }
         var quoteSuffix = System.Text.RegularExpressions.Regex.Match(fmtCode, "\"([^\"]+)\"$");
         if (quoteSuffix.Success) { suffix = quoteSuffix.Groups[1].Value; cleanFmt = cleanFmt[..^quoteSuffix.Length]; }
+
+        // Handle +/- prefix in format (e.g. "+0.0%", "-#,##0")
+        cleanFmt = cleanFmt.Trim();
+        if (cleanFmt.StartsWith('+'))
+        { prefix += "+"; cleanFmt = cleanFmt[1..]; }
+        else if (cleanFmt.StartsWith('-'))
+        { prefix += "-"; cleanFmt = cleanFmt[1..]; }
 
         var formatted = ApplyNumberFormatCore(value, cleanFmt.Trim());
         return prefix + formatted + suffix;
