@@ -569,11 +569,14 @@ public partial class ExcelHandler
         var rawValue = GetCellDisplayValue(cell);
         if (string.IsNullOrEmpty(rawValue)) return rawValue;
 
+        // Boolean: convert 1/0 to TRUE/FALSE
+        if (cell.DataType?.Value == CellValues.Boolean)
+            return rawValue == "1" ? "TRUE" : "FALSE";
+
         // Only format numeric values (not strings, shared strings, etc.)
         if (cell.DataType?.Value == CellValues.SharedString ||
             cell.DataType?.Value == CellValues.InlineString ||
             cell.DataType?.Value == CellValues.String ||
-            cell.DataType?.Value == CellValues.Boolean ||
             cell.DataType?.Value == CellValues.Error)
             return rawValue;
 
@@ -640,9 +643,19 @@ public partial class ExcelHandler
         {
             var sections = fmtCode.Split(';');
             if (value < 0 && sections.Length >= 2)
-                return ApplyNumberFormat(Math.Abs(value), sections[1].Trim()).Insert(0, "-");
+            {
+                var negFmt = sections[1].Trim();
+                // If format already handles negative (has parens or minus), don't add extra minus
+                return ApplyNumberFormat(Math.Abs(value), negFmt);
+            }
             if (value == 0 && sections.Length >= 3)
-                return ApplyNumberFormat(value, sections[2].Trim());
+            {
+                var zeroFmt = sections[2].Trim();
+                // Quoted literal for zero section: "zero" → zero
+                if (zeroFmt.StartsWith('"') && zeroFmt.EndsWith('"'))
+                    return zeroFmt[1..^1];
+                return ApplyNumberFormat(value, zeroFmt);
+            }
             fmtCode = sections[0].Trim();
         }
 
@@ -651,6 +664,13 @@ public partial class ExcelHandler
 
         // Strip condition markers: [>100], [<=0], etc.
         fmtCode = System.Text.RegularExpressions.Regex.Replace(fmtCode, @"\[[<>=!]+\d+\.?\d*\]", "").Trim();
+
+        // Handle parenthesis wrapping: ($#,##0.00) → prefix="(" suffix=")"
+        if (fmtCode.StartsWith('(') && fmtCode.EndsWith(')'))
+        {
+            var inner = fmtCode[1..^1];
+            return "(" + ApplyNumberFormat(value, inner) + ")";
+        }
 
         var fmt = fmtCode.ToLowerInvariant();
 
