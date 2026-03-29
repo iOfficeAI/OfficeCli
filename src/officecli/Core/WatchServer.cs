@@ -184,7 +184,7 @@ public class WatchServer : IDisposable
     public static string GetWatchPipeName(string filePath)
     {
         var fullPath = Path.GetFullPath(filePath);
-        if (OperatingSystem.IsWindows())
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS())
             fullPath = fullPath.ToUpperInvariant();
         var hash = Convert.ToHexString(
             System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(fullPath)))[..16];

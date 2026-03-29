@@ -30,7 +30,7 @@ public class ResidentServer : IDisposable
     public static string GetPipeName(string filePath)
     {
         var fullPath = Path.GetFullPath(filePath);
-        if (OperatingSystem.IsWindows())
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS())
             fullPath = fullPath.ToUpperInvariant();
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fullPath)))[..16];
         return $"officecli-{hash}";
