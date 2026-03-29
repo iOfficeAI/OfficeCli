@@ -70,9 +70,14 @@ public partial class WordHandler
         sb.AppendLine("<style>");
         sb.AppendLine(GenerateWordCss(pgLayout, docDef));
         sb.AppendLine("</style>");
-        // Load document font from Google Fonts (if available)
-        var gfFont = docDef.Font.Replace(' ', '+');
-        sb.AppendLine($"<link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family={HtmlEncode(gfFont)}:ital,wght@0,400;0,700;1,400;1,700&display=swap\">");
+        // Load all document fonts from Google Fonts
+        var docFonts = CollectDocumentFonts();
+        if (docFonts.Count > 0)
+        {
+            var families = string.Join("&", docFonts.Select(f =>
+                $"family={f.Replace(' ', '+')}:ital,wght@0,400;0,700;1,400;1,700"));
+            sb.AppendLine($"<link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?{families}&display=swap\">");
+        }
         // KaTeX for math rendering
         sb.AppendLine("<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css\">");
         sb.AppendLine("<script defer src=\"https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js\"></script>");
@@ -146,7 +151,7 @@ public partial class WordHandler
 
         for (int i = 0; i < pageList.Count; i++)
         {
-            sb.AppendLine($"<div class=\"page\" style=\"{maxW}\">");
+            sb.AppendLine($"<div class=\"page\" data-page=\"{i + 1}\" style=\"{maxW}\">");
             if (i == 0) sb.Append(headerHtml);
             sb.Append("<div class=\"page-body\">");
             sb.Append(pageList[i]);
@@ -404,6 +409,42 @@ public partial class WordHandler
         return new DocDef(font ?? "Calibri", sizePt, lineH, color, gridLinePitchPt);
     }
 
+    /// <summary>Collect all distinct font names from document body, styles, and theme.</summary>
+    private HashSet<string> CollectDocumentFonts()
+    {
+        var fonts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // From styles
+        var styles = _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles;
+        if (styles != null)
+            foreach (var rf in styles.Descendants<RunFonts>())
+            {
+                if (!string.IsNullOrEmpty(rf.Ascii?.Value)) fonts.Add(rf.Ascii.Value);
+                if (!string.IsNullOrEmpty(rf.HighAnsi?.Value)) fonts.Add(rf.HighAnsi.Value);
+                if (!string.IsNullOrEmpty(rf.EastAsia?.Value)) fonts.Add(rf.EastAsia.Value);
+            }
+        // From document body
+        var body = _doc.MainDocumentPart?.Document?.Body;
+        if (body != null)
+            foreach (var rf in body.Descendants<RunFonts>())
+            {
+                if (!string.IsNullOrEmpty(rf.Ascii?.Value)) fonts.Add(rf.Ascii.Value);
+                if (!string.IsNullOrEmpty(rf.HighAnsi?.Value)) fonts.Add(rf.HighAnsi.Value);
+            }
+        // From theme
+        var theme = _doc.MainDocumentPart?.ThemePart?.Theme?.ThemeElements?.FontScheme;
+        var majFont = theme?.MajorFont?.LatinFont?.Typeface?.Value;
+        if (!string.IsNullOrEmpty(majFont)) fonts.Add(majFont);
+        var minFont = theme?.MinorFont?.LatinFont?.Typeface?.Value;
+        if (!string.IsNullOrEmpty(minFont)) fonts.Add(minFont);
+        // Remove generic/system fonts that won't be on Google Fonts
+        fonts.RemoveWhere(f => f.StartsWith("Symbol") || f.StartsWith("Wingding")
+            || f.Equals("Arial", StringComparison.OrdinalIgnoreCase)
+            || f.Equals("Times New Roman", StringComparison.OrdinalIgnoreCase)
+            || f.Equals("Tahoma", StringComparison.OrdinalIgnoreCase)
+            || f.Equals("Courier New", StringComparison.OrdinalIgnoreCase));
+        return fonts;
+    }
+
     private static string? NonEmpty(string? s) => string.IsNullOrEmpty(s) ? null : s;
 
     /// <summary>Resolve shading fill color: direct hex or themeFill + themeFillTint/Shade.</summary>
@@ -513,9 +554,14 @@ public partial class WordHandler
         var bodySectPr = body.GetFirstChild<SectionProperties>();
         var bodyColCount = GetSectionColumnCount(bodySectPr);
 
+        int wParaCount = 0, wTableCount = 0;
         for (int ei = 0; ei < elements.Count; ei++)
         {
             var element = elements[ei];
+
+            // Emit invisible anchors for watch scroll targeting
+            if (element is Paragraph) { wParaCount++; sb.Append($"<a id=\"w-p-{wParaCount}\"></a>"); }
+            else if (element is Table) { wTableCount++; sb.Append($"<a id=\"w-table-{wTableCount}\"></a>"); }
 
             // Check for inline section break (sectPr inside paragraph pPr) — handle column changes
             if (element is Paragraph sectPara && sectPara.ParagraphProperties?.GetFirstChild<SectionProperties>() != null)

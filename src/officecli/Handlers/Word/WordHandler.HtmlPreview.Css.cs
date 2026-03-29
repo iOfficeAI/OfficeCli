@@ -411,9 +411,12 @@ public partial class WordHandler
                     lineHMult = dlvi / 240.0;
                 var bodyLineH = defSz * lineHMult;
                 var dropCapHeight = lineCount * bodyLineH;
+                // Read hSpace from framePr (default ~3pt)
+                var hSpaceAttr = framePr.GetAttributes().FirstOrDefault(a => a.LocalName == "hSpace").Value;
+                var hSpacePt = hSpaceAttr != null && int.TryParse(hSpaceAttr, out var hsTwips) ? hsTwips / 20.0 : 3.0;
                 parts.Add("float:left");
                 parts.Add($"line-height:{dropCapHeight:0.#}pt");
-                parts.Add($"padding-right:6px");
+                parts.Add($"padding-right:{hSpacePt:0.#}pt");
                 parts.Add($"margin:0");
             }
         }
@@ -1086,6 +1089,7 @@ public partial class WordHandler
             }}
         .page-body {{ flex: 1; }}
         .page-body > :first-child {{ margin-top: 0 !important; }}
+        .page-body > img + h1, .page-body > img + img + h1 {{ margin-top: 0 !important; }}
         .doc-header, .doc-footer {{ color: #888; font-size: 9pt; }}
         .doc-header {{ position: absolute; top: {pg.HeaderDistancePt:0.#}pt; left: {mL}; right: {mR};
             padding-bottom: 0.3em; }}
