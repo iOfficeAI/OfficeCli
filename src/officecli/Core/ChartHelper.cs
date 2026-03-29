@@ -191,7 +191,7 @@ internal static partial class ChartHelper
             }
 
             // Legacy format: series1=Sales:10,20,30
-            if (!properties.TryGetValue($"series{i}", out var seriesStr)) break;
+            if (!properties.TryGetValue($"series{i}", out var seriesStr)) continue;
             var colonIdx = seriesStr.IndexOf(':');
             if (colonIdx < 0)
             {
@@ -223,7 +223,7 @@ internal static partial class ChartHelper
             var hasValues = properties.TryGetValue($"series{i}.values", out var valuesStr);
             var hasCats = properties.TryGetValue($"series{i}.categories", out var catsStr);
 
-            if (!hasName && !hasValues && !hasCats) break;
+            if (!hasName && !hasValues && !hasCats) continue;
 
             var info = new SeriesInfo { Name = nameStr ?? $"Series {i}" };
 
