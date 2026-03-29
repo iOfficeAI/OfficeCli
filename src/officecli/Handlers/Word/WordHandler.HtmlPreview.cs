@@ -153,13 +153,13 @@ public partial class WordHandler
             // Place footnotes on the page that contains the footnote reference
             if (!string.IsNullOrEmpty(footnotesHtml) && pageList[i].Contains("fn-ref"))
                 sb.Append(footnotesHtml);
+            // Place endnotes on the last page
+            if (i == pageList.Count - 1 && !string.IsNullOrEmpty(endnotesHtml))
+                sb.Append(endnotesHtml);
             sb.Append("</div>");
             sb.Append(footerTemplate.Replace("<!--PAGE_NUM-->", (i + 1).ToString()));
             sb.AppendLine("</div>");
         }
-
-        // Endnotes at document end (outside page divs)
-        sb.Append(endnotesHtml);
 
         // Auto-pagination script: split overflowing pages and KaTeX rendering
         var bodyHeightPt = pgLayout.HeightPt - pgLayout.MarginTopPt - pgLayout.MarginBottomPt;
@@ -504,6 +504,7 @@ public partial class WordHandler
         int? currentNumId = null; // track numId for cross-numId nesting
         var numIdLevelOffset = new Dictionary<int, int>(); // numId → effective ilvl offset for cross-numId nesting
         var olCountPerLevel = new Dictionary<int, int>(); // ilvl → running <ol> item count for `start` attribute
+        var multiLevelCounters = new Dictionary<int, int>(); // ilvl → counter for multi-level numbering
         bool pendingLiClose = false; // defer </li> to allow nested lists inside
         bool inMultiColumn = false; // track whether we're inside a multi-column div
 
@@ -560,18 +561,36 @@ public partial class WordHandler
                 {
                     var ilvl = para.ParagraphProperties?.NumberingProperties?.NumberingLevelReference?.Val?.Value ?? 0;
                     var numId = para.ParagraphProperties?.NumberingProperties?.NumberingId?.Val?.Value ?? 0;
+                    var numFmt = GetNumberingFormat(numId, ilvl);
+                    var lvlText = GetLevelText(numId, ilvl);
+                    var isMultiLevel = lvlText != null && System.Text.RegularExpressions.Regex.Matches(lvlText, @"%\d").Count > 1;
+                    var picBulletUri = listStyle == "bullet" ? GetPicBulletDataUri(numId, ilvl) : null;
                     var tag = listStyle == "bullet" ? "ul" : "ol";
 
-                    // Detect cross-numId nesting: when numId changes but we're already in a list,
-                    // compare indentation to decide if the new list is nested or a sibling.
-                    if (currentNumId != null && numId != currentNumId && listStack.Count > 0
-                        && !numIdLevelOffset.ContainsKey(numId))
+                    // When numId changes, decide: nesting or new list
+                    if (currentNumId != null && numId != currentNumId)
                     {
-                        var curIndent = GetListLevelIndent(currentNumId.Value, currentListLevel);
-                        var newIndent = GetListLevelIndent(numId, ilvl);
-                        if (newIndent > curIndent)
+                        if (listStack.Count > 0 && !numIdLevelOffset.ContainsKey(numId))
                         {
-                            numIdLevelOffset[numId] = currentListLevel + 1 - ilvl;
+                            var curIndent = GetListLevelIndent(currentNumId.Value, currentListLevel);
+                            var newIndent = GetListLevelIndent(numId, ilvl);
+                            if (newIndent > curIndent)
+                            {
+                                numIdLevelOffset[numId] = currentListLevel + 1 - ilvl;
+                            }
+                            else
+                            {
+                                CloseAllLists(sb, listStack, ref currentListType, ref pendingLiClose);
+                                olCountPerLevel.Clear();
+                                multiLevelCounters.Clear();
+                            }
+                        }
+                        else if (listStack.Count == 0)
+                        {
+                            // Previous list was closed by non-list content — reset counters for new list
+                            olCountPerLevel.Clear();
+                            multiLevelCounters.Clear();
+                            numIdLevelOffset.Clear();
                         }
                     }
                     // Apply stored level offset for this numId
@@ -585,7 +604,7 @@ public partial class WordHandler
                         pendingLiClose = false;
                     }
 
-                    // Adjust nesting (close deeper levels: </ol></li> or </ul></li>)
+                    // Adjust nesting (close deeper levels)
                     while (listStack.Count > ilvl + 1)
                     {
                         sb.AppendLine($"</{listStack.Pop()}>");
@@ -593,31 +612,90 @@ public partial class WordHandler
                     }
                     if (pendingLiClose)
                     {
-                        // Still pending — we're going deeper, so leave parent <li> open
                         pendingLiClose = false;
                     }
+
+                    // Build <ol>/<ul> attributes: type, start, indentation
+                    var olType = numFmt switch
+                    {
+                        "lowerLetter" => " type=\"a\"",
+                        "upperLetter" => " type=\"A\"",
+                        "lowerRoman" => " type=\"i\"",
+                        "upperRoman" => " type=\"I\"",
+                        _ => ""
+                    };
+                    // Get indentation from numbering level definition
+                    var (lvlLeft, lvlHanging) = GetListLevelIndentFull(numId, ilvl);
+                    var parentLeft = ilvl > 0 ? GetListLevelIndent(numId, ilvl - 1) : 0;
+                    double indentPt;
+                    if (isMultiLevel)
+                    {
+                        // Multi-level: padding = number start position (left - hanging - parent)
+                        indentPt = (lvlLeft - lvlHanging - parentLeft) / 20.0;
+                    }
+                    else
+                    {
+                        // Normal list: padding = relative indent from parent
+                        indentPt = (lvlLeft - parentLeft) / 20.0;
+                    }
+                    if (indentPt < 18) indentPt = 18; // minimum indent
+                    var hangingPt = lvlHanging / 20.0;
+                    var listStyleParts = $"padding-left:{indentPt:0.#}pt;margin:0";
+                    if (isMultiLevel) listStyleParts += ";list-style-type:none";
+                    if (picBulletUri != null)
+                        listStyleParts += $";list-style-image:url('{picBulletUri}')";
+                    else if (tag == "ul")
+                    {
+                        listStyleParts += ";list-style-image:none"; // reset inherited picture bullet
+                        // Map Word bullet character to CSS list-style-type
+                        var bulletType = lvlText switch
+                        {
+                            "o" => "circle",
+                            "\uf0a7" or "▪" or "\u25AA" => "square",
+                            _ => "disc"
+                        };
+                        listStyleParts += $";list-style-type:{bulletType}";
+                    }
+                    var indentStyle = $" style=\"{listStyleParts}\"";
+
                     while (listStack.Count < ilvl + 1)
                     {
-                        // For <ol>, use start attribute to continue numbering when reopening
-                        if (tag == "ol" && olCountPerLevel.TryGetValue(ilvl, out var prevCount) && prevCount > 0)
-                            sb.AppendLine($"<{tag} start=\"{prevCount + 1}\">");
+                        if (tag == "ol")
+                        {
+                            var startAttr = "";
+                            if (olCountPerLevel.TryGetValue(ilvl, out var prevCount) && prevCount > 0)
+                                startAttr = $" start=\"{prevCount + 1}\"";
+                            sb.AppendLine($"<{tag}{olType}{startAttr}{indentStyle}>");
+                        }
                         else
-                            sb.AppendLine($"<{tag}>");
+                            sb.AppendLine($"<{tag}{indentStyle}>");
                         listStack.Push(tag);
                     }
                     // If same level but different list type, swap
                     if (listStack.Count > 0 && listStack.Peek() != tag)
                     {
                         sb.AppendLine($"</{listStack.Pop()}>");
-                        if (tag == "ol" && olCountPerLevel.TryGetValue(ilvl, out var pc) && pc > 0)
-                            sb.AppendLine($"<{tag} start=\"{pc + 1}\">");
+                        if (tag == "ol")
+                        {
+                            var startAttr = "";
+                            if (olCountPerLevel.TryGetValue(ilvl, out var pc) && pc > 0)
+                                startAttr = $" start=\"{pc + 1}\"";
+                            sb.AppendLine($"<{tag}{olType}{startAttr}{indentStyle}>");
+                        }
                         else
-                            sb.AppendLine($"<{tag}>");
+                            sb.AppendLine($"<{tag}{indentStyle}>");
                         listStack.Push(tag);
                     }
-                    // Track <ol> item count per level
+
+                    // Track counters
                     if (tag == "ol")
+                    {
                         olCountPerLevel[ilvl] = olCountPerLevel.GetValueOrDefault(ilvl, 0) + 1;
+                        multiLevelCounters[ilvl] = multiLevelCounters.GetValueOrDefault(ilvl, 0) + 1;
+                        // Reset deeper level counters
+                        for (int lk = ilvl + 1; lk <= 8; lk++)
+                            if (multiLevelCounters.ContainsKey(lk)) multiLevelCounters[lk] = 0;
+                    }
 
                     currentListType = listStyle;
                     currentListLevel = ilvl;
@@ -627,6 +705,15 @@ public partial class WordHandler
                     if (!string.IsNullOrEmpty(paraStyle))
                         sb.Append($" style=\"{paraStyle}\"");
                     sb.Append(">");
+                    // Multi-level numbering: prepend computed number (e.g., "1.1.1.")
+                    if (isMultiLevel && tag == "ol" && lvlText != null)
+                    {
+                        var numStr = lvlText;
+                        for (int lk = 0; lk <= ilvl; lk++)
+                            numStr = numStr.Replace($"%{lk + 1}", multiLevelCounters.GetValueOrDefault(lk, 0).ToString());
+                        var numWidth = hangingPt > 0 ? $"{hangingPt:0.#}pt" : "3em";
+                        sb.Append($"<span style=\"display:inline-block;min-width:{numWidth}\">{numStr}</span>");
+                    }
                     RenderParagraphContentHtml(sb, para);
                     pendingLiClose = true; // defer </li> in case next item nests
                     continue;
@@ -671,6 +758,13 @@ public partial class WordHandler
                     if (runs.Count == 0 && string.IsNullOrWhiteSpace(text)
                         && para.ParagraphProperties?.GetFirstChild<SectionProperties>() != null)
                     {
+                        continue;
+                    }
+
+                    // VML horizontal rule (w:pict > v:rect[o:hr="t"])
+                    if (IsVmlHorizontalRule(para))
+                    {
+                        RenderVmlHorizontalRule(sb, para);
                         continue;
                     }
 
@@ -757,23 +851,28 @@ public partial class WordHandler
         return bodyColCount;
     }
 
-    /// <summary>Get the left indent (in twips) for a numbering level definition.</summary>
-    private int GetListLevelIndent(int numId, int ilvl)
+    /// <summary>Get the left indent and hanging indent (in twips) for a numbering level definition.</summary>
+    private (int left, int hanging) GetListLevelIndentFull(int numId, int ilvl)
     {
         var numPart = _doc.MainDocumentPart?.NumberingDefinitionsPart;
-        if (numPart == null) return 0;
+        if (numPart == null) return (0, 0);
         var numbering = numPart.Numbering;
         var numInst = numbering?.Elements<NumberingInstance>()
             .FirstOrDefault(n => n.NumberID?.Value == numId);
         var absId = numInst?.AbstractNumId?.Val?.Value;
-        if (absId == null) return 0;
+        if (absId == null) return (0, 0);
         var absDef = numbering?.Elements<AbstractNum>()
             .FirstOrDefault(a => a.AbstractNumberId?.Value == absId);
         var lvl = absDef?.Elements<Level>()
             .FirstOrDefault(l => l.LevelIndex?.Value == ilvl);
         var indent = lvl?.PreviousParagraphProperties?.Indentation;
-        if (indent?.Left?.Value is string left && int.TryParse(left, out var twips))
-            return twips;
-        return 0;
+        int left = 0, hanging = 0;
+        if (indent?.Left?.Value is string ls && int.TryParse(ls, out var lt))
+            left = lt;
+        if (indent?.Hanging?.Value is string hs && int.TryParse(hs, out var ht))
+            hanging = ht;
+        return (left, hanging);
     }
+
+    private int GetListLevelIndent(int numId, int ilvl) => GetListLevelIndentFull(numId, ilvl).left;
 }

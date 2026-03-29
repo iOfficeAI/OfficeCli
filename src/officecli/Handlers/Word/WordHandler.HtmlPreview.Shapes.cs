@@ -57,6 +57,60 @@ public partial class WordHandler
         return false;
     }
 
+    /// <summary>Find VML horizontal rule shape in a paragraph (w:pict > v:rect/v:line with o:hr="t").</summary>
+    private static OpenXmlElement? FindVmlHorizontalRule(Paragraph para)
+    {
+        // Search all descendants to handle both direct w:pict and mc:AlternateContent wrapping
+        foreach (var pict in para.Descendants().Where(e => e.LocalName == "pict"))
+        {
+            var hrShape = pict.ChildElements.FirstOrDefault(c =>
+                (c.LocalName == "rect" || c.LocalName == "line") &&
+                c.GetAttributes().Any(a => a.LocalName == "hr" && a.Value == "t"));
+            if (hrShape != null) return hrShape;
+        }
+        return null;
+    }
+
+    /// <summary>Check if a paragraph contains a VML horizontal rule.</summary>
+    private static bool IsVmlHorizontalRule(Paragraph para) => FindVmlHorizontalRule(para) != null;
+
+    /// <summary>Render a VML horizontal rule as an HTML hr element.</summary>
+    private static void RenderVmlHorizontalRule(StringBuilder sb, Paragraph para)
+    {
+        var shape = FindVmlHorizontalRule(para)!;
+
+        // Color from fillcolor attribute
+        var fillColor = shape.GetAttributes().FirstOrDefault(a => a.LocalName == "fillcolor").Value ?? "#a0a0a0";
+        if (!fillColor.StartsWith("#")) fillColor = "#" + fillColor;
+
+        // Height from VML style (e.g. style="width:0;height:1.5pt")
+        var heightPx = 1.5;
+        var vmlStyle = shape.GetAttributes().FirstOrDefault(a => a.LocalName == "style").Value;
+        if (vmlStyle != null)
+        {
+            var hMatch = System.Text.RegularExpressions.Regex.Match(vmlStyle, @"height:\s*([\d.]+)pt");
+            if (hMatch.Success && double.TryParse(hMatch.Groups[1].Value, out var hPt))
+                heightPx = hPt;
+        }
+
+        // Width percentage from o:hrpct (value in tenths of a percent, e.g. 1000 = 100%)
+        var widthCss = "100%";
+        var hrpct = shape.GetAttributes().FirstOrDefault(a => a.LocalName == "hrpct").Value;
+        if (hrpct != null && int.TryParse(hrpct, out var pctVal) && pctVal > 0 && pctVal < 1000)
+            widthCss = $"{pctVal / 10.0:0.#}%";
+
+        // Alignment from o:hralign
+        var align = shape.GetAttributes().FirstOrDefault(a => a.LocalName == "hralign").Value ?? "center";
+        var marginCss = align switch
+        {
+            "left" => "margin:0.5em auto 0.5em 0",
+            "right" => "margin:0.5em 0 0.5em auto",
+            _ => "margin:0.5em auto"
+        };
+
+        sb.AppendLine($"<hr style=\"border:none;border-top:{heightPx:0.#}px solid {fillColor};width:{widthCss};{marginCss}\">");
+    }
+
     /// <summary>Check if a drawing contains groups or shapes (for rendering).</summary>
     private static bool HasGroupOrShape(Drawing drawing)
     {
