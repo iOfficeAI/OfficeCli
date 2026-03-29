@@ -593,6 +593,13 @@ public partial class WordHandler
                     var runs = GetAllRuns(para);
                     var mathElements = FindMathElements(para);
 
+                    // Skip empty section-break paragraphs (they only carry sectPr, no visual content)
+                    if (runs.Count == 0 && string.IsNullOrWhiteSpace(text)
+                        && para.ParagraphProperties?.GetFirstChild<SectionProperties>() != null)
+                    {
+                        continue;
+                    }
+
                     // Empty paragraph = spacing break
                     if (runs.Count == 0 && mathElements.Count == 0 && string.IsNullOrWhiteSpace(text))
                     {
