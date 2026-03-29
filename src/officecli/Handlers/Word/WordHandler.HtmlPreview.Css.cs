@@ -842,6 +842,7 @@ public partial class WordHandler
         p.empty {{ margin: 0; min-height: 1em; }}
         a {{ color: #2B579A; }} a:hover {{ color: #1a3c6e; }}
         ul, ol {{ padding-left: 2em; margin: 0.2em 0; }}
+        ul {{ list-style-type: disc; }}
         li {{ margin: 0.1em 0; }}
         .equation {{ text-align: center; padding: 0.5em 0; overflow-x: auto; }}
         img {{ max-width: 100%; height: auto; }}
