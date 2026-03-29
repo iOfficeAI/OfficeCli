@@ -182,13 +182,25 @@ public partial class WordHandler
       var page=pages[pi];
       var body=page.querySelector('.page-body');
       if(!body)continue;
-      if(body.scrollHeight<=maxBodyH+2)continue;
-      // Find first child that overflows
+      // Reserve space for footnotes at page bottom (like Word does)
+      var fnEl=body.querySelector('.footnotes');
+      var fnH=fnEl?fnEl.offsetHeight:0;
+      var availH=maxBodyH-fnH;
+      // Check if content (excluding footnotes) exceeds available space
+      var contentH=0;
+      Array.from(body.children).forEach(function(c){
+        if(c.classList.contains('footnotes'))return;
+        var b=c.offsetTop+c.offsetHeight-body.offsetTop;
+        if(b>contentH)contentH=b;
+      });
+      if(contentH<=availH+2)continue;
+      // Find first child that overflows available space
       var children=Array.from(body.children);
       var splitIdx=-1;
       for(var ci=0;ci<children.length;ci++){
+        if(children[ci].classList.contains('footnotes'))continue;
         var bot=children[ci].offsetTop+children[ci].offsetHeight-body.offsetTop;
-        if(bot>maxBodyH){splitIdx=ci;break;}
+        if(bot>availH){splitIdx=ci;break;}
       }
       if(splitIdx<=0)continue;
       // Create new page
@@ -197,13 +209,16 @@ public partial class WordHandler
       np.style.cssText=page.style.cssText;
       var nb=document.createElement('div');
       nb.className='page-body';
-      // Move overflow children to new page
-      while(splitIdx<children.length){
-        nb.appendChild(children[splitIdx]);
-        splitIdx++;
+      // Move overflow children to new page (skip footnotes — they stay on the reference page)
+      var toMove=[];
+      for(var mi=splitIdx;mi<children.length;mi++){
+        if(!children[mi].classList.contains('footnotes'))toMove.push(children[mi]);
+      }
+      for(var mi=0;mi<toMove.length;mi++){
+        nb.appendChild(toMove[mi]);
       }
       np.appendChild(nb);
-      // Clone footer into new page, replacing page number placeholder
+      // Clone footer into new page
       var nf=document.createElement('div');
       nf.innerHTML=ftpl.replace('<!--PAGE_NUM-->',(pi+2).toString());
       if(nf.firstChild)np.appendChild(nf.firstChild);
@@ -211,11 +226,9 @@ public partial class WordHandler
     }
     // Renumber pages
     var allPages=document.querySelectorAll('.page');
-    var total=allPages.length;
     allPages.forEach(function(p,i){
       var nums=p.querySelectorAll('.page-num');
       nums.forEach(function(n){n.textContent=(i+1);});
-      // Also handle PAGE_NUM placeholders in footer spans
       var footer=p.querySelector('.doc-footer');
       if(footer){
         var spans=footer.querySelectorAll('span');
@@ -230,9 +243,36 @@ public partial class WordHandler
     var again=false;
     document.querySelectorAll('.page').forEach(function(p){
       var b=p.querySelector('.page-body');
-      if(b&&b.scrollHeight>maxBodyH+2)again=true;
+      if(!b)return;
+      var f=b.querySelector('.footnotes');
+      var fh=f?f.offsetHeight:0;
+      var ch=0;
+      Array.from(b.children).forEach(function(c){
+        if(c.classList.contains('footnotes'))return;
+        var bt=c.offsetTop+c.offsetHeight-b.offsetTop;
+        if(bt>ch)ch=bt;
+      });
+      if(ch>maxBodyH-fh+2)again=true;
     });
     if(again)setTimeout(paginate,0);
+    else setTimeout(positionFootnotes,0);
+  }
+  function positionFootnotes(){
+    document.querySelectorAll('.page').forEach(function(page){
+      var body=page.querySelector('.page-body');
+      if(!body)return;
+      var fn=body.querySelector('.footnotes');
+      if(!fn)return;
+      // Calculate space between last content element and page bottom
+      var lastBot=0;
+      Array.from(body.children).forEach(function(c){
+        if(c===fn)return;
+        var b=c.offsetTop+c.offsetHeight-body.offsetTop;
+        if(b>lastBot)lastBot=b;
+      });
+      var gap=maxBodyH-lastBot-fn.offsetHeight;
+      if(gap>0)fn.style.marginTop=gap+'px';
+    });
   }
   setTimeout(paginate,100);
 ");

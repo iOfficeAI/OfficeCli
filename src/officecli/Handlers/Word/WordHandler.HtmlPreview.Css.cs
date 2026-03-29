@@ -277,6 +277,11 @@ public partial class WordHandler
             if (align != null) parts.Add($"text-align:{align}");
         }
 
+        // Drop cap detection — used to suppress text-indent
+        var framePrForIndent = pProps.GetFirstChild<FrameProperties>();
+        var hasDropCap = framePrForIndent != null &&
+            framePrForIndent.GetAttributes().FirstOrDefault(a => a.LocalName == "dropCap").Value is "drop" or "margin";
+
         // Indentation (skip for list items — handled by list nesting)
         if (!isListItem)
         {
@@ -288,10 +293,13 @@ public partial class WordHandler
                     parts.Add($"margin-left:{Units.TwipsToPt(leftTwips):0.##}pt");
                 if (indent.Right?.Value is string rightTwips && rightTwips != "0")
                     parts.Add($"margin-right:{Units.TwipsToPt(rightTwips):0.##}pt");
-                if (indent.FirstLine?.Value is string firstLineTwips && firstLineTwips != "0")
-                    parts.Add($"text-indent:{Units.TwipsToPt(firstLineTwips):0.##}pt");
-                if (indent.Hanging?.Value is string hangTwips && hangTwips != "0")
-                    parts.Add($"text-indent:-{Units.TwipsToPt(hangTwips):0.##}pt");
+                if (!hasDropCap)
+                {
+                    if (indent.FirstLine?.Value is string firstLineTwips && firstLineTwips != "0")
+                        parts.Add($"text-indent:{Units.TwipsToPt(firstLineTwips):0.##}pt");
+                    if (indent.Hanging?.Value is string hangTwips && hangTwips != "0")
+                        parts.Add($"text-indent:-{Units.TwipsToPt(hangTwips):0.##}pt");
+                }
             }
         }
 
