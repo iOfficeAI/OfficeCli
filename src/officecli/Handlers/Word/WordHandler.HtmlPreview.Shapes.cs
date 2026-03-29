@@ -75,8 +75,45 @@ public partial class WordHandler
         return false;
     }
 
+    /// <summary>
+    /// Check if a drawing is an anchored text box whose content is exclusively header/footer styled paragraphs.
+    /// Such text boxes are used by some documents to simulate headers/footers in the body area,
+    /// which would cause duplicate rendering since we also render from HeaderParts/FooterParts.
+    /// </summary>
+    private bool IsHeaderFooterTextBox(Drawing drawing)
+    {
+        // Must be an anchor (floating), not inline
+        var anchor = drawing.Descendants<DW.Anchor>().FirstOrDefault();
+        if (anchor == null) return false;
+
+        // Must contain a text box
+        var txbxContent = drawing.Descendants().FirstOrDefault(e => e.LocalName == "txbxContent");
+        if (txbxContent == null) return false;
+
+        // All paragraphs inside must have header/footer style
+        var paragraphs = txbxContent.Descendants<Paragraph>().ToList();
+        if (paragraphs.Count == 0) return false;
+
+        foreach (var para in paragraphs)
+        {
+            var styleId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+            if (styleId == null) return false;
+
+            var styleName = GetStyleName(para);
+            var lower = styleName.ToLowerInvariant();
+            if (!lower.Contains("header") && !lower.Contains("footer")
+                && !lower.Contains("页眉") && !lower.Contains("页脚"))
+                return false;
+        }
+
+        return true;
+    }
+
     private void RenderDrawingHtml(StringBuilder sb, Drawing drawing, List<Drawing>? floatImages = null)
     {
+        // Skip header/footer text boxes in body rendering (they duplicate HeaderParts/FooterParts content)
+        if (_ctx.RenderingBody && IsHeaderFooterTextBox(drawing)) return;
+
         // Check for chart (c:chart inside a:graphicData)
         var chartRef = drawing.Descendants().FirstOrDefault(e => e.LocalName == "chart" &&
             e.GetAttributes().Any(a => a.LocalName == "id"));
@@ -120,7 +157,14 @@ public partial class WordHandler
                     return;
                 }
                 // Standalone shape — render as inline block, not absolute positioned
+                // Check anchor horizontal alignment for centering (e.g., footer page numbers)
+                var hAlignEl = drawing.Descendants().FirstOrDefault(e => e.LocalName == "align" &&
+                    e.Parent?.LocalName == "positionH");
+                var hAlign = hAlignEl?.InnerText;
+                if (hAlign == "center") sb.Append("<div style=\"text-align:center\">");
+                else if (hAlign == "right") sb.Append("<div style=\"text-align:right\">");
                 RenderStandaloneShapeHtml(sb, shape, shapeWidth, shapeHeight, floatImages);
+                if (hAlign is "center" or "right") sb.Append("</div>");
                 return;
             }
         }
@@ -349,7 +393,12 @@ public partial class WordHandler
         {
             var widthPx = extCx / 9525;
             var heightPx = extCy / 9525;
-            style = $"display:inline-block;width:{widthPx}px;min-height:{heightPx}px;vertical-align:top";
+            // Check if shape has auto-fit (spAutoFit) — don't force min-height
+            var bodyPrCheck = shape.Elements().FirstOrDefault(e => e.LocalName == "bodyPr");
+            var hasAutoFit = bodyPrCheck?.Elements().Any(e => e.LocalName == "spAutoFit") ?? false;
+            style = hasAutoFit
+                ? $"display:inline-block;width:{widthPx}px;vertical-align:top"
+                : $"display:inline-block;width:{widthPx}px;min-height:{heightPx}px;vertical-align:top";
         }
         else
         {
