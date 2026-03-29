@@ -165,7 +165,8 @@ public partial class WordHandler
             var fnId = (int)fnRef.Id.Value;
             _ctx.FootnoteRefs.Add(fnId);
             var fnNum = _ctx.FootnoteRefs.Count;
-            sb.Append($"<sup class=\"fn-ref\"><a href=\"#fn{fnId}\" id=\"fnref{fnId}\">{fnNum}</a></sup>");
+            var fnLabel = FormatNoteNumber(fnNum, GetFootnoteNumFmt());
+            sb.Append($"<sup class=\"fn-ref\"><a href=\"#fn{fnId}\" id=\"fnref{fnId}\">{fnLabel}</a></sup>");
         }
         var enRef = run.GetFirstChild<EndnoteReference>();
         if (enRef?.Id?.HasValue == true && enRef.Id.Value > 0)
@@ -173,7 +174,8 @@ public partial class WordHandler
             var enId = (int)enRef.Id.Value;
             _ctx.EndnoteRefs.Add(enId);
             var enNum = _ctx.EndnoteRefs.Count;
-            sb.Append($"<sup class=\"en-ref\"><a href=\"#en{enId}\" id=\"enref{enId}\">{enNum}</a></sup>");
+            var enLabel = FormatNoteNumber(enNum, GetEndnoteNumFmt());
+            sb.Append($"<sup class=\"en-ref\"><a href=\"#en{enId}\" id=\"enref{enId}\">{enLabel}</a></sup>");
         }
         // FootnoteReferenceMark / EndnoteReferenceMark: don't skip the run, just ignore the mark element
         // (the run may also contain text that should be rendered)
@@ -246,9 +248,10 @@ public partial class WordHandler
         var fnPart = _doc.MainDocumentPart?.FootnotesPart;
         if (fnPart?.Footnotes == null) return;
 
-        sb.AppendLine("<hr style=\"margin-top:2em;border:none;border-top:1px solid #ccc;width:33%\">");
         sb.AppendLine("<div class=\"footnotes\" style=\"font-size:9pt;color:#555\">");
+        sb.AppendLine("<hr style=\"margin-top:0;margin-bottom:0.5em;border:none;border-top:1px solid #ccc;width:33%\">");
 
+        var fnFmt = GetFootnoteNumFmt();
         int num = 0;
         foreach (var fnId in _ctx.FootnoteRefs)
         {
@@ -256,7 +259,8 @@ public partial class WordHandler
             var fn = fnPart.Footnotes.Elements<Footnote>().FirstOrDefault(f => f.Id?.Value == fnId);
             if (fn == null) continue;
 
-            sb.Append($"<div id=\"fn{fnId}\" style=\"margin:0.3em 0\"><sup>{num}</sup> ");
+            var fnLabel = FormatNoteNumber(num, fnFmt);
+            sb.Append($"<div id=\"fn{fnId}\" style=\"margin:0.3em 0\"><sup>{fnLabel}</sup> ");
             var fnParas = fn.Elements<Paragraph>().ToList();
             for (int pi = 0; pi < fnParas.Count; pi++)
             {
@@ -278,6 +282,7 @@ public partial class WordHandler
         sb.AppendLine("<div class=\"endnotes\" style=\"font-size:9pt;color:#555\">");
         sb.AppendLine("<p style=\"font-weight:bold;margin-bottom:0.5em\">Endnotes</p>");
 
+        var enFmt = GetEndnoteNumFmt();
         int num = 0;
         foreach (var enId in _ctx.EndnoteRefs)
         {
@@ -285,7 +290,8 @@ public partial class WordHandler
             var en = enPart.Endnotes.Elements<Endnote>().FirstOrDefault(e => e.Id?.Value == enId);
             if (en == null) continue;
 
-            sb.Append($"<div id=\"en{enId}\" style=\"margin:0.3em 0\"><sup>{num}</sup> ");
+            var enLabel = FormatNoteNumber(num, enFmt);
+            sb.Append($"<div id=\"en{enId}\" style=\"margin:0.3em 0\"><sup>{enLabel}</sup> ");
             var enParas = en.Elements<Paragraph>().ToList();
             for (int pi = 0; pi < enParas.Count; pi++)
             {
@@ -295,5 +301,71 @@ public partial class WordHandler
             sb.AppendLine($" <a href=\"#enref{enId}\" style=\"text-decoration:none\">\u21A9</a></div>");
         }
         sb.AppendLine("</div>");
+    }
+
+    /// <summary>Get the numbering format for footnotes (default: decimal per OOXML spec §17.11.11).</summary>
+    private string GetFootnoteNumFmt()
+    {
+        // Priority: section properties > document settings > spec default
+        var sectProps = _doc.MainDocumentPart?.Document.Body
+            ?.Descendants<SectionProperties>().LastOrDefault();
+        var sectFmt = sectProps?.GetFirstChild<FootnoteProperties>()?.NumberingFormat?.Val?.InnerText;
+        if (sectFmt != null) return sectFmt;
+
+        var settingsFmt = _doc.MainDocumentPart?.DocumentSettingsPart?.Settings
+            ?.GetFirstChild<FootnoteDocumentWideProperties>()?.NumberingFormat?.Val?.InnerText;
+        if (settingsFmt != null) return settingsFmt;
+
+        return "decimal";
+    }
+
+    /// <summary>Get the numbering format for endnotes (default: lowerRoman per OOXML spec §17.11.4).</summary>
+    private string GetEndnoteNumFmt()
+    {
+        // Priority: section properties > document settings > spec default
+        var sectProps = _doc.MainDocumentPart?.Document.Body
+            ?.Descendants<SectionProperties>().LastOrDefault();
+        var sectFmt = sectProps?.GetFirstChild<EndnoteProperties>()?.NumberingFormat?.Val?.InnerText;
+        if (sectFmt != null) return sectFmt;
+
+        var settingsFmt = _doc.MainDocumentPart?.DocumentSettingsPart?.Settings
+            ?.GetFirstChild<EndnoteDocumentWideProperties>()?.NumberingFormat?.Val?.InnerText;
+        if (settingsFmt != null) return settingsFmt;
+
+        return "lowerRoman";
+    }
+
+    /// <summary>Format a note number according to Word numbering format.</summary>
+    private static string FormatNoteNumber(int num, string fmt)
+    {
+        return fmt switch
+        {
+            "lowerRoman" => ToLowerRoman(num),
+            "upperRoman" => ToLowerRoman(num).ToUpperInvariant(),
+            "lowerLetter" => num >= 1 && num <= 26 ? ((char)('a' + num - 1)).ToString() : num.ToString(),
+            "upperLetter" => num >= 1 && num <= 26 ? ((char)('A' + num - 1)).ToString() : num.ToString(),
+            _ => num.ToString(), // "decimal" and any other format
+        };
+    }
+
+    private static string ToLowerRoman(int num)
+    {
+        if (num <= 0 || num > 3999) return num.ToString();
+        var sb = new StringBuilder();
+        ReadOnlySpan<(int value, string roman)> map =
+        [
+            (1000, "m"), (900, "cm"), (500, "d"), (400, "cd"),
+            (100, "c"), (90, "xc"), (50, "l"), (40, "xl"),
+            (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i")
+        ];
+        foreach (var (value, roman) in map)
+        {
+            while (num >= value)
+            {
+                sb.Append(roman);
+                num -= value;
+            }
+        }
+        return sb.ToString();
     }
 }
