@@ -309,6 +309,12 @@ public partial class WordHandler
         if (spacing == null)
             spacing = styleSpacing;
 
+        // In Word, paragraph before/after spacing is rendered INSIDE borders.
+        // Use padding instead of margin when the paragraph has borders.
+        var hasBorders = pProps.ParagraphBorders != null;
+        var vSpacingPropBefore = hasBorders ? "padding-top" : "margin-top";
+        var vSpacingPropAfter = hasBorders ? "padding-bottom" : "margin-bottom";
+
         if (spacing != null)
         {
             // Before: try direct, then style fallback (before in twips, beforeLines in hundredths of a line)
@@ -317,9 +323,9 @@ public partial class WordHandler
             var beforeLinesVal = pProps.SpacingBetweenLines?.BeforeLines?.Value
                                  ?? styleSpacing?.BeforeLines?.Value;
             if (beforeVal is string beforeTwips && beforeTwips != "0")
-                parts.Add($"margin-top:{Units.TwipsToPt(beforeTwips):0.##}pt");
+                parts.Add($"{vSpacingPropBefore}:{Units.TwipsToPt(beforeTwips):0.##}pt");
             else if (beforeLinesVal is int beforeLines && beforeLines != 0)
-                parts.Add($"margin-top:{beforeLines / 100.0:0.##}em");
+                parts.Add($"{vSpacingPropBefore}:{beforeLines / 100.0:0.##}em");
 
             // After: try direct, then style fallback (after in twips, afterLines in hundredths of a line)
             var afterVal = pProps.SpacingBetweenLines?.After?.Value
@@ -327,9 +333,9 @@ public partial class WordHandler
             var afterLinesVal = pProps.SpacingBetweenLines?.AfterLines?.Value
                                 ?? styleSpacing?.AfterLines?.Value;
             if (afterVal is string afterTwips && afterTwips != "0")
-                parts.Add($"margin-bottom:{Units.TwipsToPt(afterTwips):0.##}pt");
+                parts.Add($"{vSpacingPropAfter}:{Units.TwipsToPt(afterTwips):0.##}pt");
             else if (afterLinesVal is int afterLines && afterLines != 0)
-                parts.Add($"margin-bottom:{afterLines / 100.0:0.##}em");
+                parts.Add($"{vSpacingPropAfter}:{afterLines / 100.0:0.##}em");
 
             // Line: try direct, then style fallback
             var lineVal = pProps.SpacingBetweenLines?.Line?.Value
@@ -340,7 +346,7 @@ public partial class WordHandler
                            ?? styleSpacing?.LineRule?.InnerText;
                 if (rule == "auto" || rule == null)
                 {
-                    if (int.TryParse(lv, out var lvNum))
+                    if (int.TryParse(lv, out var lvNum) && lvNum != 240)
                         parts.Add($"line-height:{lvNum / 240.0:0.##}");
                 }
                 else if (rule == "exact" || rule == "atLeast")
@@ -585,7 +591,7 @@ public partial class WordHandler
                     if (spacing.Line?.Value is string lv && !parts.Any(p => p.StartsWith("line-height")))
                     {
                         var rule = spacing.LineRule?.InnerText;
-                        if ((rule == "auto" || rule == null) && int.TryParse(lv, out var val))
+                        if ((rule == "auto" || rule == null) && int.TryParse(lv, out var val) && val != 240)
                             parts.Add($"line-height:{val / 240.0:0.##}");
                     }
                 }
@@ -930,6 +936,14 @@ public partial class WordHandler
         }
 
         parts.Add($"{cssProp}:{width} {style} {cssColor}");
+
+        // Border spacing (w:space) → padding on the corresponding side
+        var space = border.GetAttributes().FirstOrDefault(a => a.LocalName == "space").Value;
+        if (space != null && int.TryParse(space, out var spacePt) && spacePt > 0)
+        {
+            var paddingSide = cssProp.Replace("border-", "padding-");
+            parts.Add($"{paddingSide}:{spacePt}pt");
+        }
     }
 
     /// <summary>Resolve a run Color element to a CSS color string, handling themeColor + tint/shade.</summary>

@@ -374,6 +374,73 @@ public partial class WordHandler
         return numFmt.InnerText ?? "bullet";
     }
 
+    /// <summary>Get picture bullet data URI for a numbering level (if lvlPicBulletId is set).</summary>
+    private string? GetPicBulletDataUri(int numId, int ilvl)
+    {
+        var numPart = _doc.MainDocumentPart?.NumberingDefinitionsPart;
+        var numbering = numPart?.Numbering;
+        if (numbering == null) return null;
+
+        var numInstance = numbering.Elements<NumberingInstance>()
+            .FirstOrDefault(n => n.NumberID?.Value == numId);
+        var abstractNumId = numInstance?.AbstractNumId?.Val?.Value;
+        if (abstractNumId == null) return null;
+        var abstractNum = numbering.Elements<AbstractNum>()
+            .FirstOrDefault(a => a.AbstractNumberId?.Value == abstractNumId);
+        var level = abstractNum?.Elements<Level>()
+            .FirstOrDefault(l => l.LevelIndex?.Value == ilvl);
+
+        // Check for lvlPicBulletId
+        var picBulletIdAttr = level?.GetAttributes().FirstOrDefault(a => a.LocalName == "lvlPicBulletId");
+        if (picBulletIdAttr.Value == null) return null;
+
+        // Find the matching numPicBullet element
+        var picBulletEl = level?.Descendants().FirstOrDefault(e => e.LocalName == "lvlPicBulletId");
+        if (picBulletEl == null) return null;
+        var picBulletIdStr = picBulletEl.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
+        if (picBulletIdStr == null || !int.TryParse(picBulletIdStr, out var picBulletId)) return null;
+
+        // Find numPicBullet with this ID in numbering.xml
+        var numPicBullet = numbering.Descendants().FirstOrDefault(e =>
+            e.LocalName == "numPicBullet" &&
+            e.GetAttributes().Any(a => a.LocalName == "numPicBulletId" && a.Value == picBulletIdStr));
+        if (numPicBullet == null) return null;
+
+        // Extract image from VML imagedata r:id reference
+        var imageData = numPicBullet.Descendants().FirstOrDefault(e => e.LocalName == "imagedata");
+        var rId = imageData?.GetAttributes().FirstOrDefault(a => a.LocalName == "id").Value;
+        if (rId == null) return null;
+
+        try
+        {
+            var imgPart = numPart!.GetPartById(rId);
+            if (imgPart == null) return null;
+            using var stream = imgPart.GetStream();
+            using var ms = new System.IO.MemoryStream();
+            stream.CopyTo(ms);
+            var bytes = ms.ToArray();
+            var mime = imgPart.ContentType ?? "image/png";
+            return $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
+        }
+        catch { return null; }
+    }
+
+    private string? GetLevelText(int numId, int ilvl)
+    {
+        var numbering = _doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering;
+        if (numbering == null) return null;
+        var numInstance = numbering.Elements<NumberingInstance>()
+            .FirstOrDefault(n => n.NumberID?.Value == numId);
+        if (numInstance == null) return null;
+        var abstractNumId = numInstance.AbstractNumId?.Val?.Value;
+        if (abstractNumId == null) return null;
+        var abstractNum = numbering.Elements<AbstractNum>()
+            .FirstOrDefault(a => a.AbstractNumberId?.Value == abstractNumId);
+        var level = abstractNum?.Elements<Level>()
+            .FirstOrDefault(l => l.LevelIndex?.Value == ilvl);
+        return level?.LevelText?.Val?.Value;
+    }
+
     private int? GetStartValue(int numId, int ilvl)
     {
         var numbering = _doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering;
