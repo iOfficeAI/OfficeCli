@@ -22,6 +22,10 @@ public partial class WordHandler
         // Use <div> instead of <p> when paragraph contains block-level elements (text boxes, charts, shapes)
         var tag = HasBlockLevelDrawing(para) ? "div" : "p";
         sb.Append($"<{tag}");
+        // Add CSS class for TOC paragraphs (suppress hyperlink styling)
+        var styleId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+        if (styleId != null && styleId.StartsWith("TOC", StringComparison.OrdinalIgnoreCase))
+            sb.Append(" class=\"toc\"");
         var pStyle = GetParagraphInlineCss(para);
         if (!string.IsNullOrEmpty(pStyle))
             sb.Append($" style=\"{pStyle}\"");
@@ -210,7 +214,26 @@ public partial class WordHandler
                     sb.Append("<br>");
             }
             else if (child is TabChar)
-                sb.Append("&emsp;");
+            {
+                // Check for right-aligned tab with dot leader (common in TOC)
+                var tabs = para.ParagraphProperties?.Tabs?.Elements<TabStop>();
+                if (tabs == null || !tabs.Any())
+                {
+                    var tsId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+                    if (tsId != null) tabs = ResolveTabStopsFromStyle(tsId);
+                }
+                var rightDotTab = tabs?.FirstOrDefault(t =>
+                    t.Val?.Value == TabStopValues.Right &&
+                    t.Leader?.Value == TabStopLeaderCharValues.Dot);
+                if (rightDotTab != null)
+                {
+                    // Close current span, insert dot leader, then page number follows
+                    if (needsSpan) { sb.Append("</span>"); needsSpan = false; }
+                    sb.Append("<span class=\"dot-leader\"></span>");
+                }
+                else
+                    sb.Append("&emsp;");
+            }
             else if (child is CarriageReturn)
                 sb.Append("<br>");
             else if (child.LocalName == "noBreakHyphen")
