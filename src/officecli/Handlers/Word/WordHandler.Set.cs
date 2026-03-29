@@ -494,11 +494,18 @@ public partial class WordHandler
         if (styleSetMatch.Success)
         {
             var styleId = styleSetMatch.Groups[1].Value;
-            var styles = _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles
-                ?? throw new InvalidOperationException("No styles part");
+            var stylesPart = _doc.MainDocumentPart?.StyleDefinitionsPart
+                ?? _doc.MainDocumentPart!.AddNewPart<DocumentFormat.OpenXml.Packaging.StyleDefinitionsPart>();
+            if (stylesPart.Styles == null) stylesPart.Styles = new Styles();
+            var styles = stylesPart.Styles;
             var style = styles.Elements<Style>().FirstOrDefault(s =>
-                s.StyleId?.Value == styleId || s.StyleName?.Val?.Value == styleId)
-                ?? throw new ArgumentException($"Style '{styleId}' not found");
+                s.StyleId?.Value == styleId || s.StyleName?.Val?.Value == styleId);
+            if (style == null)
+            {
+                style = new Style { Type = StyleValues.Paragraph, StyleId = styleId, CustomStyle = true };
+                style.AppendChild(new StyleName { Val = styleId });
+                styles.AppendChild(style);
+            }
 
             foreach (var (key, value) in properties)
             {
