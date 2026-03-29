@@ -464,6 +464,23 @@ public partial class WordHandler
     /// <summary>
     /// Resolve SpacingBetweenLines from the style chain (basedOn walk).
     /// </summary>
+    private IEnumerable<TabStop>? ResolveTabStopsFromStyle(string? styleId)
+    {
+        if (styleId == null) return null;
+        var visited = new HashSet<string>();
+        var currentStyleId = styleId;
+        while (currentStyleId != null && visited.Add(currentStyleId))
+        {
+            var style = _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles
+                ?.Elements<Style>().FirstOrDefault(s => s.StyleId?.Value == currentStyleId);
+            if (style == null) break;
+            var tabs = style.StyleParagraphProperties?.Tabs?.Elements<TabStop>();
+            if (tabs != null && tabs.Any()) return tabs;
+            currentStyleId = style.BasedOn?.Val?.Value;
+        }
+        return null;
+    }
+
     private SpacingBetweenLines? ResolveSpacingFromStyle(string? styleId)
     {
         // If no explicit style, use the default paragraph style (Normal)
@@ -1044,6 +1061,10 @@ public partial class WordHandler
         p {{ margin: 0; text-align: justify; text-justify: inter-character; }}
         p.empty {{ margin: 0; min-height: 1em; }}
         a {{ color: #2B579A; }} a:hover {{ color: #1a3c6e; }}
+        .toc {{ display: flex; text-indent: 0 !important; }}
+        .toc a {{ color: inherit; text-decoration: none; display: flex; flex: 1; }}
+        .toc a span {{ color: inherit !important; text-decoration: none !important; }}
+        .dot-leader {{ flex: 1; border-bottom: 1px dotted #000; margin: 0 4px; min-width: 2em; align-self: flex-end; margin-bottom: 0.25em; }}
         ul, ol {{ padding-left: 2em; margin: 0.2em 0; }}
         ul {{ list-style-type: disc; }}
         li {{ margin: 0.1em 0; }}

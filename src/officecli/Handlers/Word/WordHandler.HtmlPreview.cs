@@ -69,6 +69,9 @@ public partial class WordHandler
         sb.AppendLine("<style>");
         sb.AppendLine(GenerateWordCss(pgLayout, docDef));
         sb.AppendLine("</style>");
+        // Load document font from Google Fonts (if available)
+        var gfFont = docDef.Font.Replace(' ', '+');
+        sb.AppendLine($"<link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family={HtmlEncode(gfFont)}:ital,wght@0,400;0,700;1,400;1,700&display=swap\">");
         // KaTeX for math rendering
         sb.AppendLine("<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css\">");
         sb.AppendLine("<script defer src=\"https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js\"></script>");
@@ -668,6 +671,10 @@ public partial class WordHandler
                     }
 
                     sb.Append("<p");
+                    // Add CSS class for TOC paragraphs (suppress hyperlink styling, enable dot leaders)
+                    var paraStyleId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+                    if (paraStyleId != null && paraStyleId.StartsWith("TOC", StringComparison.OrdinalIgnoreCase))
+                        sb.Append(" class=\"toc\"");
                     var pStyle = GetParagraphInlineCss(para);
                     if (!string.IsNullOrEmpty(pStyle))
                         sb.Append($" style=\"{pStyle}\"");
