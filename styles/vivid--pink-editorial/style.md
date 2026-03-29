@@ -1,64 +1,48 @@
-# Pink Editorial — Gradient Stats
+# Pink Editorial / Gradient Stats
 
 ## Style Overview
-Contemporary editorial design with dark purple to dusty rose gradient background. Features massive bold numbers (100-200pt) as visual anchors, simulated grain texture, and dramatic morph transitions. Perfect for data-driven annual reports and statistical presentations.
 
-- **Scenario**: Annual reports, statistical showcases, editorial publications, data journalism, executive summaries
-- **Mood**: Contemporary, editorial, sophisticated, data-driven
-- **Tone**: Dark purple-pink gradient with high-contrast white typography
+morph-template v15 — Pink Editorial / Gradient Stats。
+
+- **Scene**: 适合商业提案、品牌叙事、产品发布或数据汇报
+- **Mood**: 视觉对比清晰，强调节奏与重点信息
+- **Tone**: 结构化版式 + 明确强调色
 
 ## Color Palette
+
 | Name | Hex | Usage |
-|------|-----|-------|
-| Background | #160B33 → #7B2D52 (gradient 135°) | Dark purple to dusty rose |
-| Primary accent | #C85080 | Pink for gradient overlays |
-| Secondary | #FF8DB8 | Acid pink for accent dots |
-| Blush | #E8A0BC | Light pink for decorative elements |
-| Primary text | #FFFFFF | White for main text |
-| Secondary text | #C090A8 | Dimmed pink for supporting text |
-| Cream | #F5E8F0 | Off-white for descriptions |
+| ---- | ---- | ---- |
+| Dpurp | #160B33 | 主/辅色块、背景或强调 |
+| Rose | #7B2D52 | 主/辅色块、背景或强调 |
+| Pink | #C85080 | 主/辅色块、背景或强调 |
+| Blush | #E8A0BC | 主/辅色块、背景或强调 |
+| White | #FFFFFF | 主/辅色块、背景或强调 |
+| Dim | #C090A8 | 主/辅色块、背景或强调 |
 
 ## Typography
-| Element | Font | Size |
-|---------|------|------|
-| Hero numbers | Segoe UI Black | 160-200pt |
-| Title | Segoe UI Black | 28-36pt |
-| Stat numbers | Segoe UI Black | 52-64pt |
-| Body | Segoe UI | 14-22pt |
+
+| Element | Font | Description |
+| ---- | ---- | ---- |
+| Main Title | Segoe UI Black 48-72pt | 封面/章节页主标题，作为视觉锚点 |
+| Subtitle | Segoe UI 18-28pt | 分节标题与过渡句 |
+| Body | Segoe UI 12-18pt | 正文、注释、标签与说明 |
 
 ## Design Techniques
-- **Massive editorial numbers**: 73%, 99.2% at 160-200pt size as hero elements
-- **Gradient overlays**: Semi-transparent rect with gradients (opacity 0.35-0.40)
-- **Simulated grain**: 11 scattered white ellipses at 0.04 opacity for texture
-- **Morph actors**: `!!num-sweep` (rect/ellipse) and `!!accent-dot` (ellipse) transform across slides
-- **Dual gradient system**: Pink-purple and purple-pink for visual variety
-- **High typography contrast**: White bold text on dark gradient background
 
-## Page Structure (6 slides)
-| Slide | Type | Description |
-|-------|------|-------------|
-| 1 | hero | Massive "73%" with full-width gradient sweep |
-| 2 | evidence | "99.2%" stat, accent dot moves to top-left |
-| 3 | comparison | Left gradient panel + right text (editorial split) |
-| 4 | grid | 4 stat blocks with gradient backgrounds, 2×2 grid |
-| 5 | quote | Large quotation with circular gradient overlay |
-| 6 | cta | Call to action with full-screen gradient return |
-
-## Key Morph Patterns
-- **!!num-sweep**: Transforms from full-width rect → narrower rect → large ellipse (opacity 0.06) → ellipse (opacity 0.28) → large ellipse → full-gradient
-- **!!accent-dot**: Acid pink ellipse that moves: bottom-right (5.5cm) → top-left (4cm) → mid-right (3cm) → embedded in grid (5.5cm) → left (4cm) → center
-- **Gradient direction changes**: Alternates between 90°, 135°, 45° for visual variety
-- **Size drama**: Numbers scale from 200pt → 160pt → 52-64pt grid
-
-## Special Effects
-- **Grain texture function**: Adds 11 white ellipses at random positions, 0.04 opacity on every slide for analog feel
-- **Gradient actor animation**: Semi-transparent gradient rects morph in position, size, and opacity
-- **Typography as decoration**: Massive numbers serve dual purpose as content and visual structure
+- **形状层级**：区分背景层 / 信息层 / 强调层，避免装饰元素压住正文。
+- **遮挡 layout**：主视觉做 Morph actor，正文与数据卡保持稳定锚点。
+- **配色选择**：控制为 1 主色 + 1-2 辅色 + 1 强调色，强调色用于 KPI/CTA。
+- **结构节奏**：在冲击页与信息页之间交替，保证叙事推进。
 
 ## Reference Script
-Complete build script available in `build.py` (Python with officecli).
 
-**Recommended slides to read for core techniques**:
-- **Slide 1 (hero)** — massive 200pt number with full-width gradient sweep and grain texture
-- **Slide 4 (grid)** — 4-block stats layout with embedded gradient actors and nested ellipses
-- **Slide 5 (quote)** — large circular gradient overlay with quotation mark typography
+Complete build script available in `v15_build.py`.
+
+**Recommended slides to read for understanding core design techniques**:
+
+- **S1 — HERO  (massive "73%", full-width gradient sweep)**
+- **S2 — STAT 2  ("99.2%", accent dot moves to top-left)**
+- **S3 — EDITORIAL SPLIT  (left panel + right text)**
+- **t(3, "Executive\nSummary",**
+
+No need to read all — skim 2-3 representative slides.

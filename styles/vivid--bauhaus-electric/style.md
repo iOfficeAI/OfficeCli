@@ -1,17 +1,48 @@
-# Bauhaus Electric — Creative Agency
+# Forma Nova: Creative Agency  (BAUHAUS)
 
 ## Style Overview
-Electric blue + acid lime bold geometric rects with Bauhaus aesthetic. Features twin-shape morph journey and parallelogram geometry.
 
-- **Scenario**: Creative agencies, design studios, bold branding
-- **Mood**: Bold, energetic, geometric, electric
-- **Tone**: Electric blue + acid lime
+morph-template v40 — Forma Nova: Creative Agency  (BAUHAUS)。
+
+- **Scene**: 适合商业提案、品牌叙事、产品发布或数据汇报
+- **Mood**: 视觉对比清晰，强调节奏与重点信息
+- **Tone**: 结构化版式 + 明确强调色
+
+## Color Palette
+
+| Name | Hex | Usage |
+| ---- | ---- | ---- |
+| Blue | #1A19FF | 主/辅色块、背景或强调 |
+| Lime | #AAFF00 | 主/辅色块、背景或强调 |
+| White | #FFFFFF | 主/辅色块、背景或强调 |
+| Black | #0A0A0A | 主/辅色块、背景或强调 |
+| Lgray | #EBEBEB | 主/辅色块、背景或强调 |
+| Dim | #777777 | 主/辅色块、背景或强调 |
+
+## Typography
+
+| Element | Font | Description |
+| ---- | ---- | ---- |
+| Main Title | Segoe UI 48-72pt | 封面/章节页主标题，作为视觉锚点 |
+| Subtitle | Segoe UI Black 18-28pt | 分节标题与过渡句 |
+| Body | Segoe UI Black 12-18pt | 正文、注释、标签与说明 |
 
 ## Design Techniques
-- !!blockA (blue) + !!blockB (lime) twin-shape morph
-- Parallelogram geometry
-- Asterisk 8-pointed star accent
-- Raw geometric forms
+
+- **形状层级**：区分背景层 / 信息层 / 强调层，避免装饰元素压住正文。
+- **遮挡 layout**：主视觉做 Morph actor，正文与数据卡保持稳定锚点。
+- **配色选择**：控制为 1 主色 + 1-2 辅色 + 1 强调色，强调色用于 KPI/CTA。
+- **结构节奏**：在冲击页与信息页之间交替，保证叙事推进。
 
 ## Reference Script
-Complete build script available in `build.py`.
+
+Complete build script available in `v40_build.py`.
+
+**Recommended slides to read for understanding core design techniques**:
+
+- **raw_geom → S1 !!blockA is a parallelogram; reverts to rect for dramatic morph in/out**
+- **─── S1 HERO — white bg, parallelogram top-right BLUE, LIME rect overlap ───**
+- **─── S2 ABOUT — white bg, photo left, text right, BLUE+LIME bottom-right ───**
+- **─── S3 SERVICES — white bg, 3 BLUE cards, LIME+BLUE blobs bottom ───**
+
+No need to read all — skim 2-3 representative slides.
