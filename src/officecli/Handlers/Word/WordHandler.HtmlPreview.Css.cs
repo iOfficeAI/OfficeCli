@@ -252,8 +252,11 @@ public partial class WordHandler
         var pProps = para.ParagraphProperties;
         if (pProps == null)
         {
+            var styleCss = ResolveParagraphStyleCss(para);
+            if (parts.Count > 0 && !string.IsNullOrEmpty(styleCss))
+                return string.Join(";", parts) + ";" + styleCss;
             if (parts.Count > 0) return string.Join(";", parts);
-            return ResolveParagraphStyleCss(para);
+            return styleCss;
         }
 
         // Style ID for fallback lookups
@@ -492,7 +495,14 @@ public partial class WordHandler
     private string ResolveParagraphStyleCss(Paragraph para)
     {
         var styleId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
-        if (styleId == null) return "";
+        if (styleId == null)
+        {
+            // Fall back to default paragraph style (Normal)
+            var defaultStyle = _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles
+                ?.Elements<Style>().FirstOrDefault(s => s.Type?.Value == StyleValues.Paragraph && s.Default?.Value == true);
+            styleId = defaultStyle?.StyleId?.Value;
+            if (styleId == null) return "";
+        }
 
         var parts = new List<string>();
         var visited = new HashSet<string>();
@@ -536,6 +546,20 @@ public partial class WordHandler
                         if ((rule == "auto" || rule == null) && int.TryParse(lv, out var val))
                             parts.Add($"line-height:{val / 240.0:0.##}");
                     }
+                }
+
+                // Indentation
+                var ind = pPr.Indentation;
+                if (ind != null)
+                {
+                    if (ind.Left?.Value is string leftTwips && leftTwips != "0" && !parts.Any(p => p.StartsWith("margin-left")))
+                        parts.Add($"margin-left:{TwipsToPx(leftTwips):0.#}px");
+                    if (ind.Right?.Value is string rightTwips && rightTwips != "0" && !parts.Any(p => p.StartsWith("margin-right")))
+                        parts.Add($"margin-right:{TwipsToPx(rightTwips):0.#}px");
+                    if (ind.FirstLine?.Value is string fl && fl != "0" && !parts.Any(p => p.StartsWith("text-indent")))
+                        parts.Add($"text-indent:{TwipsToPx(fl):0.#}px");
+                    if (ind.Hanging?.Value is string hg && hg != "0" && !parts.Any(p => p.StartsWith("text-indent")))
+                        parts.Add($"text-indent:-{TwipsToPx(hg):0.#}px");
                 }
 
                 var shadingFill = ResolveShadingFill(pPr.Shading);
