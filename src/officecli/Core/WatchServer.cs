@@ -373,7 +373,7 @@ public class WatchServer : IDisposable
     private static string PatchSlideInHtml(string html, int slideNum, string newFragment)
     {
         var (start, end) = FindSlideFragmentRange(html, slideNum);
-        if (start < 0) return html;
+        if (start < 0) return AppendSlideToHtml(html, newFragment);
         return string.Concat(html.AsSpan(0, start), newFragment, html.AsSpan(end));
     }
 
