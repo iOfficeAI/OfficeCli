@@ -559,6 +559,17 @@ static class CommandBuilder
             var message = applied.Count > 0
                 ? $"Updated {path}: {string.Join(", ", applied.Select(kv => $"{kv.Key}={kv.Value}"))}"
                 : $"No properties applied to {path}";
+
+            // Check if position-related props were changed → show coordinates + overlap warning
+            var positionChanged = applied.Any(kv => PositionKeys.Contains(kv.Key));
+            string? setSpatialLine = null;
+            var setOverlaps = new List<string>();
+            if (positionChanged)
+            {
+                setSpatialLine = GetPptSpatialLine(handler, path);
+                if (setSpatialLine != null) setOverlaps = CheckPositionOverlap(handler, path);
+            }
+
             if (json)
             {
                 var allWarnings = new List<OfficeCli.Core.CliWarning>();
@@ -581,16 +592,30 @@ static class CommandBuilder
                         Suggestion = suggestion
                     });
                 }
+                if (setOverlaps.Count > 0)
+                {
+                    allWarnings.Add(new OfficeCli.Core.CliWarning
+                    {
+                        Message = $"Same position as {string.Join(", ", setOverlaps)}",
+                        Code = "position_overlap",
+                        Suggestion = "Use different x/y values to avoid overlap"
+                    });
+                    hadWarnings = true;
+                }
+                var outputMsg = setSpatialLine != null ? $"{message}\n  {setSpatialLine}" : message;
                 bool allFailed = applied.Count == 0 && (stillUnsupported.Count > 0 || unsupported.Count > 0);
                 Console.WriteLine(allFailed
-                    ? OutputFormatter.WrapEnvelopeError(message, allWarnings.Count > 0 ? allWarnings : null)
-                    : OutputFormatter.WrapEnvelopeText(message, allWarnings.Count > 0 ? allWarnings : null));
+                    ? OutputFormatter.WrapEnvelopeError(outputMsg, allWarnings.Count > 0 ? allWarnings : null)
+                    : OutputFormatter.WrapEnvelopeText(outputMsg, allWarnings.Count > 0 ? allWarnings : null));
             }
             else
             {
                 foreach (var ac in autoCorrected)
                     Console.Error.WriteLine($"WARNING: Auto-corrected '{ac.Original}' to '{ac.Corrected}'");
                 Console.WriteLine(message);
+                if (setSpatialLine != null) Console.WriteLine($"  {setSpatialLine}");
+                if (setOverlaps.Count > 0)
+                    Console.Error.WriteLine($"  WARNING: Same position as {string.Join(", ", setOverlaps)}");
                 if (stillUnsupported.Count > 0)
                     Console.Error.WriteLine(FormatUnsupported(stillUnsupported));
             }
@@ -707,8 +732,32 @@ static class CommandBuilder
                 var oldCount = (handler as OfficeCli.Handlers.PowerPointHandler)?.GetSlideCount() ?? 0;
                 var resultPath = handler.Add(parentPath, type!, index, properties);
                 var message = $"Added {type} at {resultPath}";
-                if (json) Console.WriteLine(OutputFormatter.WrapEnvelopeText(message));
-                else Console.WriteLine(message);
+                var spatialLine = GetPptSpatialLine(handler, resultPath);
+                var overlapNames = spatialLine != null ? CheckPositionOverlap(handler, resultPath) : new();
+                var addWarnings = new List<OfficeCli.Core.CliWarning>();
+                if (overlapNames.Count > 0)
+                {
+                    addWarnings.Add(new OfficeCli.Core.CliWarning
+                    {
+                        Message = $"Same position as {string.Join(", ", overlapNames)}",
+                        Code = "position_overlap",
+                        Suggestion = "Use --prop x=... y=... to set distinct positions"
+                    });
+                    hadWarnings = true;
+                }
+                if (json)
+                {
+                    Console.WriteLine(OutputFormatter.WrapEnvelopeText(
+                        spatialLine != null ? $"{message}\n  {spatialLine}" : message,
+                        addWarnings.Count > 0 ? addWarnings : null));
+                }
+                else
+                {
+                    Console.WriteLine(message);
+                    if (spatialLine != null) Console.WriteLine($"  {spatialLine}");
+                    foreach (var w in addWarnings)
+                        Console.Error.WriteLine($"  WARNING: {w.Message}");
+                }
                 if (parentPath == "/") NotifyWatchRoot(handler, file.FullName, oldCount);
                 else NotifyWatch(handler, file.FullName, parentPath);
             }
@@ -1674,6 +1723,74 @@ static class CommandBuilder
         }
 
         return d[s.Length, t.Length];
+    }
+
+    // ==================== PPT spatial info helpers ====================
+
+    private static readonly HashSet<string> PositionKeys = new(StringComparer.OrdinalIgnoreCase)
+        { "x", "left", "y", "top", "width", "w", "height", "h" };
+
+    /// <summary>
+    /// For PPT spatial elements, return coordinate string like "x: 0cm  y: 5cm  width: 33.87cm  height: 5cm".
+    /// Returns null for non-spatial elements (slide, Word, Excel).
+    /// </summary>
+    private static string? GetPptSpatialLine(IDocumentHandler handler, string path)
+    {
+        if (handler is not OfficeCli.Handlers.PowerPointHandler) return null;
+        try
+        {
+            var node = handler.Get(path);
+            if (node == null) return null;
+            // Only for spatial types (shape, textbox, picture, table, chart, connector, group, equation)
+            if (node.Type is "slide" or "paragraph" or "run" or "cell" or "row") return null;
+            if (!node.Format.ContainsKey("x") || !node.Format.ContainsKey("y")) return null;
+            var x = node.Format.TryGetValue("x", out var xv) ? xv : "?";
+            var y = node.Format.TryGetValue("y", out var yv) ? yv : "?";
+            var w = node.Format.TryGetValue("width", out var wv) ? wv : "?";
+            var h = node.Format.TryGetValue("height", out var hv) ? hv : "?";
+            return $"x: {x}  y: {y}  width: {w}  height: {h}";
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Check if the element at <paramref name="path"/> has the same (x,y) as any sibling.
+    /// Returns list of overlapping sibling names, or empty.
+    /// </summary>
+    private static List<string> CheckPositionOverlap(IDocumentHandler handler, string path)
+    {
+        var overlaps = new List<string>();
+        if (handler is not OfficeCli.Handlers.PowerPointHandler) return overlaps;
+        try
+        {
+            var node = handler.Get(path);
+            if (node == null || !node.Format.ContainsKey("x") || !node.Format.ContainsKey("y")) return overlaps;
+            var myX = node.Format["x"]?.ToString();
+            var myY = node.Format["y"]?.ToString();
+            if (myX == null || myY == null) return overlaps;
+
+            // Get parent (slide) to enumerate siblings
+            var slidePathMatch = System.Text.RegularExpressions.Regex.Match(path, @"^(/slide\[\d+\])");
+            if (!slidePathMatch.Success) return overlaps;
+            var slidePath = slidePathMatch.Value;
+            var slideNode = handler.Get(slidePath);
+            if (slideNode == null) return overlaps;
+
+            foreach (var child in slideNode.Children)
+            {
+                if (child.Path == path) continue;
+                if (!child.Format.ContainsKey("x") || !child.Format.ContainsKey("y")) continue;
+                var cx = child.Format["x"]?.ToString();
+                var cy = child.Format["y"]?.ToString();
+                if (cx == myX && cy == myY)
+                {
+                    var name = child.Format.TryGetValue("name", out var n) ? n?.ToString() : child.Path;
+                    overlaps.Add(name ?? child.Path);
+                }
+            }
+        }
+        catch { /* ignore */ }
+        return overlaps;
     }
 
     /// <summary>
