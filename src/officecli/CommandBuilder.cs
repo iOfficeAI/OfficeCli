@@ -187,7 +187,7 @@ static class CommandBuilder
 
         // ==================== view command ====================
         var viewFileArg = new Argument<FileInfo>("file") { Description = "Office document path (.docx, .xlsx, .pptx)" };
-        var viewModeArg = new Argument<string>("mode") { Description = "View mode: text, annotated, outline, stats, issues, html, svg" };
+        var viewModeArg = new Argument<string>("mode") { Description = "View mode: text, annotated, outline, stats, issues, html, svg, forms" };
         var startLineOpt = new Option<int?>("--start") { Description = "Start line/paragraph number" };
         var endLineOpt = new Option<int?>("--end") { Description = "End line/paragraph number" };
         var maxLinesOpt = new Option<int?>("--max-lines") { Description = "Maximum number of lines/rows/slides to output (truncates with total count)" };
@@ -347,11 +347,22 @@ static class CommandBuilder
                 else if (modeKey is "issues" or "i")
                     Console.WriteLine(OutputFormatter.WrapEnvelope(
                         OutputFormatter.FormatIssues(handler.ViewAsIssues(issueType, limit), OutputFormat.Json)));
+                else if (modeKey is "forms" or "f")
+                {
+                    if (handler is OfficeCli.Handlers.WordHandler wordFormsHandler)
+                        Console.WriteLine(OutputFormatter.WrapEnvelope(wordFormsHandler.ViewAsFormsJson().ToJsonString(OutputFormatter.PublicJsonOptions)));
+                    else
+                        throw new OfficeCli.Core.CliException("Forms view is only supported for .docx files.")
+                        {
+                            Code = "unsupported_type",
+                            ValidValues = ["text", "annotated", "outline", "stats", "issues", "html", "svg", "forms"]
+                        };
+                }
                 else
-                    throw new OfficeCli.Core.CliException($"Unknown mode: {mode}. Available: text, annotated, outline, stats, issues, html, svg")
+                    throw new OfficeCli.Core.CliException($"Unknown mode: {mode}. Available: text, annotated, outline, stats, issues, html, svg, forms")
                     {
                         Code = "invalid_value",
-                        ValidValues = ["text", "annotated", "outline", "stats", "issues", "html", "svg"]
+                        ValidValues = ["text", "annotated", "outline", "stats", "issues", "html", "svg", "forms"]
                     };
             }
             else
@@ -363,10 +374,17 @@ static class CommandBuilder
                     "outline" or "o" => handler.ViewAsOutline(),
                     "stats" or "s" => handler.ViewAsStats(),
                     "issues" or "i" => OutputFormatter.FormatIssues(handler.ViewAsIssues(issueType, limit), OutputFormat.Text),
-                    _ => throw new OfficeCli.Core.CliException($"Unknown mode: {mode}. Available: text, annotated, outline, stats, issues, html, svg")
+                    "forms" or "f" => handler is OfficeCli.Handlers.WordHandler wfh
+                        ? wfh.ViewAsForms()
+                        : throw new OfficeCli.Core.CliException("Forms view is only supported for .docx files.")
+                        {
+                            Code = "unsupported_type",
+                            ValidValues = ["text", "annotated", "outline", "stats", "issues", "html", "svg", "forms"]
+                        },
+                    _ => throw new OfficeCli.Core.CliException($"Unknown mode: {mode}. Available: text, annotated, outline, stats, issues, html, svg, forms")
                     {
                         Code = "invalid_value",
-                        ValidValues = ["text", "annotated", "outline", "stats", "issues", "html", "svg"]
+                        ValidValues = ["text", "annotated", "outline", "stats", "issues", "html", "svg", "forms"]
                     }
                 };
                 Console.WriteLine(output);
@@ -459,6 +477,7 @@ static class CommandBuilder
         rootCommand.Add(queryCommand);
 
         // ==================== set command ====================
+        var forceOption = new Option<bool>("--force") { Description = "Force write even if document is protected" };
         var setFileArg = new Argument<FileInfo>("file") { Description = "Office document path (required even with open/close mode)" };
         var setPathArg = new Argument<string>("path") { Description = "DOM path to the element" };
         var propsOpt = new Option<string[]>("--prop") { Description = "Property to set (key=value)", AllowMultipleArgumentsPerToken = true };
@@ -468,13 +487,22 @@ static class CommandBuilder
         setCommand.Add(setPathArg);
         setCommand.Add(propsOpt);
         setCommand.Add(jsonOption);
+        setCommand.Add(forceOption);
 
         setCommand.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
         {
             var file = result.GetValue(setFileArg)!;
             var path = result.GetValue(setPathArg)!;
             var props = result.GetValue(propsOpt);
+            var force = result.GetValue(forceOption);
             bool hadWarnings = false;
+
+            // Check document protection for .docx files
+            if (!force && file.Extension.Equals(".docx", StringComparison.OrdinalIgnoreCase))
+            {
+                var protectionError = CheckDocxProtection(file.FullName, path, json);
+                if (protectionError != 0) return protectionError;
+            }
 
             // Detect bare key=value positional arguments (missing --prop)
             var unmatchedKvWarnings = DetectUnmatchedKeyValues(result);
@@ -643,6 +671,7 @@ static class CommandBuilder
         addCommand.Add(addIndexOpt);
         addCommand.Add(addPropsOpt);
         addCommand.Add(jsonOption);
+        addCommand.Add(forceOption);
 
         addCommand.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
         {
@@ -652,7 +681,15 @@ static class CommandBuilder
             var from = result.GetValue(addFromOpt);
             var index = result.GetValue(addIndexOpt);
             var props = result.GetValue(addPropsOpt);
+            var force = result.GetValue(forceOption);
             bool hadWarnings = false;
+
+            // Check document protection for .docx files
+            if (!force && file.Extension.Equals(".docx", StringComparison.OrdinalIgnoreCase))
+            {
+                var protectionError = CheckDocxProtection(file.FullName, parentPath, json);
+                if (protectionError != 0) return protectionError;
+            }
 
             // Detect bare key=value positional arguments (missing --prop)
             var unmatchedKvWarnings = DetectUnmatchedKeyValues(result);
@@ -1726,6 +1763,45 @@ static class CommandBuilder
     }
 
     // ==================== PPT spatial info helpers ====================
+
+    /// <summary>
+    /// Check if a .docx file has document protection enforced.
+    /// Returns 0 if no protection or if the path targets an editable element.
+    /// Returns 1 with error output if the document is protected and the target is not an editable region.
+    /// </summary>
+    private static int CheckDocxProtection(string filePath, string path, bool json)
+    {
+        try
+        {
+            using var handler = DocumentHandlerFactory.Open(filePath, editable: false);
+            var root = handler.Get("/");
+            var protection = root.Format.TryGetValue("protection", out var pVal) ? pVal?.ToString() : "none";
+            var enforced = root.Format.TryGetValue("protectionEnforced", out var eVal) && eVal is true;
+
+            if (!enforced || protection == "none")
+                return 0;
+
+            // Allow writes to formfield and SDT paths (they handle their own editable check)
+            if (path.StartsWith("/formfield[", StringComparison.OrdinalIgnoreCase))
+                return 0;
+            if (path.Contains("/sdt[", StringComparison.OrdinalIgnoreCase))
+                return 0;
+
+            // Document is protected — block the write
+            var msg = $"Document is protected (mode: {protection}). " +
+                      "Use Query(\"editable\") to find editable fields, or use --force to override protection.";
+            if (json)
+                Console.WriteLine(OutputFormatter.WrapEnvelopeError(msg, new List<OfficeCli.Core.CliWarning>()));
+            else
+                Console.Error.WriteLine($"ERROR: {msg}");
+            return 1;
+        }
+        catch
+        {
+            // If we can't read protection info, allow the write to proceed
+            return 0;
+        }
+    }
 
     private static readonly HashSet<string> PositionKeys = new(StringComparer.OrdinalIgnoreCase)
         { "x", "left", "y", "top", "width", "w", "height", "h" };
