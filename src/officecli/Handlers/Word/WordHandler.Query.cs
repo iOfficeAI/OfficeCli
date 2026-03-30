@@ -141,6 +141,30 @@ public partial class WordHandler
             return FieldToNode(allFields[fieldIdx - 1], path);
         }
 
+        // FormField paths: /formfield[N] or /formfield[name]
+        var ffMatch = System.Text.RegularExpressions.Regex.Match(path, @"^/formfield\[(\w+)\]$");
+        if (ffMatch.Success)
+        {
+            var allFormFields = FindFormFields();
+            var indexOrName = ffMatch.Groups[1].Value;
+            if (int.TryParse(indexOrName, out var ffIdx))
+            {
+                if (ffIdx < 1 || ffIdx > allFormFields.Count)
+                    return new DocumentNode { Path = path, Type = "error", Text = $"FormField {ffIdx} not found (total: {allFormFields.Count})" };
+                return FormFieldToNode(allFormFields[ffIdx - 1], path);
+            }
+            else
+            {
+                // Find by name (bookmark name)
+                var match = allFormFields.FirstOrDefault(ff =>
+                    ff.FfData.GetFirstChild<FormFieldName>()?.Val?.Value == indexOrName);
+                if (match.Field == null)
+                    return new DocumentNode { Path = path, Type = "error", Text = $"FormField '{indexOrName}' not found" };
+                var idx = allFormFields.IndexOf(match) + 1;
+                return FormFieldToNode(match, $"/formfield[{idx}]");
+            }
+        }
+
         // Chart paths: /chart[N] or /chart[N]/series[K]
         var chartGetMatch = System.Text.RegularExpressions.Regex.Match(path, @"^/chart\[(\d+)\](?:/series\[(\d+)\])?$");
         if (chartGetMatch.Success)
@@ -620,6 +644,88 @@ public partial class WordHandler
             return results;
         }
 
+        // Handle formfield selector
+        if (parsed.Element == "formfield")
+        {
+            var allFormFields = FindFormFields();
+            for (int fi = 0; fi < allFormFields.Count; fi++)
+            {
+                var ffNode = FormFieldToNode(allFormFields[fi], $"/formfield[{fi + 1}]");
+                // Filter by :contains
+                if (parsed.ContainsText != null && !(ffNode.Text?.Contains(parsed.ContainsText, StringComparison.OrdinalIgnoreCase) ?? false))
+                    continue;
+                // Filter by attributes
+                bool matchAttrs = true;
+                foreach (var (attrKey, rawVal) in parsed.Attributes)
+                {
+                    bool negate = rawVal.StartsWith("!");
+                    var val = negate ? rawVal[1..] : rawVal;
+                    var hasKey = ffNode.Format.TryGetValue(attrKey, out var fmtVal);
+                    bool matches = hasKey && string.Equals(fmtVal?.ToString(), val, StringComparison.OrdinalIgnoreCase);
+                    if (negate ? matches : !matches) { matchAttrs = false; break; }
+                }
+                if (matchAttrs) results.Add(ffNode);
+            }
+            return results;
+        }
+
+        // Handle editable selector — aggregates all editable SDTs and form fields, sorted by document position
+        if (parsed.Element == "editable")
+        {
+            // Collect editable SDTs
+            int blockSdtIdx = 0;
+            foreach (var sdt in body.Descendants().Where(e => e is SdtBlock or SdtRun))
+            {
+                string sdtPath;
+                if (sdt is SdtBlock)
+                {
+                    blockSdtIdx++;
+                    sdtPath = $"/body/sdt[{blockSdtIdx}]";
+                }
+                else if (sdt is SdtRun sdtRun)
+                {
+                    var parentPara = sdtRun.Ancestors<Paragraph>().FirstOrDefault();
+                    if (parentPara != null)
+                    {
+                        int pIdx = 1;
+                        foreach (var el in body.ChildElements)
+                        {
+                            if (el == parentPara) break;
+                            if (el is Paragraph) pIdx++;
+                        }
+                        int sdtInParaIdx = 1;
+                        foreach (var child in parentPara.ChildElements)
+                        {
+                            if (child == sdtRun) break;
+                            if (child is SdtRun) sdtInParaIdx++;
+                        }
+                        sdtPath = $"/body/p[{pIdx}]/sdt[{sdtInParaIdx}]";
+                    }
+                    else
+                    {
+                        blockSdtIdx++;
+                        sdtPath = $"/body/sdt[{blockSdtIdx}]";
+                    }
+                }
+                else continue;
+
+                var sdtNode = ElementToNode(sdt, sdtPath, 0);
+                if (sdtNode.Format.TryGetValue("editable", out var editableVal) && editableVal is true)
+                    results.Add(sdtNode);
+            }
+
+            // Collect editable form fields
+            var allFormFields = FindFormFields();
+            for (int fi = 0; fi < allFormFields.Count; fi++)
+            {
+                var ffNode = FormFieldToNode(allFormFields[fi], $"/formfield[{fi + 1}]");
+                if (ffNode.Format.TryGetValue("editable", out var editableVal) && editableVal is true)
+                    results.Add(ffNode);
+            }
+
+            return results;
+        }
+
         // Determine if main selector targets runs directly (no > parent)
         bool isRunSelector = parsed.ChildSelector == null &&
             (parsed.Element == "r" || parsed.Element == "run");
@@ -644,7 +750,7 @@ public partial class WordHandler
                 or "chart"
                 or "comment"
                 or "footnote" or "endnote"
-                or "field"
+                or "field" or "formfield" or "editable"
                 or "table" or "tbl"
                 or "revision" or "change" or "trackchange";
         if (!isKnownType && parsed.ChildSelector == null)
@@ -933,6 +1039,17 @@ public partial class WordHandler
                 var node = ElementToNode(sdt, path, 0);
                 if (parsed.ContainsText != null && !(node.Text?.Contains(parsed.ContainsText, StringComparison.OrdinalIgnoreCase) ?? false))
                     continue;
+                // Filter by attributes (e.g., sdt[tag=partyA])
+                bool matchAttrs = true;
+                foreach (var (attrKey, rawVal) in parsed.Attributes)
+                {
+                    bool negate = rawVal.StartsWith("!");
+                    var val = negate ? rawVal[1..] : rawVal;
+                    var hasKey = node.Format.TryGetValue(attrKey, out var fmtVal);
+                    bool matches = hasKey && string.Equals(fmtVal?.ToString(), val, StringComparison.OrdinalIgnoreCase);
+                    if (negate ? matches : !matches) { matchAttrs = false; break; }
+                }
+                if (!matchAttrs) continue;
                 results.Add(node);
             }
             return results;

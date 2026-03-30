@@ -500,8 +500,15 @@ public class ResidentServer : IDisposable
                 Console.WriteLine(OutputFormatter.FormatView(mode, _handler.ViewAsAnnotated(start, end, maxLines, cols), format));
             else if (modeKey is "issues" or "i")
                 Console.WriteLine(OutputFormatter.FormatIssues(_handler.ViewAsIssues(issueType, limit), format));
+            else if (modeKey is "forms" or "f")
+            {
+                if (_handler is OfficeCli.Handlers.WordHandler wordFormsHandler)
+                    Console.WriteLine(wordFormsHandler.ViewAsFormsJson().ToJsonString(OutputFormatter.PublicJsonOptions));
+                else
+                    Console.Error.WriteLine("Forms view is only supported for .docx files.");
+            }
             else
-                Console.WriteLine($"Unknown mode: {mode}. Available: text, annotated, outline, stats, issues, html");
+                Console.WriteLine($"Unknown mode: {mode}. Available: text, annotated, outline, stats, issues, html, forms");
         }
         else
         {
@@ -512,7 +519,10 @@ public class ResidentServer : IDisposable
                 "outline" or "o" => _handler.ViewAsOutline(),
                 "stats" or "s" => _handler.ViewAsStats(),
                 "issues" or "i" => OutputFormatter.FormatIssues(_handler.ViewAsIssues(issueType, limit), format),
-                _ => $"Unknown mode: {mode}. Available: text, annotated, outline, stats, issues, html"
+                "forms" or "f" => _handler is OfficeCli.Handlers.WordHandler wfh
+                    ? wfh.ViewAsForms()
+                    : "Forms view is only supported for .docx files.",
+                _ => $"Unknown mode: {mode}. Available: text, annotated, outline, stats, issues, html, forms"
             };
             Console.WriteLine(output);
         }

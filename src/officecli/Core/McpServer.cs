@@ -175,6 +175,9 @@ public static class McpServer
                     "outline" or "o" => handler.ViewAsOutline(),
                     "stats" or "s" => handler.ViewAsStats(),
                     "issues" or "i" => OutputFormatter.FormatIssues(handler.ViewAsIssues(null, null), OutputFormat.Json),
+                    "forms" or "f" => handler is Handlers.WordHandler wfh
+                        ? wfh.ViewAsFormsJson().ToJsonString(OutputFormatter.PublicJsonOptions)
+                        : throw new ArgumentException("Forms view is only supported for .docx files."),
                     _ => throw new ArgumentException($"Unknown mode: {mode}")
                 };
             }

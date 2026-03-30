@@ -1074,4 +1074,54 @@ public partial class WordHandler
         }
         return null;
     }
+
+    /// <summary>
+    /// Get current document protection mode and enforcement status.
+    /// </summary>
+    private (string mode, bool enforced) GetDocumentProtection()
+    {
+        var settings = _doc.MainDocumentPart?.DocumentSettingsPart?.Settings;
+        var docProtection = settings?.GetFirstChild<DocumentProtection>();
+        if (docProtection == null)
+            return ("none", false);
+
+        var mode = docProtection.Edit?.InnerText switch
+        {
+            "readOnly" => "readOnly",
+            "comments" => "comments",
+            "trackedChanges" => "trackedChanges",
+            "forms" => "forms",
+            _ => "none"
+        };
+        var enforced = docProtection.Enforcement?.Value == true
+            || (docProtection.Enforcement?.Value == null && docProtection.Edit != null);
+        return (mode, enforced);
+    }
+
+    /// <summary>
+    /// Check if an SDT element is editable based on its lock attribute and the current document protection.
+    /// </summary>
+    private bool IsSdtEditable(SdtProperties? sdtProps)
+    {
+        var (mode, enforced) = GetDocumentProtection();
+
+        // No protection or not enforced → all SDTs are editable
+        if (!enforced || mode == "none")
+            return true;
+
+        // readOnly protection → SDTs are not editable (unless in permRange, P2)
+        if (mode == "readOnly")
+            return false;
+
+        // forms protection → SDTs are editable unless content-locked
+        if (mode == "forms")
+        {
+            var lockEl = sdtProps?.GetFirstChild<DocumentFormat.OpenXml.Wordprocessing.Lock>();
+            var lockVal = lockEl?.Val?.Value;
+            return lockVal != LockingValues.ContentLocked && lockVal != LockingValues.SdtContentLocked;
+        }
+
+        // comments/trackedChanges → not typically editable
+        return false;
+    }
 }

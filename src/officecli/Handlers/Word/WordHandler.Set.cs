@@ -46,12 +46,12 @@ public partial class WordHandler
                 remaining.Remove("scope");
                 // If there are remaining properties, apply them as document properties
                 if (remaining.Count > 0)
-                    SetDocumentProperties(remaining);
+                    SetDocumentProperties(remaining, unsupported);
                 _doc.MainDocumentPart?.Document?.Save();
                 return unsupported;
             }
 
-            SetDocumentProperties(properties);
+            SetDocumentProperties(properties, unsupported);
             _doc.MainDocumentPart?.Document?.Save();
             return unsupported;
         }
@@ -153,6 +153,29 @@ public partial class WordHandler
             }
             _doc.MainDocumentPart?.Document?.Save();
             return unsupported;
+        }
+
+        // FormField paths: /formfield[N] or /formfield[name]
+        var ffSetMatch = System.Text.RegularExpressions.Regex.Match(path, @"^/formfield\[(\w+)\]$");
+        if (ffSetMatch.Success)
+        {
+            var allFormFields = FindFormFields();
+            var indexOrName = ffSetMatch.Groups[1].Value;
+            (FieldInfo Field, FormFieldData FfData) target;
+            if (int.TryParse(indexOrName, out var ffIdx))
+            {
+                if (ffIdx < 1 || ffIdx > allFormFields.Count)
+                    throw new ArgumentException($"FormField {ffIdx} not found (total: {allFormFields.Count})");
+                target = allFormFields[ffIdx - 1];
+            }
+            else
+            {
+                target = allFormFields.FirstOrDefault(ff =>
+                    ff.FfData.GetFirstChild<FormFieldName>()?.Val?.Value == indexOrName);
+                if (target.Field == null)
+                    throw new ArgumentException($"FormField '{indexOrName}' not found");
+            }
+            return SetFormField(target, properties);
         }
 
         // Field paths: /field[N]
@@ -712,6 +735,10 @@ public partial class WordHandler
                                     new Run(new Text(value) { Space = SpaceProcessingModeValues.Preserve }));
                             }
                         }
+                        // Clear showingPlaceholder flag so Word doesn't display as placeholder style
+                        var plcHdr = (element is SdtBlock sb2 ? sb2.SdtProperties : ((SdtRun)element).SdtProperties)
+                            ?.GetFirstChild<ShowingPlaceholder>();
+                        plcHdr?.Remove();
                         break;
                     default:
                         unsupported.Add(key);

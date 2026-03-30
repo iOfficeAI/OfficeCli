@@ -104,6 +104,29 @@ public partial class WordHandler
             }
         }
 
+        // Document protection
+        var settings = _doc.MainDocumentPart?.DocumentSettingsPart?.Settings;
+        var docProtection = settings?.GetFirstChild<DocumentProtection>();
+        if (docProtection != null)
+        {
+            var editText = docProtection.Edit?.InnerText;
+            node.Format["protection"] = editText switch
+            {
+                "readOnly" => "readOnly",
+                "comments" => "comments",
+                "trackedChanges" => "trackedChanges",
+                "forms" => "forms",
+                _ => "none"
+            };
+            var enforced = docProtection.Enforcement?.Value;
+            node.Format["protectionEnforced"] = enforced == true || enforced == null && docProtection.Edit != null;
+        }
+        else
+        {
+            node.Format["protection"] = "none";
+            node.Format["protectionEnforced"] = false;
+        }
+
         node.Children = children;
         node.ChildCount = children.Count;
         return node;
@@ -656,6 +679,18 @@ public partial class WordHandler
                 else if (sdtProps.GetFirstChild<SdtContentText>() != null) node.Format["sdtType"] = "text";
                 else node.Format["sdtType"] = "richtext";
 
+                // Editable status
+                node.Format["editable"] = IsSdtEditable(sdtProps);
+
+                // Placeholder detection
+                var showingPlcHdr = sdtProps.GetFirstChild<ShowingPlaceholder>();
+                if (showingPlcHdr != null)
+                {
+                    node.Format["placeholder"] = true;
+                    var plcHdrText = sdtProps.GetFirstChild<SdtPlaceholder>()?.DocPartReference?.Val?.Value;
+                    if (plcHdrText != null) node.Format["placeholderText"] = plcHdrText;
+                }
+
                 // Read dropdown/combobox items
                 var ddl = sdtProps.GetFirstChild<SdtContentDropDownList>();
                 var combo = sdtProps.GetFirstChild<SdtContentComboBox>();
@@ -690,6 +725,18 @@ public partial class WordHandler
                 else if (sdtProps.GetFirstChild<SdtContentDate>() != null) node.Format["sdtType"] = "date";
                 else if (sdtProps.GetFirstChild<SdtContentText>() != null) node.Format["sdtType"] = "text";
                 else node.Format["sdtType"] = "richtext";
+
+                // Editable status
+                node.Format["editable"] = IsSdtEditable(sdtProps);
+
+                // Placeholder detection
+                var showingPlcHdrRun = sdtProps.GetFirstChild<ShowingPlaceholder>();
+                if (showingPlcHdrRun != null)
+                {
+                    node.Format["placeholder"] = true;
+                    var plcHdrTextRun = sdtProps.GetFirstChild<SdtPlaceholder>()?.DocPartReference?.Val?.Value;
+                    if (plcHdrTextRun != null) node.Format["placeholderText"] = plcHdrTextRun;
+                }
 
                 var ddl = sdtProps.GetFirstChild<SdtContentDropDownList>();
                 var combo = sdtProps.GetFirstChild<SdtContentComboBox>();

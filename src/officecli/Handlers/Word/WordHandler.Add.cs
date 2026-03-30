@@ -65,6 +65,7 @@ public partial class WordHandler
             "pagebreak" or "columnbreak" or "break" => AddBreak(parent, parentPath, index, properties, type),
             "sdt" or "contentcontrol" => AddSdt(parent, parentPath, index, properties),
             "watermark" => AddWatermark(parent, parentPath, index, properties),
+            "formfield" => AddFormField(parent, parentPath, index, properties),
             _ => AddDefault(parent, parentPath, index, properties, type),
         };
 
@@ -112,7 +113,7 @@ public partial class WordHandler
     }
 
 
-    private void SetDocumentProperties(Dictionary<string, string> properties)
+    private void SetDocumentProperties(Dictionary<string, string> properties, List<string>? unsupported = null)
     {
         var doc = _doc.MainDocumentPart?.Document
             ?? throw new InvalidOperationException("Document not found");
@@ -194,6 +195,38 @@ public partial class WordHandler
                     _doc.PackageProperties.Revision = value;
                     break;
 
+                case "protection":
+                {
+                    var protSettingsPart = _doc.MainDocumentPart!.DocumentSettingsPart
+                        ?? _doc.MainDocumentPart.AddNewPart<DocumentSettingsPart>();
+                    protSettingsPart.Settings ??= new Settings();
+
+                    // Remove existing protection
+                    var existing = protSettingsPart.Settings.GetFirstChild<DocumentProtection>();
+                    existing?.Remove();
+
+                    if (!string.Equals(value, "none", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var editValue = value.ToLowerInvariant() switch
+                        {
+                            "forms" => DocumentProtectionValues.Forms,
+                            "readonly" => DocumentProtectionValues.ReadOnly,
+                            "comments" => DocumentProtectionValues.Comments,
+                            "trackedchanges" => DocumentProtectionValues.TrackedChanges,
+                            _ => DocumentProtectionValues.Forms
+                        };
+                        var prot = new DocumentProtection
+                        {
+                            Edit = new EnumValue<DocumentProtectionValues>(editValue),
+                            Enforcement = new OnOffValue(true)
+                        };
+                        protSettingsPart.Settings.AppendChild(prot);
+                    }
+
+                    protSettingsPart.Settings.Save();
+                    break;
+                }
+
                 case "acceptallchanges":
                     if (IsTruthy(value))
                         AcceptAllChanges();
@@ -201,6 +234,10 @@ public partial class WordHandler
                 case "rejectallchanges":
                     if (IsTruthy(value))
                         RejectAllChanges();
+                    break;
+
+                default:
+                    unsupported?.Add(key);
                     break;
             }
         }

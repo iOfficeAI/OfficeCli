@@ -300,12 +300,15 @@ public partial class WordHandler
         var body = _doc.MainDocumentPart?.Document?.Body
             ?? throw new InvalidOperationException("Document body not found");
 
+        // Case-insensitive lookup to support camelCase keys like "sdtType", "controlType", etc.
+        var ciProps = new Dictionary<string, string>(properties, StringComparer.OrdinalIgnoreCase);
+
         // Add a Structured Document Tag (Content Control)
-        var sdtType = properties.GetValueOrDefault("sdttype", properties.GetValueOrDefault("controltype", "text")).ToLowerInvariant();
-        var alias = properties.GetValueOrDefault("alias", properties.GetValueOrDefault("name", ""));
-        var tag = properties.GetValueOrDefault("tag", "");
-        var lockVal = properties.GetValueOrDefault("lock", "");
-        var sdtText = properties.GetValueOrDefault("text", "");
+        var sdtType = ciProps.GetValueOrDefault("sdttype", ciProps.GetValueOrDefault("controltype", "text")).ToLowerInvariant();
+        var alias = ciProps.GetValueOrDefault("alias", ciProps.GetValueOrDefault("name", ""));
+        var tag = ciProps.GetValueOrDefault("tag", "");
+        var lockVal = ciProps.GetValueOrDefault("lock", "");
+        var sdtText = ciProps.GetValueOrDefault("text", "");
 
         // Determine block-level vs inline
         bool isInline = parent is Paragraph;
@@ -345,7 +348,7 @@ public partial class WordHandler
                 case "dropdown" or "dropdownlist":
                 {
                     var ddl = new SdtContentDropDownList();
-                    if (properties.TryGetValue("items", out var items))
+                    if (ciProps.TryGetValue("items", out var items))
                     {
                         foreach (var item in items.Split(','))
                         {
@@ -359,7 +362,7 @@ public partial class WordHandler
                 case "combobox" or "combo":
                 {
                     var cb = new SdtContentComboBox();
-                    if (properties.TryGetValue("items", out var items))
+                    if (ciProps.TryGetValue("items", out var items))
                     {
                         foreach (var item in items.Split(','))
                         {
@@ -372,7 +375,7 @@ public partial class WordHandler
                 }
                 case "date" or "datepicker":
                     var datePr = new SdtContentDate();
-                    if (properties.TryGetValue("format", out var dateFmt))
+                    if (ciProps.TryGetValue("format", out var dateFmt))
                         datePr.DateFormat = new DateFormat { Val = dateFmt };
                     else
                         datePr.DateFormat = new DateFormat { Val = "yyyy-MM-dd" };
@@ -428,7 +431,7 @@ public partial class WordHandler
                 case "dropdown" or "dropdownlist":
                 {
                     var ddl = new SdtContentDropDownList();
-                    if (properties.TryGetValue("items", out var items))
+                    if (ciProps.TryGetValue("items", out var items))
                     {
                         foreach (var item in items.Split(','))
                         {
@@ -442,7 +445,7 @@ public partial class WordHandler
                 case "combobox" or "combo":
                 {
                     var cb = new SdtContentComboBox();
-                    if (properties.TryGetValue("items", out var items))
+                    if (ciProps.TryGetValue("items", out var items))
                     {
                         foreach (var item in items.Split(','))
                         {
@@ -455,7 +458,7 @@ public partial class WordHandler
                 }
                 case "date" or "datepicker":
                     var datePr = new SdtContentDate();
-                    if (properties.TryGetValue("format", out var dateFmt))
+                    if (ciProps.TryGetValue("format", out var dateFmt))
                         datePr.DateFormat = new DateFormat { Val = dateFmt };
                     else
                         datePr.DateFormat = new DateFormat { Val = "yyyy-MM-dd" };
