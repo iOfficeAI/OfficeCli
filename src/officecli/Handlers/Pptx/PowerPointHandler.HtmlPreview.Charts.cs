@@ -27,7 +27,8 @@ public partial class PowerPointHandler
     private string _chartGridColor = "#333";        // gridlines
     private string _chartAxisLineColor = "#555";    // axis lines
 
-    private void RenderChart(StringBuilder sb, GraphicFrame gf, SlidePart slidePart, Dictionary<string, string> themeColors)
+    private void RenderChart(StringBuilder sb, GraphicFrame gf, SlidePart slidePart, Dictionary<string, string> themeColors,
+        string? dataPath = null)
     {
         // p:xfrm contains a:off and a:ext
         var pxfrm = gf.GetFirstChild<DocumentFormat.OpenXml.Presentation.Transform>();
@@ -115,7 +116,9 @@ public partial class PowerPointHandler
 
         // Container with optional chart background
         var bgStyle = chartFillColor != null ? $"background:#{chartFillColor};" : "background:transparent;";
-        sb.AppendLine($"    <div class=\"shape\" style=\"left:{x}cm;top:{y}cm;width:{w}cm;height:{h}cm;{bgStyle}\">");
+        // data-path 属性用于前端编辑器定位图表，格式与 Set() 命令路径一致
+        var dataPathAttr = dataPath != null ? $" data-path=\"{dataPath}\" data-type=\"chart\"" : "";
+        sb.AppendLine($"    <div class=\"shape\"{dataPathAttr} style=\"left:{x}cm;top:{y}cm;width:{w}cm;height:{h}cm;{bgStyle}\">");
 
         // Title
         if (!string.IsNullOrEmpty(titleText))

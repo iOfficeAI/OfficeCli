@@ -14,7 +14,8 @@ public partial class PowerPointHandler
 {
     // ==================== Table Rendering ====================
 
-    private static void RenderTable(StringBuilder sb, GraphicFrame gf, Dictionary<string, string> themeColors)
+    private static void RenderTable(StringBuilder sb, GraphicFrame gf, Dictionary<string, string> themeColors,
+        string? dataPath = null)
     {
         var table = gf.Descendants<Drawing.Table>().FirstOrDefault();
         if (table == null) return;
@@ -28,7 +29,9 @@ public partial class PowerPointHandler
         var cx = extents.Cx?.Value ?? 0;
         var cy = extents.Cy?.Value ?? 0;
 
-        sb.AppendLine($"    <div class=\"table-container\" style=\"left:{EmuToCm(x)}cm;top:{EmuToCm(y)}cm;width:{EmuToCm(cx)}cm;height:{EmuToCm(cy)}cm\">");
+        // data-path 属性用于前端编辑器定位表格，格式与 Set() 命令路径一致
+        var tableDataPathAttr = dataPath != null ? $" data-path=\"{dataPath}\" data-type=\"table\"" : "";
+        sb.AppendLine($"    <div class=\"table-container\"{tableDataPathAttr} style=\"left:{EmuToCm(x)}cm;top:{EmuToCm(y)}cm;width:{EmuToCm(cx)}cm;height:{EmuToCm(cy)}cm\">");
         sb.AppendLine("      <table class=\"slide-table\">");
 
         // Column widths
@@ -46,12 +49,17 @@ public partial class PowerPointHandler
             sb.AppendLine("</colgroup>");
         }
 
+        // 行/列计数器，用于生成表格单元格的 data-path（格式与 Set() 命令路径一致）
+        int rowIdx = 0;
         foreach (var row in table.Elements<Drawing.TableRow>())
         {
+            rowIdx++;
             sb.AppendLine("        <tr>");
             int skipCols = 0;
+            int colIdx = 0;
             foreach (var cell in row.Elements<Drawing.TableCell>())
             {
+                colIdx++;
                 var cellStyles = new List<string>();
 
                 // Cell fill
@@ -132,7 +140,11 @@ public partial class PowerPointHandler
 
                 if (gridSpan > 1) skipCols = (int)gridSpan - 1;
 
-                sb.AppendLine($"          <td{spanAttrs}{styleStr}>{HtmlEncode(cellText)}</td>");
+                // data-path 属性用于前端编辑器定位表格单元格，格式与 Set() 命令路径一致
+                var cellDataPathAttr = dataPath != null
+                    ? $" data-path=\"{dataPath}/tr[{rowIdx}]/tc[{colIdx}]\" data-type=\"tableCell\""
+                    : "";
+                sb.AppendLine($"          <td{spanAttrs}{cellDataPathAttr}{styleStr}>{HtmlEncode(cellText)}</td>");
             }
             sb.AppendLine("        </tr>");
         }

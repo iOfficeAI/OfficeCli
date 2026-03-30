@@ -19,7 +19,8 @@ public partial class PowerPointHandler
     /// with the adjusted coordinates — the original element is NEVER modified.
     /// </summary>
     private static void RenderShape(StringBuilder sb, Shape shape, OpenXmlPart part,
-        Dictionary<string, string> themeColors, (long x, long y, long cx, long cy)? overridePos = null)
+        Dictionary<string, string> themeColors, (long x, long y, long cx, long cy)? overridePos = null,
+        string? dataPath = null)
     {
         var xfrm = shape.ShapeProperties?.Transform2D;
 
@@ -205,6 +206,9 @@ public partial class PowerPointHandler
             || shape.ShapeProperties?.GetFirstChild<Drawing.BlipFill>() != null;
         var shapeClass = hasFillBg ? "shape has-fill" : "shape";
 
+        // data-path 属性用于前端编辑器定位形状，格式与 Set() 命令路径一致
+        var dataPathAttr = dataPath != null ? $" data-path=\"{dataPath}\" data-type=\"shape\"" : "";
+
         if (!string.IsNullOrEmpty(clipPathCss))
         {
             // For clip-path shapes: move fill to a clipped background layer, keep text unclipped
@@ -218,13 +222,13 @@ public partial class PowerPointHandler
                 else
                     outerStyles.Add(s);
             }
-            sb.Append($"    <div class=\"{shapeClass}\" style=\"{string.Join(";", outerStyles)}\">");
+            sb.Append($"    <div class=\"{shapeClass}\"{dataPathAttr} style=\"{string.Join(";", outerStyles)}\">");
             if (fillStyles.Count > 0)
                 sb.Append($"<div style=\"position:absolute;inset:0;{clipPathCss};{string.Join(";", fillStyles)}\"></div>");
         }
         else
         {
-            sb.Append($"    <div class=\"{shapeClass}\" style=\"{string.Join(";", styles)}\">");
+            sb.Append($"    <div class=\"{shapeClass}\"{dataPathAttr} style=\"{string.Join(";", styles)}\">");
         }
 
         // Text content
@@ -245,7 +249,7 @@ public partial class PowerPointHandler
                 ? $" style=\"{flipStyle}{(string.IsNullOrEmpty(clipPathCss) ? "" : "position:relative;")}\""
                 : "";
             sb.Append($"<div class=\"shape-text valign-{valign}\"{textStyle}>");
-            RenderTextBody(sb, shape.TextBody, themeColors);
+            RenderTextBody(sb, shape.TextBody, themeColors, shapeDataPath: dataPath);
             sb.Append("</div>");
         }
 
@@ -394,7 +398,8 @@ public partial class PowerPointHandler
     /// with the adjusted coordinates — the original element is NEVER modified.
     /// </summary>
     private static void RenderPicture(StringBuilder sb, Picture pic, SlidePart slidePart,
-        Dictionary<string, string> themeColors, (long x, long y, long cx, long cy)? overridePos = null)
+        Dictionary<string, string> themeColors, (long x, long y, long cx, long cy)? overridePos = null,
+        string? dataPath = null)
     {
         var xfrm = pic.ShapeProperties?.Transform2D;
         if (xfrm?.Offset == null || xfrm?.Extents == null) return;
@@ -440,7 +445,9 @@ public partial class PowerPointHandler
                 styles.Add(geomCss);
         }
 
-        sb.Append($"    <div class=\"picture\" style=\"{string.Join(";", styles)}\">");
+        // data-path 属性用于前端编辑器定位图片，格式与 Set() 命令路径一致
+        var dataPathAttr = dataPath != null ? $" data-path=\"{dataPath}\" data-type=\"picture\"" : "";
+        sb.Append($"    <div class=\"picture\"{dataPathAttr} style=\"{string.Join(";", styles)}\">");
 
         // Extract image data
         var blipFill = pic.BlipFill;

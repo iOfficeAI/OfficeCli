@@ -14,10 +14,14 @@ public partial class PowerPointHandler
 {
     // ==================== Text Rendering ====================
 
-    private static void RenderTextBody(StringBuilder sb, OpenXmlElement textBody, Dictionary<string, string> themeColors)
+    private static void RenderTextBody(StringBuilder sb, OpenXmlElement textBody, Dictionary<string, string> themeColors,
+        string? shapeDataPath = null)
     {
+        // 段落计数器，用于生成 data-path 属性（格式与 Set() 命令路径一致）
+        int paraIdx = 0;
         foreach (var para in textBody.Elements<Drawing.Paragraph>())
         {
+            paraIdx++;
             var paraStyles = new List<string>();
 
             var pProps = para.ParagraphProperties;
@@ -57,7 +61,11 @@ public partial class PowerPointHandler
             var bulletAuto = pProps?.GetFirstChild<Drawing.AutoNumberedBullet>();
             var hasBullet = bulletChar != null || bulletAuto != null;
 
-            sb.Append($"<div class=\"para\" style=\"{string.Join(";", paraStyles)}\">");
+            // data-path 属性用于前端编辑器定位段落，格式与 Set() 命令路径一致
+            var paraDataPathAttr = shapeDataPath != null
+                ? $" data-path=\"{shapeDataPath}/paragraph[{paraIdx}]\" data-type=\"paragraph\""
+                : "";
+            sb.Append($"<div class=\"para\"{paraDataPathAttr} style=\"{string.Join(";", paraStyles)}\">");
 
             if (hasBullet)
             {
@@ -100,9 +108,15 @@ public partial class PowerPointHandler
             }
             else
             {
+                // 文字行计数器，用于生成 data-path（格式与 Set() 命令路径一致）
+                int runIdx = 0;
                 foreach (var run in runs)
                 {
-                    RenderRun(sb, run, themeColors);
+                    runIdx++;
+                    var runDataPath = shapeDataPath != null
+                        ? $"{shapeDataPath}/paragraph[{paraIdx}]/run[{runIdx}]"
+                        : null;
+                    RenderRun(sb, run, themeColors, dataPath: runDataPath);
                 }
             }
 
@@ -114,7 +128,8 @@ public partial class PowerPointHandler
         }
     }
 
-    private static void RenderRun(StringBuilder sb, Drawing.Run run, Dictionary<string, string> themeColors)
+    private static void RenderRun(StringBuilder sb, Drawing.Run run, Dictionary<string, string> themeColors,
+        string? dataPath = null)
     {
         var text = run.Text?.Text ?? "";
         if (string.IsNullOrEmpty(text)) return;
@@ -179,8 +194,12 @@ public partial class PowerPointHandler
         // Actually check run's parent paragraph for hyperlinks on this run
         // Not critical for preview, skip for simplicity
 
+        // data-path 属性用于前端编辑器定位文字行，格式与 Set() 命令路径一致
+        var dataPathAttr = dataPath != null ? $" data-path=\"{dataPath}\" data-type=\"run\"" : "";
         if (styles.Count > 0)
-            sb.Append($"<span style=\"{string.Join(";", styles)}\">{HtmlEncode(text)}</span>");
+            sb.Append($"<span{dataPathAttr} style=\"{string.Join(";", styles)}\">{HtmlEncode(text)}</span>");
+        else if (dataPath != null)
+            sb.Append($"<span{dataPathAttr}>{HtmlEncode(text)}</span>");
         else
             sb.Append(HtmlEncode(text));
     }

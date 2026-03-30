@@ -335,22 +335,38 @@ public partial class PowerPointHandler
         var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree;
         if (shapeTree == null) return;
 
-        // Collect all content elements in z-order (as they appear in XML)
+        // 按 XML 中的 z 轴顺序遍历所有内容元素，并为可编辑元素生成 data-path 路径
+        int shapeIdx = 0;
+        int pictureIdx = 0;
+        int tableIdx = 0;
+        int chartIdx = 0;
         foreach (var element in shapeTree.ChildElements)
         {
             switch (element)
             {
                 case Shape shape:
-                    RenderShape(sb, shape, slidePart, themeColors);
+                    shapeIdx++;
+                    // data-path 格式：/slide[N]/shape[M]，与 Set() 命令路径格式一致
+                    RenderShape(sb, shape, slidePart, themeColors, dataPath: $"/slide[{slideNum}]/shape[{shapeIdx}]");
                     break;
                 case Picture pic:
-                    RenderPicture(sb, pic, slidePart, themeColors);
+                    pictureIdx++;
+                    // data-path 格式：/slide[N]/picture[M]，与 Set() 命令路径格式一致
+                    RenderPicture(sb, pic, slidePart, themeColors, dataPath: $"/slide[{slideNum}]/picture[{pictureIdx}]");
                     break;
                 case GraphicFrame gf:
                     if (gf.Descendants<Drawing.Table>().Any())
-                        RenderTable(sb, gf, themeColors);
+                    {
+                        tableIdx++;
+                        // data-path 格式：/slide[N]/table[M]，与 Set() 命令路径格式一致
+                        RenderTable(sb, gf, themeColors, dataPath: $"/slide[{slideNum}]/table[{tableIdx}]");
+                    }
                     else if (gf.Descendants().Any(e => e.LocalName == "chart" && e.NamespaceUri.Contains("chart")))
-                        RenderChart(sb, gf, slidePart, themeColors);
+                    {
+                        chartIdx++;
+                        // data-path 格式：/slide[N]/chart[M]，与 Set() 命令路径格式一致
+                        RenderChart(sb, gf, slidePart, themeColors, dataPath: $"/slide[{slideNum}]/chart[{chartIdx}]");
+                    }
                     break;
                 case ConnectionShape cxn:
                     RenderConnector(sb, cxn, themeColors);
