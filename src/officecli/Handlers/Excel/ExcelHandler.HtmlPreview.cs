@@ -285,14 +285,18 @@ public partial class ExcelHandler
                     if (adjColSpan > 1) spanAttrs += $" colspan=\"{adjColSpan}\"";
                     if (mergeInfo.RowSpan > 1) spanAttrs += $" rowspan=\"{mergeInfo.RowSpan}\"";
 
-                    sb.Append($"<td{spanAttrs}{style}>{CellHtml(value)}</td>");
+                    // data-path 用于前端编辑器定位可编辑单元格，格式：$工作表名:单元格引用
+                    var dataPath = $" data-path=\"${HtmlEncode(sheetName)}:{cellRef}\" data-type=\"cell\"";
+                    sb.Append($"<td{spanAttrs}{dataPath}{style}>{CellHtml(value)}</td>");
                 }
                 else
                 {
                     var cell = cellMap.TryGetValue((r, c), out var nc) ? nc : null;
                     var style = GetCellStyleCss(cell, stylesheet, frozenRows, frozenCols, r, c, frozenLeftOffsets);
                     var value = cell != null ? GetFormattedCellValue(cell, stylesheet) : "";
-                    sb.Append($"<td{style}>{CellHtml(value)}</td>");
+                    // data-path 用于前端编辑器定位可编辑单元格，格式：$工作表名:单元格引用
+                    var dataPath = $" data-path=\"${HtmlEncode(sheetName)}:{cellRef}\" data-type=\"cell\"";
+                    sb.Append($"<td{dataPath}{style}>{CellHtml(value)}</td>");
                 }
             }
             sb.AppendLine("</tr>");

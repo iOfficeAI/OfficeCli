@@ -599,7 +599,7 @@ public partial class WordHandler
                 {
                     CloseAllLists(sb, listStack, ref currentListType, ref pendingLiClose);
                     var latex = FormulaParser.ToLatex(oMathPara);
-                    sb.AppendLine($"<div class=\"equation\"><span class=\"katex-formula\" data-formula=\"{HtmlEncodeAttr(latex)}\" data-display=\"true\"></span></div>");
+                    sb.AppendLine($"<div class=\"equation\"><span class=\"katex-formula\" data-formula=\"{HtmlEncode(latex)}\" data-display=\"true\"></span></div>");
                     continue;
                 }
 
@@ -748,7 +748,9 @@ public partial class WordHandler
                     currentListType = listStyle;
                     currentListLevel = ilvl;
                     currentNumId = numId;
-                    sb.Append("<li");
+                    // data-path 用于前端编辑器定位列表段落（格式：/body/p[N]）
+                    var liDataPath = $"/body/p[{wParaCount}]";
+                    sb.Append($"<li data-path=\"{liDataPath}\" data-type=\"paragraph\"");
                     var paraStyle = GetParagraphInlineCss(para, isListItem: true);
                     if (!string.IsNullOrEmpty(paraStyle))
                         sb.Append($" style=\"{paraStyle}\"");
@@ -762,7 +764,7 @@ public partial class WordHandler
                         var numWidth = hangingPt > 0 ? $"{hangingPt:0.#}pt" : "3em";
                         sb.Append($"<span style=\"display:inline-block;min-width:{numWidth};padding-right:0.5em\">{numStr}</span>");
                     }
-                    RenderParagraphContentHtml(sb, para);
+                    RenderParagraphContentHtml(sb, para, liDataPath);
                     pendingLiClose = true; // defer </li> in case next item nests
                     continue;
                 }
@@ -787,12 +789,14 @@ public partial class WordHandler
 
                 if (headingLevel > 0)
                 {
-                    sb.Append($"<h{headingLevel}");
+                    // data-path 用于前端编辑器定位标题段落（格式：/body/p[N]）
+                    var hDataPath = $"/body/p[{wParaCount}]";
+                    sb.Append($"<h{headingLevel} data-path=\"{hDataPath}\" data-type=\"paragraph\"");
                     var hStyle = GetParagraphInlineCss(para);
                     if (!string.IsNullOrEmpty(hStyle))
                         sb.Append($" style=\"{hStyle}\"");
                     sb.Append(">");
-                    RenderParagraphContentHtml(sb, para);
+                    RenderParagraphContentHtml(sb, para, hDataPath);
                     sb.AppendLine($"</h{headingLevel}>");
                 }
                 else
@@ -827,11 +831,13 @@ public partial class WordHandler
                     if (mathElements.Count > 0 && runs.Count == 0 && string.IsNullOrWhiteSpace(text))
                     {
                         var latex = string.Concat(mathElements.Select(FormulaParser.ToLatex));
-                        sb.AppendLine($"<div class=\"equation\"><span class=\"katex-formula\" data-formula=\"{HtmlEncodeAttr(latex)}\" data-display=\"true\"></span></div>");
+                        sb.AppendLine($"<div class=\"equation\"><span class=\"katex-formula\" data-formula=\"{HtmlEncode(latex)}\" data-display=\"true\"></span></div>");
                         continue;
                     }
 
-                    sb.Append("<p");
+                    // data-path 用于前端编辑器定位普通段落（格式：/body/p[N]）
+                    var pDataPath = $"/body/p[{wParaCount}]";
+                    sb.Append($"<p data-path=\"{pDataPath}\" data-type=\"paragraph\"");
                     // Add CSS class for TOC paragraphs (suppress hyperlink styling, enable dot leaders)
                     var paraStyleId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
                     if (paraStyleId != null && paraStyleId.StartsWith("TOC", StringComparison.OrdinalIgnoreCase))
@@ -840,7 +846,7 @@ public partial class WordHandler
                     if (!string.IsNullOrEmpty(pStyle))
                         sb.Append($" style=\"{pStyle}\"");
                     sb.Append(">");
-                    RenderParagraphContentHtml(sb, para);
+                    RenderParagraphContentHtml(sb, para, pDataPath);
                     sb.AppendLine("</p>");
                 }
             }
@@ -848,7 +854,7 @@ public partial class WordHandler
             {
                 CloseAllLists(sb, listStack, ref currentListType, ref pendingLiClose);
                 var latex = FormulaParser.ToLatex(element);
-                sb.AppendLine($"<div class=\"equation\"><span class=\"katex-formula\" data-formula=\"{HtmlEncodeAttr(latex)}\" data-display=\"true\"></span></div>");
+                sb.AppendLine($"<div class=\"equation\"><span class=\"katex-formula\" data-formula=\"{HtmlEncode(latex)}\" data-display=\"true\"></span></div>");
             }
             else if (element is Table table)
             {

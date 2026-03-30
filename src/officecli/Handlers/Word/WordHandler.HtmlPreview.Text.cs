@@ -34,20 +34,23 @@ public partial class WordHandler
         sb.AppendLine($"</{tag}>");
     }
 
-    private void RenderParagraphContentHtml(StringBuilder sb, Paragraph para)
+    private void RenderParagraphContentHtml(StringBuilder sb, Paragraph para, string? paraDataPath = null)
     {
         // Render bookmark anchors for internal hyperlink targets
         foreach (var bm in para.Elements<BookmarkStart>())
         {
             var bmName = bm.Name?.Value;
             if (!string.IsNullOrEmpty(bmName) && !bmName.StartsWith("_GoBack"))
-                sb.Append($"<a id=\"{HtmlEncodeAttr(bmName)}\"></a>");
+                sb.Append($"<a id=\"{HtmlEncode(bmName)}\"></a>");
         }
 
         // Collect standalone images that precede a text box group (they overlay the group in Word)
         bool hasTextBoxGroup = HasTextBoxContent(para);
         var preGroupImages = hasTextBoxGroup ? new List<Drawing>() : null;
         bool textBoxSeen = false;
+
+        // 文字行计数器，用于生成 data-path（格式：/body/p[N]/r[R]）
+        int runIdx = 0;
 
         foreach (var child in para.ChildElements)
         {
@@ -81,7 +84,9 @@ public partial class WordHandler
                     continue;
                 }
 
-                RenderRunHtml(sb, run, para);
+                runIdx++;
+                var runDataPath = paraDataPath != null ? $"{paraDataPath}/r[{runIdx}]" : null;
+                RenderRunHtml(sb, run, para, runDataPath);
             }
             else if (child.LocalName is "ins" or "moveTo")
             {
@@ -121,7 +126,7 @@ public partial class WordHandler
                     url = $"#{hyperlink.Anchor.Value}";
 
                 if (url != null)
-                    sb.Append($"<a href=\"{HtmlEncodeAttr(url)}\"{(url.StartsWith("#") ? "" : " target=\"_blank\"")}>");
+                    sb.Append($"<a href=\"{HtmlEncode(url)}\"{(url.StartsWith("#") ? "" : " target=\"_blank\"")}>");
 
                 foreach (var hRun in hyperlink.Elements<Run>())
                     RenderRunHtml(sb, hRun, para);
@@ -132,7 +137,7 @@ public partial class WordHandler
             else if (child.LocalName == "oMath" || child is M.OfficeMath)
             {
                 var latex = FormulaParser.ToLatex(child);
-                sb.Append($"<span class=\"katex-formula\" data-formula=\"{HtmlEncodeAttr(latex)}\"></span>");
+                sb.Append($"<span class=\"katex-formula\" data-formula=\"{HtmlEncode(latex)}\"></span>");
             }
             else if (child.LocalName is "sdt" or "smartTag" or "customXml")
             {
@@ -151,7 +156,7 @@ public partial class WordHandler
 
     // ==================== Run Rendering ====================
 
-    private void RenderRunHtml(StringBuilder sb, Run run, Paragraph para)
+    private void RenderRunHtml(StringBuilder sb, Run run, Paragraph para, string? dataPath = null)
     {
         // Check for drawing (direct or inside mc:AlternateContent)
         var drawing = run.GetFirstChild<Drawing>()
@@ -194,8 +199,12 @@ public partial class WordHandler
         var rProps = ResolveEffectiveRunProperties(run, para);
         var style = GetRunInlineCss(rProps);
         var needsSpan = !string.IsNullOrEmpty(style);
+        // data-path 属性用于前端编辑器定位文字行（格式：/body/p[N]/r[R]）
+        var dataPathAttr = dataPath != null ? $" data-path=\"{dataPath}\" data-type=\"run\"" : "";
         if (needsSpan)
-            sb.Append($"<span style=\"{style}\">");
+            sb.Append($"<span{dataPathAttr} style=\"{style}\">");
+        else if (dataPath != null)
+            sb.Append($"<span{dataPathAttr}>");
 
         foreach (var child in run.ChildElements)
         {
@@ -259,7 +268,7 @@ public partial class WordHandler
             }
         }
 
-        if (needsSpan)
+        if (needsSpan || dataPath != null)
             sb.Append("</span>");
     }
 

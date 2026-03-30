@@ -19,7 +19,8 @@ public partial class PowerPointHandler
     /// with the adjusted coordinates — the original element is NEVER modified.
     /// </summary>
     private static void RenderShape(StringBuilder sb, Shape shape, OpenXmlPart part,
-        Dictionary<string, string> themeColors, (long x, long y, long cx, long cy)? overridePos = null)
+        Dictionary<string, string> themeColors, (long x, long y, long cx, long cy)? overridePos = null,
+        string? dataPath = null)
     {
         var xfrm = shape.ShapeProperties?.Transform2D;
 
@@ -236,6 +237,9 @@ public partial class PowerPointHandler
             || shape.ShapeProperties?.GetFirstChild<Drawing.BlipFill>() != null;
         var shapeClass = hasFillBg ? "shape has-fill" : "shape";
 
+        // data-path 属性用于前端编辑器定位形状（仅在从幻灯片直接渲染时设置）
+        var dataPathAttr = dataPath != null ? $" data-path=\"{dataPath}\" data-type=\"shape\"" : "";
+
         if (!string.IsNullOrEmpty(clipPathCss))
         {
             // For clip-path shapes: move fill to a clipped background layer, keep text unclipped
@@ -252,7 +256,7 @@ public partial class PowerPointHandler
                 else
                     outerStyles.Add(s);
             }
-            sb.Append($"    <div class=\"{shapeClass}\" style=\"{string.Join(";", outerStyles)}\">");
+            sb.Append($"    <div class=\"{shapeClass}\"{dataPathAttr} style=\"{string.Join(";", outerStyles)}\">");
             // Fill layer (clipped)
             if (fillStyles.Count > 0)
                 sb.Append($"<div style=\"position:absolute;inset:0;{clipPathCss};{string.Join(";", fillStyles)}\"></div>");
@@ -272,7 +276,7 @@ public partial class PowerPointHandler
         }
         else
         {
-            sb.Append($"    <div class=\"{shapeClass}\" style=\"{string.Join(";", styles)}\">");
+            sb.Append($"    <div class=\"{shapeClass}\"{dataPathAttr} style=\"{string.Join(";", styles)}\">");
         }
 
         // Text content
@@ -294,7 +298,8 @@ public partial class PowerPointHandler
                 : "";
             sb.Append($"<div class=\"shape-text valign-{valign}\"{textStyle}>");
 
-            RenderTextBody(sb, shape.TextBody, themeColors, shape, part);
+            // 将形状路径前缀传入文本体渲染，用于生成段落/文字行的 data-path
+            RenderTextBody(sb, shape.TextBody, themeColors, shape, part, shapeDataPath: dataPath);
             sb.Append("</div>");
         }
 

@@ -339,13 +339,16 @@ public partial class PowerPointHandler
         var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree;
         if (shapeTree == null) return;
 
-        // Collect all content elements in z-order (as they appear in XML)
+        // 按 XML 中的 z 轴顺序遍历所有内容元素，并为可编辑形状生成 data-path 路径
+        int shapeIdx = 0;
         foreach (var element in shapeTree.ChildElements)
         {
             switch (element)
             {
                 case Shape shape:
-                    RenderShape(sb, shape, slidePart, themeColors);
+                    shapeIdx++;
+                    // data-path 格式：/slide[N]/sp[M]，用于前端编辑器定位形状
+                    RenderShape(sb, shape, slidePart, themeColors, dataPath: $"/slide[{slideNum}]/sp[{shapeIdx}]");
                     break;
                 case Picture pic:
                     RenderPicture(sb, pic, slidePart, themeColors);
