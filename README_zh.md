@@ -148,11 +148,11 @@ officecli add deck.pptx / --type slide --prop title="Q4 Report"
 | Excel (.xlsx) | ✅ | ✅ | ✅ |
 | PowerPoint (.pptx) | ✅ | ✅ | ✅ |
 
-**Word** — 段落、文本片段、表格、样式、页眉/页脚、图片、公式、批注、列表、水印、书签、目录
+**Word** — [段落](https://github.com/iOfficeAI/OfficeCLI/wiki/word-paragraph)、[文本片段](https://github.com/iOfficeAI/OfficeCLI/wiki/word-run)、[表格](https://github.com/iOfficeAI/OfficeCLI/wiki/word-table)、[样式](https://github.com/iOfficeAI/OfficeCLI/wiki/word-style)、[页眉/页脚](https://github.com/iOfficeAI/OfficeCLI/wiki/word-header-footer)、[图片](https://github.com/iOfficeAI/OfficeCLI/wiki/word-picture)、[公式](https://github.com/iOfficeAI/OfficeCLI/wiki/word-equation)、[批注](https://github.com/iOfficeAI/OfficeCLI/wiki/word-comment)、[脚注](https://github.com/iOfficeAI/OfficeCLI/wiki/word-footnote)、[水印](https://github.com/iOfficeAI/OfficeCLI/wiki/word-watermark)、[书签](https://github.com/iOfficeAI/OfficeCLI/wiki/word-bookmark)、[目录](https://github.com/iOfficeAI/OfficeCLI/wiki/word-toc)、[图表](https://github.com/iOfficeAI/OfficeCLI/wiki/word-chart)、[超链接](https://github.com/iOfficeAI/OfficeCLI/wiki/word-hyperlink)、[节](https://github.com/iOfficeAI/OfficeCLI/wiki/word-section)
 
-**Excel** — 单元格、公式（内置 150+ 函数自动求值）、工作表、样式、条件格式、图表、数据透视表、命名范围、数据验证、CSV/TSV 导入、`$Sheet:A1` 单元格寻址
+**Excel** — [单元格](https://github.com/iOfficeAI/OfficeCLI/wiki/excel-cell)、公式（内置 150+ 函数自动求值）、[工作表](https://github.com/iOfficeAI/OfficeCLI/wiki/excel-sheet)、[表格](https://github.com/iOfficeAI/OfficeCLI/wiki/excel-table)、[条件格式](https://github.com/iOfficeAI/OfficeCLI/wiki/excel-conditionalformatting)、[图表](https://github.com/iOfficeAI/OfficeCLI/wiki/excel-chart)、[数据透视表](https://github.com/iOfficeAI/OfficeCLI/wiki/excel-pivottable)、[命名范围](https://github.com/iOfficeAI/OfficeCLI/wiki/excel-namedrange)、[数据验证](https://github.com/iOfficeAI/OfficeCLI/wiki/excel-validation)、[图片](https://github.com/iOfficeAI/OfficeCLI/wiki/excel-picture)、[迷你图](https://github.com/iOfficeAI/OfficeCLI/wiki/excel-sparkline)、[批注](https://github.com/iOfficeAI/OfficeCLI/wiki/excel-comment)、CSV/TSV 导入、`$Sheet:A1` 单元格寻址
 
-**PowerPoint** — 幻灯片、形状、文本框、图片、表格、图表、动画、morph 过渡、3D 模型（.glb）、幻灯片缩放、公式、主题、连接线、视频/音频
+**PowerPoint** — [幻灯片](https://github.com/iOfficeAI/OfficeCLI/wiki/ppt-slide)、[形状](https://github.com/iOfficeAI/OfficeCLI/wiki/ppt-shape)、[图片](https://github.com/iOfficeAI/OfficeCLI/wiki/ppt-picture)、[表格](https://github.com/iOfficeAI/OfficeCLI/wiki/ppt-table)、[图表](https://github.com/iOfficeAI/OfficeCLI/wiki/ppt-chart)、[动画](https://github.com/iOfficeAI/OfficeCLI/wiki/ppt-slide)、[morph 过渡](https://github.com/iOfficeAI/OfficeCLI/wiki/ppt-morph-check)、[3D 模型（.glb）](https://github.com/iOfficeAI/OfficeCLI/wiki/ppt-3dmodel)、[幻灯片缩放](https://github.com/iOfficeAI/OfficeCLI/wiki/ppt-zoom)、[公式](https://github.com/iOfficeAI/OfficeCLI/wiki/ppt-equation)、[主题](https://github.com/iOfficeAI/OfficeCLI/wiki/ppt-theme)、[连接线](https://github.com/iOfficeAI/OfficeCLI/wiki/ppt-connector)、[视频/音频](https://github.com/iOfficeAI/OfficeCLI/wiki/ppt-video)
 
 ## 使用场景
 
