@@ -1285,12 +1285,27 @@ public partial class ExcelHandler
                     || kv.Key.Equals("type", StringComparison.OrdinalIgnoreCase)).Value
                     ?? "column";
                 var chartTitle = properties.GetValueOrDefault("title");
-                var categories = ChartHelper.ParseCategories(properties);
-                var seriesData = ChartHelper.ParseSeriesData(properties);
+
+                // Support dataRange: read cell data from worksheet and build series with cell references
+                string[]? categories;
+                List<(string name, double[] values)> seriesData;
+                var dataRangeStr = properties.FirstOrDefault(kv =>
+                    kv.Key.Equals("datarange", StringComparison.OrdinalIgnoreCase)
+                    || kv.Key.Equals("dataRange", StringComparison.OrdinalIgnoreCase)
+                    || kv.Key.Equals("range", StringComparison.OrdinalIgnoreCase)).Value;
+                if (!string.IsNullOrEmpty(dataRangeStr))
+                {
+                    (seriesData, categories) = ParseDataRangeForChart(dataRangeStr, chartSheetName, properties);
+                }
+                else
+                {
+                    categories = ChartHelper.ParseCategories(properties);
+                    seriesData = ChartHelper.ParseSeriesData(properties);
+                }
 
                 if (seriesData.Count == 0)
                     throw new ArgumentException("Chart requires data. Use: data=\"Series1:1,2,3;Series2:4,5,6\" " +
-                        "or series1=\"Revenue:100,200,300\"");
+                        "or dataRange=\"Sheet1!A1:D5\" or series1=\"Revenue:100,200,300\"");
 
                 // Create DrawingsPart if needed
                 var drawingsPart = chartWorksheet.DrawingsPart
@@ -2063,7 +2078,25 @@ public partial class ExcelHandler
             ?? throw new ArgumentException($"Sheet not found: {sheetName}");
 
         if (segments.Length < 2)
-            throw new ArgumentException("Cannot move an entire sheet. Use move on rows or elements within a sheet.");
+        {
+            // Move (reorder) the sheet within the workbook
+            var workbook = GetWorkbook();
+            var sheets = workbook.GetFirstChild<Sheets>()
+                ?? throw new InvalidOperationException("Workbook has no sheets element");
+            var sheetEl = sheets.Elements<Sheet>().FirstOrDefault(s =>
+                string.Equals(s.Name?.Value, sheetName, StringComparison.OrdinalIgnoreCase))
+                ?? throw new ArgumentException($"Sheet not found: {sheetName}");
+
+            var targetIndex = index ?? throw new ArgumentException("--index is required when moving a sheet");
+            sheetEl.Remove();
+            var sheetList = sheets.Elements<Sheet>().ToList();
+            if (targetIndex >= 0 && targetIndex < sheetList.Count)
+                sheetList[targetIndex].InsertBeforeSelf(sheetEl);
+            else
+                sheets.AppendChild(sheetEl);
+            workbook.Save();
+            return $"/{sheetName}";
+        }
 
         var elementRef = segments[1];
         var sheetData = GetSheet(worksheet).GetFirstChild<SheetData>()

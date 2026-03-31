@@ -49,6 +49,12 @@ public partial class PowerPointHandler
                 };
             }
 
+            // Default font from theme
+            var masterPart = _doc.PresentationPart?.SlideMasterParts?.FirstOrDefault();
+            var fontScheme = masterPart?.ThemePart?.Theme?.ThemeElements?.FontScheme;
+            if (fontScheme?.MinorFont?.LatinFont?.Typeface != null)
+                node.Format["defaultFont"] = fontScheme.MinorFont.LatinFont.Typeface;
+
             // Core document properties
             var props = _doc.PackageProperties;
             if (props.Title != null) node.Format["title"] = props.Title;
@@ -107,6 +113,66 @@ public partial class PowerPointHandler
 
         if (path.Equals("/morph-check", StringComparison.OrdinalIgnoreCase))
             return GetMorphCheckNode();
+
+        // Try slidemaster path: /slidemaster[N]
+        var masterGetMatch = Regex.Match(path, @"^/slidemaster\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (masterGetMatch.Success)
+        {
+            var masterIdx = int.Parse(masterGetMatch.Groups[1].Value);
+            var masters = _doc.PresentationPart?.SlideMasterParts?.ToList() ?? [];
+            if (masterIdx < 1 || masterIdx > masters.Count)
+                throw new ArgumentException($"Slide master {masterIdx} not found (total: {masters.Count})");
+            var mp = masters[masterIdx - 1];
+            var masterNode = new DocumentNode { Path = $"/slidemaster[{masterIdx}]", Type = "slidemaster" };
+            var masterName = mp.SlideMaster?.CommonSlideData?.Name?.Value ?? "(unnamed)";
+            masterNode.Preview = masterName;
+            masterNode.Format["name"] = masterName;
+            masterNode.Format["layoutCount"] = mp.SlideLayoutParts?.Count() ?? 0;
+            var themePart = mp.ThemePart;
+            if (themePart?.Theme?.Name?.Value != null)
+                masterNode.Format["theme"] = themePart.Theme.Name.Value;
+            var shapeTree = mp.SlideMaster?.CommonSlideData?.ShapeTree;
+            var shapeCount = (shapeTree?.Elements<Shape>().Count() ?? 0)
+                + (shapeTree?.Elements<Picture>().Count() ?? 0);
+            masterNode.Format["shapeCount"] = shapeCount;
+            // Add layout children
+            int lIdx = 0;
+            foreach (var lp in mp.SlideLayoutParts ?? Enumerable.Empty<SlideLayoutPart>())
+            {
+                lIdx++;
+                var lNode = new DocumentNode
+                {
+                    Path = $"/slidemaster[{masterIdx}]/slidelayout[{lIdx}]",
+                    Type = "slidelayout",
+                    Preview = lp.SlideLayout?.CommonSlideData?.Name?.Value ?? "(unnamed)"
+                };
+                lNode.Format["name"] = lNode.Preview;
+                if (lp.SlideLayout?.Type?.HasValue == true)
+                    lNode.Format["type"] = lp.SlideLayout.Type.InnerText;
+                masterNode.Children.Add(lNode);
+            }
+            masterNode.ChildCount = masterNode.Children.Count;
+            return masterNode;
+        }
+
+        // Try slidelayout path: /slidelayout[N]
+        var layoutGetMatch = Regex.Match(path, @"^/slidelayout\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (layoutGetMatch.Success)
+        {
+            var layoutIdx = int.Parse(layoutGetMatch.Groups[1].Value);
+            var allLayouts = (_doc.PresentationPart?.SlideMasterParts ?? Enumerable.Empty<SlideMasterPart>())
+                .SelectMany(m => m.SlideLayoutParts ?? Enumerable.Empty<SlideLayoutPart>()).ToList();
+            if (layoutIdx < 1 || layoutIdx > allLayouts.Count)
+                throw new ArgumentException($"Slide layout {layoutIdx} not found (total: {allLayouts.Count})");
+            var lp = allLayouts[layoutIdx - 1];
+            var layoutNode = new DocumentNode { Path = $"/slidelayout[{layoutIdx}]", Type = "slidelayout" };
+            var layoutName = lp.SlideLayout?.CommonSlideData?.Name?.Value ?? "(unnamed)";
+            layoutNode.Preview = layoutName;
+            layoutNode.Format["name"] = layoutName;
+            if (lp.SlideLayout?.Type?.HasValue == true)
+                layoutNode.Format["type"] = lp.SlideLayout.Type.InnerText;
+            return layoutNode;
+        }
 
         // Try notes path: /slide[N]/notes
         var notesGetMatch = Regex.Match(path, @"^/slide\[(\d+)\]/notes$");
@@ -730,7 +796,9 @@ public partial class PowerPointHandler
                 or "equation" or "math" or "formula"
                 or "table" or "chart" or "placeholder" or "notes"
                 or "connector" or "connection"
-                or "group" or "zoom";
+                or "group" or "zoom"
+                or "slidemaster" or "slidelayout"
+                or "media" or "image";
         if (!isKnownType)
         {
             var genericParsed = GenericXmlQuery.ParseSelector(selector);
@@ -738,6 +806,91 @@ public partial class PowerPointHandler
             {
                 results.AddRange(GenericXmlQuery.Query(
                     GetSlide(slidePart), genericParsed.element, genericParsed.attrs, genericParsed.containsText));
+            }
+            return results;
+        }
+
+        // Slide master query
+        if (rawType == "slidemaster")
+        {
+            var masters = _doc.PresentationPart?.SlideMasterParts?.ToList() ?? [];
+            for (int mi = 0; mi < masters.Count; mi++)
+            {
+                var mp = masters[mi];
+                var masterNode = new DocumentNode
+                {
+                    Path = $"/slidemaster[{mi + 1}]",
+                    Type = "slidemaster",
+                    Preview = mp.SlideMaster?.CommonSlideData?.Name?.Value ?? "(unnamed)"
+                };
+                masterNode.Format["name"] = masterNode.Preview;
+                masterNode.Format["layoutCount"] = mp.SlideLayoutParts?.Count() ?? 0;
+                if (mp.ThemePart?.Theme?.Name?.Value != null)
+                    masterNode.Format["theme"] = mp.ThemePart.Theme.Name.Value;
+                results.Add(masterNode);
+            }
+            return results;
+        }
+
+        // Slide layout query
+        if (rawType == "slidelayout")
+        {
+            int globalIdx = 0;
+            foreach (var mp in _doc.PresentationPart?.SlideMasterParts ?? Enumerable.Empty<SlideMasterPart>())
+            {
+                foreach (var lp in mp.SlideLayoutParts ?? Enumerable.Empty<SlideLayoutPart>())
+                {
+                    globalIdx++;
+                    var lNode = new DocumentNode
+                    {
+                        Path = $"/slidelayout[{globalIdx}]",
+                        Type = "slidelayout",
+                        Preview = lp.SlideLayout?.CommonSlideData?.Name?.Value ?? "(unnamed)"
+                    };
+                    lNode.Format["name"] = lNode.Preview;
+                    if (lp.SlideLayout?.Type?.HasValue == true)
+                        lNode.Format["type"] = lp.SlideLayout.Type.InnerText;
+                    results.Add(lNode);
+                }
+            }
+            return results;
+        }
+
+        // Media/image query
+        if (rawType is "media" or "image")
+        {
+            int mediaSlideNum = 0;
+            foreach (var slidePart in GetSlideParts())
+            {
+                mediaSlideNum++;
+                var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree;
+                if (shapeTree == null) continue;
+                int picIdx = 0;
+                foreach (var pic in shapeTree.Elements<Picture>())
+                {
+                    picIdx++;
+                    var picNvPr = pic.NonVisualPictureProperties?.ApplicationNonVisualDrawingProperties;
+                    var isVideo = picNvPr?.GetFirstChild<Drawing.VideoFromFile>() != null;
+                    var isAudio = picNvPr?.GetFirstChild<Drawing.AudioFromFile>() != null;
+                    var mediaType = isVideo ? "video" : isAudio ? "audio" : "picture";
+                    // For "image" selector, skip video/audio
+                    if (rawType == "image" && mediaType != "picture") continue;
+                    var picNode = PictureToNode(pic, mediaSlideNum, picIdx, slidePart);
+                    picNode.Format["mediaType"] = mediaType;
+                    // Add content type from image part
+                    var blipFill = pic.BlipFill;
+                    var blip = blipFill?.Blip;
+                    if (blip?.Embed?.Value != null)
+                    {
+                        var part = slidePart.GetPartById(blip.Embed.Value);
+                        if (part != null)
+                        {
+                            picNode.Format["contentType"] = part.ContentType;
+                            picNode.Format["size"] = part.GetStream().Length;
+                        }
+                    }
+                    results.Add(picNode);
+                }
             }
             return results;
         }

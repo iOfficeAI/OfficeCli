@@ -74,6 +74,9 @@ public class BatchItem
     [JsonPropertyName("selector")]
     public string? Selector { get; set; }
 
+    [JsonPropertyName("text")]
+    public string? Text { get; set; }
+
     [JsonPropertyName("mode")]
     public string? Mode { get; set; }
 
@@ -103,6 +106,7 @@ public class BatchItem
         if (Index.HasValue) req.Args["index"] = Index.Value.ToString();
         if (To != null) req.Args["to"] = To;
         if (Selector != null) req.Args["selector"] = Selector;
+        if (Text != null) req.Args["text"] = Text;
         if (Mode != null) req.Args["mode"] = Mode;
         if (Depth.HasValue) req.Args["depth"] = Depth.Value.ToString();
         if (Part != null) req.Args["part"] = Part;

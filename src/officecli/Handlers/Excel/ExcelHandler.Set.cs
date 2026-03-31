@@ -1359,6 +1359,41 @@ public partial class ExcelHandler
                         sheetViews.AppendChild(sheetView);
                     }
                     sheetView.ZoomScale = ParseHelpers.SafeParseUint(value, "zoom");
+                    sheetView.ZoomScaleNormal = sheetView.ZoomScale;
+                    break;
+                }
+                case "showgridlines" or "gridlines":
+                {
+                    var sheetViews = ws.GetFirstChild<SheetViews>();
+                    if (sheetViews == null)
+                    {
+                        sheetViews = new SheetViews();
+                        ws.InsertAt(sheetViews, 0);
+                    }
+                    var sheetView = sheetViews.GetFirstChild<SheetView>();
+                    if (sheetView == null)
+                    {
+                        sheetView = new SheetView { WorkbookViewId = 0 };
+                        sheetViews.AppendChild(sheetView);
+                    }
+                    sheetView.ShowGridLines = ParseHelpers.IsTruthy(value);
+                    break;
+                }
+                case "showrowcolheaders" or "showheaders" or "rowcolheaders" or "headings":
+                {
+                    var sheetViews = ws.GetFirstChild<SheetViews>();
+                    if (sheetViews == null)
+                    {
+                        sheetViews = new SheetViews();
+                        ws.InsertAt(sheetViews, 0);
+                    }
+                    var sheetView = sheetViews.GetFirstChild<SheetView>();
+                    if (sheetView == null)
+                    {
+                        sheetView = new SheetView { WorkbookViewId = 0 };
+                        sheetViews.AppendChild(sheetView);
+                    }
+                    sheetView.ShowRowColHeaders = ParseHelpers.IsTruthy(value);
                     break;
                 }
 
@@ -1663,7 +1698,7 @@ public partial class ExcelHandler
 
                 default:
                     unsupported.Add(unsupported.Count == 0
-                        ? $"{key} (valid sheet props: name, freeze, zoom, tabcolor, autofilter, merge, protect, password, printarea, orientation, papersize, fittopage, header, footer, sort)"
+                        ? $"{key} (valid sheet props: name, freeze, zoom, showGridLines, showRowColHeaders, tabcolor, autofilter, merge, protect, password, printarea, orientation, papersize, fittopage, header, footer, sort)"
                         : key);
                     break;
             }

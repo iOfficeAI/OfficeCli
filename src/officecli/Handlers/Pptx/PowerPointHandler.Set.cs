@@ -152,9 +152,24 @@ public partial class PowerPointHandler
                     case "revision":
                         _doc.PackageProperties.Revision = value;
                         break;
+                    case "defaultfont" or "font":
+                    {
+                        var masterPart = _doc.PresentationPart?.SlideMasterParts?.FirstOrDefault();
+                        var theme = masterPart?.ThemePart?.Theme;
+                        var fontScheme = theme?.ThemeElements?.FontScheme;
+                        if (fontScheme != null)
+                        {
+                            if (fontScheme.MajorFont?.LatinFont != null)
+                                fontScheme.MajorFont.LatinFont.Typeface = value;
+                            if (fontScheme.MinorFont?.LatinFont != null)
+                                fontScheme.MinorFont.LatinFont.Typeface = value;
+                            masterPart!.ThemePart!.Theme.Save();
+                        }
+                        break;
+                    }
                     default:
                         if (unsupported.Count == 0)
-                            unsupported.Add($"{key} (valid presentation props: slideWidth, slideHeight, slideSize, width, height, title, author, subject, description, category, keywords, lastModifiedBy, revision)");
+                            unsupported.Add($"{key} (valid presentation props: slideWidth, slideHeight, slideSize, width, height, title, author, subject, description, category, keywords, lastModifiedBy, revision, defaultFont)");
                         else
                             unsupported.Add(key);
                         break;

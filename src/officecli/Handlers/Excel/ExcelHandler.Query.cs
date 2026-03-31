@@ -135,10 +135,14 @@ public partial class ExcelHandler
                 sheetNode.Format["freeze"] = pane.TopLeftCell?.Value ?? "";
             }
 
-            // Include zoom
+            // Include zoom and view properties
             var sheetView = ws.GetFirstChild<SheetViews>()?.GetFirstChild<SheetView>();
             if (sheetView?.ZoomScale?.HasValue == true && sheetView.ZoomScale.Value != 100)
                 sheetNode.Format["zoom"] = (int)sheetView.ZoomScale.Value;
+            if (sheetView?.ShowGridLines != null && !sheetView.ShowGridLines.Value)
+                sheetNode.Format["gridlines"] = false;
+            if (sheetView?.ShowRowColHeaders != null && !sheetView.ShowRowColHeaders.Value)
+                sheetNode.Format["headings"] = false;
 
             // Include tab color
             var tabColor = ws.GetFirstChild<SheetProperties>()?.GetFirstChild<TabColor>();
@@ -669,7 +673,7 @@ public partial class ExcelHandler
         var elementMatch = Regex.Match(selectorForType, @"^(\w+)");
         var elementName = elementMatch.Success ? elementMatch.Groups[1].Value : "";
         bool isKnownType = string.IsNullOrEmpty(elementName)
-            || elementName is "cell" or "row" or "sheet" or "validation" or "comment" or "note" or "table" or "listobject" or "chart" or "pivottable" or "pivot" or "shape" or "picture" or "sparkline" or "namedrange" or "definedname"
+            || elementName is "cell" or "row" or "sheet" or "validation" or "comment" or "note" or "table" or "listobject" or "chart" or "pivottable" or "pivot" or "shape" or "picture" or "sparkline" or "namedrange" or "definedname" or "media" or "image"
             || (elementName.Length <= 3 && Regex.IsMatch(elementName, @"^[A-Z]+$", RegexOptions.IgnoreCase));
         if (!isKnownType)
         {
@@ -921,6 +925,45 @@ public partial class ExcelHandler
                     }
                     if (MatchesFormatAttributes(node, parsed))
                         results.Add(node);
+                }
+            }
+            return results;
+        }
+
+        // Handle media/image queries
+        if (elementName is "media" or "image")
+        {
+            foreach (var (sheetName, worksheetPart) in GetWorksheets())
+            {
+                if (parsed.Sheet != null && !sheetName.Equals(parsed.Sheet, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var drawingsPart = worksheetPart.DrawingsPart;
+                if (drawingsPart?.WorksheetDrawing == null) continue;
+
+                var picAnchors = drawingsPart.WorksheetDrawing
+                    .Elements<DocumentFormat.OpenXml.Drawing.Spreadsheet.TwoCellAnchor>()
+                    .Where(a => a.Descendants<DocumentFormat.OpenXml.Drawing.Spreadsheet.Picture>().Any())
+                    .ToList();
+
+                for (int i = 0; i < picAnchors.Count; i++)
+                {
+                    var node = GetPictureNode(sheetName, worksheetPart, i + 1, $"/{sheetName}/picture[{i + 1}]");
+                    if (node == null) continue;
+
+                    // Add content type from image part
+                    var pic = picAnchors[i].Descendants<DocumentFormat.OpenXml.Drawing.Spreadsheet.Picture>().First();
+                    var blip = pic.BlipFill?.Blip;
+                    if (blip?.Embed?.Value != null)
+                    {
+                        var part = drawingsPart.GetPartById(blip.Embed.Value);
+                        if (part != null)
+                        {
+                            node.Format["contentType"] = part.ContentType;
+                            node.Format["size"] = part.GetStream().Length;
+                        }
+                    }
+                    results.Add(node);
                 }
             }
             return results;

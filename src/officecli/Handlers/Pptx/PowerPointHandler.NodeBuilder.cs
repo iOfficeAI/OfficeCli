@@ -468,6 +468,23 @@ public partial class PowerPointHandler
             }
         }
 
+        // Shape-level hyperlink (on NonVisualDrawingProperties)
+        if (part != null && !node.Format.ContainsKey("link"))
+        {
+            var nvDp = shape.NonVisualShapeProperties?.NonVisualDrawingProperties;
+            var hlClick = nvDp?.GetFirstChild<Drawing.HyperlinkOnClick>();
+            var hlId = hlClick?.Id?.Value;
+            if (hlId != null)
+            {
+                try
+                {
+                    var rel = part.HyperlinkRelationships.FirstOrDefault(r => r.Id == hlId);
+                    if (rel?.Uri != null) node.Format["link"] = rel.Uri.ToString();
+                }
+                catch { }
+            }
+        }
+
         // Line/border
         var outline = shape.ShapeProperties?.GetFirstChild<Drawing.Outline>();
         if (outline != null)

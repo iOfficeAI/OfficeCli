@@ -503,6 +503,41 @@ public partial class WordHandler
                         sepCols.Separator = IsTruthy(value);
                         break;
                     }
+                    case "linenumbers" or "linenumbering":
+                    {
+                        var lower = value.ToLowerInvariant();
+                        if (lower == "none" || lower == "off" || lower == "false")
+                        {
+                            sectPr.RemoveAllChildren<LineNumberType>();
+                        }
+                        else
+                        {
+                            var lnNum = sectPr.GetFirstChild<LineNumberType>();
+                            if (lnNum == null)
+                            {
+                                lnNum = new LineNumberType();
+                                sectPr.AppendChild(lnNum);
+                            }
+                            // If value is a number, set CountBy to that number
+                            if (int.TryParse(lower, out var countBy))
+                            {
+                                lnNum.CountBy = (short)countBy;
+                                lnNum.Restart = LineNumberRestartValues.Continuous;
+                            }
+                            else
+                            {
+                                lnNum.CountBy = 1;
+                                lnNum.Restart = lower switch
+                                {
+                                    "continuous" => LineNumberRestartValues.Continuous,
+                                    "restartpage" or "page" => LineNumberRestartValues.NewPage,
+                                    "restartsection" or "section" => LineNumberRestartValues.NewSection,
+                                    _ => LineNumberRestartValues.Continuous
+                                };
+                            }
+                        }
+                        break;
+                    }
                     default:
                         unsupported.Add(key);
                         break;

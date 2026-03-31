@@ -243,8 +243,22 @@ public partial class WordHandler
         var body = _doc.MainDocumentPart?.Document?.Body
             ?? throw new InvalidOperationException("Document body not found");
 
-        var para = parent as Paragraph
-            ?? throw new ArgumentException("Form fields must be added to a paragraph: /body/p[N]");
+        Paragraph para;
+        if (parent is Paragraph p)
+        {
+            para = p;
+        }
+        else if (parent is Body bodyEl)
+        {
+            para = new Paragraph();
+            bodyEl.AppendChild(para);
+            var paraIdx = bodyEl.Elements<Paragraph>().ToList().IndexOf(para) + 1;
+            parentPath = $"/body/p[{paraIdx}]";
+        }
+        else
+        {
+            throw new ArgumentException("Form fields must be added to a paragraph or /body");
+        }
 
         var ciProps = new Dictionary<string, string>(properties, StringComparer.OrdinalIgnoreCase);
         var ffType = ciProps.GetValueOrDefault("formfieldtype",

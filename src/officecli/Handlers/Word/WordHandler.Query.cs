@@ -240,6 +240,22 @@ public partial class WordHandler
             if (margin?.Left?.Value != null) secNode.Format["marginLeft"] = FormatTwipsToCm(margin.Left.Value);
             if (margin?.Right?.Value != null) secNode.Format["marginRight"] = FormatTwipsToCm(margin.Right.Value);
 
+            // Line numbers
+            var lnNum = sectPr.GetFirstChild<LineNumberType>();
+            if (lnNum != null)
+            {
+                var countBy = lnNum.CountBy?.Value ?? 1;
+                var restartVal = lnNum.Restart?.InnerText ?? "continuous";
+                var restart = restartVal switch
+                {
+                    "newPage" => "restartPage",
+                    "newSection" => "restartSection",
+                    _ => "continuous"
+                };
+                secNode.Format["lineNumbers"] = restart;
+                if (countBy != 1) secNode.Format["lineNumberCountBy"] = countBy;
+            }
+
             // Column properties
             var cols = sectPr.GetFirstChild<Columns>();
             if (cols != null)
@@ -776,12 +792,46 @@ public partial class WordHandler
                 or "field" or "formfield" or "editable"
                 or "table" or "tbl"
                 or "toc" or "tableofcontents"
-                or "revision" or "change" or "trackchange";
+                or "revision" or "change" or "trackchange"
+                or "media";
         if (!isKnownType && parsed.ChildSelector == null)
         {
             var root = _doc.MainDocumentPart?.Document;
             if (root != null)
                 return GenericXmlQuery.Query(root, genericParsed.element, genericParsed.attrs, genericParsed.containsText);
+            return results;
+        }
+
+        // Handle media query (same as picture/image but explicitly named "media")
+        if (parsed.ChildSelector == null && parsed.Element == "media")
+        {
+            int mediaPIdx = 0;
+            foreach (var para in body.Elements<Paragraph>())
+            {
+                int mediaRIdx = 0;
+                foreach (var run in GetAllRuns(para))
+                {
+                    var drawing = run.GetFirstChild<Drawing>();
+                    if (drawing != null)
+                    {
+                        var node = CreateImageNode(drawing, run, $"/body/p[{mediaPIdx + 1}]/r[{mediaRIdx + 1}]");
+                        // Add content type from image part
+                        var blip = drawing.Descendants<DocumentFormat.OpenXml.Drawing.Blip>().FirstOrDefault();
+                        if (blip?.Embed?.Value != null)
+                        {
+                            var part = _doc.MainDocumentPart?.GetPartById(blip.Embed.Value);
+                            if (part != null)
+                            {
+                                node.Format["contentType"] = part.ContentType;
+                                node.Format["size"] = part.GetStream().Length;
+                            }
+                        }
+                        results.Add(node);
+                    }
+                    mediaRIdx++;
+                }
+                mediaPIdx++;
+            }
             return results;
         }
 

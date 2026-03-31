@@ -1611,4 +1611,99 @@ public partial class ExcelHandler
         }
         return count;
     }
+
+    /// <summary>
+    /// Parse a dataRange (e.g. "Sheet1!A1:D5" or "A1:B3") and read cell data from the worksheet.
+    /// Returns series data and populates properties with cell references for chart building.
+    /// First row = category labels + series names, remaining rows = data.
+    /// </summary>
+    private (List<(string name, double[] values)> seriesData, string[]? categories) ParseDataRangeForChart(
+        string dataRange, string defaultSheetName, Dictionary<string, string> properties)
+    {
+        // Parse sheet name and range
+        string rangeSheetName = defaultSheetName;
+        string rangePart = dataRange.Trim();
+        var bangIdx = rangePart.IndexOf('!');
+        if (bangIdx >= 0)
+        {
+            rangeSheetName = rangePart[..bangIdx].Trim('\'');
+            rangePart = rangePart[(bangIdx + 1)..];
+        }
+
+        // Strip any $ signs for parsing
+        var cleanRange = rangePart.Replace("$", "");
+        var rangeParts = cleanRange.Split(':');
+        if (rangeParts.Length != 2)
+            throw new ArgumentException($"Invalid dataRange: '{dataRange}'. Expected format: 'Sheet1!A1:D5' or 'A1:B3'");
+
+        var (startCol, startRow) = ParseCellReference(rangeParts[0]);
+        var (endCol, endRow) = ParseCellReference(rangeParts[1]);
+        var startColIdx = ColumnNameToIndex(startCol);
+        var endColIdx = ColumnNameToIndex(endCol);
+
+        // Find the worksheet and read cells
+        var ws = FindWorksheet(rangeSheetName)
+            ?? throw new ArgumentException($"Sheet not found: {rangeSheetName}");
+        var sheetData = GetSheet(ws).GetFirstChild<SheetData>();
+        if (sheetData == null)
+            throw new ArgumentException($"Sheet '{rangeSheetName}' has no data");
+
+        // Build cell lookup
+        var cellLookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in sheetData.Elements<Row>())
+        {
+            var rowIdx = (int)(row.RowIndex?.Value ?? 0);
+            if (rowIdx < startRow || rowIdx > endRow) continue;
+            foreach (var cell in row.Elements<Cell>())
+            {
+                if (cell.CellReference?.Value != null)
+                    cellLookup[cell.CellReference.Value] = GetCellDisplayValue(cell);
+            }
+        }
+
+        // First row = headers: first cell is ignored (corner), rest are series names
+        // First column (excluding header row) = category labels
+        var categories = new List<string>();
+        for (int r = startRow + 1; r <= endRow; r++)
+        {
+            var cellRef = $"{startCol}{r}";
+            cellLookup.TryGetValue(cellRef, out var catVal);
+            categories.Add(catVal ?? "");
+        }
+
+        var seriesData = new List<(string name, double[] values)>();
+        int seriesIdx = 1;
+        for (int c = startColIdx + 1; c <= endColIdx; c++)
+        {
+            var colName = IndexToColumnName(c);
+            // Series name from header row
+            var headerRef = $"{colName}{startRow}";
+            cellLookup.TryGetValue(headerRef, out var seriesName);
+            seriesName ??= $"Series {seriesIdx}";
+
+            // Series values
+            var values = new List<double>();
+            for (int r = startRow + 1; r <= endRow; r++)
+            {
+                var cellRef = $"{colName}{r}";
+                cellLookup.TryGetValue(cellRef, out var valStr);
+                if (double.TryParse(valStr, System.Globalization.CultureInfo.InvariantCulture, out var num))
+                    values.Add(num);
+                else
+                    values.Add(0);
+            }
+
+            // Set up cell references in properties for ApplySeriesReferences
+            var valuesRef = $"{rangeSheetName}!${colName}${startRow + 1}:${colName}${endRow}";
+            var categoriesRef = $"{rangeSheetName}!${startCol}${startRow + 1}:${startCol}${endRow}";
+            properties[$"series{seriesIdx}.name"] = seriesName;
+            properties[$"series{seriesIdx}.values"] = valuesRef;
+            properties[$"series{seriesIdx}.categories"] = categoriesRef;
+
+            seriesData.Add((seriesName, values.ToArray()));
+            seriesIdx++;
+        }
+
+        return (seriesData, categories.ToArray());
+    }
 }

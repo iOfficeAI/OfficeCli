@@ -541,6 +541,9 @@ public class ResidentServer : IDisposable
         var selector = req.GetArg("selector", "");
         var filters = AttributeFilter.Parse(selector);
         var (results, warnings) = AttributeFilter.ApplyWithWarnings(_handler.Query(selector), filters);
+        var textFilter = req.GetArgOrNull("text");
+        if (!string.IsNullOrEmpty(textFilter))
+            results = results.Where(n => n.Text != null && n.Text.Contains(textFilter, StringComparison.OrdinalIgnoreCase)).ToList();
         foreach (var w in warnings) Console.Error.WriteLine(w);
         Console.WriteLine(OutputFormatter.FormatNodes(results, format));
     }
