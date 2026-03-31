@@ -345,16 +345,9 @@ public partial class WordHandler
     /// <summary>Load an image part by relationship ID and return as a base64 data URI.</summary>
     private string? LoadImageAsDataUri(string relId)
     {
-        try
-        {
-            var imagePart = _doc.MainDocumentPart?.GetPartById(relId) as ImagePart;
-            if (imagePart == null) return null;
-            using var stream = imagePart.GetStream();
-            using var ms = new MemoryStream();
-            stream.CopyTo(ms);
-            return $"data:{imagePart.ContentType};base64,{Convert.ToBase64String(ms.ToArray())}";
-        }
-        catch { return null; }
+        var mainPart = _doc.MainDocumentPart;
+        if (mainPart == null) return null;
+        return HtmlPreviewHelper.PartToDataUri(mainPart, relId);
     }
 
     // ==================== Group / Shape Rendering ====================

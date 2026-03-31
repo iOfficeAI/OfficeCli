@@ -653,105 +653,12 @@ public partial class PowerPointHandler
 
     private static string ApplyColorTransforms(string hex, Drawing.SchemeColor schemeColor)
     {
-        var r = Convert.ToInt32(hex[..2], 16);
-        var g = Convert.ToInt32(hex[2..4], 16);
-        var b = Convert.ToInt32(hex[4..6], 16);
-
-        var lumMod = schemeColor.GetFirstChild<Drawing.LuminanceModulation>()?.Val?.Value;
-        var lumOff = schemeColor.GetFirstChild<Drawing.LuminanceOffset>()?.Val?.Value;
-        var tint = schemeColor.GetFirstChild<Drawing.Tint>()?.Val?.Value;
-        var shade = schemeColor.GetFirstChild<Drawing.Shade>()?.Val?.Value;
-        var alpha = schemeColor.GetFirstChild<Drawing.Alpha>()?.Val?.Value;
-
-        // OOXML spec: tint blends toward white, shade blends toward black
-        if (tint.HasValue)
-        {
-            var t = tint.Value / 100000.0;
-            r = (int)(r + (255 - r) * (1 - t));
-            g = (int)(g + (255 - g) * (1 - t));
-            b = (int)(b + (255 - b) * (1 - t));
-        }
-
-        if (shade.HasValue)
-        {
-            var s = shade.Value / 100000.0;
-            r = (int)(r * s);
-            g = (int)(g * s);
-            b = (int)(b * s);
-        }
-
-        // OOXML spec: lumMod/lumOff operate in HSL space
-        if (lumMod.HasValue || lumOff.HasValue)
-        {
-            var mod = (lumMod ?? 100000) / 100000.0;
-            var off = (lumOff ?? 0) / 100000.0;
-            RgbToHsl(r, g, b, out var h, out var s, out var l);
-            l = Math.Clamp(l * mod + off, 0, 1);
-            HslToRgb(h, s, l, out r, out g, out b);
-        }
-
-        r = Math.Clamp(r, 0, 255);
-        g = Math.Clamp(g, 0, 255);
-        b = Math.Clamp(b, 0, 255);
-
-        if (alpha.HasValue && alpha.Value < 100000)
-            return $"rgba({r},{g},{b},{alpha.Value / 100000.0:0.##})";
-
-        return $"#{r:X2}{g:X2}{b:X2}";
-    }
-
-    private static void RgbToHsl(int r, int g, int b, out double h, out double s, out double l)
-    {
-        var rf = r / 255.0;
-        var gf = g / 255.0;
-        var bf = b / 255.0;
-        var max = Math.Max(rf, Math.Max(gf, bf));
-        var min = Math.Min(rf, Math.Min(gf, bf));
-        var delta = max - min;
-
-        l = (max + min) / 2.0;
-
-        if (delta < 1e-10)
-        {
-            h = 0;
-            s = 0;
-            return;
-        }
-
-        s = l < 0.5 ? delta / (max + min) : delta / (2.0 - max - min);
-
-        if (Math.Abs(max - rf) < 1e-10)
-            h = ((gf - bf) / delta + (gf < bf ? 6 : 0)) / 6.0;
-        else if (Math.Abs(max - gf) < 1e-10)
-            h = ((bf - rf) / delta + 2) / 6.0;
-        else
-            h = ((rf - gf) / delta + 4) / 6.0;
-    }
-
-    private static void HslToRgb(double h, double s, double l, out int r, out int g, out int b)
-    {
-        if (s < 1e-10)
-        {
-            r = g = b = (int)Math.Round(l * 255);
-            return;
-        }
-
-        var q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-        var p = 2 * l - q;
-
-        r = (int)Math.Round(HueToRgb(p, q, h + 1.0 / 3) * 255);
-        g = (int)Math.Round(HueToRgb(p, q, h) * 255);
-        b = (int)Math.Round(HueToRgb(p, q, h - 1.0 / 3) * 255);
-    }
-
-    private static double HueToRgb(double p, double q, double t)
-    {
-        if (t < 0) t += 1;
-        if (t > 1) t -= 1;
-        if (t < 1.0 / 6) return p + (q - p) * 6 * t;
-        if (t < 1.0 / 2) return q;
-        if (t < 2.0 / 3) return p + (q - p) * (2.0 / 3 - t) * 6;
-        return p;
+        return ColorMath.ApplyTransforms(hex,
+            tint: schemeColor.GetFirstChild<Drawing.Tint>()?.Val?.Value,
+            shade: schemeColor.GetFirstChild<Drawing.Shade>()?.Val?.Value,
+            lumMod: schemeColor.GetFirstChild<Drawing.LuminanceModulation>()?.Val?.Value,
+            lumOff: schemeColor.GetFirstChild<Drawing.LuminanceOffset>()?.Val?.Value,
+            alpha: schemeColor.GetFirstChild<Drawing.Alpha>()?.Val?.Value);
     }
 
     /// <summary>
@@ -759,41 +666,9 @@ public partial class PowerPointHandler
     /// </summary>
     private Dictionary<string, string> ResolveThemeColorMap()
     {
-        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var theme = _doc.PresentationPart?.SlideMasterParts?.FirstOrDefault()?.ThemePart?.Theme;
-        var colorScheme = theme?.ThemeElements?.ColorScheme;
-        if (colorScheme == null) return map;
-
-        void Add(string name, OpenXmlCompositeElement? color)
-        {
-            if (color == null) return;
-            var rgb = color.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
-            var sys = color.GetFirstChild<Drawing.SystemColor>();
-            var srgb = sys?.LastColor?.Value ?? sys?.Val?.InnerText;
-            var hex = rgb ?? srgb;
-            if (hex != null) map[name] = hex;
-        }
-
-        Add("dk1", colorScheme.Dark1Color);
-        Add("dk2", colorScheme.Dark2Color);
-        Add("lt1", colorScheme.Light1Color);
-        Add("lt2", colorScheme.Light2Color);
-        Add("accent1", colorScheme.Accent1Color);
-        Add("accent2", colorScheme.Accent2Color);
-        Add("accent3", colorScheme.Accent3Color);
-        Add("accent4", colorScheme.Accent4Color);
-        Add("accent5", colorScheme.Accent5Color);
-        Add("accent6", colorScheme.Accent6Color);
-        Add("hlink", colorScheme.Hyperlink);
-        Add("folHlink", colorScheme.FollowedHyperlinkColor);
-
-        // Aliases
-        if (map.TryGetValue("dk1", out var dk1)) { map["tx1"] = dk1; map["dark1"] = dk1; map["text1"] = dk1; }
-        if (map.TryGetValue("dk2", out var dk2)) { map["dark2"] = dk2; map["text2"] = dk2; map["tx2"] = dk2; }
-        if (map.TryGetValue("lt1", out var lt1)) { map["bg1"] = lt1; map["light1"] = lt1; map["background1"] = lt1; }
-        if (map.TryGetValue("lt2", out var lt2)) { map["bg2"] = lt2; map["light2"] = lt2; map["background2"] = lt2; }
-
-        return map;
+        var colorScheme = _doc.PresentationPart?.SlideMasterParts?.FirstOrDefault()
+            ?.ThemePart?.Theme?.ThemeElements?.ColorScheme;
+        return ThemeColorResolver.BuildColorMap(colorScheme, includePptAliases: true);
     }
 
     // ==================== Image Helpers ====================
@@ -802,20 +677,7 @@ public partial class PowerPointHandler
     {
         var blip = blipFill.GetFirstChild<Drawing.Blip>();
         if (blip?.Embed?.HasValue != true) return null;
-
-        try
-        {
-            var imgPart = part.GetPartById(blip.Embed.Value!);
-            using var stream = imgPart.GetStream();
-            using var ms = new MemoryStream();
-            stream.CopyTo(ms);
-            var base64 = Convert.ToBase64String(ms.ToArray());
-            return $"data:{imgPart.ContentType ?? "image/png"};base64,{base64}";
-        }
-        catch
-        {
-            return null;
-        }
+        return HtmlPreviewHelper.PartToDataUri(part, blip.Embed.Value!);
     }
 
     // ==================== Utility ====================
