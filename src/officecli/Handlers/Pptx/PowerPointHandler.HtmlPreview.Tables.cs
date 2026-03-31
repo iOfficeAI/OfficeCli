@@ -297,22 +297,8 @@ public partial class PowerPointHandler
 
     /// <summary>
     /// Apply OOXML lumMod/lumOff color transform in HSL space.
-    /// lumMod and lumOff are in 0–100000 units (percentage * 1000).
-    /// Formula: newL = clamp(L * lumMod/100000 + lumOff/100000, 0, 1)
+    /// Delegates to shared ColorMath.ApplyLumModOff.
     /// </summary>
     private static string ApplyLumModOff(string hex, int lumMod, int lumOff)
-    {
-        var r = Convert.ToInt32(hex[..2], 16);
-        var g = Convert.ToInt32(hex[2..4], 16);
-        var b = Convert.ToInt32(hex[4..6], 16);
-
-        RgbToHsl(r, g, b, out var h, out var s, out var l);
-        l = Math.Clamp(l * (lumMod / 100000.0) + (lumOff / 100000.0), 0, 1);
-        HslToRgb(h, s, l, out r, out g, out b);
-
-        r = Math.Clamp(r, 0, 255);
-        g = Math.Clamp(g, 0, 255);
-        b = Math.Clamp(b, 0, 255);
-        return $"#{r:X2}{g:X2}{b:X2}";
-    }
+        => ColorMath.ApplyLumModOff(hex, lumMod, lumOff);
 }

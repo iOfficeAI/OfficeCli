@@ -21,39 +21,8 @@ public partial class WordHandler
     {
         if (_themeColors != null) return _themeColors;
 
-        _themeColors = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var theme = _doc.MainDocumentPart?.ThemePart?.Theme;
-        var colorScheme = theme?.ThemeElements?.ColorScheme;
-        if (colorScheme == null) return _themeColors;
-
-        void Add(string name, OpenXmlCompositeElement? color)
-        {
-            if (color == null) return;
-            var rgb = color.GetFirstChild<A.RgbColorModelHex>()?.Val?.Value;
-            var sys = color.GetFirstChild<A.SystemColor>();
-            var srgb = sys?.LastColor?.Value;
-            var hex = rgb ?? srgb;
-            if (hex != null) _themeColors[name] = hex;
-        }
-
-        Add("dk1", colorScheme.Dark1Color);
-        Add("dk2", colorScheme.Dark2Color);
-        Add("lt1", colorScheme.Light1Color);
-        Add("lt2", colorScheme.Light2Color);
-        Add("accent1", colorScheme.Accent1Color);
-        Add("accent2", colorScheme.Accent2Color);
-        Add("accent3", colorScheme.Accent3Color);
-        Add("accent4", colorScheme.Accent4Color);
-        Add("accent5", colorScheme.Accent5Color);
-        Add("accent6", colorScheme.Accent6Color);
-        Add("hlink", colorScheme.Hyperlink);
-        Add("folHlink", colorScheme.FollowedHyperlinkColor);
-
-        // Aliases
-        if (_themeColors.TryGetValue("dk1", out var dk1)) { _themeColors["tx1"] = dk1; _themeColors["dark1"] = dk1; }
-        if (_themeColors.TryGetValue("lt1", out var lt1)) { _themeColors["bg1"] = lt1; _themeColors["light1"] = lt1; }
-        if (_themeColors.TryGetValue("lt2", out var lt2)) { _themeColors["bg2"] = lt2; _themeColors["light2"] = lt2; }
-
+        var colorScheme = _doc.MainDocumentPart?.ThemePart?.Theme?.ThemeElements?.ColorScheme;
+        _themeColors = ThemeColorResolver.BuildColorMap(colorScheme, includePptAliases: false);
         return _themeColors;
     }
 
@@ -65,45 +34,23 @@ public partial class WordHandler
         var themeColors = GetThemeColors();
         if (!themeColors.TryGetValue(schemeName, out var hex)) return null;
 
-        // Apply color transforms (lumMod, lumOff, tint, shade)
-        var r = Convert.ToInt32(hex[..2], 16);
-        var g = Convert.ToInt32(hex[2..4], 16);
-        var b = Convert.ToInt32(hex[4..6], 16);
-
-        var lumMod = schemeColor.Elements().FirstOrDefault(e => e.LocalName == "lumMod");
-        var lumOff = schemeColor.Elements().FirstOrDefault(e => e.LocalName == "lumOff");
+        // Extract transform values from child elements
         var tint = schemeColor.Elements().FirstOrDefault(e => e.LocalName == "tint");
         var shade = schemeColor.Elements().FirstOrDefault(e => e.LocalName == "shade");
+        var lumMod = schemeColor.Elements().FirstOrDefault(e => e.LocalName == "lumMod");
+        var lumOff = schemeColor.Elements().FirstOrDefault(e => e.LocalName == "lumOff");
 
-        if (tint != null)
-        {
-            var t = GetLongAttr(tint, "val") / 100000.0;
-            r = (int)(r + (255 - r) * (1 - t));
-            g = (int)(g + (255 - g) * (1 - t));
-            b = (int)(b + (255 - b) * (1 - t));
-        }
+        var hasTint = tint != null ? (int?)GetLongAttr(tint, "val") : null;
+        var hasShade = shade != null ? (int?)GetLongAttr(shade, "val") : null;
+        var hasLumMod = lumMod != null ? (int?)GetLongAttr(lumMod, "val") : null;
+        var hasLumOff = lumOff != null ? (int?)GetLongAttr(lumOff, "val") : null;
 
-        if (shade != null)
-        {
-            var s = GetLongAttr(shade, "val") / 100000.0;
-            r = (int)(r * s);
-            g = (int)(g * s);
-            b = (int)(b * s);
-        }
+        // No transforms needed — return raw hex
+        if (hasTint == null && hasShade == null && hasLumMod == null && hasLumOff == null)
+            return $"#{hex}";
 
-        if (lumMod != null || lumOff != null)
-        {
-            var mod = (lumMod != null ? GetLongAttr(lumMod, "val") : 100000) / 100000.0;
-            var off = (lumOff != null ? GetLongAttr(lumOff, "val") : 0) / 100000.0;
-            RgbToHsl(r, g, b, out var h, out var s, out var l);
-            l = Math.Clamp(l * mod + off, 0, 1);
-            HslToRgb(h, s, l, out r, out g, out b);
-        }
-
-        r = Math.Clamp(r, 0, 255);
-        g = Math.Clamp(g, 0, 255);
-        b = Math.Clamp(b, 0, 255);
-        return $"#{r:X2}{g:X2}{b:X2}";
+        return ColorMath.ApplyTransforms(hex,
+            tint: hasTint, shade: hasShade, lumMod: hasLumMod, lumOff: hasLumOff);
     }
 
     private string ResolveShapeFillCss(OpenXmlElement? spPr)
@@ -197,38 +144,6 @@ public partial class WordHandler
         return val != null && long.TryParse(val, out var v) ? v : defaultVal;
     }
 
-    private static void RgbToHsl(int r, int g, int b, out double h, out double s, out double l)
-    {
-        var rf = r / 255.0; var gf = g / 255.0; var bf = b / 255.0;
-        var max = Math.Max(rf, Math.Max(gf, bf));
-        var min = Math.Min(rf, Math.Min(gf, bf));
-        var delta = max - min;
-        l = (max + min) / 2.0;
-        if (delta < 1e-10) { h = 0; s = 0; return; }
-        s = l < 0.5 ? delta / (max + min) : delta / (2.0 - max - min);
-        if (Math.Abs(max - rf) < 1e-10) h = ((gf - bf) / delta + (gf < bf ? 6 : 0)) / 6.0;
-        else if (Math.Abs(max - gf) < 1e-10) h = ((bf - rf) / delta + 2) / 6.0;
-        else h = ((rf - gf) / delta + 4) / 6.0;
-    }
-
-    private static void HslToRgb(double h, double s, double l, out int r, out int g, out int b)
-    {
-        if (s < 1e-10) { r = g = b = (int)Math.Round(l * 255); return; }
-        var q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-        var p = 2 * l - q;
-        r = (int)Math.Round(HueToRgb(p, q, h + 1.0 / 3) * 255);
-        g = (int)Math.Round(HueToRgb(p, q, h) * 255);
-        b = (int)Math.Round(HueToRgb(p, q, h - 1.0 / 3) * 255);
-    }
-
-    private static double HueToRgb(double p, double q, double t)
-    {
-        if (t < 0) t += 1; if (t > 1) t -= 1;
-        if (t < 1.0 / 6) return p + (q - p) * 6 * t;
-        if (t < 1.0 / 2) return q;
-        if (t < 2.0 / 3) return p + (q - p) * (2.0 / 3 - t) * 6;
-        return p;
-    }
 
     // ==================== Inline CSS ====================
 
