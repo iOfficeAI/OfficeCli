@@ -142,6 +142,31 @@ officecli add deck.pptx / --type slide --prop title="Q4 Report"
 - **Modify** any element -- text, fonts, colors, layout, formulas, charts, images
 - **Reorganize** content -- add, remove, move, copy elements across documents
 
+In [AionUi](https://github.com/iOfficeAI/AionUi), OfficeCLI integrates with built-in office assistants:
+
+| Assistant | ID | Primary output |
+|-----------|----|----------------|
+| Morph PPT | `morph-ppt` | Morph-transition `.pptx` |
+| PPT Creator | `ppt-creator` | `.pptx` |
+| Academic Paper | `academic-paper` | `.docx` |
+| Word Creator | `word-creator` | `.docx` |
+| Excel Creator | `excel-creator` | `.xlsx/.xlsm/.csv` |
+
+<table>
+<tr>
+<td width="50%"><a href="https://github.com/iOfficeAI/AionUi"><img src="assets/morph-ppt-balanced-aionui.gif" alt="Morph PPT (OfficeCLI / AionUi)" /></a></td>
+<td width="50%"><a href="https://github.com/iOfficeAI/AionUi"><img src="assets/ppt-assistant-aionui.gif" alt="PPT Creator (OfficeCLI / AionUi)" /></a></td>
+</tr>
+<tr>
+<td width="50%"><a href="https://github.com/iOfficeAI/AionUi"><img src="assets/showcase/word-academic-paper-aionui.gif" alt="Academic Paper (OfficeCLI / AionUi)" /></a></td>
+<td width="50%"><a href="https://github.com/iOfficeAI/AionUi"><img src="assets/showcase/word-write-paper-aionui.gif" alt="Word Creator (OfficeCLI / AionUi)" /></a></td>
+</tr>
+<tr>
+<td width="50%"><a href="https://github.com/iOfficeAI/AionUi"><img src="assets/showcase/excel-generate-aionui.gif" alt="Excel Creator (OfficeCLI / AionUi)" /></a></td>
+<td width="50%"><a href="https://github.com/iOfficeAI/AionUi"><img src="assets/showcase/excel-assistant-aionui.gif" alt="Excel Creator (OfficeCLI / AionUi)" /></a></td>
+</tr>
+</table>
+
 | Format | Read | Modify | Create |
 |--------|------|--------|--------|
 | Word (.docx) | ✅ | ✅ | ✅ |

@@ -142,6 +142,31 @@ officecli add deck.pptx / --type slide --prop title="Q4 Report"
 - **修改** 任意元素 -- 文本、字体、颜色、布局、公式、图表、图片
 - **重组** 内容 -- 添加、删除、移动、复制跨文档元素
 
+在 [AionUi](https://github.com/iOfficeAI/AionUi) 中，OfficeCLI 与内置办公助手联动：
+
+| 助手 | ID | 主要输出 |
+|------|----|----------|
+| Morph PPT 助手 | `morph-ppt` | 带 Morph 转场的 `.pptx` |
+| PPT 演示助手 | `ppt-creator` | `.pptx` |
+| 学术论文助手 | `academic-paper` | `.docx` |
+| Word 文档助手 | `word-creator` | `.docx` |
+| Excel 表格助手 | `excel-creator` | `.xlsx/.xlsm/.csv` |
+
+<table>
+<tr>
+<td width="50%"><a href="https://github.com/iOfficeAI/AionUi"><img src="assets/morph-ppt-balanced-aionui.gif" alt="Morph PPT（OfficeCLI / AionUi）"></a></td>
+<td width="50%"><a href="https://github.com/iOfficeAI/AionUi"><img src="assets/ppt-assistant-aionui.gif" alt="PPT 演示助手（OfficeCLI / AionUi）"></a></td>
+</tr>
+<tr>
+<td width="50%"><a href="https://github.com/iOfficeAI/AionUi"><img src="assets/showcase/word-academic-paper-aionui.gif" alt="学术论文助手（OfficeCLI / Word / AionUi）"></a></td>
+<td width="50%"><a href="https://github.com/iOfficeAI/AionUi"><img src="assets/showcase/word-write-paper-aionui.gif" alt="Word 文档助手（OfficeCLI / Word / AionUi）"></a></td>
+</tr>
+<tr>
+<td width="50%"><a href="https://github.com/iOfficeAI/AionUi"><img src="assets/showcase/excel-generate-aionui.gif" alt="Excel 表格助手（Excel 生成）（OfficeCLI / AionUi）"></a></td>
+<td width="50%"><a href="https://github.com/iOfficeAI/AionUi"><img src="assets/showcase/excel-assistant-aionui.gif" alt="Excel 表格助手（Excel 分析/格式化）（OfficeCLI / AionUi）"></a></td>
+</tr>
+</table>
+
 | 格式 | 读取 | 修改 | 创建 |
 |------|------|------|------|
 | Word (.docx) | ✅ | ✅ | ✅ |
