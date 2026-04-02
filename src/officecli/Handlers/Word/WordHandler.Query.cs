@@ -795,7 +795,8 @@ public partial class WordHandler
                 or "table" or "tbl"
                 or "toc" or "tableofcontents"
                 or "revision" or "change" or "trackchange"
-                or "media";
+                or "media"
+                or "hyperlink";
         if (!isKnownType && parsed.ChildSelector == null)
         {
             var root = _doc.MainDocumentPart?.Document;
@@ -1071,6 +1072,54 @@ public partial class WordHandler
                 node.Format["revisionType"] = "paragraphChange";
                 if (pPrChange.Author?.Value != null) node.Format["author"] = pPrChange.Author.Value;
                 if (pPrChange.Date?.Value != null) node.Format["date"] = pPrChange.Date.Value.ToString("o");
+                results.Add(node);
+            }
+            return results;
+        }
+
+        // Handle hyperlink query
+        bool isHyperlinkSelector = parsed.ChildSelector == null && parsed.Element == "hyperlink";
+        if (isHyperlinkSelector)
+        {
+            int hlIdx = 0;
+            foreach (var hl in body.Descendants<Hyperlink>())
+            {
+                hlIdx++;
+                var text = string.Concat(hl.Descendants<Text>().Select(t => t.Text));
+                if (parsed.ContainsText != null && !text.Contains(parsed.ContainsText, StringComparison.OrdinalIgnoreCase))
+                { hlIdx--; continue; }
+
+                // Build node via ElementToNode to get full format (link, color, underline, etc.)
+                var parentPara = hl.Ancestors<Paragraph>().FirstOrDefault();
+                int pIdx = 1;
+                int hlInParaIdx = 1;
+                if (parentPara != null)
+                {
+                    foreach (var el in body.ChildElements)
+                    {
+                        if (el == parentPara) break;
+                        if (el is Paragraph) pIdx++;
+                    }
+                    foreach (var child in parentPara.ChildElements)
+                    {
+                        if (child == hl) break;
+                        if (child is Hyperlink) hlInParaIdx++;
+                    }
+                }
+                var hlPath = $"/body/p[{pIdx}]/hyperlink[{hlInParaIdx}]";
+                var node = ElementToNode(hl, hlPath, 0);
+
+                // Filter by attributes
+                bool matchAttrs = true;
+                foreach (var (attrKey, rawVal) in parsed.Attributes)
+                {
+                    bool negate = rawVal.StartsWith("!");
+                    var val = negate ? rawVal[1..] : rawVal;
+                    var hasKey = node.Format.TryGetValue(attrKey, out var fmtVal);
+                    bool matches = hasKey && string.Equals(fmtVal?.ToString(), val, StringComparison.OrdinalIgnoreCase);
+                    if (negate ? matches : !matches) { matchAttrs = false; break; }
+                }
+                if (!matchAttrs) continue;
                 results.Add(node);
             }
             return results;
