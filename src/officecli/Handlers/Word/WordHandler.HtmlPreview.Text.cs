@@ -288,7 +288,8 @@ public partial class WordHandler
         var fnPart = _doc.MainDocumentPart?.FootnotesPart;
         if (fnPart?.Footnotes == null) return;
 
-        sb.AppendLine("<div class=\"footnotes\" style=\"font-size:9pt;color:#555\">");
+        var fnSize = ResolveStyleFontSize("FootnoteText") ?? "10pt";
+        sb.AppendLine($"<div class=\"footnotes\" style=\"font-size:{fnSize};color:#555\">");
         sb.AppendLine("<hr style=\"margin-top:0;margin-bottom:0.5em;border:none;border-top:1px solid #ccc;width:33%\">");
 
         var fnFmt = GetFootnoteNumFmt();
@@ -318,7 +319,8 @@ public partial class WordHandler
         var enPart = _doc.MainDocumentPart?.EndnotesPart;
         if (enPart?.Endnotes == null) return;
 
-        sb.AppendLine("<div class=\"endnotes\">");
+        var enSize = ResolveStyleFontSize("EndnoteText") ?? "10pt";
+        sb.AppendLine($"<div class=\"endnotes\" style=\"font-size:{enSize}\">");
         sb.AppendLine("<hr style=\"margin-top:2em;margin-bottom:0.5em;border:none;border-top:1px solid #ccc;width:33%\">");
 
         var enFmt = GetEndnoteNumFmt();

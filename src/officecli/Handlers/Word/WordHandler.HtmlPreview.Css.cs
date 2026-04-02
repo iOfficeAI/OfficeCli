@@ -265,7 +265,12 @@ public partial class WordHandler
                 if (rule == "auto" || rule == null)
                 {
                     if (int.TryParse(lv, out var lvNum))
-                        parts.Add($"line-height:{lvNum / 240.0:0.##}");
+                    {
+                        // Correct for font metrics: Word uses (winAscent+winDescent)/UPM as base
+                        var paraFont = ResolveParaFontForLineHeight(para);
+                        var ratio = FontMetricsReader.GetRatio(paraFont);
+                        parts.Add($"line-height:{lvNum / 240.0 * ratio:0.##}");
+                    }
                 }
                 else if (rule == "exact" || rule == "atLeast")
                 {
@@ -820,7 +825,7 @@ public partial class WordHandler
         // Padding — add vertical compensation for CSS vs Word rendering difference
         // (CSS line-height:1 clips glyph ascenders; Word's layout engine doesn't)
         const double CellPadVComp = 3.0; // pt
-        var margins = tcPr.TableCellMargin;
+        var margins = tcPr?.TableCellMargin;
         {
             var padTop = Units.TwipsToPt(margins?.TopMargin?.Width?.Value ?? "0") + CellPadVComp;
             var padBot = Units.TwipsToPt(margins?.BottomMargin?.Width?.Value ?? "0") + CellPadVComp;
@@ -949,6 +954,41 @@ public partial class WordHandler
         return string.IsNullOrEmpty(cjk) ? null : cjk.TrimStart(',', ' ');
     }
 
+    /// <summary>Resolve font size from a style chain by styleId. Returns e.g. "10pt" or null.</summary>
+    /// <summary>Resolve the dominant font for line-height calculation from a paragraph's runs.</summary>
+    private string ResolveParaFontForLineHeight(Paragraph para)
+    {
+        // Use the first run's ascii font; fall back to document default
+        var firstRun = para.Elements<Run>().FirstOrDefault();
+        if (firstRun != null)
+        {
+            var rProps = ResolveEffectiveRunProperties(firstRun, para);
+            var font = rProps.RunFonts?.Ascii?.Value ?? rProps.RunFonts?.HighAnsi?.Value;
+            if (!string.IsNullOrEmpty(font)) return font;
+        }
+        // Fall back to document default font
+        var defFont = _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles
+            ?.DocDefaults?.RunPropertiesDefault?.RunPropertiesBaseStyle?.RunFonts?.Ascii?.Value;
+        return defFont ?? "Calibri";
+    }
+
+    private string? ResolveStyleFontSize(string styleId)
+    {
+        var visited = new HashSet<string>();
+        var current = styleId;
+        while (current != null && visited.Add(current))
+        {
+            var style = _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles
+                ?.Elements<Style>().FirstOrDefault(s => s.StyleId?.Value == current);
+            if (style == null) break;
+            var sz = style.StyleRunProperties?.FontSize?.Val?.Value;
+            if (sz != null && int.TryParse(sz, out var halfPts))
+                return $"{halfPts / 2.0:0.##}pt";
+            current = style.BasedOn?.Val?.Value;
+        }
+        return null;
+    }
+
     private static string CssSanitize(string value) =>
         Regex.Replace(value, @"[""'\\<>&;{}]", "");
 
@@ -1036,7 +1076,7 @@ public partial class WordHandler
         .doc-footer {{ position: absolute; bottom: {pg.FooterDistancePt:0.#}pt; left: {mL}; right: {mR};
             padding-top: 0.3em; }}
         h1, h2, h3, h4, h5, h6 {{ line-height: 1.4; }}
-        p {{ margin: 0; margin-bottom: 10pt; line-height: 1.15; text-align: justify; text-justify: inter-character; }}
+        p {{ margin: 0; margin-bottom: 10pt; line-height: {1.15 * FontMetricsReader.GetRatio(dd.Font):0.##}; text-align: justify; text-justify: inter-character; }}
         p.empty {{ margin: 0; min-height: 1em; }}
         a {{ color: #2B579A; }} a:hover {{ color: #1a3c6e; }}
         .toc {{ display: flex; text-indent: 0 !important; }}
@@ -1055,7 +1095,7 @@ public partial class WordHandler
         .wg p {{ padding: 0; margin: 0.05em 0; }}
         table.borderless {{ border: none; }}
         table.borderless td, table.borderless th {{ border: none; padding: 2px 6px; }}
-        th, td {{ border: none; padding: 0 5.4pt; text-align: inherit; vertical-align: top; }}
+        th, td {{ border: none; padding: 3pt 5.4pt; text-align: inherit; vertical-align: top; }}
         th {{ font-weight: 600; }}
         @media print {{ body {{ background: white; padding: 0; }}
             .page {{ box-shadow: none; margin: 0; max-width: none; }}
