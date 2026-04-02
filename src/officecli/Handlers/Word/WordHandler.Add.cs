@@ -149,16 +149,16 @@ public partial class WordHandler
                     EnsureSectionProperties().GetFirstChild<PageSize>()!.Height = ParseTwips(value);
                     break;
                 case "margintop":
-                    EnsurePageMargin().Top = ParseHelpers.SafeParseInt(value, "margintop");
+                    EnsurePageMargin().Top = (int)ParseTwips(value);
                     break;
                 case "marginbottom":
-                    EnsurePageMargin().Bottom = ParseHelpers.SafeParseInt(value, "marginbottom");
+                    EnsurePageMargin().Bottom = (int)ParseTwips(value);
                     break;
                 case "marginleft":
-                    EnsurePageMargin().Left = ParseHelpers.SafeParseUint(value, "marginleft");
+                    EnsurePageMargin().Left = ParseTwips(value);
                     break;
                 case "marginright":
-                    EnsurePageMargin().Right = ParseHelpers.SafeParseUint(value, "marginright");
+                    EnsurePageMargin().Right = ParseTwips(value);
                     break;
 
                 // Core document properties

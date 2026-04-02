@@ -324,7 +324,15 @@ sqref/range, color (font), fill, bold, italic, strike, underline, border (thin|m
 topn: rank, bottom (true), percent (true)
 aboveaverage: below (true)
 containstext: text
-dateoccurring: period (today|yesterday|tomorrow|last7days|thisweek|lastweek|thismonth|lastmonth)",
+dateoccurring: period (today|yesterday|tomorrow|last7days|thisweek|lastweek|thismonth|lastmonth)
+
+## Workbook settings (Set / or /workbook)
+workbook.date1904, workbook.codeName, workbook.filterPrivacy
+calc.mode (auto|manual), calc.iterate, calc.iterateCount, calc.refMode (A1|R1C1)
+workbook.lockStructure, workbook.lockWindows
+
+## Extended properties
+extended.company, extended.manager, extended.template",
 
                     "pptx" => @"# PPTX Reference
 
@@ -341,7 +349,17 @@ shadow, glow, reflection, softedge, effect3d
 link (https://...), alt (alt text)
 
 ## Slide properties (Set)
-layout, background, transition, notes",
+layout, background, transition, notes
+
+## Presentation settings (Set /)
+firstSlideNum, rtl, compatMode
+show.loop, show.narration, show.animation, show.useTimings
+print.what (slides|notes|outline), print.colorMode, print.frameSlides
+theme.color.accent1..6, theme.color.dk1/lt1/dk2/lt2/hlink/folHlink
+theme.font.major.latin, theme.font.minor.latin
+
+## Extended properties
+extended.company, extended.manager, extended.template",
 
                     "docx" => @"# DOCX Reference
 
@@ -363,7 +381,19 @@ pagebreakbefore (true|false)
 
 ## Section properties
 pagewidth, pageheight, orientation (landscape|portrait)
-margintop, marginbottom, marginleft, marginright",
+margintop, marginbottom, marginleft, marginright (supports 2cm|1in|36pt|raw twips)
+
+## Document settings (Set /)
+docDefaults.font, docDefaults.fontSize, docDefaults.lineSpacing, docDefaults.color
+docGrid.type (default|lines|linesAndChars|snapToCharacters), docGrid.linePitch
+autoSpaceDE, autoSpaceDN, kinsoku, overflowPunct (true|false)
+charSpacingControl (doNotCompress|compressPunctuation)
+compatibility.preset (word2019|word2010|css-layout), compatibility.mode, compatibility.<flag>
+embedFonts, mirrorMargins, gutterAtTop, bookFoldPrinting, evenAndOddHeaders
+defaultTabStop (720|1.27cm), columns.count, columns.space, section.type
+
+## Extended properties
+extended.company, extended.manager, extended.template",
 
                     _ => null
                 };
