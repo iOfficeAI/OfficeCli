@@ -221,7 +221,7 @@ public partial class PowerPointHandler
         if (showProps != null)
         {
             if (showProps.Loop?.Value == true) node.Format["show.loop"] = true;
-            if (showProps.ShowNarration?.Value == true) node.Format["show.narration"] = true;
+            if (showProps.ShowNarration?.Value != null) node.Format["show.narration"] = showProps.ShowNarration.Value;
             if (showProps.ShowAnimation?.Value != null) node.Format["show.animation"] = showProps.ShowAnimation.Value;
             if (showProps.UseTimings?.Value != null) node.Format["show.useTimings"] = showProps.UseTimings.Value;
         }
