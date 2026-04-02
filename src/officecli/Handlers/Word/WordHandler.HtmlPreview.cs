@@ -547,22 +547,16 @@ public partial class WordHandler
             _themeCjkFont = eaFont;
     }
 
-    /// <summary>Generate @font-face rules with local() and ascent/descent overrides for document fonts.</summary>
+    /// <summary>Generate @font-face rules with local() for document fonts.</summary>
     private static string ResolveLocalFontFaces(HashSet<string> docFonts)
     {
         var sb = new StringBuilder();
         foreach (var font in docFonts)
         {
-            // Read font metrics for ascent/descent override
-            var (ascentPct, descentPct) = FontMetricsReader.GetAscentDescentOverride(font);
-            var overrides = ascentPct > 0
-                ? $" ascent-override: {ascentPct:0.#}%; descent-override: {descentPct:0.#}%;"
-                : "";
-
-            sb.AppendLine($"@font-face {{ font-family: '{font}'; src: local('{font}');{overrides} }}");
-            sb.AppendLine($"@font-face {{ font-family: '{font}'; font-weight: bold; src: local('{font} Bold');{overrides} }}");
-            sb.AppendLine($"@font-face {{ font-family: '{font}'; font-style: italic; src: local('{font} Italic');{overrides} }}");
-            sb.AppendLine($"@font-face {{ font-family: '{font}'; font-weight: bold; font-style: italic; src: local('{font} Bold Italic');{overrides} }}");
+            sb.AppendLine($"@font-face {{ font-family: '{font}'; src: local('{font}'); }}");
+            sb.AppendLine($"@font-face {{ font-family: '{font}'; font-weight: bold; src: local('{font} Bold'); }}");
+            sb.AppendLine($"@font-face {{ font-family: '{font}'; font-style: italic; src: local('{font} Italic'); }}");
+            sb.AppendLine($"@font-face {{ font-family: '{font}'; font-weight: bold; font-style: italic; src: local('{font} Bold Italic'); }}");
         }
         return sb.ToString();
     }
