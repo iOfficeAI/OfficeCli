@@ -87,12 +87,12 @@ static partial class CommandBuilder
                     var response = ResidentClient.TrySend(file.FullName, req);
                     if (response == null)
                     {
-                        results.Add(new BatchResult { Index = bi, Success = false, Error = "Failed to send to resident" });
+                        results.Add(new BatchResult { Index = bi, Success = false, Item = item, Error = "Failed to send to resident" });
                         if (stopOnError) break;
                         continue;
                     }
                     var success = response.ExitCode == 0;
-                    results.Add(new BatchResult { Index = bi, Success = success, Output = response.Stdout, Error = response.Stderr });
+                    results.Add(new BatchResult { Index = bi, Success = success, Item = !success ? item : null, Output = response.Stdout, Error = response.Stderr });
                     if (!success && stopOnError) break;
                 }
                 PrintBatchResults(results, json, items.Count);
@@ -114,7 +114,7 @@ static partial class CommandBuilder
                 }
                 catch (Exception ex)
                 {
-                    batchResults.Add(new BatchResult { Index = bi, Success = false, Error = ex.Message });
+                    batchResults.Add(new BatchResult { Index = bi, Success = false, Item = item, Error = ex.Message });
                     if (stopOnError) break;
                 }
             }

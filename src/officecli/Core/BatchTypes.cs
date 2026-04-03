@@ -170,6 +170,8 @@ public class BatchResult
     public bool Success { get; set; }
     public string? Output { get; set; }
     public string? Error { get; set; }
+    /// <summary>The original batch item, included when the command fails so the agent can inspect/retry.</summary>
+    public BatchItem? Item { get; set; }
 }
 
 /// <summary>
@@ -187,6 +189,7 @@ internal class BatchResultConverter : JsonConverter<BatchResult>
         if (root.TryGetProperty("success", out var suc)) result.Success = suc.GetBoolean();
         if (root.TryGetProperty("output", out var outp)) result.Output = outp.ValueKind == JsonValueKind.String ? outp.GetString() : outp.GetRawText();
         if (root.TryGetProperty("error", out var err)) result.Error = err.GetString();
+        if (root.TryGetProperty("item", out var itm)) result.Item = JsonSerializer.Deserialize<BatchItem>(itm.GetRawText(), BatchJsonContext.Default.Options);
         return result;
     }
 
@@ -210,7 +213,14 @@ internal class BatchResultConverter : JsonConverter<BatchResult>
             }
         }
         if (value.Error != null)
+        {
             writer.WriteString("error", value.Error);
+            if (value.Item != null)
+            {
+                writer.WritePropertyName("item");
+                JsonSerializer.Serialize(writer, value.Item, BatchJsonContext.Default.Options);
+            }
+        }
         writer.WriteEndObject();
     }
 
@@ -230,6 +240,7 @@ internal class BatchResultConverter : JsonConverter<BatchResult>
 }
 
 [JsonSourceGenerationOptions]
+[JsonSerializable(typeof(BatchItem))]
 [JsonSerializable(typeof(List<BatchItem>))]
 [JsonSerializable(typeof(List<BatchResult>))]
 internal partial class BatchJsonContext : JsonSerializerContext;

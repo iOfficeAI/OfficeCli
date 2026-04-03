@@ -257,24 +257,34 @@ public static class McpServer
             {
                 var file = Arg("file");
                 var commands = Arg("commands");
+                var forceStr = Arg("force");
+                var stopOnError = !string.Equals(forceStr, "true", StringComparison.OrdinalIgnoreCase);
                 var items = JsonSerializer.Deserialize<List<BatchItem>>(commands, BatchJsonContext.Default.ListBatchItem);
                 if (items == null || items.Count == 0)
                     throw new ArgumentException("No commands found in input.");
                 using var handler = DocumentHandlerFactory.Open(file, editable: true);
                 var results = new List<BatchResult>();
-                foreach (var item in items)
+                for (int bi = 0; bi < items.Count; bi++)
                 {
+                    var item = items[bi];
                     try
                     {
                         var output = CommandBuilder.ExecuteBatchItem(handler, item, true);
-                        results.Add(new BatchResult { Success = true, Output = output });
+                        results.Add(new BatchResult { Index = bi, Success = true, Output = output });
                     }
                     catch (Exception ex)
                     {
-                        results.Add(new BatchResult { Success = false, Error = ex.Message });
+                        results.Add(new BatchResult { Index = bi, Success = false, Item = item, Error = ex.Message });
+                        if (stopOnError) break;
                     }
                 }
-                return JsonSerializer.Serialize(results, BatchJsonContext.Default.ListBatchResult);
+                // Use PrintBatchResults to get consistent output (envelope + spill-to-file)
+                var origOut = Console.Out;
+                var sw = new System.IO.StringWriter();
+                Console.SetOut(sw);
+                try { CommandBuilder.PrintBatchResults(results, json: true, totalCount: items.Count); }
+                finally { Console.SetOut(origOut); }
+                return sw.ToString().Trim();
             }
             case "raw":
             {
@@ -469,6 +479,8 @@ Paths are 1-based: /slide[1]/shape[2], /body/p[3], /Sheet1/A1. Props are key=val
         w.WriteStartObject("max_lines"); w.WriteString("type", "number"); w.WriteString("description", "Max lines for view"); w.WriteEndObject();
         // commands
         w.WriteStartObject("commands"); w.WriteString("type", "string"); w.WriteString("description", "JSON array of batch commands"); w.WriteEndObject();
+        // force
+        w.WriteStartObject("force"); w.WriteString("type", "string"); w.WriteString("description", "Set to 'true' to continue batch on error (default: stop on first error)"); w.WriteEndObject();
         // part
         w.WriteStartObject("part"); w.WriteString("type", "string"); w.WriteString("description", "Part path for raw (e.g. /document, /styles, /slide[1])"); w.WriteEndObject();
         // format

@@ -390,7 +390,54 @@ static partial class CommandBuilder
                 writer.WriteEndObject();
                 writer.WriteEndObject();
             }
-            Console.WriteLine(System.Text.Encoding.UTF8.GetString(ms.ToArray()));
+
+            var fullBytes = ms.ToArray();
+            if (fullBytes.Length <= 8192)
+            {
+                Console.WriteLine(System.Text.Encoding.UTF8.GetString(fullBytes));
+            }
+            else
+            {
+                // Spill full output to temp file
+                var tempPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"officecli_batch_{Guid.NewGuid():N}.json");
+                System.IO.File.WriteAllBytes(tempPath, fullBytes);
+
+                // Write slim envelope to console
+                using var slimMs = new System.IO.MemoryStream();
+                using (var slimWriter = new System.Text.Json.Utf8JsonWriter(slimMs))
+                {
+                    slimWriter.WriteStartObject();
+                    slimWriter.WriteString("outputFile", tempPath);
+                    slimWriter.WriteNumber("outputSize", fullBytes.Length);
+                    slimWriter.WriteStartArray("results");
+                    foreach (var r in results)
+                    {
+                        slimWriter.WriteStartObject();
+                        slimWriter.WriteNumber("index", r.Index);
+                        slimWriter.WriteBoolean("success", r.Success);
+                        if (r.Error != null)
+                        {
+                            slimWriter.WriteString("error", r.Error);
+                            if (r.Item != null)
+                            {
+                                slimWriter.WritePropertyName("item");
+                                System.Text.Json.JsonSerializer.Serialize(slimWriter, r.Item, BatchJsonContext.Default.Options);
+                            }
+                        }
+                        slimWriter.WriteEndObject();
+                    }
+                    slimWriter.WriteEndArray();
+                    slimWriter.WriteStartObject("summary");
+                    slimWriter.WriteNumber("total", totalCount);
+                    slimWriter.WriteNumber("executed", results.Count);
+                    slimWriter.WriteNumber("succeeded", succeeded);
+                    slimWriter.WriteNumber("failed", failed);
+                    slimWriter.WriteNumber("skipped", skipped);
+                    slimWriter.WriteEndObject();
+                    slimWriter.WriteEndObject();
+                }
+                Console.WriteLine(System.Text.Encoding.UTF8.GetString(slimMs.ToArray()));
+            }
         }
         else
         {
