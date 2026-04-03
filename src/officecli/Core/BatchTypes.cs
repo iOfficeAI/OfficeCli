@@ -44,60 +44,96 @@ internal class LenientStringDictionaryConverter : JsonConverter<Dictionary<strin
     }
 }
 
+internal class BatchItemConverter : JsonConverter<BatchItem>
+{
+    private static readonly LenientStringDictionaryConverter PropsConverter = new();
+
+    public override BatchItem? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType != JsonTokenType.StartObject)
+            throw new JsonException("Expected StartObject for BatchItem");
+
+        var item = new BatchItem();
+        while (reader.Read())
+        {
+            if (reader.TokenType == JsonTokenType.EndObject) return item;
+            if (reader.TokenType != JsonTokenType.PropertyName)
+                throw new JsonException("Expected PropertyName");
+            var prop = reader.GetString()!;
+            reader.Read();
+            switch (prop.ToLowerInvariant())
+            {
+                case "command":
+                case "op":
+                    item.Command = reader.GetString() ?? "";
+                    break;
+                case "path": item.Path = reader.GetString(); break;
+                case "parent": item.Parent = reader.GetString(); break;
+                case "type": item.Type = reader.GetString(); break;
+                case "from": item.From = reader.GetString(); break;
+                case "index": item.Index = reader.TokenType == JsonTokenType.Null ? null : reader.GetInt32(); break;
+                case "to": item.To = reader.GetString(); break;
+                case "props": item.Props = PropsConverter.Read(ref reader, typeof(Dictionary<string, string>), options); break;
+                case "selector": item.Selector = reader.GetString(); break;
+                case "text": item.Text = reader.GetString(); break;
+                case "mode": item.Mode = reader.GetString(); break;
+                case "depth": item.Depth = reader.TokenType == JsonTokenType.Null ? null : reader.GetInt32(); break;
+                case "part": item.Part = reader.GetString(); break;
+                case "xpath": item.Xpath = reader.GetString(); break;
+                case "action": item.Action = reader.GetString(); break;
+                case "xml": item.Xml = reader.GetString(); break;
+                default: reader.Skip(); break;
+            }
+        }
+        throw new JsonException("Unexpected end of JSON for BatchItem");
+    }
+
+    public override void Write(Utf8JsonWriter writer, BatchItem value, JsonSerializerOptions options)
+    {
+        writer.WriteStartObject();
+        if (!string.IsNullOrEmpty(value.Command)) writer.WriteString("command", value.Command);
+        if (value.Path != null) writer.WriteString("path", value.Path);
+        if (value.Parent != null) writer.WriteString("parent", value.Parent);
+        if (value.Type != null) writer.WriteString("type", value.Type);
+        if (value.From != null) writer.WriteString("from", value.From);
+        if (value.Index.HasValue) writer.WriteNumber("index", value.Index.Value);
+        if (value.To != null) writer.WriteString("to", value.To);
+        if (value.Props != null) { writer.WritePropertyName("props"); PropsConverter.Write(writer, value.Props, options); }
+        if (value.Selector != null) writer.WriteString("selector", value.Selector);
+        if (value.Text != null) writer.WriteString("text", value.Text);
+        if (value.Mode != null) writer.WriteString("mode", value.Mode);
+        if (value.Depth.HasValue) writer.WriteNumber("depth", value.Depth.Value);
+        if (value.Part != null) writer.WriteString("part", value.Part);
+        if (value.Xpath != null) writer.WriteString("xpath", value.Xpath);
+        if (value.Action != null) writer.WriteString("action", value.Action);
+        if (value.Xml != null) writer.WriteString("xml", value.Xml);
+        writer.WriteEndObject();
+    }
+}
+
+[JsonConverter(typeof(BatchItemConverter))]
 public class BatchItem
 {
-    [JsonPropertyName("command")]
     public string Command { get; set; } = "";
-
-    [JsonPropertyName("path")]
     public string? Path { get; set; }
-
-    [JsonPropertyName("parent")]
     public string? Parent { get; set; }
-
-    [JsonPropertyName("type")]
     public string? Type { get; set; }
-
-    [JsonPropertyName("from")]
     public string? From { get; set; }
-
-    [JsonPropertyName("index")]
     public int? Index { get; set; }
-
-    [JsonPropertyName("to")]
     public string? To { get; set; }
-
-    [JsonPropertyName("props")]
-    [JsonConverter(typeof(LenientStringDictionaryConverter))]
     public Dictionary<string, string>? Props { get; set; }
-
-    [JsonPropertyName("selector")]
     public string? Selector { get; set; }
-
-    [JsonPropertyName("text")]
     public string? Text { get; set; }
-
-    [JsonPropertyName("mode")]
     public string? Mode { get; set; }
-
-    [JsonPropertyName("depth")]
     public int? Depth { get; set; }
-
-    [JsonPropertyName("part")]
     public string? Part { get; set; }
-
-    [JsonPropertyName("xpath")]
     public string? Xpath { get; set; }
-
-    [JsonPropertyName("action")]
     public string? Action { get; set; }
-
-    [JsonPropertyName("xml")]
     public string? Xml { get; set; }
 
     internal static readonly HashSet<string> KnownFields = new(StringComparer.OrdinalIgnoreCase)
     {
-        "command", "path", "parent", "type", "from", "index", "to",
+        "command", "op", "path", "parent", "type", "from", "index", "to",
         "props", "selector", "text", "mode", "depth", "part", "xpath", "action", "xml"
     };
 
@@ -127,18 +163,70 @@ public class BatchItem
     }
 }
 
+[JsonConverter(typeof(BatchResultConverter))]
 public class BatchResult
 {
-    [JsonPropertyName("success")]
+    public int Index { get; set; }
     public bool Success { get; set; }
-
-    [JsonPropertyName("output")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Output { get; set; }
-
-    [JsonPropertyName("error")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Error { get; set; }
+}
+
+/// <summary>
+/// Custom converter for BatchResult that writes Output as raw JSON (not double-encoded)
+/// when the Output string is valid JSON.
+/// </summary>
+internal class BatchResultConverter : JsonConverter<BatchResult>
+{
+    public override BatchResult? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        using var doc = JsonDocument.ParseValue(ref reader);
+        var root = doc.RootElement;
+        var result = new BatchResult();
+        if (root.TryGetProperty("index", out var idx)) result.Index = idx.GetInt32();
+        if (root.TryGetProperty("success", out var suc)) result.Success = suc.GetBoolean();
+        if (root.TryGetProperty("output", out var outp)) result.Output = outp.ValueKind == JsonValueKind.String ? outp.GetString() : outp.GetRawText();
+        if (root.TryGetProperty("error", out var err)) result.Error = err.GetString();
+        return result;
+    }
+
+    public override void Write(Utf8JsonWriter writer, BatchResult value, JsonSerializerOptions options)
+    {
+        writer.WriteStartObject();
+        writer.WriteNumber("index", value.Index);
+        writer.WriteBoolean("success", value.Success);
+        if (value.Output != null)
+        {
+            // If Output is valid JSON (object or array), write it as raw JSON to avoid double-encoding
+            if (IsJsonObjectOrArray(value.Output))
+            {
+                writer.WritePropertyName("output");
+                using var doc = JsonDocument.Parse(value.Output);
+                doc.RootElement.WriteTo(writer);
+            }
+            else
+            {
+                writer.WriteString("output", value.Output);
+            }
+        }
+        if (value.Error != null)
+            writer.WriteString("error", value.Error);
+        writer.WriteEndObject();
+    }
+
+    private static bool IsJsonObjectOrArray(string s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return false;
+        var trimmed = s.TrimStart();
+        if (trimmed.Length == 0) return false;
+        if (trimmed[0] != '{' && trimmed[0] != '[') return false;
+        try
+        {
+            using var doc = JsonDocument.Parse(s);
+            return doc.RootElement.ValueKind is JsonValueKind.Object or JsonValueKind.Array;
+        }
+        catch { return false; }
+    }
 }
 
 [JsonSourceGenerationOptions]

@@ -13,12 +13,12 @@ static partial class CommandBuilder
         var batchFileArg = new Argument<FileInfo>("file") { Description = "Office document path" };
         var batchInputOpt = new Option<FileInfo?>("--input") { Description = "JSON file containing batch commands. If omitted, reads from stdin" };
         var batchCommandsOpt = new Option<string?>("--commands") { Description = "Inline JSON array of batch commands (alternative to --input or stdin)" };
-        var batchStopOnErrorOpt = new Option<bool>("--stop-on-error") { Description = "Stop execution on first error (default: continue all)" };
+        var batchForceOpt = new Option<bool>("--force") { Description = "Continue execution even if a command fails (default: stop on first error)" };
         var batchCommand = new Command("batch", "Execute multiple commands from a JSON array (one open/save cycle)");
         batchCommand.Add(batchFileArg);
         batchCommand.Add(batchInputOpt);
         batchCommand.Add(batchCommandsOpt);
-        batchCommand.Add(batchStopOnErrorOpt);
+        batchCommand.Add(batchForceOpt);
         batchCommand.Add(jsonOption);
 
         batchCommand.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
@@ -26,7 +26,7 @@ static partial class CommandBuilder
             var file = result.GetValue(batchFileArg)!;
             var inputFile = result.GetValue(batchInputOpt);
             var inlineCommands = result.GetValue(batchCommandsOpt);
-            var stopOnError = result.GetValue(batchStopOnErrorOpt);
+            var stopOnError = !result.GetValue(batchForceOpt);
 
             string jsonText;
             if (inlineCommands != null)
@@ -79,22 +79,23 @@ static partial class CommandBuilder
             if (ResidentClient.TryConnect(file.FullName, out _))
             {
                 var results = new List<BatchResult>();
-                foreach (var item in items)
+                for (int bi = 0; bi < items.Count; bi++)
                 {
+                    var item = items[bi];
                     var req = item.ToResidentRequest();
                     req.Json = json;
                     var response = ResidentClient.TrySend(file.FullName, req);
                     if (response == null)
                     {
-                        results.Add(new BatchResult { Success = false, Error = "Failed to send to resident" });
+                        results.Add(new BatchResult { Index = bi, Success = false, Error = "Failed to send to resident" });
                         if (stopOnError) break;
                         continue;
                     }
                     var success = response.ExitCode == 0;
-                    results.Add(new BatchResult { Success = success, Output = response.Stdout, Error = response.Stderr });
+                    results.Add(new BatchResult { Index = bi, Success = success, Output = response.Stdout, Error = response.Stderr });
                     if (!success && stopOnError) break;
                 }
-                PrintBatchResults(results, json);
+                PrintBatchResults(results, json, items.Count);
                 if (results.Any(r => !r.Success))
                     throw new InvalidOperationException($"Batch completed with {results.Count(r => !r.Success)} error(s)");
                 return 0;
@@ -103,20 +104,21 @@ static partial class CommandBuilder
             // Non-resident: open file once, execute all commands, save once
             using var handler = DocumentHandlerFactory.Open(file.FullName, editable: true);
             var batchResults = new List<BatchResult>();
-            foreach (var item in items)
+            for (int bi = 0; bi < items.Count; bi++)
             {
+                var item = items[bi];
                 try
                 {
                     var output = ExecuteBatchItem(handler, item, json);
-                    batchResults.Add(new BatchResult { Success = true, Output = output });
+                    batchResults.Add(new BatchResult { Index = bi, Success = true, Output = output });
                 }
                 catch (Exception ex)
                 {
-                    batchResults.Add(new BatchResult { Success = false, Error = ex.Message });
+                    batchResults.Add(new BatchResult { Index = bi, Success = false, Error = ex.Message });
                     if (stopOnError) break;
                 }
             }
-            PrintBatchResults(batchResults, json);
+            PrintBatchResults(batchResults, json, items.Count);
             if (batchResults.Any(r => r.Success))
                 NotifyWatch(handler, file.FullName, null);
             if (batchResults.Any(r => !r.Success))

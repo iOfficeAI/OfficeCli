@@ -365,11 +365,32 @@ static partial class CommandBuilder
         }
     }
 
-    internal static void PrintBatchResults(List<BatchResult> results, bool json)
+    internal static void PrintBatchResults(List<BatchResult> results, bool json, int totalCount = 0)
     {
+        if (totalCount == 0) totalCount = results.Count;
+
         if (json)
         {
-            Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(results, BatchJsonContext.Default.ListBatchResult));
+            var succeeded = results.Count(r => r.Success);
+            var failed = results.Count - succeeded;
+            var skipped = totalCount - results.Count;
+
+            using var ms = new System.IO.MemoryStream();
+            using (var writer = new System.Text.Json.Utf8JsonWriter(ms))
+            {
+                writer.WriteStartObject();
+                writer.WritePropertyName("results");
+                System.Text.Json.JsonSerializer.Serialize(writer, results, BatchJsonContext.Default.ListBatchResult);
+                writer.WriteStartObject("summary");
+                writer.WriteNumber("total", totalCount);
+                writer.WriteNumber("executed", results.Count);
+                writer.WriteNumber("succeeded", succeeded);
+                writer.WriteNumber("failed", failed);
+                writer.WriteNumber("skipped", skipped);
+                writer.WriteEndObject();
+                writer.WriteEndObject();
+            }
+            Console.WriteLine(System.Text.Encoding.UTF8.GetString(ms.ToArray()));
         }
         else
         {
