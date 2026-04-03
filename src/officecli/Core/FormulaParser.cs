@@ -834,9 +834,36 @@ public static class FormulaParser
                     if (pos < tokens.Count) pos++; // skip }
                 }
 
-                if (envName is "matrix" or "pmatrix" or "bmatrix" or "Bmatrix" or "vmatrix" or "cases")
+                if (envName is "matrix" or "pmatrix" or "bmatrix" or "Bmatrix" or "vmatrix" or "cases"
+                    or "array")
                 {
+                    // For array, skip optional column spec like {cc}
+                    if (envName == "array" && pos < tokens.Count && tokens[pos].Type == TokenType.LBrace)
+                    {
+                        pos++; // skip {
+                        while (pos < tokens.Count && tokens[pos].Type != TokenType.RBrace) pos++;
+                        if (pos < tokens.Count) pos++; // skip }
+                    }
                     return ParseMatrix(envName, tokens, ref pos);
+                }
+                if (envName is "align" or "align*" or "aligned" or "gathered" or "eqnarray"
+                    or "eqnarray*" or "split")
+                {
+                    // Multi-line equation environments → m:eqArr (equation array)
+                    // These use \\ for row breaks and & for alignment points
+                    // Reuse matrix parser which already handles \\ and &
+                    var matrixEl = ParseMatrix(envName, tokens, ref pos);
+                    // ParseMatrix wraps in a delimiter for cases/pmatrix/etc.
+                    // For align/gathered, we want the raw m:m (matrix) without delimiters
+                    if (matrixEl is M.Delimiter delim)
+                    {
+                        // Extract the matrix from inside the delimiter
+                        var innerBase = delim.GetFirstChild<M.Base>();
+                        var innerMatrix = innerBase?.GetFirstChild<M.Matrix>();
+                        if (innerMatrix != null)
+                            return innerMatrix.CloneNode(true);
+                    }
+                    return matrixEl;
                 }
 
                 // Unknown environment, render as text
@@ -857,7 +884,23 @@ public static class FormulaParser
             {
                 // Get opening delimiter character from next token
                 var openChar = "(";
-                if (pos < tokens.Count && tokens[pos].Type == TokenType.Text)
+                if (pos < tokens.Count && tokens[pos].Type == TokenType.Command)
+                {
+                    // Handle \left\langle, \left\lfloor, \left\lceil, \left\lvert, \left\|
+                    var delimCmd = tokens[pos].Value;
+                    var mapped = delimCmd switch
+                    {
+                        "langle" => "\u27E8",
+                        "lceil" => "\u2308",
+                        "lfloor" => "\u230A",
+                        "lvert" => "|",
+                        "lVert" => "\u2016",
+                        "|" => "\u2016",
+                        _ => null
+                    };
+                    if (mapped != null) { openChar = mapped; pos++; }
+                }
+                else if (pos < tokens.Count && tokens[pos].Type == TokenType.Text)
                 {
                     openChar = tokens[pos].Value[..1];
                     if (tokens[pos].Value.Length > 1)
@@ -873,14 +916,30 @@ public static class FormulaParser
 
                 // Parse content until \right
                 var content = new List<OpenXmlElement>();
-                var closeChar = openChar switch { "(" => ")", "[" => "]", "{" => "}", "|" => "|", _ => ")" };
+                var closeChar = openChar switch { "(" => ")", "[" => "]", "{" => "}", "|" => "|", "\u27E8" => "\u27E9", "\u2308" => "\u2309", "\u230A" => "\u230B", "\u2016" => "\u2016", _ => ")" };
                 while (pos < tokens.Count)
                 {
                     if (tokens[pos].Type == TokenType.Command && tokens[pos].Value == "right")
                     {
                         pos++;
                         // Get closing delimiter character — capture the actual delimiter
-                        if (pos < tokens.Count && tokens[pos].Type == TokenType.Text)
+                        if (pos < tokens.Count && tokens[pos].Type == TokenType.Command)
+                        {
+                            // Handle \right\rangle, \right\rfloor, \right\rceil, etc.
+                            var rDelimCmd = tokens[pos].Value;
+                            var rMapped = rDelimCmd switch
+                            {
+                                "rangle" => "\u27E9",
+                                "rceil" => "\u2309",
+                                "rfloor" => "\u230B",
+                                "rvert" => "|",
+                                "rVert" => "\u2016",
+                                "|" => "\u2016",
+                                _ => null
+                            };
+                            if (rMapped != null) { closeChar = rMapped; pos++; }
+                        }
+                        else if (pos < tokens.Count && tokens[pos].Type == TokenType.Text)
                         {
                             closeChar = tokens[pos].Value[..1];
                             if (tokens[pos].Value.Length > 1)
@@ -1150,10 +1209,165 @@ public static class FormulaParser
             case "xcancel":
             case "cancelto":
             {
-                // Feynman slash notation: \cancel{D} → D followed by combining long solidus overlay (U+0338)
+                // Cancel/strikethrough: use m:borderBox with m:strikeH
                 var cancelArg = ParseBracedArg(tokens, ref pos);
-                var cancelText = ExtractText(cancelArg);
-                return MakeMathRun(cancelText + "\u0338");
+                var bbPr = new M.BorderBoxProperties();
+                if (cmd is "bcancel")
+                    bbPr.AppendChild(new M.StrikeBLTR { Val = M.BooleanValues.True });
+                else if (cmd is "xcancel")
+                {
+                    bbPr.AppendChild(new M.StrikeHorizontal { Val = M.BooleanValues.True });
+                    bbPr.AppendChild(new M.StrikeBLTR { Val = M.BooleanValues.True });
+                }
+                else
+                    bbPr.AppendChild(new M.StrikeHorizontal { Val = M.BooleanValues.True });
+                return new M.BorderBox(bbPr, new M.Base(ExtractChildren(cancelArg)));
+            }
+            case "boxed":
+            {
+                // \boxed{expr} → m:borderBox (all four sides)
+                var arg = ParseBracedArg(tokens, ref pos);
+                return new M.BorderBox(
+                    new M.BorderBoxProperties(),
+                    new M.Base(ExtractChildren(arg))
+                );
+            }
+            case "underbrace":
+            {
+                // \underbrace{expr}_{label} → m:groupChr with ⏟ below
+                var arg = ParseBracedArg(tokens, ref pos);
+                var groupChr = new M.GroupChar(
+                    new M.GroupCharProperties(
+                        new M.AccentChar { Val = "\u23DF" },
+                        new M.Position { Val = M.VerticalJustificationValues.Bottom }
+                    ),
+                    new M.Base(ExtractChildren(arg))
+                );
+                // Check for subscript label
+                if (pos < tokens.Count && tokens[pos].Type == TokenType.Sub)
+                {
+                    pos++;
+                    var label = ParseSingleArg(tokens, ref pos);
+                    return new M.LimitLower(
+                        new M.LimitLowerProperties(),
+                        new M.Base(groupChr),
+                        new M.Limit(ExtractChildren(label))
+                    );
+                }
+                return groupChr;
+            }
+            case "overbrace":
+            {
+                // \overbrace{expr}^{label} → m:groupChr with ⏞ above
+                var arg = ParseBracedArg(tokens, ref pos);
+                var groupChr = new M.GroupChar(
+                    new M.GroupCharProperties(
+                        new M.AccentChar { Val = "\u23DE" },
+                        new M.Position { Val = M.VerticalJustificationValues.Top }
+                    ),
+                    new M.Base(ExtractChildren(arg))
+                );
+                // Check for superscript label
+                if (pos < tokens.Count && tokens[pos].Type == TokenType.Sup)
+                {
+                    pos++;
+                    var label = ParseSingleArg(tokens, ref pos);
+                    return new M.LimitUpper(
+                        new M.LimitUpperProperties(),
+                        new M.Base(groupChr),
+                        new M.Limit(ExtractChildren(label))
+                    );
+                }
+                return groupChr;
+            }
+            case "color":
+            {
+                // \color{red}{expr} → m:r with w:color run property
+                var colorArg = ParseBracedArg(tokens, ref pos);
+                var colorName = ExtractText(colorArg);
+                var contentArg = ParseBracedArg(tokens, ref pos);
+                var contentText = ExtractText(contentArg);
+                var colorHex = NamedColorToHex(colorName);
+                var run = new M.Run(
+                    new M.Text(contentText) { Space = SpaceProcessingModeValues.Preserve }
+                );
+                // Insert w:rPr with color before the m:t
+                var wrPr = new DocumentFormat.OpenXml.Wordprocessing.RunProperties(
+                    new DocumentFormat.OpenXml.Wordprocessing.Color { Val = colorHex }
+                );
+                run.InsertAt(wrPr, 0);
+                return run;
+            }
+            case "textcolor":
+            {
+                // \textcolor{red}{expr} — alias for \color
+                var colorArg = ParseBracedArg(tokens, ref pos);
+                var colorName = ExtractText(colorArg);
+                var contentArg = ParseBracedArg(tokens, ref pos);
+                var contentText = ExtractText(contentArg);
+                var colorHex = NamedColorToHex(colorName);
+                var run = new M.Run(
+                    new M.Text(contentText) { Space = SpaceProcessingModeValues.Preserve }
+                );
+                var wrPr = new DocumentFormat.OpenXml.Wordprocessing.RunProperties(
+                    new DocumentFormat.OpenXml.Wordprocessing.Color { Val = colorHex }
+                );
+                run.InsertAt(wrPr, 0);
+                return run;
+            }
+            case "pmod":
+            {
+                // \pmod{n} → (mod n) with upright "mod"
+                var arg = ParseBracedArg(tokens, ref pos);
+                var modRun = new M.Run(
+                    new M.RunProperties(new M.NormalText()),
+                    new M.Text("mod") { Space = SpaceProcessingModeValues.Preserve }
+                );
+                var spaceRun = MakeMathRun("\u2003");
+                var dPr = new M.DelimiterProperties();
+                // Parentheses are default, no need to set begin/end
+                var delimiter = new M.Delimiter(dPr);
+                delimiter.AppendChild(new M.Base(modRun, spaceRun, ExtractChildren(arg)[0].CloneNode(true)));
+                return delimiter;
+            }
+            case "bmod":
+            {
+                // \bmod → upright "mod" (binary operator form)
+                return new M.Run(
+                    new M.RunProperties(new M.NormalText()),
+                    new M.Text("\u2003mod\u2003") { Space = SpaceProcessingModeValues.Preserve }
+                );
+            }
+            case "arcsin" or "arccos" or "arctan" or "arccot" or "arcsec" or "arccsc":
+            {
+                // Arc-trig functions: render upright like \sin, \cos, etc.
+                var funcRun = new M.Run(
+                    new M.RunProperties(new M.NormalText()),
+                    new M.Text(cmd) { Space = SpaceProcessingModeValues.Preserve }
+                );
+                return funcRun;
+            }
+            case "operatorname":
+            {
+                // \operatorname{name} → upright function name
+                var arg = ParseBracedArg(tokens, ref pos);
+                var opText = ExtractText(arg);
+                var funcRun = new M.Run(
+                    new M.RunProperties(new M.NormalText()),
+                    new M.Text(opText) { Space = SpaceProcessingModeValues.Preserve }
+                );
+                // Check for subscript limits (like \lim)
+                if (pos < tokens.Count && tokens[pos].Type == TokenType.Sub)
+                {
+                    pos++;
+                    var subArg = ParseSingleArg(tokens, ref pos);
+                    return new M.LimitLower(
+                        new M.LimitLowerProperties(),
+                        new M.Base(funcRun),
+                        new M.Limit(ExtractChildren(subArg))
+                    );
+                }
+                return funcRun;
             }
 
             default:
@@ -1335,6 +1549,40 @@ public static class FormulaParser
         return new[] { element.CloneNode(true) };
     }
 
+    private static string NamedColorToHex(string color)
+    {
+        // Strip # prefix if present, return 6-digit hex
+        color = color.Trim().TrimStart('#');
+        if (color.Length == 6 && color.All(c => "0123456789ABCDEFabcdef".Contains(c)))
+            return color.ToUpperInvariant();
+        return color.ToLowerInvariant() switch
+        {
+            "red" => "FF0000",
+            "blue" => "0000FF",
+            "green" => "008000",
+            "black" => "000000",
+            "white" => "FFFFFF",
+            "orange" => "FF8C00",
+            "purple" => "800080",
+            "brown" => "8B4513",
+            "gray" or "grey" => "808080",
+            "cyan" => "00FFFF",
+            "magenta" => "FF00FF",
+            "yellow" => "FFD700",
+            "darkred" => "8B0000",
+            "darkblue" => "00008B",
+            "darkgreen" => "006400",
+            "lightblue" => "ADD8E6",
+            "lightgreen" => "90EE90",
+            "pink" => "FFC0CB",
+            "teal" => "008080",
+            "navy" => "000080",
+            "maroon" => "800000",
+            "olive" => "808000",
+            _ => "000000"
+        };
+    }
+
     private static string ExtractText(OpenXmlElement element)
     {
         if (element is M.Run run)
@@ -1430,9 +1678,32 @@ public static class FormulaParser
         "ldots" => "…",
         "vdots" => "⋮",
         "ddots" => "⋱",
+        // Delimiters (when used standalone, not with \left/\right)
+        "langle" => "\u27E8",     // ⟨ mathematical left angle bracket
+        "rangle" => "\u27E9",     // ⟩ mathematical right angle bracket
+        "lceil" => "\u2308",      // ⌈ left ceiling
+        "rceil" => "\u2309",      // ⌉ right ceiling
+        "lfloor" => "\u230A",     // ⌊ left floor
+        "rfloor" => "\u230B",     // ⌋ right floor
+        "lvert" => "|",
+        "rvert" => "|",
+        "lVert" => "\u2016",      // ‖ double vertical line
+        "rVert" => "\u2016",
+        "vert" => "|",
+        "Vert" => "\u2016",
+        // Set notation
+        "emptyset" => "∅",
+        "varnothing" => "∅",
+        "setminus" => "∖",
+        "complement" => "∁",
+        "cap" => "∩",
+        "cup" => "∪",
         // Spacing
         "quad" => "\u2003",    // em space
         "qquad" => "\u2003\u2003", // double em space
+        "," => "\u2009",       // thin space
+        ";" => "\u2005",       // medium mathematical space
+        "!" => "",             // negative thin space (approximate with nothing)
         // Greek lowercase
         "alpha" => "α",
         "beta" => "β",
