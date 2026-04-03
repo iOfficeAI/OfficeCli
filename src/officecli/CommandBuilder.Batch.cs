@@ -97,9 +97,7 @@ static partial class CommandBuilder
                     if (!success && stopOnError) break;
                 }
                 PrintBatchResults(results, json, items.Count);
-                if (results.Any(r => !r.Success))
-                    throw new InvalidOperationException($"Batch completed with {results.Count(r => !r.Success)} error(s)");
-                return 0;
+                return results.Any(r => !r.Success) ? 1 : 0;
             }
 
             // Non-resident: open file once, execute all commands, save once
@@ -122,9 +120,7 @@ static partial class CommandBuilder
             PrintBatchResults(batchResults, json, items.Count);
             if (batchResults.Any(r => r.Success))
                 NotifyWatch(handler, file.FullName, null);
-            if (batchResults.Any(r => !r.Success))
-                throw new InvalidOperationException($"Batch completed with {batchResults.Count(r => !r.Success)} error(s)");
-            return 0;
+            return batchResults.Any(r => !r.Success) ? 1 : 0;
         }, json); });
 
         return batchCommand;
