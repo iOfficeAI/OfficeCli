@@ -135,6 +135,13 @@ public class ResidentServer : IDisposable
                         var response = MakeResponse(0, "Closing resident.", "");
                         await writer.WriteLineAsync(response.AsMemory(), token);
                         _cts.Cancel();
+                        // Kick the main pipe listener out of WaitForConnectionAsync
+                        try
+                        {
+                            using var kick = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut);
+                            kick.Connect(500);
+                        }
+                        catch { }
                         break;
                     }
                 }

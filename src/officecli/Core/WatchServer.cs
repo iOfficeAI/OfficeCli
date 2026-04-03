@@ -112,8 +112,10 @@ public class WatchServer : IDisposable
                                 else t.classList.remove('active');
                             });
                         }
+                        var savedScrollY = window.scrollY;
                         document.body.innerHTML = doc.body.innerHTML;
                         if (sseScript) document.body.appendChild(sseScript);
+                        window.scrollTo(0, savedScrollY);
                         // Re-run inline scripts from new content (switchSheet etc.)
                         doc.body.querySelectorAll('script').forEach(function(s) {
                             if (s.textContent.indexOf('EventSource') >= 0) return;
@@ -121,12 +123,9 @@ public class WatchServer : IDisposable
                             ns.textContent = s.textContent;
                             document.body.appendChild(ns);
                         });
-                        // Apply scroll target (non-sheet)
+                        // Apply scroll target (non-sheet) — wait for pagination + scaling to finish
                         if (msg.scrollTo && targetSheetIdx < 0) {
-                            setTimeout(function() {
-                                var el = document.querySelector(msg.scrollTo);
-                                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                            }, 100);
+                            window._pendingScrollTo = msg.scrollTo;
                         }
                     });
                     return;
@@ -311,6 +310,7 @@ public class WatchServer : IDisposable
                 {
                     await writer.WriteLineAsync("ok".AsMemory(), token);
                     Console.WriteLine("Watch closed by remote command.");
+                    try { _tcpListener.Stop(); } catch { }
                     _cts.Cancel();
                     break;
                 }
