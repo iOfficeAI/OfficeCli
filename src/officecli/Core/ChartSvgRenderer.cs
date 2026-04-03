@@ -437,11 +437,12 @@ internal class ChartSvgRenderer
             }
             if (points.Count > 0)
             {
-                sb.AppendLine($"        <polygon points=\"{string.Join(" ", points)}\" fill=\"{colors[s]}\" fill-opacity=\"0.2\" stroke=\"{colors[s]}\" stroke-width=\"2\"/>");
+                var serColor = colors[s % colors.Count];
+                sb.AppendLine($"        <polygon points=\"{string.Join(" ", points)}\" fill=\"{serColor}\" fill-opacity=\"0.2\" stroke=\"{serColor}\" stroke-width=\"2\"/>");
                 foreach (var pt in points)
                 {
                     var parts = pt.Split(',');
-                    sb.AppendLine($"        <circle cx=\"{parts[0]}\" cy=\"{parts[1]}\" r=\"3\" fill=\"{colors[s]}\"/>");
+                    sb.AppendLine($"        <circle cx=\"{parts[0]}\" cy=\"{parts[1]}\" r=\"3\" fill=\"{serColor}\"/>");
                 }
             }
         }
@@ -1346,6 +1347,15 @@ internal class ChartSvgRenderer
             var label = c < categories.Length ? categories[c] : "";
             var lx = ox + (catCount > 1 ? (double)pw * c / (catCount - 1) : pw / 2.0);
             sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"middle\">{HtmlEncode(label)}</text>");
+        }
+
+        // Y-axis value labels
+        for (int t = 0; t <= 4; t++)
+        {
+            var val = maxVal * t / 4;
+            var label = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
+            var ty = oy + ph - (double)ph * t / 4;
+            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
         }
     }
 }

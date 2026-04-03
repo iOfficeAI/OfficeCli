@@ -263,8 +263,9 @@ internal static partial class ChartHelper
         return valStr.Split(',').Select(v =>
         {
             var trimmed = v.Trim();
-            if (!double.TryParse(trimmed, System.Globalization.CultureInfo.InvariantCulture, out var num))
-                throw new ArgumentException($"Invalid data value '{trimmed}' in series '{seriesName}'. Expected comma-separated numbers (e.g. '1,2,3').");
+            if (!double.TryParse(trimmed, System.Globalization.CultureInfo.InvariantCulture, out var num)
+                || double.IsNaN(num) || double.IsInfinity(num))
+                throw new ArgumentException($"Invalid data value '{trimmed}' in series '{seriesName}'. Expected comma-separated finite numbers (e.g. '1,2,3').");
             return num;
         }).ToArray();
     }
