@@ -190,7 +190,7 @@ Run `officecli <format> set` for all settable elements. Run `officecli <format> 
 
 ### find — format or replace matched text
 
-Use `find=` with `set` to target specific text within a paragraph (or broader scope) for formatting or replacement. The matched text is automatically split into its own run(s).
+Use `find=` with `set` to target specific text within a paragraph (or broader scope) for formatting or replacement. The matched text is automatically split into its own run(s). Use `r"..."` prefix for regex: `find=r"\d+"` matches digits, `find=hello` matches literal text.
 
 ```bash
 # Format matched text (auto-splits runs)
@@ -273,7 +273,7 @@ officecli add <file> <parent> --from <path>                               # clon
 
 **Text-anchored insert** (`--after find:X` / `--before find:X`):
 
-The `--after` and `--before` flags accept a `find:` prefix to locate an insertion point by text match within a paragraph.
+The `--after` and `--before` flags accept a `find:` prefix to locate an insertion point by text match within a paragraph. Use `r"..."` for regex: `--after 'find:r"\d+"'`.
 
 ```bash
 # Insert run after matched text (inline, within the same paragraph)
