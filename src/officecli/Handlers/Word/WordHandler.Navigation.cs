@@ -154,6 +154,10 @@ public partial class WordHandler
 
         var anchorPath = position.After ?? position.Before!;
 
+        // Catch bare attribute selector without element wrapper, e.g. @paraId=XXX instead of p[@paraId=XXX]
+        if (System.Text.RegularExpressions.Regex.IsMatch(anchorPath, @"^@(\w+)=(.+)$"))
+            throw new ArgumentException($"Invalid anchor path \"{anchorPath}\". Did you mean: p[{anchorPath}]?");
+
         // Handle find: prefix — text-based anchoring within a paragraph
         if (anchorPath.StartsWith("find:", StringComparison.OrdinalIgnoreCase))
         {

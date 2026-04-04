@@ -41,6 +41,10 @@ public partial class ExcelHandler
         path = NormalizeExcelPath(path);
         path = ResolveSheetIndexInPath(path);
 
+        // Excel only supports find+replace — reject find without replace early (before path dispatch)
+        if (properties.ContainsKey("find") && !properties.ContainsKey("replace"))
+            throw new ArgumentException("Excel only supports 'find' with 'replace'. Use 'find' + 'replace' for text replacement. find+format (without replace) is not supported in Excel.");
+
         // Handle root path "/" — document properties
         if (path == "/")
         {

@@ -190,7 +190,7 @@ Run `officecli <format> set` for all settable elements. Run `officecli <format> 
 
 ### find — format or replace matched text
 
-Use `find=` with `set` to target specific text within a paragraph (or broader scope) for formatting or replacement. The matched text is automatically split into its own run(s). Use `r"..."` prefix for regex: `find=r"\d+"` matches digits, `find=hello` matches literal text.
+Use `find=` with `set` to target specific text within a paragraph (or broader scope) for formatting or replacement. The matched text is automatically split into its own run(s). Use `r"..."` prefix for regex: `find=r"\d+"` matches digits, `find=hello` matches literal text. Format props are separate `--prop` flags — do NOT nest them (e.g. `--prop bold=true`, not `--prop format=bold:true`).
 
 ```bash
 # Format matched text (auto-splits runs)
@@ -234,6 +234,8 @@ officecli set slides.pptx '/slide[1]/table[1]' --prop find=old --prop replace=ne
 
 Path controls search scope: `/` = all slides, `/slide[N]` = single slide, `/slide[N]/shape[M]` = single shape, `/slide[N]/table[M]` = table, `/slide[N]/notes` = notes pane.
 
+> **Known limitation:** Notes pane find+format writes correctly, but `get` returns plain text only — run-level formatting cannot be verified via CLI.
+
 **Behavior matrix:**
 
 | Props | Effect |
@@ -243,9 +245,12 @@ Path controls search scope: `/` = all slides, `/slide[N]` = single slide, `/slid
 | `find` + `replace` + format props | Replace text and apply format to new text |
 
 - `r"..."` prefix enables regex mode
-- Path controls search scope: `/` = whole body, `/header[1]`, `/body/p[1]`, etc.
+- Path controls search scope: `/` = body only (excludes headers/footers), `/header[1]` = first header, `/footer[1]` = first footer, `/body/p[1]` = specific paragraph, etc.
 - If `find=` matches nothing, the command succeeds with no changes (no error)
+- Matching is **case-sensitive** by default. Use regex `(?i)` flag for case-insensitive: `find=r"(?i)error"`
 - `find:` / `find=` matches work across run boundaries — text split across multiple runs is still found
+
+**Excel limitations:** Excel only supports `find` + `replace` (text replacement). `find` + format props (formatting matched text without replacing) is not supported in Excel — use Word or PowerPoint for that. In Excel, `find` without `replace` is treated as an unsupported property.
 
 ### add — add elements or clone
 
@@ -367,6 +372,7 @@ Run `officecli <format> raw` for available parts per format.
 | Guessing property names | ❌ Run `officecli <format> set <element>` to see exact names |
 | Modifying an open file | ❌ Close the file in PowerPoint/WPS first |
 | `\n` in shell strings | ❌ Use `\\n` for newlines in `--prop text="..."` |
+| `officecli set f.pptx /slide[1]` | ❌ Shell glob expands brackets. Always single-quote paths: `'/slide[1]'` |
 
 ---
 

@@ -44,6 +44,10 @@ public partial class PowerPointHandler
 
         var anchorPath = position.After ?? position.Before!;
 
+        // Catch bare attribute selector without element wrapper, e.g. @id=XXX instead of shape[@id=XXX]
+        if (Regex.IsMatch(anchorPath, @"^@(\w+)=(.+)$"))
+            throw new ArgumentException($"Invalid anchor path \"{anchorPath}\". Did you mean: shape[{anchorPath}]?");
+
         // Handle find: prefix — text-based anchoring
         if (anchorPath.StartsWith("find:", StringComparison.OrdinalIgnoreCase))
             return FindAnchorIndex;
