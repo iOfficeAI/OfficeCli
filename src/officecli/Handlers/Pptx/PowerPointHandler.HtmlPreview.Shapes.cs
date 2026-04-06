@@ -198,9 +198,9 @@ public partial class PowerPointHandler
         long rIns = bodyPr?.RightInset?.Value ?? 91440;
         long bIns = bodyPr?.BottomInset?.Value ?? 45720;
 
-        // For clip-path shapes (non-rectangular), add extra inner padding
+        // For non-rectangular shapes (clip-path or border-radius), add extra inner padding
         // so text doesn't appear outside the visible shape area.
-        if (!string.IsNullOrEmpty(clipPathCss) && presetGeom?.Preset?.HasValue == true)
+        if ((!string.IsNullOrEmpty(clipPathCss) || !string.IsNullOrEmpty(borderRadiusCss)) && presetGeom?.Preset?.HasValue == true)
         {
             var (pctL, pctT, pctR, pctB) = GetShapeTextInsetPercent(presetGeom.Preset!.InnerText!);
             if (pctL > 0 || pctT > 0 || pctR > 0 || pctB > 0)
@@ -511,6 +511,7 @@ public partial class PowerPointHandler
         "moon" => (0.15, 0, 0, 0),
         "cube" => (0, 0.08, 0.08, 0),
         "donut" => (0.25, 0.25, 0.25, 0.25),
+        "roundRect" => (0.07, 0.07, 0.07, 0.07),
         "wedgeRectCallout" or "wedgeRoundRectCallout" or "wedgeEllipseCallout" => (0.08, 0.08, 0.08, 0.08),
         "curvedRightArrow" or "curvedLeftArrow" or "curvedUpArrow" or "curvedDownArrow" => (0.12, 0.12, 0.12, 0.12),
         _ => (0, 0, 0, 0)

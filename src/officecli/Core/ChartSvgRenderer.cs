@@ -1239,8 +1239,9 @@ internal class ChartSvgRenderer
     public void RenderLegendHtml(StringBuilder sb, ChartInfo info, string fontColor = "#555")
     {
         if (!info.HasLegend) return;
+        var legendColor = info.LegendFontColor != null ? $"#{info.LegendFontColor}" : fontColor;
         var isPieType = info.ChartType.Contains("pie") || info.ChartType.Contains("doughnut");
-        sb.Append($"<div style=\"display:flex;justify-content:center;gap:16px;padding:4px 0;font-size:{info.LegendFontSize};color:{fontColor}\">");
+        sb.Append($"<div style=\"display:flex;justify-content:center;gap:16px;padding:4px 0;font-size:{info.LegendFontSize};color:{legendColor}\">");
         if (isPieType && info.Categories.Length > 0)
         {
             for (int i = 0; i < info.Categories.Length; i++)
