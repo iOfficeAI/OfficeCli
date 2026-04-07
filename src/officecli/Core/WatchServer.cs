@@ -181,11 +181,26 @@ public class WatchServer : IDisposable
                 e.preventDefault();
                 e.stopPropagation();
             }, true);
+            function _cancelRubber() {
+                if (!_rubber) return;
+                if (_rubber.div) _rubber.div.remove();
+                _rubber = null;
+            }
             document.addEventListener('keydown', function(e) {
-                if (e.key === 'Escape' && _rubber) {
-                    if (_rubber.div) _rubber.div.remove();
-                    _rubber = null;
-                }
+                if (e.key === 'Escape') _cancelRubber();
+            });
+            // If the user alt-tabs / window loses focus mid-drag, the OS-level
+            // mouseup never reaches us. Clean up so the rubber-band overlay
+            // doesn't get stuck on screen and click handling stays sane.
+            window.addEventListener('blur', _cancelRubber);
+            document.addEventListener('visibilitychange', function() {
+                if (document.hidden) _cancelRubber();
+            });
+            // Belt-and-suspenders: if a mouseup never came after a long enough
+            // mousemove pause, drop the rubber-band on the next mouse re-entry.
+            document.addEventListener('mouseleave', function(e) {
+                // Only cancel if cursor truly left the page (relatedTarget == null)
+                if (!e.relatedTarget && _rubber) _cancelRubber();
             });
             // SSE: receive selection updates from any browser (including ours)
             es.addEventListener('update', function(e) {
