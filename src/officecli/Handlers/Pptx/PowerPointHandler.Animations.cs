@@ -505,8 +505,7 @@ public partial class PowerPointHandler
             bldLst.AppendChild(new BuildParagraph
             {
                 ShapeId = shapeIdStr,
-                GroupId = new UInt32Value((uint)grpId),
-                Build = ParagraphBuildValues.AllAtOnce
+                GroupId = new UInt32Value((uint)grpId)
             });
         }
     }
