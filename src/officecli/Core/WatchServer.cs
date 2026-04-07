@@ -651,6 +651,29 @@ public class WatchServer : IDisposable
             try
             {
                 await server.WaitForConnectionAsync(token);
+            }
+            catch (OperationCanceledException) { await server.DisposeAsync(); break; }
+            catch { await server.DisposeAsync(); continue; }
+
+            // Handle the client on a background task and immediately loop back
+            // to accept another connection. This avoids a tiny window where the
+            // pipe is not listening between iterations and back-to-back CLI
+            // calls get refused.
+            _ = Task.Run(async () =>
+            {
+                using (server)
+                {
+                    try { await HandleSinglePipeClientAsync(server, token); }
+                    catch { /* ignore individual client errors */ }
+                }
+            }, token);
+        }
+    }
+
+    private async Task HandleSinglePipeClientAsync(System.IO.Pipes.NamedPipeServerStream server, CancellationToken token)
+    {
+            try
+            {
                 var noBom = new UTF8Encoding(false);
                 using var reader = new StreamReader(server, noBom, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
                 using var writer = new StreamWriter(server, noBom, leaveOpen: true) { AutoFlush = true };
@@ -664,7 +687,7 @@ public class WatchServer : IDisposable
                     Console.WriteLine("Watch closed by remote command.");
                     try { _tcpListener.Stop(); } catch { }
                     _cts.Cancel();
-                    break;
+                    return;
                 }
                 else if (message == "ping")
                 {
@@ -687,13 +710,8 @@ public class WatchServer : IDisposable
                     HandleWatchMessage(message);
                 }
             }
-            catch (OperationCanceledException) { break; }
+            catch (OperationCanceledException) { return; }
             catch { /* ignore pipe errors */ }
-            finally
-            {
-                await server.DisposeAsync();
-            }
-        }
     }
 
     private void HandleWatchMessage(string json)
