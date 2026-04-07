@@ -233,8 +233,7 @@ public partial class PowerPointHandler
                 // Position and size (in EMU, 1cm = 360000 EMU; or parse as cm/in)
                 {
                     long xEmu = 0, yEmu = 0;
-                    var (titleSlideW, _) = GetSlideSize();
-                    long cxEmu = titleSlideW, cyEmu = 1800000; // default: slide width x 5cm
+                    long cxEmu = 3600000, cyEmu = 1800000; // default: 10cm x 5cm (avoid full-slide overlap when width unspecified)
                     if (properties.TryGetValue("x", out var xStr) || properties.TryGetValue("left", out xStr)) xEmu = ParseEmu(xStr);
                     if (properties.TryGetValue("y", out var yStr) || properties.TryGetValue("top", out yStr)) yEmu = ParseEmu(yStr);
                     if (properties.TryGetValue("width", out var wStr) || properties.TryGetValue("w", out wStr))
