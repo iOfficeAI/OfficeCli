@@ -4734,6 +4734,16 @@ internal static class PivotTableHelper
                 case "filters":
                     fieldAreaProps[key.ToLowerInvariant() == "columns" ? "cols" : key.ToLowerInvariant()] = value;
                     break;
+                case "aggregate":
+                case "showdataas":
+                    // CONSISTENCY(aggregate-override / showdataas): these two
+                    // sibling keys mutate per-value-field semantics. They piggy-
+                    // back on the same RebuildFieldAreas pass that 'values' uses,
+                    // so we hand them through verbatim and let the rebuild path
+                    // (which always re-parses the value field list, even when
+                    // 'values' was not in this Set call) pick them up.
+                    fieldAreaProps[key.ToLowerInvariant()] = value;
+                    break;
                 case "sort":
                     // Already consumed by PushAxisSortMode at the top of this
                     // method; re-rendering below reads _axisSortMode directly.
@@ -4814,6 +4824,32 @@ internal static class PivotTableHelper
         var valueFields = changes.ContainsKey("values")
             ? ParseValueFieldsWithWarning(changes, "values", headers)
             : currentValues;
+
+        // CONSISTENCY(aggregate-override / showdataas in Set): when only the
+        // sibling keys were passed (values list unchanged), apply them to
+        // the existing value-field list positionally so users can mutate
+        // func / showAs without restating the whole values spec.
+        if (!changes.ContainsKey("values"))
+        {
+            string[]? aggOverride = null;
+            string[]? showOverride = null;
+            if (changes.TryGetValue("aggregate", out var aggSpec) && !string.IsNullOrEmpty(aggSpec))
+                aggOverride = aggSpec.Split(',').Select(s => s.Trim().ToLowerInvariant()).ToArray();
+            if (changes.TryGetValue("showdataas", out var showSpec) && !string.IsNullOrEmpty(showSpec))
+                showOverride = showSpec.Split(',').Select(s => s.Trim().ToLowerInvariant()).ToArray();
+            if (aggOverride != null || showOverride != null)
+            {
+                for (int i = 0; i < valueFields.Count; i++)
+                {
+                    var (idx, func, showAs, name) = valueFields[i];
+                    if (aggOverride != null && i < aggOverride.Length && !string.IsNullOrEmpty(aggOverride[i]))
+                        func = aggOverride[i];
+                    if (showOverride != null && i < showOverride.Length && !string.IsNullOrEmpty(showOverride[i]))
+                        showAs = showOverride[i];
+                    valueFields[i] = (idx, func, showAs, name);
+                }
+            }
+        }
 
         // Layer 1: Reset all PivotField axis/dataField, then re-assign
         var pivotFields = pivotDef.PivotFields;
