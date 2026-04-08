@@ -408,6 +408,60 @@ public partial class ExcelHandler
             return null;
         }
 
+        // pivottable[N] — remove pivot table (and its cache if no other pivot references it)
+        var pivotRemoveMatch = Regex.Match(cellRef, @"^pivottable\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (pivotRemoveMatch.Success)
+        {
+            var ptIdx = int.Parse(pivotRemoveMatch.Groups[1].Value);
+            var pivotParts = worksheet.PivotTableParts.ToList();
+            if (ptIdx < 1 || ptIdx > pivotParts.Count)
+                throw new ArgumentException($"PivotTable index {ptIdx} out of range (1..{pivotParts.Count})");
+            var pivotPart = pivotParts[ptIdx - 1];
+
+            // Capture the cache-definition part (if any) so we can clean up
+            // workbook-level PivotCache registration after removing the pivot.
+            var cachePart = pivotPart.PivotTableCacheDefinitionPart;
+
+            // Remove the pivot table part itself.
+            worksheet.DeletePart(pivotPart);
+
+            // If no other pivot table references this cache, drop the cache
+            // definition (and its records) plus the workbook-level PivotCache
+            // registration. Otherwise leave it alone — shared caches are valid.
+            if (cachePart != null)
+            {
+                var workbookPart = _doc.WorkbookPart!;
+                bool stillReferenced = workbookPart.WorksheetParts
+                    .SelectMany(ws => ws.PivotTableParts)
+                    .Any(pp => pp.PivotTableCacheDefinitionPart == cachePart);
+
+                if (!stillReferenced)
+                {
+                    // Locate and remove the <pivotCache> entry in workbook.xml
+                    // by matching the relationship id from WorkbookPart → cachePart.
+                    string? cacheRelId = null;
+                    try { cacheRelId = workbookPart.GetIdOfPart(cachePart); } catch { }
+
+                    var wb = GetWorkbook();
+                    var pivotCaches = wb.GetFirstChild<PivotCaches>();
+                    if (pivotCaches != null && cacheRelId != null)
+                    {
+                        var pcEntry = pivotCaches.Elements<PivotCache>()
+                            .FirstOrDefault(pc => pc.Id?.Value == cacheRelId);
+                        pcEntry?.Remove();
+                        if (!pivotCaches.HasChildren)
+                            pivotCaches.Remove();
+                    }
+
+                    try { workbookPart.DeletePart(cachePart); } catch { }
+                    wb.Save();
+                }
+            }
+
+            SaveWorksheet(worksheet);
+            return null;
+        }
+
         // autofilter — remove AutoFilter from worksheet
         if (cellRef.Equals("autofilter", StringComparison.OrdinalIgnoreCase))
         {
