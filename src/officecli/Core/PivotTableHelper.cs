@@ -396,6 +396,12 @@ internal static class PivotTableHelper
         //   2 row × 1 col × 1 data → multi-row renderer (RenderMultiRowPivot)
         //   1 row × 2 col × 1 data → multi-col renderer (RenderMultiColPivot)
         // Other combinations fall back to empty skeleton with a warning.
+        if (rowFieldIndices.Count == 2 && colFieldIndices.Count == 2 && valueFields.Count == 1)
+        {
+            RenderMatrixPivot(targetSheet, position, headers, columnData,
+                rowFieldIndices, colFieldIndices, valueFields, filterFieldIndices);
+            return;
+        }
         if (rowFieldIndices.Count == 2 && colFieldIndices.Count == 1 && valueFields.Count >= 1)
         {
             RenderMultiRowPivot(targetSheet, position, headers, columnData,
@@ -1333,6 +1339,392 @@ internal static class PivotTableHelper
         }
 
         ws.Save();
+    }
+
+    /// <summary>
+    /// Render a 2-row × 2-col × 1-data matrix pivot. The cross product of
+    /// hierarchical rows (multi-row layout) with hierarchical columns
+    /// (multi-col layout). Verified against matrix_authored.xlsx.
+    ///
+    /// Layout (rows=地区,城市 cols=产品,包装 values=金额:sum):
+    ///   Row 0 (caption):       [data caption] [col field caption]
+    ///   Row 1 (outer col hdr):                  咖啡            奶茶
+    ///   Row 2 (inner col hdr): [row field nm]   罐装  袋装  咖啡 Total  罐装  袋装  奶茶 Total  Grand Total
+    ///   Row 3 onwards:
+    ///     For each row outer in display order:
+    ///       Outer subtotal row: [outer]   <values across all cols>
+    ///       For each (existing) inner:
+    ///         Leaf row:         [inner]   <values for this leaf>
+    ///   Last row: [总计] <col grand totals>
+    ///
+    /// Cell value semantics (all reduce raw value lists, never pre-aggregated):
+    ///   - (outer row sub, leaf col):    sum over (rOuter, *, cOuter, cInner)
+    ///   - (outer row sub, col sub):     sum over (rOuter, *, cOuter, *)
+    ///   - (outer row sub, grand col):   sum over (rOuter, *, *, *)
+    ///   - (leaf row, leaf col):         sum over (rOuter, rInner, cOuter, cInner)
+    ///   - (leaf row, col sub):          sum over (rOuter, rInner, cOuter, *)
+    ///   - (leaf row, grand col):        sum over (rOuter, rInner, *, *)
+    ///   - (grand row, leaf col):        sum over (*, *, cOuter, cInner)
+    ///   - (grand row, col sub):         sum over (*, *, cOuter, *)
+    ///   - (grand row, grand col):       sum over (*, *, *, *)
+    ///
+    /// K=1 only. 2×2×K (matrix + multi-data) is rare and tracked as v5.
+    /// </summary>
+    private static void RenderMatrixPivot(
+        WorksheetPart targetSheet, string position,
+        string[] headers, List<string[]> columnData,
+        List<int> rowFieldIndices, List<int> colFieldIndices,
+        List<(int idx, string func, string name)> valueFields,
+        List<int>? filterFieldIndices)
+    {
+        var rowOuterIdx = rowFieldIndices[0];
+        var rowInnerIdx = rowFieldIndices[1];
+        var colOuterIdx = colFieldIndices[0];
+        var colInnerIdx = colFieldIndices[1];
+        var (dataFieldIdx, func, dataFieldName) = valueFields[0];
+
+        var rowOuterVals = columnData[rowOuterIdx];
+        var rowInnerVals = columnData[rowInnerIdx];
+        var colOuterVals = columnData[colOuterIdx];
+        var colInnerVals = columnData[colInnerIdx];
+        var dataVals = columnData[dataFieldIdx];
+
+        var rowGroups = BuildOuterInnerGroups(rowOuterIdx, rowInnerIdx, columnData);
+        var colGroups = BuildOuterInnerGroups(colOuterIdx, colInnerIdx, columnData);
+
+        // Aggregate per (rowOuter, rowInner, colOuter, colInner). All reductions
+        // pull raw value lists from this bucket so totals follow LibreOffice's
+        // avg-of-all-values semantics, not avg-of-sub-aggregates.
+        var bucket = new Dictionary<(string ro, string ri, string co, string ci), List<double>>();
+        var allValues = new List<double>();
+        for (int i = 0; i < dataVals.Length; i++)
+        {
+            var ro = rowOuterVals.Length > i ? rowOuterVals[i] : null;
+            var ri = rowInnerVals.Length > i ? rowInnerVals[i] : null;
+            var co = colOuterVals.Length > i ? colOuterVals[i] : null;
+            var ci = colInnerVals.Length > i ? colInnerVals[i] : null;
+            if (string.IsNullOrEmpty(ro) || string.IsNullOrEmpty(ri)
+                || string.IsNullOrEmpty(co) || string.IsNullOrEmpty(ci)) continue;
+            if (!double.TryParse(dataVals[i], System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var num)) continue;
+
+            var key = (ro, ri, co, ci);
+            if (!bucket.TryGetValue(key, out var list))
+            {
+                list = new List<double>();
+                bucket[key] = list;
+            }
+            list.Add(num);
+            allValues.Add(num);
+        }
+
+        double Reduce(IEnumerable<double> values)
+        {
+            var arr = values as double[] ?? values.ToArray();
+            if (arr.Length == 0) return 0;
+            return func.ToLowerInvariant() switch
+            {
+                "sum" => arr.Sum(),
+                "count" => arr.Length,
+                "average" or "avg" => arr.Average(),
+                "min" => arr.Min(),
+                "max" => arr.Max(),
+                _ => arr.Sum()
+            };
+        }
+
+        // Cell-value computations. Each one collects raw values matching the
+        // requested (row pattern, col pattern) and applies the same reducer.
+        // The "row pattern" is either a specific (ro, ri) leaf or "all inners
+        // of ro" (subtotal) or "all rows" (grand). Same for col patterns.
+        double LeafCell(string ro, string ri, string co, string ci)
+            => bucket.TryGetValue((ro, ri, co, ci), out var b) && b.Count > 0
+                ? Reduce(b) : double.NaN;
+
+        double LeafRowColSub(string ro, string ri, string co)
+        {
+            var all = new List<double>();
+            foreach (var (oc, inners) in colGroups)
+                if (oc == co)
+                    foreach (var inner in inners)
+                        if (bucket.TryGetValue((ro, ri, co, inner), out var b))
+                            all.AddRange(b);
+            return Reduce(all);
+        }
+
+        double LeafRowGrandTotal(string ro, string ri)
+        {
+            var all = new List<double>();
+            foreach (var (oc, inners) in colGroups)
+                foreach (var inner in inners)
+                    if (bucket.TryGetValue((ro, ri, oc, inner), out var b))
+                        all.AddRange(b);
+            return Reduce(all);
+        }
+
+        double OuterRowLeafCell(string ro, string co, string ci)
+        {
+            var all = new List<double>();
+            foreach (var (g, inners) in rowGroups)
+                if (g == ro)
+                    foreach (var inner in inners)
+                        if (bucket.TryGetValue((ro, inner, co, ci), out var b))
+                            all.AddRange(b);
+            return Reduce(all);
+        }
+
+        double OuterRowColSub(string ro, string co)
+        {
+            var all = new List<double>();
+            foreach (var (g, rinners) in rowGroups)
+                if (g == ro)
+                    foreach (var rinner in rinners)
+                        foreach (var (oc, cinners) in colGroups)
+                            if (oc == co)
+                                foreach (var cinner in cinners)
+                                    if (bucket.TryGetValue((ro, rinner, co, cinner), out var b))
+                                        all.AddRange(b);
+            return Reduce(all);
+        }
+
+        double OuterRowGrandTotal(string ro)
+        {
+            var all = new List<double>();
+            foreach (var (g, rinners) in rowGroups)
+                if (g == ro)
+                    foreach (var rinner in rinners)
+                        foreach (var (oc, cinners) in colGroups)
+                            foreach (var cinner in cinners)
+                                if (bucket.TryGetValue((ro, rinner, oc, cinner), out var b))
+                                    all.AddRange(b);
+            return Reduce(all);
+        }
+
+        double GrandRowLeafCol(string co, string ci)
+        {
+            var all = new List<double>();
+            foreach (var (g, rinners) in rowGroups)
+                foreach (var rinner in rinners)
+                    if (bucket.TryGetValue((g, rinner, co, ci), out var b))
+                        all.AddRange(b);
+            return Reduce(all);
+        }
+
+        double GrandRowColSub(string co)
+        {
+            var all = new List<double>();
+            foreach (var (g, rinners) in rowGroups)
+                foreach (var rinner in rinners)
+                    foreach (var (oc, cinners) in colGroups)
+                        if (oc == co)
+                            foreach (var cinner in cinners)
+                                if (bucket.TryGetValue((g, rinner, co, cinner), out var b))
+                                    all.AddRange(b);
+            return Reduce(all);
+        }
+
+        var grandTotal = Reduce(allValues);
+
+        // ===== Write cells =====
+        var (anchorCol, anchorRow) = ParseCellRef(position);
+        var anchorColIdx = ColToIndex(anchorCol);
+        var totalLabel = "总计";
+
+        var ws = targetSheet.Worksheet
+            ?? throw new InvalidOperationException("Target worksheet has no Worksheet element");
+        var sheetData = ws.GetFirstChild<SheetData>();
+        if (sheetData == null)
+        {
+            sheetData = new SheetData();
+            ws.AppendChild(sheetData);
+        }
+
+        // Pre-compute col positions (same as multi-col K=1 case).
+        var leafColPositions = new Dictionary<(string outer, string inner), int>();
+        var subtotalColPositions = new Dictionary<string, int>();
+        int currentCol = anchorColIdx + 1;
+        foreach (var (outer, inners) in colGroups)
+        {
+            foreach (var inner in inners)
+            {
+                leafColPositions[(outer, inner)] = currentCol;
+                currentCol++;
+            }
+            subtotalColPositions[outer] = currentCol;
+            currentCol++;
+        }
+        int grandTotalCol = currentCol;
+
+        // ----- Header rows -----
+        // Row 0: data caption + col field caption
+        var captionRow = new Row { RowIndex = (uint)anchorRow };
+        captionRow.AppendChild(MakeStringCell(anchorColIdx, anchorRow, dataFieldName));
+        captionRow.AppendChild(MakeStringCell(anchorColIdx + 1, anchorRow, headers[colOuterIdx]));
+        sheetData.AppendChild(captionRow);
+
+        // Row 1: outer col labels at first leaf col of each group
+        var outerHeaderRowIdx = anchorRow + 1;
+        var outerHeaderRow = new Row { RowIndex = (uint)outerHeaderRowIdx };
+        foreach (var (outer, inners) in colGroups)
+        {
+            int firstLeafCol = leafColPositions[(outer, inners[0])];
+            outerHeaderRow.AppendChild(MakeStringCell(firstLeafCol, outerHeaderRowIdx, outer));
+        }
+        sheetData.AppendChild(outerHeaderRow);
+
+        // Row 2: row outer field caption + inner col labels + "<outer> Total" + 总计
+        var innerHeaderRowIdx = anchorRow + 2;
+        var innerHeaderRow = new Row { RowIndex = (uint)innerHeaderRowIdx };
+        innerHeaderRow.AppendChild(MakeStringCell(anchorColIdx, innerHeaderRowIdx, headers[rowOuterIdx]));
+        foreach (var (outer, inners) in colGroups)
+        {
+            foreach (var inner in inners)
+                innerHeaderRow.AppendChild(MakeStringCell(leafColPositions[(outer, inner)],
+                    innerHeaderRowIdx, inner));
+            innerHeaderRow.AppendChild(MakeStringCell(subtotalColPositions[outer], innerHeaderRowIdx, outer + " Total"));
+        }
+        innerHeaderRow.AppendChild(MakeStringCell(grandTotalCol, innerHeaderRowIdx, totalLabel));
+        sheetData.AppendChild(innerHeaderRow);
+
+        // ----- Data rows: alternate (outer subtotal row + leaf rows) per row group -----
+        int currentRowIdx = anchorRow + 3;
+        foreach (var (rowOuter, rowInners) in rowGroups)
+        {
+            // Outer subtotal row.
+            var outerSubRow = new Row { RowIndex = (uint)currentRowIdx };
+            outerSubRow.AppendChild(MakeStringCell(anchorColIdx, currentRowIdx, rowOuter));
+            foreach (var (colOuter, colInners) in colGroups)
+            {
+                foreach (var colInner in colInners)
+                {
+                    var v = OuterRowLeafCell(rowOuter, colOuter, colInner);
+                    if (v != 0 || HasAnyValueInOuterRowCol(rowOuter, colOuter, colInner, rowGroups, bucket))
+                        outerSubRow.AppendChild(MakeNumericCell(leafColPositions[(colOuter, colInner)], currentRowIdx, v));
+                }
+                var sub = OuterRowColSub(rowOuter, colOuter);
+                if (sub != 0 || HasAnyValueInOuterRowOuterCol(rowOuter, colOuter, rowGroups, colGroups, bucket))
+                    outerSubRow.AppendChild(MakeNumericCell(subtotalColPositions[colOuter], currentRowIdx, sub));
+            }
+            outerSubRow.AppendChild(MakeNumericCell(grandTotalCol, currentRowIdx, OuterRowGrandTotal(rowOuter)));
+            sheetData.AppendChild(outerSubRow);
+            currentRowIdx++;
+
+            // Leaf rows for each existing inner of this row outer.
+            foreach (var rowInner in rowInners)
+            {
+                var leafRow = new Row { RowIndex = (uint)currentRowIdx };
+                leafRow.AppendChild(MakeStringCell(anchorColIdx, currentRowIdx, rowInner));
+                foreach (var (colOuter, colInners) in colGroups)
+                {
+                    foreach (var colInner in colInners)
+                    {
+                        var v = LeafCell(rowOuter, rowInner, colOuter, colInner);
+                        if (!double.IsNaN(v))
+                            leafRow.AppendChild(MakeNumericCell(leafColPositions[(colOuter, colInner)], currentRowIdx, v));
+                    }
+                    var sub = LeafRowColSub(rowOuter, rowInner, colOuter);
+                    if (sub != 0 || HasAnyValueInLeafRowCol(rowOuter, rowInner, colOuter, colGroups, bucket))
+                        leafRow.AppendChild(MakeNumericCell(subtotalColPositions[colOuter], currentRowIdx, sub));
+                }
+                leafRow.AppendChild(MakeNumericCell(grandTotalCol, currentRowIdx, LeafRowGrandTotal(rowOuter, rowInner)));
+                sheetData.AppendChild(leafRow);
+                currentRowIdx++;
+            }
+        }
+
+        // Grand total row.
+        var grandRow = new Row { RowIndex = (uint)currentRowIdx };
+        grandRow.AppendChild(MakeStringCell(anchorColIdx, currentRowIdx, totalLabel));
+        foreach (var (colOuter, colInners) in colGroups)
+        {
+            foreach (var colInner in colInners)
+                grandRow.AppendChild(MakeNumericCell(leafColPositions[(colOuter, colInner)], currentRowIdx,
+                    GrandRowLeafCol(colOuter, colInner)));
+            grandRow.AppendChild(MakeNumericCell(subtotalColPositions[colOuter], currentRowIdx, GrandRowColSub(colOuter)));
+        }
+        grandRow.AppendChild(MakeNumericCell(grandTotalCol, currentRowIdx, grandTotal));
+        sheetData.AppendChild(grandRow);
+
+        // Page filter cells (same logic as the other renderers).
+        if (filterFieldIndices != null && filterFieldIndices.Count > 0)
+        {
+            var requiredHeadroom = filterFieldIndices.Count + 1;
+            if (anchorRow > requiredHeadroom)
+            {
+                var firstFilterRow = anchorRow - requiredHeadroom;
+                for (int fi = 0; fi < filterFieldIndices.Count; fi++)
+                {
+                    var fIdx = filterFieldIndices[fi];
+                    if (fIdx < 0 || fIdx >= headers.Length) continue;
+                    var rowIdx = firstFilterRow + fi;
+                    var filterRow = new Row { RowIndex = (uint)rowIdx };
+                    filterRow.AppendChild(MakeStringCell(anchorColIdx, rowIdx, headers[fIdx]));
+                    filterRow.AppendChild(MakeStringCell(anchorColIdx + 1, rowIdx, "(All)"));
+                    sheetData.InsertAt(filterRow, fi);
+                }
+            }
+        }
+
+        ws.Save();
+    }
+
+    /// <summary>
+    /// Helper for RenderMatrixPivot: true if (rowOuter, *, colOuter, colInner)
+    /// has at least one non-empty leaf bucket. Used to decide whether to write
+    /// 0-valued outer-row × leaf-col subtotal cells or skip them entirely.
+    /// </summary>
+    private static bool HasAnyValueInOuterRowCol(string rowOuter, string colOuter, string colInner,
+        List<(string outer, List<string> inners)> rowGroups,
+        Dictionary<(string ro, string ri, string co, string ci), List<double>> bucket)
+    {
+        foreach (var (g, inners) in rowGroups)
+        {
+            if (g != rowOuter) continue;
+            foreach (var inner in inners)
+                if (bucket.TryGetValue((rowOuter, inner, colOuter, colInner), out var b) && b.Count > 0)
+                    return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Helper for RenderMatrixPivot: true if (rowOuter, *, colOuter, *) has any
+    /// non-empty bucket. For deciding outer-row × col-subtotal sparsity.
+    /// </summary>
+    private static bool HasAnyValueInOuterRowOuterCol(string rowOuter, string colOuter,
+        List<(string outer, List<string> inners)> rowGroups,
+        List<(string outer, List<string> inners)> colGroups,
+        Dictionary<(string ro, string ri, string co, string ci), List<double>> bucket)
+    {
+        foreach (var (g, rinners) in rowGroups)
+        {
+            if (g != rowOuter) continue;
+            foreach (var rinner in rinners)
+                foreach (var (oc, cinners) in colGroups)
+                    if (oc == colOuter)
+                        foreach (var cinner in cinners)
+                            if (bucket.TryGetValue((rowOuter, rinner, colOuter, cinner), out var b) && b.Count > 0)
+                                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Helper for RenderMatrixPivot: true if (rowOuter, rowInner, colOuter, *)
+    /// has any non-empty bucket. For deciding leaf-row × col-subtotal sparsity.
+    /// </summary>
+    private static bool HasAnyValueInLeafRowCol(string rowOuter, string rowInner, string colOuter,
+        List<(string outer, List<string> inners)> colGroups,
+        Dictionary<(string ro, string ri, string co, string ci), List<double>> bucket)
+    {
+        foreach (var (oc, cinners) in colGroups)
+        {
+            if (oc != colOuter) continue;
+            foreach (var cinner in cinners)
+                if (bucket.TryGetValue((rowOuter, rowInner, colOuter, cinner), out var b) && b.Count > 0)
+                    return true;
+        }
+        return false;
     }
 
     /// <summary>
