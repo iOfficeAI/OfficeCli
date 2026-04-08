@@ -4770,7 +4770,10 @@ internal static class PivotTableHelper
         {
             var names = rowFields.Elements<Field>().Where(f => f.Index?.Value >= 0).Select(f => ResolveFieldName((uint)f.Index!.Value)).ToList();
             if (names.Count > 0)
-                node.Format["rowFields"] = string.Join(",", names);
+                // R4-1: canonical key matches input ('rows=' on Add/Set).
+                // Legacy 'rowFields' output key removed in favor of single
+                // canonical key per CLAUDE.md "Canonical DocumentNode.Format Rules".
+                node.Format["rows"] = string.Join(",", names);
         }
 
         // Column fields
@@ -4779,7 +4782,8 @@ internal static class PivotTableHelper
         {
             var names = colFields.Elements<Field>().Where(f => f.Index?.Value >= 0).Select(f => ResolveFieldName((uint)f.Index!.Value)).ToList();
             if (names.Count > 0)
-                node.Format["colFields"] = string.Join(",", names);
+                // R4-1: canonical key matches input ('cols=' on Add/Set).
+                node.Format["cols"] = string.Join(",", names);
         }
 
         // Page/filter fields
