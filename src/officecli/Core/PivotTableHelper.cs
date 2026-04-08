@@ -68,6 +68,90 @@ internal static class PivotTableHelper
         public void Dispose() { _axisSortMode = _prev; }
     }
 
+    // ==================== Grand totals options ====================
+    //
+    // CONSISTENCY(thread-static-pivot-opts): reuses the same ThreadStatic
+    // pattern as _axisSortMode above. Grand totals need to reach the same
+    // ~15 nested sites (item builders, geometry, all 6 renderers, definition
+    // builder), and threading parameters would explode signature churn.
+    //
+    // OOXML semantics (ECMA-376 § 18.10.1.73 on pivotTableDefinition):
+    //   rowGrandTotals — "Show grand totals for rows" = per-row grand totals
+    //                    = RIGHTMOST grand total COLUMN (a total for each row)
+    //   colGrandTotals — "Show grand totals for columns" = per-col grand totals
+    //                    = BOTTOM grand total ROW (a total for each column)
+    //
+    // Both default to true. We only write the attribute when the user
+    // explicitly opts out (matches how real Excel + LibreOffice serialize).
+    [ThreadStatic] private static bool? _rowGrandTotals;
+    [ThreadStatic] private static bool? _colGrandTotals;
+
+    private static bool ActiveRowGrandTotals => _rowGrandTotals ?? true;
+    private static bool ActiveColGrandTotals => _colGrandTotals ?? true;
+
+    /// <summary>
+    /// Parse grand-totals properties into the thread-static scope. Supports:
+    ///   grandTotals=both|none|rows|cols|on|off|true|false
+    ///   rowGrandTotals=true|false   (overrides grandTotals for the row-grand axis)
+    ///   colGrandTotals=true|false   (overrides grandTotals for the col-grand axis)
+    /// Returns a scope that restores the previous values on Dispose.
+    /// </summary>
+    private static IDisposable PushGrandTotalsOptions(Dictionary<string, string> properties)
+    {
+        var prevRow = _rowGrandTotals;
+        var prevCol = _colGrandTotals;
+
+        // Master 'grandTotals' key (friendly). 'rows' means only per-row grand
+        // totals (right column); 'cols' means only per-col grand totals (bottom).
+        if (properties.TryGetValue("grandTotals", out var gt)
+            || properties.TryGetValue("grandtotals", out gt))
+        {
+            switch ((gt ?? "").Trim().ToLowerInvariant())
+            {
+                case "both": case "on": case "true": case "1": case "yes":
+                    _rowGrandTotals = true; _colGrandTotals = true; break;
+                case "none": case "off": case "false": case "0": case "no":
+                    _rowGrandTotals = false; _colGrandTotals = false; break;
+                case "rows": case "row":
+                    _rowGrandTotals = true; _colGrandTotals = false; break;
+                case "cols": case "col": case "columns":
+                    _rowGrandTotals = false; _colGrandTotals = true; break;
+            }
+        }
+
+        // Fine-grained bool keys (OOXML-level), parsed AFTER the master key
+        // so they override it when both are supplied.
+        if (TryParseBoolProp(properties, "rowGrandTotals", out var rgt))
+            _rowGrandTotals = rgt;
+        if (TryParseBoolProp(properties, "colGrandTotals", out var cgt)
+            || TryParseBoolProp(properties, "columnGrandTotals", out cgt))
+            _colGrandTotals = cgt;
+
+        return new GrandTotalsScope(prevRow, prevCol);
+    }
+
+    private static bool TryParseBoolProp(Dictionary<string, string> properties, string key, out bool value)
+    {
+        value = false;
+        if (!properties.TryGetValue(key, out var raw)
+            && !properties.TryGetValue(key.ToLowerInvariant(), out raw))
+            return false;
+        switch ((raw ?? "").Trim().ToLowerInvariant())
+        {
+            case "true": case "1": case "yes": case "on": value = true; return true;
+            case "false": case "0": case "no": case "off": value = false; return true;
+            default: return false;
+        }
+    }
+
+    private sealed class GrandTotalsScope : IDisposable
+    {
+        private readonly bool? _prevRow;
+        private readonly bool? _prevCol;
+        public GrandTotalsScope(bool? prevRow, bool? prevCol) { _prevRow = prevRow; _prevCol = prevCol; }
+        public void Dispose() { _rowGrandTotals = _prevRow; _colGrandTotals = _prevCol; }
+    }
+
     /// <summary>
     /// Apply axis ordering (ascending/descending) to an OrderBy clause using
     /// the currently-active sort mode. All axis sort sites use this helper.
@@ -103,6 +187,10 @@ internal static class PivotTableHelper
         // sort site below — cache builder, pivotField items writer, per-level
         // index maps, specialized renderers — reads the same comparer.
         using var _sortScope = PushAxisSortMode(properties);
+        // CONSISTENCY(thread-static-pivot-opts): same pattern — grand totals
+        // options reach item builders, geometry, and every renderer via
+        // ActiveRowGrandTotals/ActiveColGrandTotals.
+        using var _gtScope = PushGrandTotalsOptions(properties);
 
         // 1. Read source data to build cache
         var (headers, columnData, columnStyleIds) = ReadSourceData(sourceSheet, sourceRef);
@@ -526,8 +614,14 @@ internal static class PivotTableHelper
                 headerRows = dataFieldCount > 1 ? 2 : 1;
         }
 
+        // Grand-totals toggles:
+        //   rowGrandTotals=false → no rightmost grand-total COLUMN → drop totalCols
+        //   colGrandTotals=false → no bottom grand-total ROW → drop the +1 in height
+        if (!ActiveRowGrandTotals) totalCols = 0;
+        int grandRowHeight = ActiveColGrandTotals ? 1 : 0;
+
         int width = rowLabelCols + valueCols + totalCols;
-        int height = headerRows + dataRowCount + 1;
+        int height = headerRows + dataRowCount + grandRowHeight;
 
         var (anchorCol, anchorRow) = ParseCellRef(position);
         var anchorColIdx = ColToIndex(anchorCol);
@@ -2892,6 +2986,12 @@ internal static class PivotTableHelper
             GrandTotalCaption = "总计"
         };
 
+        // Grand totals toggles. Both attributes default to true in ECMA-376 —
+        // only emit when the user opted out, matching real Excel + LibreOffice
+        // serialization behavior.
+        if (!ActiveRowGrandTotals) pivotDef.RowGrandTotals = false;
+        if (!ActiveColGrandTotals) pivotDef.ColumnGrandTotals = false;
+
         // Use typed property setters to ensure correct schema order
 
         // Compute the pivot's geometry (range + offsets) via shared helper, so the
@@ -3783,10 +3883,22 @@ internal static class PivotTableHelper
         // renderers use the requested order. Sort only affects the rendered
         // layout — sharedItems order in the cache is fixed at Create time.
         using var _sortScope = PushAxisSortMode(properties);
+        // CONSISTENCY(thread-static-pivot-opts): grand totals options ride
+        // through the same ambient scope as sort.
+        using var _gtScope = PushGrandTotalsOptions(properties);
 
         var unsupported = new List<string>();
         var pivotDef = pivotPart.PivotTableDefinition;
         if (pivotDef == null) { unsupported.AddRange(properties.Keys); return unsupported; }
+
+        // Seed the thread-static grand-totals scope from the CURRENT definition
+        // when the caller did not explicitly pass the keys. This keeps prior
+        // toggles sticky across unrelated Set operations (e.g. `set rows=...`
+        // must not silently re-enable grand totals that were turned off earlier).
+        if (!_rowGrandTotals.HasValue && pivotDef.RowGrandTotals?.Value == false)
+            _rowGrandTotals = false;
+        if (!_colGrandTotals.HasValue && pivotDef.ColumnGrandTotals?.Value == false)
+            _colGrandTotals = false;
 
         // Collect field-area properties separately — they require a coordinated rebuild
         var fieldAreaProps = new Dictionary<string, string>();
@@ -3828,6 +3940,20 @@ internal static class PivotTableHelper
                         // Seed an empty entry so RebuildFieldAreas runs with
                         // current field assignments and re-renders with the
                         // new sort.
+                        fieldAreaProps["__sort_only__"] = value;
+                    }
+                    break;
+                case "grandtotals":
+                case "rowgrandtotals":
+                case "colgrandtotals":
+                case "columngrandtotals":
+                    // Already consumed by PushGrandTotalsOptions at the top of
+                    // this method. Trigger a re-render so geometry / items /
+                    // cells all reflect the new toggle. Mirrors "sort".
+                    if (!fieldAreaProps.ContainsKey("rows") && !fieldAreaProps.ContainsKey("cols")
+                        && !fieldAreaProps.ContainsKey("values") && !fieldAreaProps.ContainsKey("filters")
+                        && !fieldAreaProps.ContainsKey("__sort_only__"))
+                    {
                         fieldAreaProps["__sort_only__"] = value;
                     }
                     break;
@@ -4060,6 +4186,15 @@ internal static class PivotTableHelper
             FirstDataRow = 2u,
             FirstDataColumn = (uint)newGeom.RowLabelCols
         };
+
+        // Sync grand-totals attributes. Only touch when the caller explicitly
+        // set them in this Set call (_*.HasValue); otherwise leave whatever
+        // the definition already carried so repeated Sets don't clobber an
+        // earlier toggle.
+        if (_rowGrandTotals.HasValue)
+            pivotDef.RowGrandTotals = _rowGrandTotals.Value ? null : (BooleanValue)false;
+        if (_colGrandTotals.HasValue)
+            pivotDef.ColumnGrandTotals = _colGrandTotals.Value ? null : (BooleanValue)false;
 
         // Rebuild RowItems / ColumnItems for the new field assignments. The previous
         // configuration's row/col layout no longer matches; without these the rendered
