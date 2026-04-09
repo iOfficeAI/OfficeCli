@@ -1561,8 +1561,9 @@ public partial class ExcelHandler
                 var sourceWorksheet = FindWorksheet(sourceSheetName)
                     ?? throw new ArgumentException($"Source sheet not found: {sourceSheetName}");
 
-                var ptPosition = properties.GetValueOrDefault("position", "")
-                    ?? properties.GetValueOrDefault("pos", "");
+                var ptPosition = (properties.GetValueOrDefault("position", "")
+                    ?? properties.GetValueOrDefault("pos", ""))
+                    ?.Replace("$", ""); // CONSISTENCY(dollar-strip): parity with source ref handling
                 if (string.IsNullOrEmpty(ptPosition))
                 {
                     // Auto-position: place after the source data range
