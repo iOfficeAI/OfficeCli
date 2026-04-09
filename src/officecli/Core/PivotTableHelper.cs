@@ -2240,6 +2240,9 @@ internal static class PivotTableHelper
         //     subtotal:                                  K cells (per-data subtotal)
         //   grand total:                                 K cells (per-data grand)
         // The grand total column block is skipped entirely when emitRowGrand=false.
+        // CONSISTENCY(subtotals-opts): cached once per render call.
+        bool emitSubtotals = ActiveDefaultSubtotal;
+
         var leafColPositions = new Dictionary<(string outer, string inner, int d), int>();
         var subtotalColPositions = new Dictionary<(string outer, int d), int>();
         var grandTotalColPositions = new int[K];
@@ -2254,10 +2257,13 @@ internal static class PivotTableHelper
                     currentCol++;
                 }
             }
-            for (int d = 0; d < K; d++)
+            if (emitSubtotals)
             {
-                subtotalColPositions[(outer, d)] = currentCol;
-                currentCol++;
+                for (int d = 0; d < K; d++)
+                {
+                    subtotalColPositions[(outer, d)] = currentCol;
+                    currentCol++;
+                }
             }
         }
         if (emitRowGrand)
@@ -2300,7 +2306,8 @@ internal static class PivotTableHelper
             {
                 foreach (var inner in inners)
                     innerHeaderRow.AppendChild(MakeStringCell(leafColPositions[(outer, inner, 0)], innerHeaderRowIdx, inner));
-                innerHeaderRow.AppendChild(MakeStringCell(subtotalColPositions[(outer, 0)], innerHeaderRowIdx, outer + " Total"));
+                if (emitSubtotals)
+                    innerHeaderRow.AppendChild(MakeStringCell(subtotalColPositions[(outer, 0)], innerHeaderRowIdx, outer + " Total"));
             }
             if (emitRowGrand)
                 innerHeaderRow.AppendChild(MakeStringCell(grandTotalColPositions[0], innerHeaderRowIdx, totalLabel));
@@ -2324,9 +2331,12 @@ internal static class PivotTableHelper
             {
                 int firstLeafCol = leafColPositions[(outer, inners[0], 0)];
                 outerHeaderRow.AppendChild(MakeStringCell(firstLeafCol, outerHeaderRowIdx, outer));
-                for (int d = 0; d < K; d++)
-                    outerHeaderRow.AppendChild(MakeStringCell(subtotalColPositions[(outer, d)],
-                        outerHeaderRowIdx, $"{outer} {valueFields[d].name}"));
+                if (emitSubtotals)
+                {
+                    for (int d = 0; d < K; d++)
+                        outerHeaderRow.AppendChild(MakeStringCell(subtotalColPositions[(outer, d)],
+                            outerHeaderRowIdx, $"{outer} {valueFields[d].name}"));
+                }
             }
             if (emitRowGrand)
             {
@@ -2384,13 +2394,16 @@ internal static class PivotTableHelper
                             dataRow.AppendChild(MakeNumericCell(leafColPositions[(outer, inner, d)], rowIdx, v, valueStyleIds[d]));
                     }
                 }
-                // Outer col subtotal cells (K per outer).
-                bool any = HasAnyValueInRowOuter(uniqueRows[r], outer, colGroups, leafBucket, K);
-                for (int d = 0; d < K; d++)
+                if (emitSubtotals)
                 {
-                    var sub = OuterColSubtotalForRow(uniqueRows[r], outer, d);
-                    if (sub != 0 || any)
-                        dataRow.AppendChild(MakeNumericCell(subtotalColPositions[(outer, d)], rowIdx, sub, valueStyleIds[d]));
+                    // Outer col subtotal cells (K per outer).
+                    bool any = HasAnyValueInRowOuter(uniqueRows[r], outer, colGroups, leafBucket, K);
+                    for (int d = 0; d < K; d++)
+                    {
+                        var sub = OuterColSubtotalForRow(uniqueRows[r], outer, d);
+                        if (sub != 0 || any)
+                            dataRow.AppendChild(MakeNumericCell(subtotalColPositions[(outer, d)], rowIdx, sub, valueStyleIds[d]));
+                    }
                 }
             }
 
@@ -2414,8 +2427,11 @@ internal static class PivotTableHelper
                     for (int d = 0; d < K; d++)
                         grandRow.AppendChild(MakeNumericCell(leafColPositions[(outer, inner, d)], grandRowIdx,
                             LeafColTotal(outer, inner, d), valueStyleIds[d]));
-                for (int d = 0; d < K; d++)
-                    grandRow.AppendChild(MakeNumericCell(subtotalColPositions[(outer, d)], grandRowIdx, OuterColTotal(outer, d), valueStyleIds[d]));
+                if (emitSubtotals)
+                {
+                    for (int d = 0; d < K; d++)
+                        grandRow.AppendChild(MakeNumericCell(subtotalColPositions[(outer, d)], grandRowIdx, OuterColTotal(outer, d), valueStyleIds[d]));
+                }
             }
             if (emitRowGrand)
             {
@@ -3584,8 +3600,12 @@ internal static class PivotTableHelper
     {
         dt = default;
         if (string.IsNullOrEmpty(raw)) return false;
+        // CONSISTENCY(timezone): Use AssumeUniversal+AdjustToUniversal so the parsed
+        // DateTime has Kind=Utc and no timezone shift occurs when OpenXML SDK serializes
+        // it. AssumeLocal would produce Kind=Local which the SDK converts to UTC on
+        // write, shifting dates by the local UTC offset (e.g. UTC+8 shifts Jan 15 → Jan 14).
         if (DateTime.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture,
-                System.Globalization.DateTimeStyles.AssumeLocal, out dt))
+                System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out dt))
             return true;
         if (double.TryParse(raw, System.Globalization.NumberStyles.Float,
                 System.Globalization.CultureInfo.InvariantCulture, out var serial))
@@ -3607,8 +3627,10 @@ internal static class PivotTableHelper
         if (string.IsNullOrEmpty(raw)) return raw ?? string.Empty;
 
         DateTime dt;
+        // CONSISTENCY(timezone): match TryParseSourceDate — use AssumeUniversal to
+        // avoid Kind=Local which shifts dates by local UTC offset during serialization.
         if (!DateTime.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture,
-                System.Globalization.DateTimeStyles.AssumeLocal, out dt))
+                System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out dt))
         {
             if (double.TryParse(raw, System.Globalization.NumberStyles.Float,
                     System.Globalization.CultureInfo.InvariantCulture, out var serial))
