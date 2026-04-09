@@ -4720,13 +4720,20 @@ internal static class PivotTableHelper
         int count = 0;
         foreach (var (outer, inners) in groups)
         {
-            // Outer subtotal row: <i><x v="outerIdx"/></i>
+            // Outer subtotal row: <i><x v="outerIdx"/><x v="defaultInner"/></i>
+            // ECMA-376 §18.10.1.44: r=0 requires fieldCount (2) <x> children.
+            // Pad with the inner field's default item index.
             var outerEntry = new RowItem();
             var outerPivIdx = outerOrder[outer];
             if (outerPivIdx == 0)
                 outerEntry.AppendChild(new MemberPropertyIndex());
             else
                 outerEntry.AppendChild(new MemberPropertyIndex { Val = outerPivIdx });
+            var innerDefaultIdx = innerOrder.Count;
+            if (innerDefaultIdx == 0)
+                outerEntry.AppendChild(new MemberPropertyIndex());
+            else
+                outerEntry.AppendChild(new MemberPropertyIndex { Val = innerDefaultIdx });
             container.AppendChild(outerEntry);
             count++;
 
@@ -5035,6 +5042,20 @@ internal static class PivotTableHelper
                 int idx = perLevelOrder[i].TryGetValue(path[i], out var pi) ? pi : 0;
                 if (idx == 0) item.AppendChild(new MemberPropertyIndex());
                 else item.AppendChild(new MemberPropertyIndex { Val = idx });
+            }
+            // ECMA-376 §18.10.1.44: each <i> must have exactly
+            // (fieldCount - r) <x> children. Subtotal entries have
+            // path.Length < fieldIndices.Count, so pad with the "default"
+            // item index for each remaining deeper field. The default item
+            // is appended after all value items by AppendFieldItems, so its
+            // 0-based index equals the unique value count for that level.
+            // Leaf entries already satisfy the requirement (path.Length ==
+            // fieldIndices.Count), so the loop is a no-op for them.
+            for (int i = path.Length; i < fieldIndices.Count; i++)
+            {
+                int defaultIdx = perLevelOrder[i].Count;
+                if (defaultIdx == 0) item.AppendChild(new MemberPropertyIndex());
+                else item.AppendChild(new MemberPropertyIndex { Val = defaultIdx });
             }
             // For col-axis leaves with K>1, append one extra <x/> for the
             // first data field (index 0 = bare <x/>). The K-1 subsequent
