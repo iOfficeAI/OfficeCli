@@ -5507,24 +5507,39 @@ internal static class PivotTableHelper
         // list, which Excel renders as a corrupt pivotTableDefinition.
         // Precedence: the most-recently-set axis wins; areas not touched
         // in this Set call shed any field that was just claimed elsewhere.
+        var valueFields = changes.ContainsKey("values")
+            ? ParseValueFieldsWithWarning(changes, "values", headers)
+            : currentValues;
+
         if (changes.ContainsKey("rows"))
         {
             colFieldIndices = colFieldIndices.Where(i => !rowFieldIndices.Contains(i)).ToList();
             filterFieldIndices = filterFieldIndices.Where(i => !rowFieldIndices.Contains(i)).ToList();
+            // R15-1 parity: claimed row field also drops from values axis.
+            valueFields = valueFields.Where(vf => !rowFieldIndices.Contains(vf.idx)).ToList();
         }
         if (changes.ContainsKey("cols"))
         {
             rowFieldIndices = rowFieldIndices.Where(i => !colFieldIndices.Contains(i)).ToList();
             filterFieldIndices = filterFieldIndices.Where(i => !colFieldIndices.Contains(i)).ToList();
+            valueFields = valueFields.Where(vf => !colFieldIndices.Contains(vf.idx)).ToList();
         }
         if (changes.ContainsKey("filters"))
         {
             rowFieldIndices = rowFieldIndices.Where(i => !filterFieldIndices.Contains(i)).ToList();
             colFieldIndices = colFieldIndices.Where(i => !filterFieldIndices.Contains(i)).ToList();
+            // R15-1: without this, `set filters=Sales` leaves Sales in both
+            // DataFields and PageFields, producing a corrupt pivot with
+            // duplicate assignment on the same cacheField.
+            valueFields = valueFields.Where(vf => !filterFieldIndices.Contains(vf.idx)).ToList();
         }
-        var valueFields = changes.ContainsKey("values")
-            ? ParseValueFieldsWithWarning(changes, "values", headers)
-            : currentValues;
+        if (changes.ContainsKey("values"))
+        {
+            var valueIdxSet = valueFields.Select(vf => vf.idx).ToHashSet();
+            rowFieldIndices = rowFieldIndices.Where(i => !valueIdxSet.Contains(i)).ToList();
+            colFieldIndices = colFieldIndices.Where(i => !valueIdxSet.Contains(i)).ToList();
+            filterFieldIndices = filterFieldIndices.Where(i => !valueIdxSet.Contains(i)).ToList();
+        }
 
         // CONSISTENCY(aggregate-override / showdataas in Set): when only the
         // sibling keys were passed (values list unchanged), apply them to
