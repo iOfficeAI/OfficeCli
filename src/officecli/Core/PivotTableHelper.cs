@@ -1209,8 +1209,17 @@ internal static class PivotTableHelper
             valueCols = (colSubtotals + colLeaves) * dataFieldCount;
             totalCols = dataFieldCount;
 
-            // Header rows: 1 caption + N_col field-label rows + (K>1 ? 1 : 0).
-            headerRows = 1 + Math.Max(1, colFieldIndices.Count) + (dataFieldCount > 1 ? 1 : 0);
+            // Header rows:
+            //   colN == 0: a SINGLE combined row carrying the row-label caption
+            //              in col A plus the K data field names across cols B..B+K-1.
+            //              Matches Excel's canonical compact-form layout for
+            //              (N row × 0 col × K data) pivots (verified against
+            //              Excel-authored test_encrypted.xlsx).
+            //   colN >= 1: 1 caption + N_col field-label rows + optional dfRow
+            //              when K>1.
+            headerRows = colFieldIndices.Count == 0
+                ? 1
+                : (1 + colFieldIndices.Count + (dataFieldCount > 1 ? 1 : 0));
         }
         else if (colFieldIndices.Count >= 2)
         {
@@ -1275,6 +1284,49 @@ internal static class PivotTableHelper
         var rangeRef = $"{position}:{IndexToCol(endColIdx)}{endRow}";
 
         return new PivotGeometry(anchorColIdx, anchorRow, width, height, rowLabelCols, rangeRef);
+    }
+
+    /// <summary>
+    /// Build the &lt;location&gt; element with offsets that match what the
+    /// renderer will actually write to sheetData. Shared by BuildPivotTableDefinition
+    /// (initial creation) and RebuildFieldAreas (post-Set rebuild) so the two
+    /// paths stay in sync.
+    ///
+    /// For the (N row × 0 col × K data) shape, Excel's canonical layout is a
+    /// SINGLE header row at the top of the range, so firstHeaderRow=0 and
+    /// firstDataRow=1 (verified against Excel-authored pivot in test_encrypted.xlsx:
+    /// 4 row × 0 col × 5 data × 1 filter ⇒ ref="A3:F42", firstHeaderRow=0,
+    /// firstDataRow=1, firstDataCol=1). For pivots with col fields, keep the
+    /// previous convention (firstHeaderRow=1 = second row of the range, offset
+    /// by the existing baselines under tests/pivot_baselines/).
+    /// </summary>
+    private static Location BuildLocation(
+        PivotGeometry geom,
+        List<int> rowFieldIndices,
+        List<int> colFieldIndices,
+        List<(int idx, string func, string showAs, string name)> valueFields)
+    {
+        uint firstHeaderRow;
+        uint firstDataRow;
+        if (colFieldIndices.Count == 0)
+        {
+            firstHeaderRow = 0u;
+            firstDataRow = 1u;
+        }
+        else
+        {
+            firstHeaderRow = 1u;
+            firstDataRow = (colFieldIndices.Count >= 2 && valueFields.Count > 1) ? 4u
+                         : ((valueFields.Count > 1 || colFieldIndices.Count >= 2) ? 3u : 2u);
+        }
+
+        return new Location
+        {
+            Reference = geom.RangeRef,
+            FirstHeaderRow = firstHeaderRow,
+            FirstDataRow = firstDataRow,
+            FirstDataColumn = (uint)geom.RowLabelCols
+        };
     }
 
     /// <summary>
@@ -3201,21 +3253,47 @@ internal static class PivotTableHelper
         int grandTotalColStart = firstDataCol + colCells;  // unused when !emitRowGrand
 
         // Header rows. Layout depends on (N_col, K):
-        //   - 1 caption row (row 0)
-        //   - N_col header rows (one per col field level, top→bottom = outer→inner)
-        //   - Optionally 1 data-field-name row when K>1
-        int headerRows = 1 + Math.Max(1, colFieldIndices.Count) + (K > 1 ? 1 : 0);
+        //   - colN == 0: a SINGLE combined row with row-label caption in col A
+        //                plus K data field names across cols B..B+K-1. Matches
+        //                Excel's canonical (N row × 0 col × K data) compact-form
+        //                layout (verified against Excel-authored test_encrypted.xlsx).
+        //                Must stay in sync with ComputePivotGeometry and BuildLocation.
+        //   - colN >= 1: 1 caption row + N_col field-label rows + optional dfRow
+        //                when K>1.
+        int headerRows = colFieldIndices.Count == 0
+            ? 1
+            : (1 + colFieldIndices.Count + (K > 1 ? 1 : 0));
 
-        // Row 0 (caption): col field caption (the outermost col field name) at
-        // first data col position. For K=1 the row-label col also gets the
-        // single data field name.
-        var captionRow = new Row { RowIndex = (uint)anchorRow };
-        if (K == 1)
-            captionRow.AppendChild(MakeStringCell(anchorColIdx, anchorRow, valueFields[0].name));
-        if (colFieldIndices.Count > 0)
+        if (colFieldIndices.Count == 0)
+        {
+            // Single header row: row-label caption at col A, then K data field
+            // names at cols B..B+K-1 (which is where grandTotalColStart maps to
+            // when colPositions is empty — there's no body col block).
+            var headerRow = new Row { RowIndex = (uint)anchorRow };
+            var rowLabelCaption = rowFieldIndices.Count > 0
+                ? headers[rowFieldIndices[0]]
+                : "行标签";
+            headerRow.AppendChild(MakeStringCell(anchorColIdx, anchorRow, rowLabelCaption));
+            if (emitRowGrand)
+            {
+                for (int d = 0; d < K; d++)
+                    headerRow.AppendChild(MakeStringCell(grandTotalColStart + d, anchorRow,
+                        valueFields[d].name));
+            }
+            sheetData.AppendChild(headerRow);
+        }
+        else
+        {
+            // Row 0 (caption): col field caption (the outermost col field name) at
+            // first data col position. For K=1 the row-label col also gets the
+            // single data field name.
+            var captionRow = new Row { RowIndex = (uint)anchorRow };
+            if (K == 1)
+                captionRow.AppendChild(MakeStringCell(anchorColIdx, anchorRow, valueFields[0].name));
             captionRow.AppendChild(MakeStringCell(firstDataCol, anchorRow,
                 headers[colFieldIndices[0]]));
-        sheetData.AppendChild(captionRow);
+            sheetData.AppendChild(captionRow);
+        }
 
         // Rows 1..N_col (col field header rows). For each level L (1..N_col), the
         // L-th col field's labels are written at the first leaf col of every node
@@ -3325,8 +3403,11 @@ internal static class PivotTableHelper
             sheetData.AppendChild(headerRow);
         }
 
-        // Optional data field name row (K>1).
-        if (K > 1)
+        // Optional data field name row (K>1). Only emitted when colN >= 1;
+        // the colN == 0 path above already wrote a single combined header row
+        // carrying the row-label caption + data field names, so running this
+        // block would write duplicate cells at anchorRow.
+        if (K > 1 && colFieldIndices.Count > 0)
         {
             int dfRowIdx = anchorRow + headerRows - 1;
             var dfRow = new Row { RowIndex = (uint)dfRowIdx };
@@ -4596,14 +4677,7 @@ internal static class PivotTableHelper
         // produce identical results.
         var geom = ComputePivotGeometry(
             position, columnData, rowFieldIndices, colFieldIndices, valueFields);
-        pivotDef.Location = new Location
-        {
-            Reference = geom.RangeRef,
-            FirstHeaderRow = 1u,
-            FirstDataRow = (colFieldIndices.Count >= 2 && valueFields.Count > 1) ? 4u
-                         : ((valueFields.Count > 1 || colFieldIndices.Count >= 2) ? 3u : 2u),
-            FirstDataColumn = (uint)geom.RowLabelCols
-        };
+        pivotDef.Location = BuildLocation(geom, rowFieldIndices, colFieldIndices, valueFields);
 
         // Page filters: presence is signalled by the <pageFields> element + the
         // pivotField axis="axisPage" marker, both written further down. ECMA-376
@@ -6557,13 +6631,7 @@ internal static class PivotTableHelper
         var newGeom = ComputePivotGeometry(
             anchorRefForGeometry, cacheColumnData, rowFieldIndices, colFieldIndices, valueFields);
 
-        pivotDef.Location = new Location
-        {
-            Reference = newGeom.RangeRef,
-            FirstHeaderRow = 1u,
-            FirstDataRow = 2u,
-            FirstDataColumn = (uint)newGeom.RowLabelCols
-        };
+        pivotDef.Location = BuildLocation(newGeom, rowFieldIndices, colFieldIndices, valueFields);
 
         // Sync grand-totals attributes. Only touch when the caller explicitly
         // set them in this Set call (_*.HasValue); otherwise leave whatever
