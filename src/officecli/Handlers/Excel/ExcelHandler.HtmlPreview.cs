@@ -351,6 +351,34 @@ public partial class ExcelHandler
             if (widthPx <= 0) hiddenCols.Add(colIdx);
         }
 
+        // Auto-fit columns without explicit OOXML widths: scan cell content and
+        // compute a width from the longest text in each column. Uses a simple
+        // char-width heuristic (CJK ≈ 1.8 char units, ASCII ≈ 1) converted to
+        // pt via the same chars × 7.0017 × 0.75 formula as explicit widths.
+        // Only columns that have NO entry in colWidths are auto-fitted; columns
+        // with explicit widths (including 0 = hidden) are left as-is.
+        for (int c = 1; c <= maxCol; c++)
+        {
+            if (colWidths.ContainsKey(c)) continue;
+            double maxChars = 0;
+            for (int r = 1; r <= maxRow; r++)
+            {
+                if (!cellMap.TryGetValue((r, c), out var cell)) continue;
+                var text = GetCellDisplayValue(cell);
+                if (string.IsNullOrEmpty(text)) continue;
+                double chars = 0;
+                foreach (var ch in text)
+                    chars += ch > 0x2E7F ? 2.2 : 1.0; // CJK / fullwidth → ~2.2 char units
+                if (chars > maxChars) maxChars = chars;
+            }
+            if (maxChars > 0)
+            {
+                // Add 2 char padding, cap at 60 chars to avoid extreme widths
+                maxChars = Math.Min(maxChars + 2, 60);
+                colWidths[c] = maxChars * 7.0017 * 0.75;
+            }
+        }
+
         // Build chart lookup: fromRow → chart info for inline insertion
         var chartAtRow = new Dictionary<int, (int toRow, int fromCol, int toCol, string html)>();
         if (charts != null)
@@ -1744,10 +1772,10 @@ public partial class ExcelHandler
             border-right: none;
         }
         td {
-            /* No default border. POI/libra approach: only render borders explicitly defined in OOXML.
-               A default 1px light-grey border interferes with border-collapse — it competes with
-               adjacent cells' dark borders and can erase explicit dividers (e.g. row 9→10 in col C
-               where row 9 has no bottom border but row 10 has a dark top border). */
+            /* Default gridlines. Explicit OOXML borders are rendered as inline
+               styles on individual cells, which win the border-collapse contest
+               because inline specificity > stylesheet rule. */
+            border: 1px solid #e0e0e0;
             padding: 2px 4px;
             white-space: nowrap;
             overflow: hidden;
