@@ -529,10 +529,12 @@ public partial class WordHandler
         var paragraphs = GetBodyElements(body).OfType<Paragraph>().ToList();
         var tables = GetBodyElements(body).OfType<Table>().ToList();
         var imageCount = body.Descendants<Drawing>().Count();
+        var oleCount = body.Descendants<EmbeddedObject>().Count();
         var equationCount = body.Descendants().Count(e => e.LocalName == "oMathPara" || e is M.Paragraph);
         var formFieldCount = FindFormFields().Count;
         var contentControlCount = body.Descendants<SdtBlock>().Count() + body.Descendants<SdtRun>().Count();
         var statsLine = $"File: {Path.GetFileName(_filePath)} | {paragraphs.Count} paragraphs | {tables.Count} tables | {imageCount} images";
+        if (oleCount > 0) statsLine += $" | {oleCount} OLE objects";
         if (equationCount > 0) statsLine += $" | {equationCount} equations";
         if (formFieldCount > 0) statsLine += $" | {formFieldCount} formfields";
         if (contentControlCount > 0) statsLine += $" | {contentControlCount} content controls";
@@ -734,6 +736,7 @@ public partial class WordHandler
         var paragraphs = GetBodyElements(body).OfType<Paragraph>().ToList();
         var tables = GetBodyElements(body).OfType<Table>().ToList();
         var imageCount = body.Descendants<Drawing>().Count();
+        var oleCount = body.Descendants<EmbeddedObject>().Count();
         var equationCount = body.Descendants().Count(e => e.LocalName == "oMathPara" || e is M.Paragraph);
 
         var formFieldCount = FindFormFields().Count;
@@ -747,6 +750,7 @@ public partial class WordHandler
             ["images"] = imageCount,
             ["equations"] = equationCount
         };
+        if (oleCount > 0) result["oleObjects"] = oleCount;
         if (formFieldCount > 0) result["formfields"] = formFieldCount;
         if (contentControlCount > 0) result["contentControls"] = contentControlCount;
 

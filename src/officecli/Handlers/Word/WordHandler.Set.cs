@@ -1038,6 +1038,62 @@ public partial class WordHandler
                         blip.Embed = mainPartImg.GetIdOfPart(newImgPart);
                         break;
                     }
+                    case "wrap":
+                    {
+                        var drawingWrap = run.GetFirstChild<Drawing>();
+                        var anchorWrap = drawingWrap?.GetFirstChild<DW.Anchor>();
+                        if (anchorWrap == null) { unsupported.Add(key); break; }
+                        ReplaceWrapElement(anchorWrap, value);
+                        break;
+                    }
+                    case "hposition":
+                    {
+                        var drawingHP = run.GetFirstChild<Drawing>();
+                        var anchorHP = drawingHP?.GetFirstChild<DW.Anchor>();
+                        var hPosEl = anchorHP?.GetFirstChild<DW.HorizontalPosition>();
+                        if (hPosEl == null) { unsupported.Add(key); break; }
+                        var hOffset = hPosEl.GetFirstChild<DW.PositionOffset>();
+                        if (hOffset != null) hOffset.Text = ParseEmu(value).ToString();
+                        else hPosEl.AppendChild(new DW.PositionOffset(ParseEmu(value).ToString()));
+                        break;
+                    }
+                    case "vposition":
+                    {
+                        var drawingVP = run.GetFirstChild<Drawing>();
+                        var anchorVP = drawingVP?.GetFirstChild<DW.Anchor>();
+                        var vPosEl = anchorVP?.GetFirstChild<DW.VerticalPosition>();
+                        if (vPosEl == null) { unsupported.Add(key); break; }
+                        var vOffset = vPosEl.GetFirstChild<DW.PositionOffset>();
+                        if (vOffset != null) vOffset.Text = ParseEmu(value).ToString();
+                        else vPosEl.AppendChild(new DW.PositionOffset(ParseEmu(value).ToString()));
+                        break;
+                    }
+                    case "hrelative":
+                    {
+                        var drawingHR = run.GetFirstChild<Drawing>();
+                        var anchorHR = drawingHR?.GetFirstChild<DW.Anchor>();
+                        var hPosHR = anchorHR?.GetFirstChild<DW.HorizontalPosition>();
+                        if (hPosHR == null) { unsupported.Add(key); break; }
+                        hPosHR.RelativeFrom = ParseHorizontalRelative(value);
+                        break;
+                    }
+                    case "vrelative":
+                    {
+                        var drawingVR = run.GetFirstChild<Drawing>();
+                        var anchorVR = drawingVR?.GetFirstChild<DW.Anchor>();
+                        var vPosVR = anchorVR?.GetFirstChild<DW.VerticalPosition>();
+                        if (vPosVR == null) { unsupported.Add(key); break; }
+                        vPosVR.RelativeFrom = ParseVerticalRelative(value);
+                        break;
+                    }
+                    case "behindtext":
+                    {
+                        var drawingBT = run.GetFirstChild<Drawing>();
+                        var anchorBT = drawingBT?.GetFirstChild<DW.Anchor>();
+                        if (anchorBT == null) { unsupported.Add(key); break; }
+                        anchorBT.BehindDoc = value.Equals("true", StringComparison.OrdinalIgnoreCase);
+                        break;
+                    }
                     case "link":
                     {
                         var mainPart3 = _doc.MainDocumentPart!;

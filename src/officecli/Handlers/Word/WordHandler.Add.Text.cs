@@ -235,17 +235,21 @@ public partial class WordHandler
             para.AppendChild(run);
         }
 
-        var paraCount = parent.Elements<Paragraph>().Count();
-        if (index.HasValue && index.Value < paraCount)
+        // Use ChildElements for index lookup to match ResolveAnchorPosition
+        // which computes indices against ChildElements (not just Paragraphs)
+        var allChildren = parent.ChildElements.ToList();
+        if (index.HasValue && index.Value < allChildren.Count)
         {
-            var refElement = parent.Elements<Paragraph>().ElementAt(index.Value);
+            var refElement = allChildren[index.Value];
             parent.InsertBefore(para, refElement);
-            resultPath = $"{parentPath}/{BuildParaPathSegment(para, index.Value + 1)}";
+            var paraPosIdx = parent.Elements<Paragraph>().ToList().IndexOf(para) + 1;
+            resultPath = $"{parentPath}/{BuildParaPathSegment(para, paraPosIdx)}";
         }
         else
         {
             AppendToParent(parent, para);
-            resultPath = $"{parentPath}/{BuildParaPathSegment(para, paraCount + 1)}";
+            var paraCount = parent.Elements<Paragraph>().Count();
+            resultPath = $"{parentPath}/{BuildParaPathSegment(para, paraCount)}";
         }
         return resultPath;
     }

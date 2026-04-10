@@ -340,6 +340,8 @@ officecli validate doc.docx
 | Page number on cover | Adding `--type footer --prop type=first` automatically enables differentFirstPage. Do NOT use `set / --prop differentFirstPage=true` — that prop is UNSUPPORTED and silently fails |
 | TOC skipped for multi-heading docs | Any document with 3+ headings requires a TOC. It is not optional — add with `--type toc --index 0` after the cover page break |
 | Code block indentation via spaces | Use the `ind.left` paragraph property (e.g. `--prop ind.left=720`) for code block indentation — consecutive spaces as padding produce `view issues` warnings and visually inconsistent results |
+| `--type paragraph --prop "image=..."` | Wrong syntax — creates empty paragraph. Use `--type picture --prop "path=file.png" --prop "width=12cm" --prop "height=12.5cm"`. Both width AND height required (omitting height defaults to 4in) |
+| Image shows as thin sliver | Image paragraph inherited fixed line spacing from Normal style. Set `--prop lineSpacing=1x` on the image paragraph, or use patched version which does this automatically |
 
 ---
 # officecli: v1.0.23
@@ -396,6 +398,8 @@ Batch fields: `command`, `path`, `parent`, `type`, `from`, `to`, `index`, `after
 | **`\mathcal` in equations causes validation errors** | The `\mathcal` LaTeX command generates invalid `m:scr` XML. Use `\mathit` or plain letters instead. |
 | **`view text` shows "1." for all numbered items** | Display-only limitation. Rendered output in Word/LibreOffice shows correct auto-incrementing numbers. |
 | **`chartType=pie`/`doughnut` in LibreOffice PDF** | **Do NOT use `chartType=pie` or `chartType=doughnut` when LibreOffice PDF delivery is required.** These chart types render without visible slices in LibreOffice PDF export — only labels and legend appear, slices are invisible. Use `chartType=column` or `chartType=bar` instead. Charts render correctly in Microsoft Word only. |
+| **`--after`/`--before` offset when document has tables** *(fixed in fork)* | When the document body contains `<w:tbl>` or `<w:sectPr>` elements, `--after`/`--before`/`--index` positioning shifts by 1 per non-paragraph element. Root cause: `ResolveAnchorPosition` computes index against `ChildElements` (all types), but `AddPicture`/`AddParagraph` look up against `Elements<Paragraph>()` (paragraphs only). **Fix applied**: both methods now use `ChildElements` for index lookup. If using unpatched version, verify insertion position with `view annotated` after each insert. |
+| **Inserted images clipped to one line height** *(fixed in fork)* | `add --type picture` creates a bare `<w:p>` with no `<w:pPr>`. If the document's Normal style has fixed line spacing ("Exactly Npt"), the image is clipped to that height — e.g., a 12cm image shows as a 1cm sliver. **Fix applied**: `AddPicture` now auto-injects `<w:spacing w:line="240" w:lineRule="auto"/>`. If using unpatched version, run `set "/body/p[@paraId=XXX]" --prop lineSpacing=1x` on each image paragraph after insertion. |
 
 ---
 # officecli: v1.0.23

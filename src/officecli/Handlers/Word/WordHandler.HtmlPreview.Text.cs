@@ -171,6 +171,14 @@ public partial class WordHandler
             return;
         }
 
+        // Check for OLE object with preview image (e.g., embedded Visio diagrams)
+        var oleObj = run.Descendants().FirstOrDefault(e => e.LocalName == "object");
+        if (oleObj != null)
+        {
+            RenderOlePreviewHtml(sb, oleObj);
+            return;
+        }
+
         // Footnote/endnote reference — render superscript number (don't return, run may also have text)
         var fnRef = run.GetFirstChild<FootnoteReference>();
         if (fnRef?.Id?.HasValue == true && fnRef.Id.Value > 0)
@@ -278,6 +286,93 @@ public partial class WordHandler
 
         if (needsSpan && !_ctx.LineBreakEnabled)
             sb.Append("</span>");
+    }
+
+    // ==================== OLE Object Rendering ====================
+
+    /// <summary>
+    /// Render an OLE object's preview image (v:imagedata inside w:object).
+    /// Handles embedded objects like Visio diagrams that use VML instead of DrawingML.
+    /// </summary>
+    private void RenderOlePreviewHtml(StringBuilder sb, OpenXmlElement oleObj)
+    {
+        var imageData = oleObj.Descendants()
+            .FirstOrDefault(e => e.LocalName == "imagedata");
+        if (imageData == null) return;
+
+        // Get r:id (relationship ID to the preview image part)
+        string? relId = null;
+        foreach (var attr in imageData.GetAttributes())
+        {
+            if (attr.LocalName == "id" && (attr.NamespaceUri?.Contains("relationships") ?? false))
+            {
+                relId = attr.Value;
+                break;
+            }
+        }
+        if (string.IsNullOrEmpty(relId)) return;
+
+        var dataUri = LoadImageAsDataUri(relId);
+        if (dataUri == null) return;
+
+        // Get dimensions from v:shape style="width:Xpt;height:Ypt"
+        double widthPt = 0, heightPt = 0;
+        var shape = oleObj.Descendants()
+            .FirstOrDefault(e => e.LocalName == "shape");
+        if (shape != null)
+        {
+            var styleAttr = shape.GetAttributes()
+                .FirstOrDefault(a => a.LocalName == "style").Value;
+            if (styleAttr != null)
+            {
+                var wMatch = Regex.Match(styleAttr, @"width:([\d.]+)pt");
+                var hMatch = Regex.Match(styleAttr, @"height:([\d.]+)pt");
+                if (wMatch.Success) double.TryParse(wMatch.Groups[1].Value,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out widthPt);
+                if (hMatch.Success) double.TryParse(hMatch.Groups[1].Value,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out heightPt);
+            }
+        }
+
+        // Fallback to dxaOrig/dyaOrig (twips → pt)
+        if (widthPt == 0 || heightPt == 0)
+        {
+            foreach (var attr in oleObj.GetAttributes())
+            {
+                if (attr.LocalName == "dxaOrig" && int.TryParse(attr.Value, out var dxa))
+                    widthPt = dxa / 20.0;
+                if (attr.LocalName == "dyaOrig" && int.TryParse(attr.Value, out var dya))
+                    heightPt = dya / 20.0;
+            }
+        }
+
+        var widthPx = widthPt > 0 ? (long)(widthPt * 96 / 72) : 0;
+        var heightPx = heightPt > 0 ? (long)(heightPt * 96 / 72) : 0;
+
+        // Check if the image format is browser-renderable
+        bool isWebCompatible = dataUri.Contains("image/png") || dataUri.Contains("image/jpeg")
+            || dataUri.Contains("image/gif") || dataUri.Contains("image/svg")
+            || dataUri.Contains("image/webp") || dataUri.Contains("image/bmp");
+
+        if (isWebCompatible)
+        {
+            var widthAttr = widthPx > 0 ? $" width=\"{widthPx}\"" : "";
+            var heightAttr = heightPx > 0 ? $" height=\"{heightPx}\"" : "";
+            var sizeStyle = widthPx > 0 ? $"max-width:100%;width:{widthPx}px;height:auto" : "max-width:100%";
+            sb.Append($"<img src=\"{dataUri}\" alt=\"Embedded object\"{widthAttr}{heightAttr} style=\"{sizeStyle}\">");
+        }
+        else
+        {
+            // EMF/WMF/TIFF — browsers can't render natively, show placeholder with dimensions
+            var ph = widthPx > 0 && heightPx > 0
+                ? $"width:{widthPx}px;height:{heightPx}px;max-width:100%"
+                : "min-width:200px;min-height:100px";
+            sb.Append($"<div style=\"{ph};border:1px dashed #bbb;background:#f5f5f5;display:flex;align-items:center;justify-content:center;color:#888;font-size:13px;margin:8px 0\">");
+            sb.Append("\U0001F4CE Embedded Object (preview not supported in browser)");
+            sb.Append("</div>");
+        }
     }
 
     // Footnote/endnote reference tracking is in _ctx.FootnoteRefs / _ctx.EndnoteRefs

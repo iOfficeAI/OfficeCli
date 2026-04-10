@@ -326,6 +326,50 @@ public partial class WordHandler
 
     // ==================== List / Numbering ====================
 
+    /// <summary>
+    /// Resolve numbering properties (numId, ilvl) from the paragraph's style chain.
+    /// Checks direct paragraph numPr first, then walks the style hierarchy.
+    /// Used to detect heading auto-numbering defined in styles.
+    /// </summary>
+    private (int numId, int ilvl)? ResolveNumPrFromStyle(Paragraph para)
+    {
+        // 1. Direct numPr on the paragraph
+        var numProps = para.ParagraphProperties?.NumberingProperties;
+        if (numProps != null)
+        {
+            var nid = numProps.NumberingId?.Val?.Value;
+            if (nid != null && nid != 0)
+                return (nid.Value, numProps.NumberingLevelReference?.Val?.Value ?? 0);
+        }
+
+        // 2. Walk the style chain
+        var styleId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+        if (styleId == null) return null;
+
+        var stylesPart = _doc.MainDocumentPart?.StyleDefinitionsPart;
+        if (stylesPart?.Styles == null) return null;
+
+        var visited = new HashSet<string>();
+        while (styleId != null && visited.Add(styleId))
+        {
+            var style = stylesPart.Styles.Elements<Style>()
+                .FirstOrDefault(s => s.StyleId?.Value == styleId);
+            if (style == null) break;
+
+            var styleNumPr = style.StyleParagraphProperties?.NumberingProperties;
+            if (styleNumPr != null)
+            {
+                var nid = styleNumPr.NumberingId?.Val?.Value;
+                if (nid != null && nid != 0)
+                    return (nid.Value, styleNumPr.NumberingLevelReference?.Val?.Value ?? 0);
+            }
+
+            styleId = style.BasedOn?.Val?.Value;
+        }
+
+        return null;
+    }
+
     private string? GetParagraphListStyle(Paragraph para)
     {
         var numProps = para.ParagraphProperties?.NumberingProperties;

@@ -267,7 +267,15 @@ public partial class WordHandler
         var bot=children[ci].offsetTop+children[ci].offsetHeight-body.offsetTop;
         if(bot>availH){splitIdx=ci;break;}
       }
-      if(splitIdx<=0)continue;
+      if(splitIdx<0)continue;
+      // When the first child itself exceeds page height, keep it and split after
+      if(splitIdx===0)splitIdx=1;
+      // Collect movable children from splitIdx onward
+      var toMove=[];
+      for(var mi=splitIdx;mi<children.length;mi++){
+        if(!children[mi].classList.contains('footnotes'))toMove.push(children[mi]);
+      }
+      if(toMove.length===0)continue; // irreducibly oversized single element
       // Create new page wrapped in page-wrapper
       var nw=document.createElement('div');
       nw.className='page-wrapper';
@@ -276,11 +284,6 @@ public partial class WordHandler
       np.style.cssText=page.style.cssText;
       var nb=document.createElement('div');
       nb.className='page-body';
-      // Move overflow children to new page (skip footnotes — they stay on the reference page)
-      var toMove=[];
-      for(var mi=splitIdx;mi<children.length;mi++){
-        if(!children[mi].classList.contains('footnotes'))toMove.push(children[mi]);
-      }
       for(var mi=0;mi<toMove.length;mi++){
         nb.appendChild(toMove[mi]);
       }
@@ -317,12 +320,15 @@ public partial class WordHandler
       var f=b.querySelector('.footnotes');
       var fh=f?f.offsetHeight:0;
       var ch=0;
+      var visibleCount=0;
       Array.from(b.children).forEach(function(c){
         if(c.classList.contains('footnotes'))return;
         var bt=c.offsetTop+c.offsetHeight-b.offsetTop;
         if(bt>ch)ch=bt;
+        if(c.offsetHeight>0)visibleCount++;
       });
-      if(ch>maxBodyH-fh+2)again=true;
+      // Only re-paginate if overflow AND more than one visible child to split
+      if(ch>maxBodyH-fh+2 && visibleCount>1)again=true;
     });
     if(again)setTimeout(paginate,0);
     else{setTimeout(positionFootnotes,0);setTimeout(applyPageFilter,0);setTimeout(function(){scalePages(false);},0);}
@@ -762,6 +768,7 @@ public partial class WordHandler
         var numIdLevelOffset = new Dictionary<int, int>(); // numId → effective ilvl offset for cross-numId nesting
         var olCountPerLevel = new Dictionary<int, int>(); // ilvl → running <ol> item count for `start` attribute
         var multiLevelCounters = new Dictionary<int, int>(); // ilvl → counter for multi-level numbering
+        var headingCounters = new Dictionary<int, int>(); // ilvl → counter for heading auto-numbering (from style numPr)
         bool pendingLiClose = false; // defer </li> to allow nested lists inside
         bool inMultiColumn = false; // track whether we're inside a multi-column div
 
@@ -1056,6 +1063,31 @@ public partial class WordHandler
                     if (!string.IsNullOrEmpty(hStyle))
                         sb.Append($" style=\"{hStyle}\"");
                     sb.Append(">");
+
+                    // Heading auto-numbering from style (e.g., "1", "1.1", "1.2.1")
+                    var hNumPr = ResolveNumPrFromStyle(para);
+                    if (hNumPr != null)
+                    {
+                        var (hNumId, hIlvl) = hNumPr.Value;
+                        headingCounters[hIlvl] = headingCounters.GetValueOrDefault(hIlvl, 0) + 1;
+                        // Reset deeper level counters
+                        for (int lk = hIlvl + 1; lk <= 8; lk++)
+                            if (headingCounters.ContainsKey(lk)) headingCounters[lk] = 0;
+
+                        var lvlText = GetLevelText(hNumId, hIlvl);
+                        if (lvlText != null)
+                        {
+                            var numStr = lvlText;
+                            for (int lk = 0; lk <= hIlvl; lk++)
+                                numStr = numStr.Replace($"%{lk + 1}",
+                                    headingCounters.GetValueOrDefault(lk, 0).ToString());
+                            // Skip if paragraph text already starts with the number (avoid duplication)
+                            var paraText = GetParagraphText(para).TrimStart();
+                            if (!paraText.StartsWith(numStr, StringComparison.Ordinal))
+                                sb.Append($"<span class=\"heading-num\" style=\"margin-right:0.5em\">{HtmlEncode(numStr)}</span>");
+                        }
+                    }
+
                     RenderParagraphContentHtml(sb, para);
                     sb.AppendLine($"</h{headingLevel}>");
                     if (hasReflect)

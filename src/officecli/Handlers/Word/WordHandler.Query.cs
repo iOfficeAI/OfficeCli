@@ -836,6 +836,8 @@ public partial class WordHandler
             parsed.Element == "bookmark";
         bool isSdtSelector = parsed.ChildSelector == null &&
             (parsed.Element == "sdt" || parsed.Element == "contentcontrol");
+        bool isOleSelector = parsed.ChildSelector == null &&
+            (parsed.Element is "ole" or "object" or "embed");
 
         // Scheme B: generic XML fallback for unrecognized element types
         // Use GenericXmlQuery.ParseSelector which properly handles namespace prefixes (e.g., "a:ln")
@@ -855,7 +857,8 @@ public partial class WordHandler
                 or "style"
                 or "revision" or "change" or "trackchange"
                 or "media"
-                or "hyperlink";
+                or "hyperlink"
+                or "ole" or "object" or "embed";
         if (!isKnownType && parsed.ChildSelector == null)
         {
             var root = _doc.MainDocumentPart?.Document;
@@ -1433,6 +1436,27 @@ public partial class WordHandler
                             {
                                 results.Add(CreateImageNode(drawing, run, $"/body/{BuildParaPathSegment(para, paraIdx + 1)}/r[{runIdx + 1}]"));
                             }
+                        }
+
+                        // Also detect OLE embedded objects (Visio, Excel, etc.)
+                        var oleObject = run.GetFirstChild<EmbeddedObject>();
+                        if (oleObject != null)
+                        {
+                            results.Add(CreateOleNode(oleObject, run, $"/body/{BuildParaPathSegment(para, paraIdx + 1)}/r[{runIdx + 1}]"));
+                        }
+
+                        runIdx++;
+                    }
+                }
+                else if (isOleSelector)
+                {
+                    int runIdx = 0;
+                    foreach (var run in GetAllRuns(para))
+                    {
+                        var oleObject = run.GetFirstChild<EmbeddedObject>();
+                        if (oleObject != null)
+                        {
+                            results.Add(CreateOleNode(oleObject, run, $"/body/{BuildParaPathSegment(para, paraIdx + 1)}/r[{runIdx + 1}]"));
                         }
                         runIdx++;
                     }

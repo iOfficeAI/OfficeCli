@@ -17,6 +17,7 @@
   <ItemGroup>
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.4.1" />
     <PackageReference Include="System.CommandLine" Version="3.0.0-preview.2.26159.112" />
+    <PackageReference Include="System.Drawing.Common" Version="10.0.5" />
   </ItemGroup>
 
   <ItemGroup Condition="Exists('wiki/')">

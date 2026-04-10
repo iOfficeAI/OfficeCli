@@ -998,13 +998,6 @@ public partial class WordHandler
         InsertPosition? position,
         Dictionary<string, string> properties)
     {
-        // Parent must be a paragraph (or we navigate to one)
-        Paragraph para;
-        if (parent is Paragraph p)
-            para = p;
-        else
-            throw new ArgumentException("after=\"find:...\" / before=\"find:...\" requires a paragraph parent path (e.g. /body/p[1]), not a section-level path like /body.");
-
         // Support regex=true prop as alternative to r"..." prefix
         // CONSISTENCY(find-regex): mirror of WordHandler.Set.cs:60-61. grep
         // "CONSISTENCY(find-regex)" for every project-wide call site.
@@ -1012,6 +1005,22 @@ public partial class WordHandler
             findValue = $"r\"{findValue}\"";
 
         var (pattern, isRegex) = ParseFindPattern(findValue);
+
+        // Resolve parent to a paragraph — supports both paragraph-level and container-level (body/cell/sdt)
+        Paragraph para;
+        string paraPath;
+        if (parent is Paragraph p)
+        {
+            para = p;
+            paraPath = parentPath;
+        }
+        else
+        {
+            // Search across all child paragraphs in the container
+            (para, paraPath) = FindParagraphContainingText(parent, parentPath, pattern, isRegex)
+                ?? throw new ArgumentException($"Text '{findValue}' not found in any paragraph under {parentPath}.");
+        }
+
         var runTexts = BuildRunTexts(para);
         if (runTexts.Count == 0)
             throw new ArgumentException("Paragraph has no text content to search.");
@@ -1029,12 +1038,37 @@ public partial class WordHandler
 
         if (isInline)
         {
-            return AddInlineAtSplitPoint(para, parentPath, splitPoint, type, position, properties);
+            return AddInlineAtSplitPoint(para, paraPath, splitPoint, type, position, properties);
         }
         else
         {
-            return AddBlockAtSplitPoint(para, parentPath, splitPoint, type, position, properties);
+            return AddBlockAtSplitPoint(para, paraPath, splitPoint, type, position, properties);
         }
+    }
+
+    /// <summary>
+    /// Search child paragraphs of a container for text matching the given pattern.
+    /// Returns the first matching paragraph and its constructed path.
+    /// </summary>
+    private (Paragraph Para, string Path)? FindParagraphContainingText(
+        OpenXmlElement container, string containerPath, string pattern, bool isRegex)
+    {
+        var paragraphs = container.Elements<Paragraph>().ToList();
+        for (int i = 0; i < paragraphs.Count; i++)
+        {
+            var candidate = paragraphs[i];
+            var runTexts = BuildRunTexts(candidate);
+            if (runTexts.Count == 0) continue;
+
+            var fullText = string.Concat(runTexts.Select(rt => rt.TextElement.Text));
+            var matches = FindMatchRanges(fullText, pattern, isRegex);
+            if (matches.Count > 0)
+            {
+                var paraPath = $"{containerPath}/{BuildParaPathSegment(candidate, i + 1)}";
+                return (candidate, paraPath);
+            }
+        }
+        return null;
     }
 
     /// <summary>

@@ -1,6 +1,7 @@
 // Copyright 2025 OfficeCli (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Runtime.Versioning;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Wordprocessing;
 using OfficeCli.Core;
@@ -203,6 +204,224 @@ public partial class WordHandler
         if (extent?.Cy != null) node.Format["height"] = $"{extent.Cy.Value / 360000.0:F1}cm";
         if (docProps?.Description?.Value != null) node.Format["alt"] = docProps.Description.Value;
 
+        // Detect wrap type and position from inline/anchor
+        var inlineEl = drawing.GetFirstChild<DW.Inline>();
+        var anchorEl = drawing.GetFirstChild<DW.Anchor>();
+        if (inlineEl != null)
+        {
+            node.Format["wrap"] = "inline";
+        }
+        else if (anchorEl != null)
+        {
+            node.Format["wrap"] = DetectWrapType(anchorEl);
+            if (anchorEl.BehindDoc?.Value == true)
+                node.Format["behindText"] = true;
+
+            var hPos = anchorEl.GetFirstChild<DW.HorizontalPosition>();
+            if (hPos != null)
+            {
+                var offset = hPos.GetFirstChild<DW.PositionOffset>();
+                if (offset != null && long.TryParse(offset.Text, out var hEmu))
+                    node.Format["hPosition"] = $"{hEmu / 360000.0:F1}cm";
+                if (hPos.RelativeFrom?.HasValue == true)
+                    node.Format["hRelative"] = hPos.RelativeFrom.InnerText;
+            }
+
+            var vPos = anchorEl.GetFirstChild<DW.VerticalPosition>();
+            if (vPos != null)
+            {
+                var offset = vPos.GetFirstChild<DW.PositionOffset>();
+                if (offset != null && long.TryParse(offset.Text, out var vEmu))
+                    node.Format["vPosition"] = $"{vEmu / 360000.0:F1}cm";
+                if (vPos.RelativeFrom?.HasValue == true)
+                    node.Format["vRelative"] = vPos.RelativeFrom.InnerText;
+            }
+        }
+
         return node;
+    }
+
+    private static string DetectWrapType(DW.Anchor anchor)
+    {
+        if (anchor.GetFirstChild<DW.WrapNone>() != null) return "none";
+        if (anchor.GetFirstChild<DW.WrapSquare>() != null) return "square";
+        if (anchor.GetFirstChild<DW.WrapTight>() != null) return "tight";
+        if (anchor.GetFirstChild<DW.WrapThrough>() != null) return "through";
+        if (anchor.GetFirstChild<DW.WrapTopBottom>() != null) return "topandbottom";
+        return "none";
+    }
+
+    private static void ReplaceWrapElement(DW.Anchor anchor, string wrapType)
+    {
+        // Remove existing wrap element
+        anchor.GetFirstChild<DW.WrapNone>()?.Remove();
+        anchor.GetFirstChild<DW.WrapSquare>()?.Remove();
+        anchor.GetFirstChild<DW.WrapTight>()?.Remove();
+        anchor.GetFirstChild<DW.WrapThrough>()?.Remove();
+        anchor.GetFirstChild<DW.WrapTopBottom>()?.Remove();
+
+        OpenXmlElement newWrap = wrapType.ToLowerInvariant() switch
+        {
+            "square" => new DW.WrapSquare { WrapText = DW.WrapTextValues.BothSides },
+            "tight" => new DW.WrapTight(new DW.WrapPolygon(
+                new DW.StartPoint { X = 0, Y = 0 },
+                new DW.LineTo { X = 21600, Y = 0 },
+                new DW.LineTo { X = 21600, Y = 21600 },
+                new DW.LineTo { X = 0, Y = 21600 },
+                new DW.LineTo { X = 0, Y = 0 }
+            ) { Edited = false }),
+            "through" => new DW.WrapThrough(new DW.WrapPolygon(
+                new DW.StartPoint { X = 0, Y = 0 },
+                new DW.LineTo { X = 21600, Y = 0 },
+                new DW.LineTo { X = 21600, Y = 21600 },
+                new DW.LineTo { X = 0, Y = 21600 },
+                new DW.LineTo { X = 0, Y = 0 }
+            ) { Edited = false }),
+            "topandbottom" or "topbottom" => new DW.WrapTopBottom(),
+            "none" => new DW.WrapNone(),
+            _ => throw new ArgumentException($"Invalid wrap value: '{wrapType}'. Valid values: none, square, tight, through, topandbottom.")
+        };
+
+        // Insert wrap after EffectExtent (standard OOXML order)
+        var effectExtent = anchor.GetFirstChild<DW.EffectExtent>();
+        if (effectExtent != null)
+            effectExtent.InsertAfterSelf(newWrap);
+        else
+            anchor.PrependChild(newWrap);
+    }
+
+    private DocumentNode CreateOleNode(EmbeddedObject oleObj, Run run, string path)
+    {
+        var node = new DocumentNode
+        {
+            Path = path,
+            Type = "ole",
+            Text = ""
+        };
+        node.Format["objectType"] = "ole";
+
+        // Extract ProgID from o:OLEObject
+        var oleElement = oleObj.Descendants().FirstOrDefault(e => e.LocalName == "OLEObject");
+        if (oleElement != null)
+        {
+            var progId = oleElement.GetAttributes().FirstOrDefault(a => a.LocalName == "ProgID").Value;
+            if (progId != null)
+            {
+                node.Format["progId"] = progId;
+                node.Text = progId;
+            }
+        }
+
+        // Extract dimensions from v:shape style
+        var shape = oleObj.Descendants().FirstOrDefault(e => e.LocalName == "shape");
+        if (shape != null)
+        {
+            var style = shape.GetAttributes().FirstOrDefault(a => a.LocalName == "style").Value;
+            if (style != null)
+                ParseVmlStyle(style, node);
+        }
+
+        // Extract preview image from v:imagedata (Windows only — requires GDI+)
+        var (previewPath, previewContentType) = OperatingSystem.IsWindowsVersionAtLeast(6, 1)
+            ? ExtractOlePreviewImage(oleObj, path)
+            : (null, null);
+        if (previewPath != null)
+        {
+            node.Format["previewImage"] = previewPath;
+            if (previewContentType != null)
+                node.Format["previewContentType"] = previewContentType;
+        }
+
+        return node;
+    }
+
+    /// <summary>
+    /// Extract the OLE preview image (EMF/WMF) from v:imagedata, convert to PNG,
+    /// and save to temp directory. Returns (pngPath, originalContentType) or (null, null).
+    /// </summary>
+    [SupportedOSPlatform("windows6.1")]
+    private (string? path, string? contentType) ExtractOlePreviewImage(EmbeddedObject oleObj, string nodePath)
+    {
+        var mainPart = _doc.MainDocumentPart;
+        if (mainPart == null) return (null, null);
+
+        // Find v:imagedata element and its r:id
+        var shape = oleObj.Descendants().FirstOrDefault(e => e.LocalName == "shape");
+        if (shape == null) return (null, null);
+
+        var imageData = shape.Descendants().FirstOrDefault(e => e.LocalName == "imagedata");
+        if (imageData == null) return (null, null);
+
+        var rId = imageData.GetAttributes().FirstOrDefault(a => a.LocalName == "id").Value;
+        if (string.IsNullOrEmpty(rId)) return (null, null);
+
+        try
+        {
+            var imgPart = mainPart.GetPartById(rId);
+            using var stream = imgPart.GetStream();
+            using var ms = new MemoryStream();
+            stream.CopyTo(ms);
+            ms.Position = 0;
+
+            var contentType = imgPart.ContentType ?? "";
+            var isMetafile = contentType.Contains("emf") || contentType.Contains("wmf")
+                          || contentType.Contains("metafile");
+
+            // Build a stable file name from the node path
+            var safeId = nodePath.Replace("/", "_").Replace("[", "").Replace("]", "").TrimStart('_');
+            var pngPath = Path.Combine(Path.GetTempPath(), $"officecli_ole_{safeId}.png");
+
+            if (isMetafile)
+            {
+                // Convert EMF/WMF to PNG using System.Drawing (Windows GDI+)
+                using var img = System.Drawing.Image.FromStream(ms);
+                img.Save(pngPath, System.Drawing.Imaging.ImageFormat.Png);
+            }
+            else if (contentType.Contains("png"))
+            {
+                using var fs = new FileStream(pngPath, FileMode.Create);
+                ms.CopyTo(fs);
+            }
+            else
+            {
+                // JPEG or other raster — convert to PNG for consistency
+                using var img = System.Drawing.Image.FromStream(ms);
+                img.Save(pngPath, System.Drawing.Imaging.ImageFormat.Png);
+            }
+
+            return (pngPath, contentType);
+        }
+        catch
+        {
+            return (null, null);
+        }
+    }
+
+    private static void ParseVmlStyle(string style, DocumentNode node)
+    {
+        foreach (var part in style.Split(';', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var kv = part.Split(':', 2);
+            if (kv.Length != 2) continue;
+            var k = kv[0].Trim().ToLowerInvariant();
+            var v = kv[1].Trim();
+            if (k == "width") node.Format["width"] = ConvertPtToCm(v);
+            else if (k == "height") node.Format["height"] = ConvertPtToCm(v);
+        }
+    }
+
+    private static string ConvertPtToCm(string ptValue)
+    {
+        // Handle values like "385.45pt"
+        var num = ptValue.Replace("pt", "").Replace("in", "").Trim();
+        if (double.TryParse(num, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var val))
+        {
+            if (ptValue.EndsWith("pt", StringComparison.OrdinalIgnoreCase))
+                return $"{val * 2.54 / 72.0:F1}cm";
+            if (ptValue.EndsWith("in", StringComparison.OrdinalIgnoreCase))
+                return $"{val * 2.54:F1}cm";
+        }
+        return ptValue; // return as-is if unparseable
     }
 }
