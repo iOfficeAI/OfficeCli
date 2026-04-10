@@ -35,6 +35,14 @@ public partial class HwpxHandler
                     else
                         unsupported.Add(key);  // Don't silently coerce unsupported keys to text
                     break;
+                case "tc":
+                    if (!SetCellProp(element, key, value))
+                        unsupported.Add(key);
+                    break;
+                case "tbl":
+                    if (!SetTableProp(element, key, value))
+                        unsupported.Add(key);
+                    break;
                 default:
                     SetGenericAttr(element, key, value);
                     break;
@@ -58,6 +66,89 @@ public partial class HwpxHandler
     private void SetTextProp(XElement tElement, string value)
     {
         tElement.Value = value;
+    }
+
+    // ==================== Table ====================
+
+    /// <summary>
+    /// Dispatch table property by name.
+    /// </summary>
+    private bool SetTableProp(XElement tbl, string property, string value)
+    {
+        return property.ToLowerInvariant() switch
+        {
+            "borderfillid" or "borderfillidref" => SetAttribute(tbl, "borderFillIDRef", value),
+            "cellspacing" => SetAttribute(tbl, "cellSpacing", value),
+            _ => false
+        };
+    }
+
+    // ==================== Table Cell ====================
+
+    /// <summary>
+    /// Dispatch table cell property by name.
+    /// Supports: text, colspan, rowspan, borderfillid.
+    /// </summary>
+    private bool SetCellProp(XElement tc, string property, string value)
+    {
+        return property.ToLowerInvariant() switch
+        {
+            "text" => SetCellText(tc, value),
+            "colspan" => SetCellSpan(tc, "colSpan", value),
+            "rowspan" => SetCellSpan(tc, "rowSpan", value),
+            "borderfillid" or "borderfillidref" => SetAttribute(tc, "borderFillIDRef", value),
+            _ => false
+        };
+    }
+
+    /// <summary>
+    /// Set text content of a table cell by navigating tc → subList → p → run → t.
+    /// </summary>
+    private bool SetCellText(XElement tc, string text)
+    {
+        var subList = tc.Element(HwpxNs.Hp + "subList");
+        if (subList == null) return false;
+
+        var para = subList.Element(HwpxNs.Hp + "p");
+        if (para == null) return false;
+
+        return SetParagraphText(para, text);
+    }
+
+    /// <summary>
+    /// Set rowSpan or colSpan on a cell. Prefers the separate &lt;hp:cellSpan&gt; element
+    /// (Hancom native format); falls back to cellAddr attributes for legacy documents.
+    /// </summary>
+    private static bool SetCellSpan(XElement tc, string spanAttr, string value)
+    {
+        if (!int.TryParse(value, out var spanVal) || spanVal < 1)
+            return false;
+
+        // Prefer separate <hp:cellSpan> element (Hancom native format)
+        var cellSpan = tc.Element(HwpxNs.Hp + "cellSpan");
+        if (cellSpan != null)
+        {
+            cellSpan.SetAttributeValue(spanAttr, spanVal.ToString());
+            return true;
+        }
+
+        // Fallback: create cellSpan element if cellAddr exists
+        var cellAddr = tc.Element(HwpxNs.Hp + "cellAddr");
+        if (cellAddr == null) return false;
+
+        // Check if span was on cellAddr (legacy)
+        if (cellAddr.Attribute(spanAttr) != null)
+        {
+            cellAddr.SetAttributeValue(spanAttr, spanVal.ToString());
+            return true;
+        }
+
+        // Create new cellSpan element after cellAddr
+        var newCellSpan = new XElement(HwpxNs.Hp + "cellSpan",
+            new XAttribute("colSpan", spanAttr == "colSpan" ? spanVal.ToString() : "1"),
+            new XAttribute("rowSpan", spanAttr == "rowSpan" ? spanVal.ToString() : "1"));
+        cellAddr.AddAfterSelf(newCellSpan);
+        return true;
     }
 
     // ==================== Paragraph ====================

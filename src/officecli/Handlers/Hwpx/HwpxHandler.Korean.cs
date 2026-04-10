@@ -23,8 +23,10 @@ internal static partial class HwpxKorean
 
     public static string NormalizeKoreanSpacing(string text)
     {
-        // Fix uniform-distribution spacing between Korean syllables
-        text = KoreanSpacingRegex().Replace(text, "$1$2");
+        // Fix uniform-distribution spacing (균등 분할): "현 장 대 응" → "현장대응"
+        // Only collapse when 3+ consecutive single Korean syllables are space-separated.
+        // Preserves normal word spacing like "인사 발령 통보".
+        text = UniformDistRegex().Replace(text, m => m.Value.Replace(" ", ""));
         // Remove zero-width joiners between jamo
         text = text.Replace("\u200D", "");
         return text;
@@ -33,6 +35,6 @@ internal static partial class HwpxKorean
     [GeneratedRegex(@"사각형입니다\.")]
     private static partial Regex ShapeAltTextRegex();
 
-    [GeneratedRegex(@"(\p{IsHangulSyllables}) +(\p{IsHangulSyllables})")]
-    private static partial Regex KoreanSpacingRegex();
+    [GeneratedRegex(@"(?<!\p{IsHangulSyllables})\p{IsHangulSyllables}(?: \p{IsHangulSyllables}){2,}(?!\p{IsHangulSyllables})")]
+    private static partial Regex UniformDistRegex();
 }

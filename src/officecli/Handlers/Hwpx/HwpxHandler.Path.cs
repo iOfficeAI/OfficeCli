@@ -14,6 +14,8 @@ public partial class HwpxHandler
     /// <summary>
     /// Parse a path string into segments.
     /// "/section[1]/p[3]" → [("section", 1), ("p", 3)]
+    /// "/section[1]/p[last]" → [("section", 1), ("p", -1)]
+    /// -1 is a sentinel value meaning "last element".
     /// </summary>
     internal static List<PathSegment> ParsePath(string path)
     {
@@ -22,12 +24,16 @@ public partial class HwpxHandler
 
         foreach (var part in parts)
         {
-            var match = Regex.Match(part, @"^(\w+)(?:\[(\d+)\])?$");
+            var match = Regex.Match(part, @"^(\w+)(?:\[(\d+|last)\])?$");
             if (!match.Success)
                 throw new ArgumentException($"Invalid path segment: '{part}'");
 
             var name = match.Groups[1].Value;
-            int? index = match.Groups[2].Success ? int.Parse(match.Groups[2].Value) : null;
+            int? index;
+            if (match.Groups[2].Success)
+                index = match.Groups[2].Value == "last" ? -1 : int.Parse(match.Groups[2].Value);
+            else
+                index = null;
             segments.Add(new PathSegment(name, index));
         }
 
@@ -98,7 +104,6 @@ public partial class HwpxHandler
     private XElement ResolveChildElement(XElement parent, PathSegment segment)
     {
         var name = segment.Name.ToLowerInvariant();
-        var idx = (segment.Index ?? 1) - 1; // convert 1-indexed to 0-indexed
 
         XName elementName = name switch
         {
@@ -109,13 +114,33 @@ public partial class HwpxHandler
             "run" => HwpxNs.Hp + "run",
             "img" => HwpxNs.Hp + "img",
             "drawing" => HwpxNs.Hp + "drawing",
+            "sublist" => HwpxNs.Hp + "subList",
             _ => throw new ArgumentException($"Unknown element type: '{name}'")
         };
 
-        var children = parent.Elements(elementName).ToList();
+        // When parent is <hp:tc>, transparently navigate through <hp:subList>
+        // so paths like /tbl[1]/tr[1]/tc[1]/p[1] work without explicit subList
+        var searchParent = parent;
+        if (parent.Name.LocalName == "tc" && (name == "p" || name == "run"))
+        {
+            searchParent = parent.Element(HwpxNs.Hp + "subList") ?? parent;
+        }
+
+        var children = searchParent.Elements(elementName).ToList();
+
+        // Resolve index: -1 = last, null = first (1), positive = 1-based
+        int idx;
+        if (segment.Index == -1)
+            idx = children.Count - 1;
+        else
+            idx = (segment.Index ?? 1) - 1;
+
         if (idx < 0 || idx >= children.Count)
+        {
+            var label = segment.Index == -1 ? "last" : (segment.Index ?? 1).ToString();
             throw new ArgumentException(
-                $"{name}[{segment.Index ?? 1}] not found (parent has {children.Count} {name} elements)");
+                $"{name}[{label}] not found (parent has {children.Count} {name} elements)");
+        }
 
         return children[idx];
     }
@@ -177,6 +202,13 @@ public partial class HwpxHandler
         {
             var localName = current.Name.LocalName;
             var ns = current.Name.Namespace;
+
+            // Skip subList in path building — users navigate tc/p directly
+            if (localName == "subList")
+            {
+                current = current.Parent;
+                continue;
+            }
 
             if (ns == HwpxNs.Hs && localName == "sec")
             {

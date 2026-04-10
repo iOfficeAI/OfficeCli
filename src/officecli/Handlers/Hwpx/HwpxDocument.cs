@@ -36,4 +36,65 @@ internal class HwpxDocument
                 yield return (sec, tbl, localIdx++);
         }
     }
+
+    /// <summary>All content elements (paragraphs + table cells) in document order for text extraction.
+    /// Handles both officecli-created tables (direct section children) and
+    /// Hancom-created tables (nested inside p &gt; run &gt; tbl).</summary>
+    public IEnumerable<(HwpxSection Section, XElement Paragraph, string Path)> AllContentInOrder()
+    {
+        foreach (var sec in Sections)
+        {
+            int paraIdx = 0;
+            int tblIdx = 0;
+            foreach (var child in sec.Root.Elements())
+            {
+                var localName = child.Name.LocalName;
+                if (localName == "p")
+                {
+                    paraIdx++;
+                    yield return (sec, child, $"/section[{sec.Index + 1}]/p[{paraIdx}]");
+
+                    // Hancom nests tables inside p > run > tbl
+                    var nestedTables = child.Descendants(HwpxNs.Hp + "tbl");
+                    foreach (var ntbl in nestedTables)
+                    {
+                        tblIdx++;
+                        foreach (var item in EnumerateTableCells(sec, ntbl, tblIdx))
+                            yield return item;
+                    }
+                }
+                else if (localName == "tbl")
+                {
+                    tblIdx++;
+                    foreach (var item in EnumerateTableCells(sec, child, tblIdx))
+                        yield return item;
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<(HwpxSection Section, XElement Paragraph, string Path)> EnumerateTableCells(
+        HwpxSection sec, XElement tbl, int tblIdx)
+    {
+        int rowIdx = 0;
+        foreach (var tr in tbl.Elements(HwpxNs.Hp + "tr"))
+        {
+            rowIdx++;
+            int cellIdx = 0;
+            foreach (var tc in tr.Elements(HwpxNs.Hp + "tc"))
+            {
+                cellIdx++;
+                var subList = tc.Element(HwpxNs.Hp + "subList");
+                var paragraphs = subList?.Elements(HwpxNs.Hp + "p")
+                    ?? tc.Elements(HwpxNs.Hp + "p");
+                int cellParaIdx = 0;
+                foreach (var p in paragraphs)
+                {
+                    cellParaIdx++;
+                    var path = $"/section[{sec.Index + 1}]/tbl[{tblIdx}]/tr[{rowIdx}]/tc[{cellIdx}]/p[{cellParaIdx}]";
+                    yield return (sec, p, path);
+                }
+            }
+        }
+    }
 }

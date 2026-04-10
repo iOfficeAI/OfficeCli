@@ -16,7 +16,7 @@ public partial class HwpxHandler
         int lineNum = 0;
         int emitted = 0;
 
-        foreach (var (section, para, localIdx) in _doc.AllParagraphs())
+        foreach (var (section, para, path) in _doc.AllContentInOrder())
         {
             lineNum++;
             if (startLine.HasValue && lineNum < startLine.Value) continue;
@@ -27,9 +27,7 @@ public partial class HwpxHandler
 
             if (maxLines.HasValue && emitted >= maxLines.Value)
             {
-                int remaining = CountRemainingParagraphs(lineNum);
-                if (remaining > 0)
-                    sb.AppendLine($"... ({remaining} more lines)");
+                sb.AppendLine($"... (more lines)");
                 break;
             }
 
@@ -207,7 +205,7 @@ public partial class HwpxHandler
         int lineNum = 0;
         int emitted = 0;
 
-        foreach (var (section, para, localIdx) in _doc.AllParagraphs())
+        foreach (var (section, para, path) in _doc.AllContentInOrder())
         {
             lineNum++;
             if (startLine.HasValue && lineNum < startLine.Value) continue;
@@ -215,7 +213,6 @@ public partial class HwpxHandler
             if (maxLines.HasValue && emitted >= maxLines.Value) break;
 
             var text = HwpxKorean.Normalize(ExtractParagraphText(para));
-            var path = $"/section[{section.Index + 1}]/p[{localIdx + 1}]";
 
             lines.Add(new JsonObject
             {
@@ -229,7 +226,7 @@ public partial class HwpxHandler
         return new JsonObject
         {
             ["lines"] = lines,
-            ["totalLines"] = _doc.AllParagraphs().Count(),
+            ["totalLines"] = lineNum,
         };
     }
 

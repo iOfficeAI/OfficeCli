@@ -13,5 +13,6 @@ internal class HwpxSection
     public XDocument Document { get; set; } = null!;
     public XElement Root => Document.Root!;
     public List<XElement> Paragraphs => Root.Elements(HwpxNs.Hp + "p").ToList();
-    public List<XElement> Tables => Root.Elements(HwpxNs.Hp + "tbl").ToList();
+    /// <summary>All tables: both direct children and nested inside paragraphs (Hancom format).</summary>
+    public List<XElement> Tables => Root.Descendants(HwpxNs.Hp + "tbl").ToList();
 }
