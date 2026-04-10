@@ -608,6 +608,11 @@ public partial class HwpxHandler
         entry.Delete();
         var newEntry = _doc.Archive.CreateEntry(entryName, CompressionLevel.Optimal);
         using var stream = newEntry.Open();
-        _doc.Header.Save(stream);
+        // CRITICAL: Hancom requires single-line (minified) XML without BOM.
+        var xmlStr = HwpxPacker.MinifyXml(_doc.Header.ToString(SaveOptions.DisableFormatting));
+        xmlStr = HwpxPacker.RestoreOriginalNamespaces(xmlStr);
+        xmlStr = "<?xml version='1.0' encoding='UTF-8'?>" + xmlStr;
+        var bytes = System.Text.Encoding.UTF8.GetBytes(xmlStr);
+        stream.Write(bytes, 0, bytes.Length);
     }
 }

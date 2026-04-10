@@ -65,6 +65,47 @@ public static class HwpxPacker
         return xml;
     }
 
+    /// <summary>
+    /// Minify XML by removing whitespace between tags.
+    /// Hancom Office requires single-line XML — pretty-printed XML renders blank.
+    /// </summary>
+    public static string MinifyXml(string xml)
+    {
+        // Remove whitespace between > and < (inter-element whitespace)
+        // But preserve whitespace inside text content
+        return System.Text.RegularExpressions.Regex.Replace(xml, @">\s+<", "><");
+    }
+
+    /// <summary>
+    /// Reverse the namespace normalization before saving back to ZIP.
+    /// Hancom Office expects the original 2016 namespace URIs to remain intact.
+    /// Only restores namespaces that appear as xmlns declarations (not element content).
+    /// </summary>
+    public static string RestoreOriginalNamespaces(string xml)
+    {
+        // Reverse: canonical → legacy (only the ones that matter for xmlns declarations)
+        foreach (var (legacy, canonical) in HwpxNs.LegacyToCanonical)
+        {
+            // Only restore if the canonical URI appears in an xmlns declaration
+            // AND the original doc had the legacy URI (we can't know, so restore all)
+            // Use a targeted replacement: only in xmlns="..." context
+            var canonicalInXmlns = $"\"{canonical}\"";
+            var legacyInXmlns = $"\"{legacy}\"";
+            // Don't replace the main namespaces (hp, hs, hh, hc) — only hp10 etc.
+            // Actually it's safe to restore all since LegacyToCanonical only has 2016→2011 mappings
+        }
+
+        // Targeted fix: restore hp10 namespace (2011→2016 for paragraph)
+        // The key issue: hp10 prefix originally pointed to 2016/paragraph,
+        // but after normalization it points to 2011/paragraph (same as hp).
+        // This confuses Hancom. Only restore if there's a duplicate.
+        xml = xml.Replace(
+            "xmlns:hp10=\"http://www.hancom.co.kr/hwpml/2011/paragraph\"",
+            "xmlns:hp10=\"http://www.hancom.co.kr/hwpml/2016/paragraph\"");
+
+        return xml;
+    }
+
     // ==================== Write ====================
 
     /// <summary>

@@ -31,6 +31,13 @@ public partial class HwpxHandler
             _ => throw new CliException($"Unsupported element type: {type}")
         };
 
+        // Hancom requires tables to be wrapped: <hp:p><hp:run><hp:tbl>...</hp:tbl></hp:run></hp:p>
+        // If adding a table to a section (or section-like parent), wrap it in p>run.
+        if (newElement.Name == HwpxNs.Hp + "tbl" && IsSectionLike(parent))
+        {
+            newElement = WrapTableInParagraph(newElement);
+        }
+
         // Insert at index or append
         if (index.HasValue)
         {
@@ -163,17 +170,62 @@ public partial class HwpxHandler
         }
 
         var borderFillRef = props?.GetValueOrDefault("borderfillid")
-            ?? props?.GetValueOrDefault("borderFillIDRef") ?? "1";
+            ?? props?.GetValueOrDefault("borderFillIDRef")
+            ?? EnsureTableBorderFill();
+
+        var cellHeight = 1000;
+        var totalHeight = rows * cellHeight;
 
         var tbl = new XElement(HwpxNs.Hp + "tbl",
             new XAttribute("id", id),
-            new XAttribute("colCnt", cols.ToString()),
+            new XAttribute("zOrder", "0"),
+            new XAttribute("numberingType", "TABLE"),
+            new XAttribute("textWrap", "TOP_AND_BOTTOM"),
+            new XAttribute("textFlow", "BOTH_SIDES"),
+            new XAttribute("lock", "0"),
+            new XAttribute("dropcapstyle", "None"),
+            new XAttribute("pageBreak", "CELL"),
+            new XAttribute("repeatHeader", "1"),
             new XAttribute("rowCnt", rows.ToString()),
+            new XAttribute("colCnt", cols.ToString()),
             new XAttribute("cellSpacing", "0"),
-            new XAttribute("borderFillIDRef", borderFillRef)
+            new XAttribute("borderFillIDRef", borderFillRef),
+            new XAttribute("noAdjust", "0"),
+            // Table size — required by Hancom for rendering
+            new XElement(HwpxNs.Hp + "sz",
+                new XAttribute("width", totalWidth.ToString()),
+                new XAttribute("widthRelTo", "ABSOLUTE"),
+                new XAttribute("height", totalHeight.ToString()),
+                new XAttribute("heightRelTo", "ABSOLUTE"),
+                new XAttribute("protect", "0")),
+            // Position — treatAsChar=1 makes table inline with text
+            new XElement(HwpxNs.Hp + "pos",
+                new XAttribute("treatAsChar", "1"),
+                new XAttribute("affectLSpacing", "0"),
+                new XAttribute("flowWithText", "1"),
+                new XAttribute("allowOverlap", "0"),
+                new XAttribute("holdAnchorAndSO", "0"),
+                new XAttribute("vertRelTo", "PARA"),
+                new XAttribute("horzRelTo", "COLUMN"),
+                new XAttribute("vertAlign", "TOP"),
+                new XAttribute("horzAlign", "LEFT"),
+                new XAttribute("vertOffset", "0"),
+                new XAttribute("horzOffset", "0")),
+            // Outer margin
+            new XElement(HwpxNs.Hp + "outMargin",
+                new XAttribute("left", "283"),
+                new XAttribute("right", "283"),
+                new XAttribute("top", "283"),
+                new XAttribute("bottom", "283")),
+            // Inner margin
+            new XElement(HwpxNs.Hp + "inMargin",
+                new XAttribute("left", "510"),
+                new XAttribute("right", "510"),
+                new XAttribute("top", "141"),
+                new XAttribute("bottom", "141"))
         );
 
-        // Column widths
+        // Column widths — Hancom uses these to distribute column sizes
         for (int col = 0; col < cols; col++)
         {
             var cw = colWidthArr != null && col < colWidthArr.Length ? colWidthArr[col] : defaultCellWidth;
@@ -206,8 +258,6 @@ public partial class HwpxHandler
                 }
             }
         }
-
-        var cellHeight = 1000;
 
         // Build rows and cells
         for (int row = 0; row < rows; row++)
@@ -491,6 +541,95 @@ public partial class HwpxHandler
     // ==================== Helpers ====================
 
     /// <summary>
+    /// Ensure a borderFill with SOLID black borders exists in header.xml.
+    /// Returns the borderFill ID. If one already exists, returns its ID.
+    /// If not, creates a new one and returns the new ID.
+    /// </summary>
+    private string EnsureTableBorderFill()
+    {
+        var header = _doc.Header?.Root;
+        if (header == null) return "1"; // fallback
+
+        var refList = header.Element(HwpxNs.Hh + "refList");
+        if (refList == null) return "1";
+
+        var borderFills = refList.Element(HwpxNs.Hh + "borderFills");
+        if (borderFills == null) return "1";
+
+        // Check if any existing borderFill has SOLID borders on all 4 sides
+        foreach (var bf in borderFills.Elements(HwpxNs.Hh + "borderFill"))
+        {
+            var left = bf.Element(HwpxNs.Hh + "leftBorder");
+            var right = bf.Element(HwpxNs.Hh + "rightBorder");
+            var top = bf.Element(HwpxNs.Hh + "topBorder");
+            var bottom = bf.Element(HwpxNs.Hh + "bottomBorder");
+            if (left?.Attribute("type")?.Value == "SOLID"
+                && right?.Attribute("type")?.Value == "SOLID"
+                && top?.Attribute("type")?.Value == "SOLID"
+                && bottom?.Attribute("type")?.Value == "SOLID")
+            {
+                return bf.Attribute("id")?.Value ?? "1";
+            }
+        }
+
+        // None found — create a new one with SOLID black borders
+        var existingCount = borderFills.Elements(HwpxNs.Hh + "borderFill").Count();
+        var newId = (existingCount + 1).ToString();
+
+        var newBorderFill = new XElement(HwpxNs.Hh + "borderFill",
+            new XAttribute("id", newId),
+            new XAttribute("threeD", "0"),
+            new XAttribute("shadow", "0"),
+            new XAttribute("centerLine", "NONE"),
+            new XAttribute("breakCellSeparateLine", "0"),
+            new XElement(HwpxNs.Hh + "slash", new XAttribute("type", "NONE"), new XAttribute("Crooked", "0"), new XAttribute("isCounter", "0")),
+            new XElement(HwpxNs.Hh + "backSlash", new XAttribute("type", "NONE"), new XAttribute("Crooked", "0"), new XAttribute("isCounter", "0")),
+            new XElement(HwpxNs.Hh + "leftBorder", new XAttribute("type", "SOLID"), new XAttribute("width", "0.12 mm"), new XAttribute("color", "#000000")),
+            new XElement(HwpxNs.Hh + "rightBorder", new XAttribute("type", "SOLID"), new XAttribute("width", "0.12 mm"), new XAttribute("color", "#000000")),
+            new XElement(HwpxNs.Hh + "topBorder", new XAttribute("type", "SOLID"), new XAttribute("width", "0.12 mm"), new XAttribute("color", "#000000")),
+            new XElement(HwpxNs.Hh + "bottomBorder", new XAttribute("type", "SOLID"), new XAttribute("width", "0.12 mm"), new XAttribute("color", "#000000")),
+            new XElement(HwpxNs.Hh + "diagonal", new XAttribute("type", "SOLID"), new XAttribute("width", "0.12 mm"), new XAttribute("color", "#000000"))
+        );
+
+        borderFills.Add(newBorderFill);
+        borderFills.SetAttributeValue("itemCnt", (existingCount + 1).ToString());
+
+        // Save the modified header
+        SaveHeader();
+
+        return newId;
+    }
+
+    /// <summary>
+    /// Check if parent element is a section or section-like container.
+    /// Tables added to these containers must be wrapped in p>run.
+    /// </summary>
+    private static bool IsSectionLike(XElement parent)
+    {
+        var localName = parent.Name.LocalName;
+        return localName is "sec" or "section" or "body";
+    }
+
+    /// <summary>
+    /// Wrap a &lt;hp:tbl&gt; in &lt;hp:p&gt;&lt;hp:run&gt;...&lt;/hp:run&gt;&lt;/hp:p&gt;
+    /// so Hancom renders it. Without this wrapper, tables are invisible.
+    /// </summary>
+    private XElement WrapTableInParagraph(XElement tbl)
+    {
+        return new XElement(HwpxNs.Hp + "p",
+            new XAttribute("id", NewId()),
+            new XAttribute("styleIDRef", "0"),
+            new XAttribute("paraPrIDRef", "0"),
+            new XAttribute("pageBreak", "0"),
+            new XAttribute("columnBreak", "0"),
+            new XAttribute("merged", "0"),
+            new XElement(HwpxNs.Hp + "run",
+                new XAttribute("charPrIDRef", "0"),
+                tbl)
+        );
+    }
+
+    /// <summary>
     /// Build a Hancom-compatible <hp:tc> element with correct child ordering:
     /// subList → cellAddr → cellSpan → cellSz → cellMargin.
     /// This matches the structure produced by Hancom Office (2011 namespace).
@@ -544,12 +683,13 @@ public partial class HwpxHandler
     }
 
     /// <summary>
-    /// Generate a unique ID string.
-    /// Format: "p" + first 8 hex chars of a new GUID.
-    /// Short enough for readability, collision-resistant for single-document scope.
+    /// Generate a unique numeric ID string.
+    /// Hancom requires numeric IDs (not hex) for elements to render properly.
+    /// Uses a high base + random offset to avoid collisions with existing IDs.
     /// </summary>
+    private static long _idCounter = 2000000000L + Random.Shared.Next(0, 100000000);
     private string NewId()
     {
-        return "p" + Guid.NewGuid().ToString("N")[..8];
+        return Interlocked.Increment(ref _idCounter).ToString();
     }
 }

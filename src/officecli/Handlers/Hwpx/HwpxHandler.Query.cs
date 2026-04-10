@@ -389,6 +389,14 @@ public partial class HwpxHandler
         entry.Delete();
         var newEntry = _doc.Archive.CreateEntry(entryName, CompressionLevel.Optimal);
         using var stream = newEntry.Open();
-        section.Document.Save(stream);
+        // CRITICAL: Hancom requires single-line (minified) XML without BOM.
+        // XDocument.ToString() pretty-prints by default — use DisableFormatting.
+        var xmlStr = HwpxPacker.MinifyXml(section.Document.ToString(SaveOptions.DisableFormatting));
+        // Restore 2016 namespace for hp10 prefix — Hancom expects this original URI
+        xmlStr = HwpxPacker.RestoreOriginalNamespaces(xmlStr);
+        // Prepend XML declaration (without BOM)
+        xmlStr = "<?xml version='1.0' encoding='UTF-8'?>" + xmlStr;
+        var bytes = System.Text.Encoding.UTF8.GetBytes(xmlStr);
+        stream.Write(bytes, 0, bytes.Length);
     }
 }
