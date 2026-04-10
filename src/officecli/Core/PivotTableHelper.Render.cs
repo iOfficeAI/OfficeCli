@@ -73,6 +73,20 @@ internal static partial class PivotTableHelper
             return;
         }
 
+        // Compact + multi-row + subtotals OFF also routes through the general
+        // renderer. The N=2 specialized RenderMultiRowPivot lacks the
+        // compactLabelRows path (label-only parent rows + indented children) and
+        // falls back to an "outer / inner" string-concat hack on the first
+        // leaf, which doesn't match Excel. The general renderer treats N≥2
+        // compact+nosubtotals uniformly via its compactLabelRows branch.
+        if (ActiveLayoutMode == "compact" && !ActiveDefaultSubtotal
+            && rowFieldIndices.Count >= 2 && valueFields.Count >= 1)
+        {
+            RenderGeneralPivot(targetSheet, position, headers, columnData,
+                rowFieldIndices, colFieldIndices, valueFields, filterFieldIndices, valueStyleIds);
+            return;
+        }
+
         // Catch-all for field combinations not handled by the specialized N≤2
         // renderers below: 0×0, 0×1, 0×2, 2×0. RenderGeneralPivot handles
         // empty row/col axes naturally via empty AxisTrees.
