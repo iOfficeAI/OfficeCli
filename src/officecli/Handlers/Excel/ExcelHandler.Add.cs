@@ -1610,6 +1610,11 @@ public partial class ExcelHandler
                 return $"/{ptSheetName}/pivottable[{ptIdx}]";
             }
 
+            case "slicer":
+            {
+                return AddSlicer(parentPath, properties);
+            }
+
             case "col" or "column":
             {
                 var colSegments = parentPath.TrimStart('/').Split('/', 2);

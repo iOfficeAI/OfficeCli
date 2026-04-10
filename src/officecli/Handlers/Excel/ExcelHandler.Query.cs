@@ -565,6 +565,18 @@ public partial class ExcelHandler
             return ptNode;
         }
 
+        // Slicer path: /Sheet1/slicer[N]
+        var slicerMatch = Regex.Match(cellRef, @"^slicer\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (slicerMatch.Success)
+        {
+            var slIdx = int.Parse(slicerMatch.Groups[1].Value);
+            if (!TryFindSlicerByIndex(worksheet, slIdx, out var slicerElem, out var slicerCache) || slicerElem == null)
+                throw new ArgumentException($"slicer[{slIdx}] not found on sheet '{sheetNameFromPath}'");
+            var slNode = new DocumentNode { Path = path, Type = "slicer" };
+            ReadSlicerProperties(slicerElem, slicerCache, slNode);
+            return slNode;
+        }
+
         // Comment path: /Sheet1/comment[N]
         var commentMatch = Regex.Match(cellRef, @"^comment\[(\d+)\]$", RegexOptions.IgnoreCase);
         if (commentMatch.Success)
@@ -712,7 +724,7 @@ public partial class ExcelHandler
         var elementMatch = Regex.Match(selectorForType, @"^(\w+)");
         var elementName = elementMatch.Success ? elementMatch.Groups[1].Value : "";
         bool isKnownType = string.IsNullOrEmpty(elementName)
-            || elementName is "cell" or "row" or "sheet" or "validation" or "comment" or "note" or "table" or "listobject" or "chart" or "pivottable" or "pivot" or "shape" or "picture" or "sparkline" or "namedrange" or "definedname" or "media" or "image"
+            || elementName is "cell" or "row" or "sheet" or "validation" or "comment" or "note" or "table" or "listobject" or "chart" or "pivottable" or "pivot" or "slicer" or "shape" or "picture" or "sparkline" or "namedrange" or "definedname" or "media" or "image"
             || (elementName.Length <= 3 && Regex.IsMatch(elementName, @"^[A-Z]+$", RegexOptions.IgnoreCase));
         if (!isKnownType)
         {
@@ -868,6 +880,41 @@ public partial class ExcelHandler
                     {
                         var name = node.Format.TryGetValue("name", out var n) ? n?.ToString() : null;
                         if (name == null || !name.Contains(parsed.ValueContains, StringComparison.OrdinalIgnoreCase))
+                            continue;
+                    }
+                    results.Add(node);
+                }
+            }
+            return results;
+        }
+
+        // Handle slicer queries
+        if (elementName == "slicer")
+        {
+            foreach (var (sheetName, worksheetPart) in GetWorksheets())
+            {
+                if (parsed.Sheet != null && !sheetName.Equals(parsed.Sheet, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var slicersPart = worksheetPart.GetPartsOfType<SlicersPart>().FirstOrDefault();
+                if (slicersPart?.Slicers == null) continue;
+
+                var slicers = slicersPart.Slicers.Elements<X14.Slicer>().ToList();
+                for (int i = 0; i < slicers.Count; i++)
+                {
+                    if (!TryFindSlicerByIndex(worksheetPart, i + 1, out var slElem, out var slCache) || slElem == null)
+                        continue;
+                    var node = new DocumentNode
+                    {
+                        Path = $"/{sheetName}/slicer[{i + 1}]",
+                        Type = "slicer"
+                    };
+                    ReadSlicerProperties(slElem, slCache, node);
+
+                    if (parsed.ValueContains != null)
+                    {
+                        var nm = node.Format.TryGetValue("name", out var n) ? n?.ToString() : null;
+                        if (nm == null || !nm.Contains(parsed.ValueContains, StringComparison.OrdinalIgnoreCase))
                             continue;
                     }
                     results.Add(node);
