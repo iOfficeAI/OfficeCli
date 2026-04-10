@@ -83,25 +83,48 @@ public static class HwpxPacker
     /// </summary>
     public static string RestoreOriginalNamespaces(string xml)
     {
-        // Reverse: canonical → legacy (only the ones that matter for xmlns declarations)
-        foreach (var (legacy, canonical) in HwpxNs.LegacyToCanonical)
-        {
-            // Only restore if the canonical URI appears in an xmlns declaration
-            // AND the original doc had the legacy URI (we can't know, so restore all)
-            // Use a targeted replacement: only in xmlns="..." context
-            var canonicalInXmlns = $"\"{canonical}\"";
-            var legacyInXmlns = $"\"{legacy}\"";
-            // Don't replace the main namespaces (hp, hs, hh, hc) — only hp10 etc.
-            // Actually it's safe to restore all since LegacyToCanonical only has 2016→2011 mappings
-        }
-
-        // Targeted fix: restore hp10 namespace (2011→2016 for paragraph)
-        // The key issue: hp10 prefix originally pointed to 2016/paragraph,
-        // but after normalization it points to 2011/paragraph (same as hp).
-        // This confuses Hancom. Only restore if there's a duplicate.
+        // Fix 1: Restore hp10 namespace declaration (2011→2016)
         xml = xml.Replace(
             "xmlns:hp10=\"http://www.hancom.co.kr/hwpml/2011/paragraph\"",
             "xmlns:hp10=\"http://www.hancom.co.kr/hwpml/2016/paragraph\"");
+
+        // Fix 2: XDocument may have swapped hp: ↔ hp10: prefixes since both resolve
+        // to the same URI after normalization. Restore original prefix usage:
+        // Elements that should use hp: but got hp10: due to namespace collapse
+        xml = xml.Replace("<hp10:p ", "<hp:p ");
+        xml = xml.Replace("</hp10:p>", "</hp:p>");
+        xml = xml.Replace("<hp10:run ", "<hp:run ");
+        xml = xml.Replace("</hp10:run>", "</hp:run>");
+        xml = xml.Replace("<hp10:t>", "<hp:t>");
+        xml = xml.Replace("</hp10:t>", "</hp:t>");
+        xml = xml.Replace("<hp10:tbl ", "<hp:tbl ");
+        xml = xml.Replace("</hp10:tbl>", "</hp:tbl>");
+        xml = xml.Replace("<hp10:tr>", "<hp:tr>");
+        xml = xml.Replace("</hp10:tr>", "</hp:tr>");
+        xml = xml.Replace("<hp10:tr ", "<hp:tr ");
+        xml = xml.Replace("<hp10:tc ", "<hp:tc ");
+        xml = xml.Replace("</hp10:tc>", "</hp:tc>");
+        xml = xml.Replace("<hp10:subList ", "<hp:subList ");
+        xml = xml.Replace("</hp10:subList>", "</hp:subList>");
+        xml = xml.Replace("<hp10:cellAddr ", "<hp:cellAddr ");
+        xml = xml.Replace("<hp10:cellSpan ", "<hp:cellSpan ");
+        xml = xml.Replace("<hp10:cellSz ", "<hp:cellSz ");
+        xml = xml.Replace("<hp10:cellMargin ", "<hp:cellMargin ");
+        xml = xml.Replace("<hp10:colSz ", "<hp:colSz ");
+        xml = xml.Replace("<hp10:sz ", "<hp:sz ");
+        xml = xml.Replace("<hp10:pos ", "<hp:pos ");
+        xml = xml.Replace("<hp10:outMargin ", "<hp:outMargin ");
+        xml = xml.Replace("<hp10:inMargin ", "<hp:inMargin ");
+        xml = xml.Replace("<hp10:secPr ", "<hp:secPr ");
+        xml = xml.Replace("</hp10:secPr>", "</hp:secPr>");
+        xml = xml.Replace("<hp10:linesegarray>", "<hp:linesegarray>");
+        xml = xml.Replace("</hp10:linesegarray>", "</hp:linesegarray>");
+        xml = xml.Replace("<hp10:lineseg ", "<hp:lineseg ");
+        xml = xml.Replace("<hp10:ctrl ", "<hp:ctrl ");
+        xml = xml.Replace("</hp10:ctrl>", "</hp:ctrl>");
+        // Catch-all: any remaining hp10: elements → hp:
+        xml = System.Text.RegularExpressions.Regex.Replace(xml, @"<hp10:(\w+)", "<hp:$1");
+        xml = System.Text.RegularExpressions.Regex.Replace(xml, @"</hp10:(\w+)>", "</hp:$1>");
 
         return xml;
     }
