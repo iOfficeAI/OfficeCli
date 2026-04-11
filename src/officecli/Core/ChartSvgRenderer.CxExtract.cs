@@ -132,21 +132,160 @@ internal partial class ChartSvgRenderer
             }
             info.Categories = labels;
             info.Series[0] = (firstSeries.name, binCounts.Select(c => (double)c).ToArray());
-            info.GapWidth = 0;  // histogram bars touch
+            info.GapWidth = 0;  // histogram default — overridden below if cx:catScaling/@gapWidth is present
         }
 
-        // ---- Axis titles (histogram / boxWhisker only) ----
+        // ---- Axes: titles, scaling, styling ----
+        //
+        // Extracts the full per-axis vocabulary so it matches what the cx
+        // builder emits (ChartExBuilder.BuildCategoryAxis / BuildValueAxis):
+        //   - axismin/axismax/majorunit → cx:valScaling @min/@max/@majorUnit
+        //   - gapWidth                  → cx:catScaling @gapWidth
+        //   - gridlineColor             → cx:axis/cx:majorGridlines/cx:spPr/a:ln
+        //   - axisline                  → cx:axis/cx:spPr/a:ln
+        //   - axisfont (size+color)     → cx:axis/cx:txPr/.../a:defRPr
+        //   - axis title font/bold      → cx:axis/cx:title/.../a:rPr
+        //
+        // Without these reads, any histogram that sets locked Y scale, custom
+        // gridline/axis-line color, custom tick-label font, or custom axis
+        // title bold/size renders in the HTML preview with Excel-default
+        // values even though the XML is correct. Excel itself renders them
+        // fine — this only affects officecli's in-process preview.
         if (plotArea != null)
         {
             var axes = plotArea.Elements<CX.Axis>().ToList();
             var catAxis = axes.FirstOrDefault();   // Id=0
             var valAxis = axes.ElementAtOrDefault(1);
+
             info.CatAxisTitle = ExtractAxisTitleText(catAxis);
             info.ValAxisTitle = ExtractAxisTitleText(valAxis);
+
+            if (valAxis != null)
+            {
+                // Axis scaling (min/max/majorUnit) — string attributes on cx:valScaling.
+                var valScaling = valAxis.GetFirstChild<CX.ValueAxisScaling>();
+                if (valScaling != null)
+                {
+                    if (double.TryParse(valScaling.Min?.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var mnV))
+                        info.AxisMin = mnV;
+                    if (double.TryParse(valScaling.Max?.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var mxV))
+                        info.AxisMax = mxV;
+                    if (double.TryParse(valScaling.MajorUnit?.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var muV))
+                        info.MajorUnit = muV;
+                }
+
+                // Axis title font size / bold
+                var valTitleEl = valAxis.Elements().FirstOrDefault(e => e.LocalName == "title");
+                var valTitleRPr = valTitleEl?.Descendants<Drawing.RunProperties>().FirstOrDefault();
+                if (valTitleRPr?.FontSize?.HasValue == true)
+                    info.ValAxisTitleFontPx = (int)(valTitleRPr.FontSize.Value / 100.0);
+                if (valTitleRPr?.Bold?.Value == true)
+                    info.ValAxisTitleBold = true;
+
+                // Tick label font — cx:axis/cx:txPr/.../a:defRPr (axisfont compound knob)
+                var valTxPr = valAxis.Elements().FirstOrDefault(e => e.LocalName == "txPr");
+                var valDefRPr = valTxPr?.Descendants<Drawing.DefaultRunProperties>().FirstOrDefault();
+                if (valDefRPr?.FontSize?.HasValue == true)
+                    info.ValFontPx = (int)(valDefRPr.FontSize.Value / 100.0);
+                info.ValFontColor = ExtractFontColor(valDefRPr);
+
+                // Major gridline color
+                var valGl = valAxis.Elements().FirstOrDefault(e => e.LocalName == "majorGridlines");
+                var valGlSpPr = valGl?.Elements().FirstOrDefault(e => e.LocalName == "spPr");
+                info.GridlineColor = ExtractLineColor(valGlSpPr);
+
+                // Axis spine color
+                var valSpPr = valAxis.Elements().FirstOrDefault(e => e.LocalName == "spPr");
+                info.AxisLineColor = ExtractLineColor(valSpPr);
+            }
+
+            if (catAxis != null)
+            {
+                // gapWidth — string attribute on cx:catScaling (overrides the
+                // histogram default of 0 set during binning above).
+                var catScaling = catAxis.GetFirstChild<CX.CategoryAxisScaling>();
+                if (catScaling?.GapWidth?.Value is string gwStr
+                    && int.TryParse(gwStr, out var gw))
+                    info.GapWidth = gw;
+
+                // Axis title font size / bold
+                var catTitleEl = catAxis.Elements().FirstOrDefault(e => e.LocalName == "title");
+                var catTitleRPr = catTitleEl?.Descendants<Drawing.RunProperties>().FirstOrDefault();
+                if (catTitleRPr?.FontSize?.HasValue == true)
+                    info.CatAxisTitleFontPx = (int)(catTitleRPr.FontSize.Value / 100.0);
+                if (catTitleRPr?.Bold?.Value == true)
+                    info.CatAxisTitleBold = true;
+
+                // Tick label font
+                var catTxPr = catAxis.Elements().FirstOrDefault(e => e.LocalName == "txPr");
+                var catDefRPr = catTxPr?.Descendants<Drawing.DefaultRunProperties>().FirstOrDefault();
+                if (catDefRPr?.FontSize?.HasValue == true)
+                    info.CatFontPx = (int)(catDefRPr.FontSize.Value / 100.0);
+                info.CatFontColor = ExtractFontColor(catDefRPr);
+
+                // Category-axis spine color (cataxis.line / axisline) — if
+                // only axisline was set, both axes received identical outlines;
+                // we still read cat separately so per-axis overrides work.
+                // valSpPr is preferred but if valAxis has none we fall back
+                // to catAxis for AxisLineColor.
+                if (info.AxisLineColor == null)
+                {
+                    var catSpPr = catAxis.Elements().FirstOrDefault(e => e.LocalName == "spPr");
+                    info.AxisLineColor = ExtractLineColor(catSpPr);
+                }
+            }
         }
 
+        // ---- Data labels (histogram) ----
+        //
+        // cx attaches dLbls to the series, not the chart type element. Read
+        // cx:series/cx:dataLabels/cx:visibility[@value] to decide whether
+        // the bar chart renderer should draw value labels above each bar.
+        var firstSeriesEl = allSeries.FirstOrDefault();
+        var dLabelsEl = firstSeriesEl?.GetFirstChild<CX.DataLabels>();
+        if (dLabelsEl != null)
+        {
+            var vis = dLabelsEl.GetFirstChild<CX.DataLabelVisibilities>();
+            if (vis?.Value?.Value == true)
+            {
+                info.ShowDataLabels = true;
+                info.ShowDataLabelVal = true;
+            }
+        }
+
+        // ---- Plot-area / chart-area background fills ----
+        // Mirrors the regular cChart path in ExtractChartInfo: read the
+        // spPr direct child of <cx:plotArea> and of <cx:chartSpace> and pull
+        // the a:solidFill/a:srgbClr value. ExtractFillColor uses LocalName
+        // matching so it works across c: and cx: namespaces unchanged.
+        //
+        // Downstream, PlotFillColor is painted as a <rect> inside the chart
+        // SVG (RenderChartSvgContent) and ChartFillColor is applied as a
+        // `background:` style on the chart container div (ExcelHandler
+        // HtmlPreview). Without these lines, cx histograms with
+        // `plotareafill` / `chartareafill` render on a blank white page
+        // even though the XML is perfectly correct — the fills only
+        // surface in Excel itself.
+        var plotSpPr = plotArea?.Elements().FirstOrDefault(e => e.LocalName == "spPr");
+        info.PlotFillColor = ExtractFillColor(plotSpPr);
+        var chartSpPr = chartSpace?.Elements().FirstOrDefault(e => e.LocalName == "spPr");
+        info.ChartFillColor = ExtractFillColor(chartSpPr);
+
         // ---- Legend ----
-        info.HasLegend = chart.GetFirstChild<CX.Legend>() != null;
+        // Presence-based (cx omits the element entirely to hide the legend,
+        // unlike c:legend which uses <c:delete val="1"/>).
+        var legend = chart.GetFirstChild<CX.Legend>();
+        info.HasLegend = legend != null;
+        if (legend != null)
+        {
+            // legendfont — cx:legend/cx:txPr/.../a:defRPr — compound
+            // "size:color:fontname" knob from the builder.
+            var legendTxPr = legend.Elements().FirstOrDefault(e => e.LocalName == "txPr");
+            var legendDefRPr = legendTxPr?.Descendants<Drawing.DefaultRunProperties>().FirstOrDefault();
+            if (legendDefRPr?.FontSize?.HasValue == true)
+                info.LegendFontSize = $"{legendDefRPr.FontSize.Value / 100.0:0.##}pt";
+            info.LegendFontColor = ExtractFontColor(legendDefRPr);
+        }
 
         return info;
     }
