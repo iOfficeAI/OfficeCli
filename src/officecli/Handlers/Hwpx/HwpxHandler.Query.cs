@@ -382,11 +382,10 @@ public partial class HwpxHandler
 
         var section = _doc.Sections.First(s => s.Root == current);
         var entryName = section.EntryPath;
-        var entry = _doc.Archive.GetEntry(entryName)
-            ?? throw new InvalidOperationException($"Section entry {entryName} not found");
-
         // Delete-and-recreate pattern (avoids trailing bytes from SetLength(0))
-        entry.Delete();
+        // For new sections, entry may not exist yet — just create.
+        var entry = _doc.Archive.GetEntry(entryName);
+        entry?.Delete();
         var newEntry = _doc.Archive.CreateEntry(entryName, CompressionLevel.Optimal);
         using var stream = newEntry.Open();
         // CRITICAL: Hancom requires single-line (minified) XML without BOM.

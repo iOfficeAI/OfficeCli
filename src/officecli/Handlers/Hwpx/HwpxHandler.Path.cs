@@ -126,7 +126,10 @@ public partial class HwpxHandler
             searchParent = parent.Element(HwpxNs.Hp + "subList") ?? parent;
         }
 
-        var children = searchParent.Elements(elementName).ToList();
+        // When looking for tbl inside a p, search descendants (tbl is inside p > run > tbl)
+        var children = (parent.Name.LocalName == "p" && name == "tbl")
+            ? parent.Descendants(elementName).ToList()
+            : searchParent.Elements(elementName).ToList();
 
         // Resolve index: -1 = last, null = first (1), positive = 1-based
         int idx;

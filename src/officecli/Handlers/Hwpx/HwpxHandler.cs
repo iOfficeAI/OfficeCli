@@ -15,6 +15,7 @@ public partial class HwpxHandler : IDocumentHandler
     private readonly bool _editable;
     private readonly Stream _stream;
     private bool _dirty;
+    private readonly HashSet<string> _deletedBinData = new();
 
     public HwpxHandler(string filePath, bool editable)
     {
@@ -49,6 +50,8 @@ public partial class HwpxHandler : IDocumentHandler
         {
             using var hpfStream = hpfEntry.Open();
             var hpf = LoadAndNormalize(hpfStream);
+            doc.ManifestDoc = hpf;
+            doc.ManifestEntryPath = hpfEntry.FullName;
             var allItems = hpf.Descendants()
                 .Where(e => e.Name.LocalName == "item")
                 .ToList();

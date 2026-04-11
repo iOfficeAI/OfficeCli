@@ -126,6 +126,11 @@ public static class HwpxPacker
         xml = System.Text.RegularExpressions.Regex.Replace(xml, @"<hp10:(\w+)", "<hp:$1");
         xml = System.Text.RegularExpressions.Regex.Replace(xml, @"</hp10:(\w+)>", "</hp:$1>");
 
+        // Fix attributes: LINQ to XML may swap hp10: for hp: in namespaced attributes
+        // (e.g. hp10:required-namespace) since both resolved to the same URI during
+        // normalization. Original files always use hp: for attributes.
+        xml = System.Text.RegularExpressions.Regex.Replace(xml, @" hp10:([\w-]+)=""", " hp:$1=\"");
+
         return xml;
     }
 

@@ -79,6 +79,8 @@ static partial class CommandBuilder
                     html = excelHandler.ViewAsHtml();
                 else if (handler is OfficeCli.Handlers.WordHandler wordHandler)
                     html = wordHandler.ViewAsHtml(pageFilter);
+                else if (handler is OfficeCli.Handlers.HwpxHandler hwpxHandler)
+                    html = hwpxHandler.ViewAsHtml();
 
                 if (html != null)
                 {
@@ -103,10 +105,10 @@ static partial class CommandBuilder
                 }
                 else
                 {
-                    throw new OfficeCli.Core.CliException("HTML preview is only supported for .pptx, .xlsx, and .docx files.")
+                    throw new OfficeCli.Core.CliException("HTML preview is only supported for .pptx, .xlsx, .docx, and .hwpx files.")
                     {
                         Code = "unsupported_type",
-                        Suggestion = "Use a .pptx, .xlsx, or .docx file, or use mode 'text' or 'annotated' for other formats.",
+                        Suggestion = "Use a .pptx, .xlsx, .docx, or .hwpx file, or use mode 'text' or 'annotated' for other formats.",
                         ValidValues = ["text", "annotated", "outline", "stats", "issues"]
                     };
                 }

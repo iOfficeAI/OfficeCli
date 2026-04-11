@@ -13,7 +13,23 @@ internal class HwpxDocument
     /// <summary>Actual ZIP entry path of header.xml (e.g. "Contents/header.xml").</summary>
     public string? HeaderEntryPath { get; set; }
     public List<HwpxSection> Sections { get; } = new();
+    /// <summary>Parsed content.hpf manifest document for section/spine management.</summary>
+    public XDocument? ManifestDoc { get; set; }
+    /// <summary>ZIP entry path for the manifest (e.g. "Contents/content.hpf").</summary>
+    public string? ManifestEntryPath { get; set; }
     public HwpxSection PrimarySection => Sections[0];  // convenience
+
+    /// <summary>Read binary data from BinData directory in the ZIP archive.</summary>
+    public byte[]? GetBinData(string reference)
+    {
+        var path = reference.StartsWith("BinData/") ? $"Contents/{reference}" : $"Contents/BinData/{reference}";
+        var entry = Archive.GetEntry(path);
+        if (entry == null) return null;
+        using var stream = entry.Open();
+        using var ms = new MemoryStream();
+        stream.CopyTo(ms);
+        return ms.ToArray();
+    }
 
     /// <summary>All paragraphs across all sections. SectionIndex is 0-based LOCAL index within that section.</summary>
     public IEnumerable<(HwpxSection Section, XElement Paragraph, int SectionIndex)> AllParagraphs()

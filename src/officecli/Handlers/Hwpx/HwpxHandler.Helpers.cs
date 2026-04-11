@@ -72,9 +72,16 @@ public partial class HwpxHandler
             var newId = NextParaPrId();
             var cloned = new XElement(paraPr);
             cloned.SetAttributeValue("id", newId.ToString());
-            paraPr.AddAfterSelf(cloned);
+            // CRITICAL: Hancom uses POSITIONAL indexing (array index), not id-based lookup.
+            // Append at END so position matches the new ID.
+            var container = paraPr.Parent!;
+            container.Add(cloned);
             para.SetAttributeValue("paraPrIDRef", newId.ToString());
             paraPr = cloned;
+
+            // Update itemCnt on the parent <hh:paraProperties> container
+            var count = container.Elements(HwpxNs.Hh + "paraPr").Count();
+            container.SetAttributeValue("itemCnt", count.ToString());
         }
 
         return paraPr;
