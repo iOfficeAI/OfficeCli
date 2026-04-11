@@ -14,8 +14,24 @@ public partial class HwpxHandler
     /// </summary>
     public List<string> Set(string path, Dictionary<string, string> properties)
     {
-        var element = ResolvePath(path);
         var unsupported = new List<string>();
+
+        // Document-level properties (including find/replace)
+        if (path is "/" or "" or "/body")
+        {
+            if (properties.TryGetValue("find", out var findText) && properties.TryGetValue("replace", out var replaceText))
+            {
+                var count = FindAndReplace(findText, replaceText);
+                var remaining = new Dictionary<string, string>(properties, StringComparer.OrdinalIgnoreCase);
+                remaining.Remove("find");
+                remaining.Remove("replace");
+                if (remaining.Count > 0)
+                    unsupported.AddRange(remaining.Keys);
+                return unsupported;
+            }
+        }
+
+        var element = ResolvePath(path);
 
         foreach (var (key, value) in properties)
         {
@@ -180,11 +196,30 @@ public partial class HwpxHandler
         var existingRun = para.Elements(HwpxNs.Hp + "run").FirstOrDefault();
         var charPrIdRef = existingRun?.Attribute("charPrIDRef")?.Value ?? "0";
 
-        para.Elements(HwpxNs.Hp + "run").Remove();
+        // CRITICAL: preserve runs that contain secPr, ctrl, or other structural elements
+        // Only remove runs that are purely text-bearing
+        var runs = para.Elements(HwpxNs.Hp + "run").ToList();
+        var structuralRuns = runs.Where(r =>
+            r.Elements(HwpxNs.Hp + "secPr").Any() ||
+            r.Elements(HwpxNs.Hp + "ctrl").Any()).ToList();
+        var textRuns = runs.Except(structuralRuns).ToList();
+
+        // Remove only text runs, strip text from structural runs
+        foreach (var tr in textRuns)
+            tr.Remove();
+        foreach (var sr in structuralRuns)
+            sr.Elements(HwpxNs.Hp + "t").Remove();
+
+        // Add new text run
         var run = new XElement(HwpxNs.Hp + "run",
             new XAttribute("charPrIDRef", charPrIdRef),
             new XElement(HwpxNs.Hp + "t", text));
-        para.Add(run);
+        // Insert text run before structural runs so text appears first
+        var firstStructural = para.Elements(HwpxNs.Hp + "run").FirstOrDefault();
+        if (firstStructural != null)
+            firstStructural.AddBeforeSelf(run);
+        else
+            para.Add(run);
         return true;
     }
 
@@ -589,6 +624,37 @@ public partial class HwpxHandler
     {
         element.SetAttributeValue(name, value);
         return true;
+    }
+
+    // ==================== Find & Replace ====================
+
+    /// <summary>
+    /// Replace all occurrences of <paramref name="find"/> with <paramref name="replace"/>
+    /// across all sections' &lt;hp:t&gt; elements. Returns the number of replacements made.
+    /// Known limitation: text split across multiple runs will not be matched.
+    /// </summary>
+    private int FindAndReplace(string find, string replace)
+    {
+        if (string.IsNullOrEmpty(find)) return 0;
+        int totalCount = 0;
+
+        foreach (var section in _doc.Sections)
+        {
+            foreach (var t in section.Document.Descendants(HwpxNs.Hp + "t"))
+            {
+                var text = t.Value;
+                if (text.Contains(find, StringComparison.Ordinal))
+                {
+                    t.Value = text.Replace(find, replace, StringComparison.Ordinal);
+                    totalCount++;
+                }
+            }
+            if (totalCount > 0)
+                SaveSection(section.Document.Root!);
+        }
+
+        _dirty = true;
+        return totalCount;
     }
 
     // ==================== Save Helpers ====================

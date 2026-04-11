@@ -326,6 +326,15 @@ public partial class HwpxHandler
             {
                 sb.Append(t.Value);
             }
+            // Handle equations — extract Hancom equation script text
+            var eqEdit = run.Element(HwpxNs.Hp + "eqEdit")
+                ?? run.Descendants().FirstOrDefault(e => e.Name.LocalName == "eqEdit");
+            if (eqEdit != null)
+            {
+                var script = eqEdit.Attribute("script")?.Value ?? eqEdit.Value;
+                if (!string.IsNullOrEmpty(script))
+                    sb.Append($"[eq: {script}]");
+            }
             // Handle line breaks
             if (run.Element(HwpxNs.Hp + "lineBreak") != null)
                 sb.Append('\n');

@@ -21,6 +21,17 @@ public partial class HwpxHandler
     {
         var parent = ResolvePath(parentPath);
 
+        // Header/footer: special handling — adds to secPr, not to parent directly
+        if (type.Equals("header", StringComparison.OrdinalIgnoreCase) || type.Equals("footer", StringComparison.OrdinalIgnoreCase))
+        {
+            var isHeader = type.Equals("header", StringComparison.OrdinalIgnoreCase);
+            var hfElement = AddHeaderFooter(parent, properties, isHeader);
+            _dirty = true;
+            // SaveSection needs an element from the target section document
+            SaveSection(hfElement);
+            return $"/{(isHeader ? "header" : "footer")}[1]";
+        }
+
         var newElement = type.ToLowerInvariant() switch
         {
             "paragraph" or "p" => CreateParagraph(properties),
@@ -28,12 +39,18 @@ public partial class HwpxHandler
             "run"              => CreateRun(properties),
             "row" or "tr"      => CreateRow(parent, properties),
             "cell" or "tc"     => CreateCell(parent, properties),
+            "picture" or "image" or "pic" => CreatePicture(properties),
+            "hyperlink" or "link"         => CreateHyperlink(properties),
+            "pagebreak" or "page-break"   => CreatePageBreak(),
+            "footnote"                    => CreateFootnote(properties),
             _ => throw new CliException($"Unsupported element type: {type}")
         };
 
-        // Hancom requires tables to be wrapped: <hp:p><hp:run><hp:tbl>...</hp:tbl></hp:run></hp:p>
-        // If adding a table to a section (or section-like parent), wrap it in p>run.
-        if (newElement.Name == HwpxNs.Hp + "tbl" && IsSectionLike(parent))
+        // Hancom requires tables and pictures to be wrapped: <hp:p><hp:run><hp:tbl/pic>...</hp:tbl/pic></hp:run></hp:p>
+        // If adding to a section (or section-like parent), wrap in p>run.
+        var needsWrap = (newElement.Name == HwpxNs.Hp + "tbl" || newElement.Name == HwpxNs.Hp + "pic")
+                        && IsSectionLike(parent);
+        if (needsWrap)
         {
             newElement = WrapTableInParagraph(newElement);
         }
@@ -680,6 +697,376 @@ public partial class HwpxHandler
                 new XAttribute("top", "141"),
                 new XAttribute("bottom", "141"))
         );
+    }
+
+    // ==================== Picture ====================
+
+    /// <summary>
+    /// Create a picture element. The image file is registered in the ZIP (BinData/) and content.hpf manifest.
+    /// Golden template based on real Hancom documents: uses hc:img (NOT hp:img), hc:pt0-pt3 for imgRect.
+    /// Props: path (required), width (e.g. "2in"), height (e.g. "1in"), alt.
+    /// </summary>
+    private XElement CreatePicture(Dictionary<string, string>? props)
+    {
+        var path = props?.GetValueOrDefault("path")
+            ?? throw new CliException("picture requires 'path' property");
+        if (!File.Exists(path))
+            throw new CliException($"Image file not found: {path}");
+
+        var widthHwp = ParseDimensionToHwpUnit(props?.GetValueOrDefault("width") ?? "2in");
+        var heightHwp = ParseDimensionToHwpUnit(props?.GetValueOrDefault("height") ?? "1in");
+
+        // 1. Read image bytes and determine format
+        var imageBytes = File.ReadAllBytes(path);
+        var ext = Path.GetExtension(path).TrimStart('.').ToLowerInvariant();
+        if (ext == "jpg") ext = "jpeg";
+        var mediaType = ext switch
+        {
+            "png" => "image/png",
+            "jpeg" => "image/jpeg",
+            "gif" => "image/gif",
+            "bmp" => "image/bmp",
+            "tiff" or "tif" => "image/tiff",
+            _ => $"image/{ext}"
+        };
+
+        // 2. Find next available image ID in content.hpf
+        var imageId = GetNextImageId();
+        var binFileName = $"image{imageId}.{ext}";
+
+        // 3. Add image to ZIP at BinData/ (root level, NOT Contents/BinData/)
+        var binEntry = _doc.Archive.CreateEntry($"BinData/{binFileName}", System.IO.Compression.CompressionLevel.Optimal);
+        using (var binStream = binEntry.Open())
+            binStream.Write(imageBytes, 0, imageBytes.Length);
+
+        // 4. Register in content.hpf manifest
+        RegisterImageInManifest($"image{imageId}", $"BinData/{binFileName}", mediaType);
+
+        // 5. Create <hp:pic> element (golden template structure from real Hancom docs)
+        var id = NewId();
+        var instId = NewId();
+        return new XElement(HwpxNs.Hp + "pic",
+            new XAttribute("id", id),
+            new XAttribute("zOrder", "0"),
+            new XAttribute("numberingType", "PICTURE"),
+            new XAttribute("textWrap", "TOP_AND_BOTTOM"),
+            new XAttribute("textFlow", "BOTH_SIDES"),
+            new XAttribute("lock", "0"),
+            new XAttribute("dropcapstyle", "None"),
+            new XAttribute("href", ""),
+            new XAttribute("groupLevel", "0"),
+            new XAttribute("instid", instId),
+            new XAttribute("reverse", "0"),
+            new XElement(HwpxNs.Hp + "offset", new XAttribute("x", "0"), new XAttribute("y", "0")),
+            new XElement(HwpxNs.Hp + "orgSz",
+                new XAttribute("width", widthHwp), new XAttribute("height", heightHwp)),
+            new XElement(HwpxNs.Hp + "curSz",
+                new XAttribute("width", widthHwp), new XAttribute("height", heightHwp)),
+            new XElement(HwpxNs.Hp + "flip", new XAttribute("horizontal", "0"), new XAttribute("vertical", "0")),
+            new XElement(HwpxNs.Hp + "rotationInfo",
+                new XAttribute("angle", "0"),
+                new XAttribute("centerX", (widthHwp / 2).ToString()),
+                new XAttribute("centerY", (heightHwp / 2).ToString()),
+                new XAttribute("rotateimage", "1")),
+            new XElement(HwpxNs.Hp + "renderingInfo",
+                new XElement(HwpxNs.Hc + "transMatrix",
+                    new XAttribute("e1", "1"), new XAttribute("e2", "0"), new XAttribute("e3", "0"),
+                    new XAttribute("e4", "0"), new XAttribute("e5", "1"), new XAttribute("e6", "0")),
+                new XElement(HwpxNs.Hc + "scaMatrix",
+                    new XAttribute("e1", "1"), new XAttribute("e2", "0"), new XAttribute("e3", "0"),
+                    new XAttribute("e4", "0"), new XAttribute("e5", "1"), new XAttribute("e6", "0")),
+                new XElement(HwpxNs.Hc + "rotMatrix",
+                    new XAttribute("e1", "1"), new XAttribute("e2", "0"), new XAttribute("e3", "0"),
+                    new XAttribute("e4", "0"), new XAttribute("e5", "1"), new XAttribute("e6", "0"))),
+            // CRITICAL: hc:img, NOT hp:img (core namespace)
+            new XElement(HwpxNs.Hc + "img",
+                new XAttribute("binaryItemIDRef", $"image{imageId}"),
+                new XAttribute("bright", "0"),
+                new XAttribute("contrast", "0"),
+                new XAttribute("effect", "REAL_PIC"),
+                new XAttribute("alpha", "0")),
+            new XElement(HwpxNs.Hp + "imgRect",
+                new XElement(HwpxNs.Hc + "pt0", new XAttribute("x", "0"), new XAttribute("y", "0")),
+                new XElement(HwpxNs.Hc + "pt1", new XAttribute("x", widthHwp), new XAttribute("y", "0")),
+                new XElement(HwpxNs.Hc + "pt2", new XAttribute("x", widthHwp), new XAttribute("y", heightHwp)),
+                new XElement(HwpxNs.Hc + "pt3", new XAttribute("x", "0"), new XAttribute("y", heightHwp))),
+            new XElement(HwpxNs.Hp + "imgClip",
+                new XAttribute("left", "0"), new XAttribute("right", widthHwp),
+                new XAttribute("top", "0"), new XAttribute("bottom", heightHwp)),
+            new XElement(HwpxNs.Hp + "inMargin",
+                new XAttribute("left", "0"), new XAttribute("right", "0"),
+                new XAttribute("top", "0"), new XAttribute("bottom", "0")),
+            new XElement(HwpxNs.Hp + "imgDim",
+                new XAttribute("dimwidth", widthHwp), new XAttribute("dimheight", heightHwp)),
+            new XElement(HwpxNs.Hp + "effects"),
+            new XElement(HwpxNs.Hp + "sz",
+                new XAttribute("width", widthHwp), new XAttribute("widthRelTo", "ABSOLUTE"),
+                new XAttribute("height", heightHwp), new XAttribute("heightRelTo", "ABSOLUTE"),
+                new XAttribute("protect", "0")),
+            new XElement(HwpxNs.Hp + "pos",
+                new XAttribute("treatAsChar", "1"), new XAttribute("affectLSpacing", "0"),
+                new XAttribute("flowWithText", "1"), new XAttribute("allowOverlap", "0"),
+                new XAttribute("holdAnchorAndSO", "0"),
+                new XAttribute("vertRelTo", "PARA"), new XAttribute("horzRelTo", "COLUMN"),
+                new XAttribute("vertAlign", "TOP"), new XAttribute("horzAlign", "LEFT"),
+                new XAttribute("vertOffset", "0"), new XAttribute("horzOffset", "0")),
+            new XElement(HwpxNs.Hp + "outMargin",
+                new XAttribute("left", "0"), new XAttribute("right", "0"),
+                new XAttribute("top", "0"), new XAttribute("bottom", "0"))
+        );
+    }
+
+    // ==================== Hyperlink ====================
+
+    /// <summary>
+    /// Create a hyperlink using the OWPML fieldBegin/fieldEnd pattern (3-run structure).
+    /// Golden template based on OWPML schema + python-hwpx implementation.
+    /// Props: url/href (required), text (default=url).
+    /// </summary>
+    private XElement CreateHyperlink(Dictionary<string, string>? props)
+    {
+        var url = props?.GetValueOrDefault("url") ?? props?.GetValueOrDefault("href")
+            ?? throw new CliException("hyperlink requires 'url' property");
+        var text = props?.GetValueOrDefault("text") ?? url;
+        var fieldId = NewId();
+
+        // Hyperlinks in HWPX use 3 runs: fieldBegin + text + fieldEnd
+        // We return a container fragment — the runs will be added to the parent paragraph.
+        // If adding to a section, wrap in a paragraph.
+        var para = new XElement(HwpxNs.Hp + "p",
+            new XAttribute("id", NewId()),
+            new XAttribute("styleIDRef", "0"),
+            new XAttribute("paraPrIDRef", "0"),
+            // Run 1: fieldBegin
+            new XElement(HwpxNs.Hp + "run",
+                new XAttribute("charPrIDRef", "0"),
+                new XElement(HwpxNs.Hp + "ctrl",
+                    new XElement(HwpxNs.Hp + "fieldBegin",
+                        new XAttribute("id", fieldId),
+                        new XAttribute("type", "HYPERLINK"),
+                        new XAttribute("name", url),
+                        new XAttribute("editable", "false"),
+                        new XAttribute("dirty", "false")))),
+            // Run 2: visible text
+            new XElement(HwpxNs.Hp + "run",
+                new XAttribute("charPrIDRef", "0"),
+                new XElement(HwpxNs.Hp + "t", text)),
+            // Run 3: fieldEnd
+            new XElement(HwpxNs.Hp + "run",
+                new XAttribute("charPrIDRef", "0"),
+                new XElement(HwpxNs.Hp + "ctrl",
+                    new XElement(HwpxNs.Hp + "fieldEnd",
+                        new XAttribute("beginIDRef", fieldId))))
+        );
+        return para;
+    }
+
+    // ==================== Page Break ====================
+
+    /// <summary>
+    /// Create a page break paragraph. In HWPX, page break is simply a paragraph
+    /// with pageBreak="1" attribute.
+    /// </summary>
+    private XElement CreatePageBreak()
+    {
+        return new XElement(HwpxNs.Hp + "p",
+            new XAttribute("id", NewId()),
+            new XAttribute("styleIDRef", "0"),
+            new XAttribute("paraPrIDRef", "0"),
+            new XAttribute("pageBreak", "1"),
+            new XAttribute("columnBreak", "0"),
+            new XAttribute("merged", "0"));
+    }
+
+    // ==================== Footnote ====================
+
+    /// <summary>
+    /// Create a footnote. HWPX footnotes use hp:ctrl > hp:footNote > hp:subList structure.
+    /// The footnote marker appears at the insertion point, and the footnote text appears at page bottom.
+    /// Props: text (required), number (auto if omitted).
+    /// </summary>
+    private XElement CreateFootnote(Dictionary<string, string>? props)
+    {
+        var text = props?.GetValueOrDefault("text")
+            ?? throw new CliException("footnote requires 'text' property");
+        var number = props?.GetValueOrDefault("number") ?? "0"; // 0 = auto-number
+
+        var fnId = NewId();
+
+        // Footnote is a paragraph containing a ctrl with footNote
+        return new XElement(HwpxNs.Hp + "p",
+            new XAttribute("id", NewId()),
+            new XAttribute("styleIDRef", "0"),
+            new XAttribute("paraPrIDRef", "0"),
+            new XAttribute("pageBreak", "0"),
+            new XAttribute("columnBreak", "0"),
+            new XAttribute("merged", "0"),
+            new XElement(HwpxNs.Hp + "run",
+                new XAttribute("charPrIDRef", "0"),
+                new XElement(HwpxNs.Hp + "ctrl",
+                    new XElement(HwpxNs.Hp + "footNote",
+                        new XAttribute("number", number),
+                        new XElement(HwpxNs.Hp + "subList",
+                            new XAttribute("id", ""),
+                            new XAttribute("textDirection", "HORIZONTAL"),
+                            new XAttribute("lineWrap", "BREAK"),
+                            new XAttribute("vertAlign", "TOP"),
+                            new XAttribute("linkListIDRef", "0"),
+                            new XAttribute("linkListNextIDRef", "0"),
+                            new XAttribute("textWidth", "0"),
+                            new XAttribute("textHeight", "0"),
+                            new XAttribute("hasTextRef", "0"),
+                            new XAttribute("hasNumRef", "0"),
+                            new XElement(HwpxNs.Hp + "p",
+                                new XAttribute("id", NewId()),
+                                new XAttribute("styleIDRef", "0"),
+                                new XAttribute("paraPrIDRef", "0"),
+                                new XElement(HwpxNs.Hp + "run",
+                                    new XAttribute("charPrIDRef", "0"),
+                                    new XElement(HwpxNs.Hp + "t", text))))))));
+    }
+
+    // ==================== Header / Footer ====================
+
+    /// <summary>
+    /// Add header or footer to the section. Uses the secPr-inline pattern with headerApply/footerApply.
+    /// Golden template based on python-hwpx header-footer-placeholder fixture.
+    /// Props: text (required), type (BOTH/ODD/EVEN, default=BOTH).
+    /// </summary>
+    private XElement AddHeaderFooter(XElement sectionRoot, Dictionary<string, string>? props, bool isHeader)
+    {
+        var text = props?.GetValueOrDefault("text") ?? "";
+        var applyPageType = props?.GetValueOrDefault("type") ?? "BOTH";
+        var tagName = isHeader ? "header" : "footer";
+        var applyTagName = isHeader ? "headerApply" : "footerApply";
+        var vertAlign = isHeader ? "TOP" : "BOTTOM";
+
+        // Find secPr in the section document — it's typically at hp:p > hp:run > hp:secPr
+        var doc = sectionRoot.Document ?? sectionRoot.AncestorsAndSelf().Last().Document;
+        var searchRoot = doc?.Root ?? sectionRoot;
+
+        var secPr = searchRoot.Descendants(HwpxNs.Hp + "secPr").FirstOrDefault()
+            ?? searchRoot.Descendants().FirstOrDefault(e => e.Name.LocalName == "secPr");
+
+        if (secPr == null)
+            throw new CliException("Cannot find <secPr> in section to add header/footer");
+
+        var hfId = NewId();
+
+        // Create header/footer element
+        var hfElement = new XElement(HwpxNs.Hp + tagName,
+            new XAttribute("id", hfId),
+            new XAttribute("applyPageType", applyPageType),
+            new XElement(HwpxNs.Hp + "subList",
+                new XAttribute("id", ""),
+                new XAttribute("textDirection", "HORIZONTAL"),
+                new XAttribute("lineWrap", "BREAK"),
+                new XAttribute("vertAlign", vertAlign),
+                new XAttribute("linkListIDRef", "0"),
+                new XAttribute("linkListNextIDRef", "0"),
+                new XAttribute("textWidth", "0"),
+                new XAttribute("textHeight", "0"),
+                new XAttribute("hasTextRef", "0"),
+                new XAttribute("hasNumRef", "0"),
+                CreateParagraph(new Dictionary<string, string> { ["text"] = text })));
+
+        // Create apply element (required sibling)
+        var applyElement = new XElement(HwpxNs.Hp + applyTagName,
+            new XAttribute("applyPageType", applyPageType),
+            new XAttribute("idRef", hfId));
+
+        // Add both to secPr
+        secPr.Add(hfElement);
+        secPr.Add(applyElement);
+
+        return hfElement;
+    }
+
+    // ==================== Image Helpers ====================
+
+    /// <summary>Find the next available image index by scanning content.hpf manifest.</summary>
+    private int GetNextImageId()
+    {
+        var hpfEntry = _doc.Archive.GetEntry("Contents/content.hpf");
+        if (hpfEntry == null) return 1;
+
+        using var stream = hpfEntry.Open();
+        var hpf = LoadAndNormalize(stream);
+        var maxId = 0;
+        foreach (var item in hpf.Descendants().Where(e => e.Name.LocalName == "item"))
+        {
+            var id = item.Attribute("id")?.Value;
+            if (id != null && id.StartsWith("image", StringComparison.OrdinalIgnoreCase))
+            {
+                if (int.TryParse(id.AsSpan("image".Length), out var num) && num > maxId)
+                    maxId = num;
+            }
+        }
+        return maxId + 1;
+    }
+
+    /// <summary>Register an image item in content.hpf manifest.</summary>
+    private void RegisterImageInManifest(string itemId, string href, string mediaType)
+    {
+        var hpfEntry = _doc.Archive.GetEntry("Contents/content.hpf");
+        if (hpfEntry == null)
+            throw new CliException("Cannot find Contents/content.hpf in HWPX archive");
+
+        XDocument hpf;
+        using (var stream = hpfEntry.Open())
+            hpf = LoadAndNormalize(stream);
+
+        // Add item to manifest (inside <opf:manifest>)
+        var manifest = hpf.Descendants().FirstOrDefault(e => e.Name.LocalName == "manifest");
+        if (manifest == null)
+            throw new CliException("Cannot find <manifest> in content.hpf");
+
+        manifest.Add(new XElement(HwpxNs.Opf + "item",
+            new XAttribute("id", itemId),
+            new XAttribute("href", href),
+            new XAttribute("media-type", mediaType),
+            new XAttribute("isEmbeded", "1")));
+
+        // Save back to ZIP
+        var entryName = hpfEntry.FullName;
+        hpfEntry.Delete();
+        var newEntry = _doc.Archive.CreateEntry(entryName, System.IO.Compression.CompressionLevel.Optimal);
+        using var outStream = newEntry.Open();
+        var xmlStr = HwpxPacker.MinifyXml(hpf.ToString(SaveOptions.DisableFormatting));
+        xmlStr = HwpxPacker.RestoreOriginalNamespaces(xmlStr);
+        xmlStr = "<?xml version='1.0' encoding='UTF-8'?>" + xmlStr;
+        var bytes = System.Text.Encoding.UTF8.GetBytes(xmlStr);
+        outStream.Write(bytes, 0, bytes.Length);
+    }
+
+    /// <summary>
+    /// Parse a dimension string (e.g. "2in", "50mm", "100pt", "5cm") to HWPX units (HWPUNIT).
+    /// 1 inch = 7200 HWPUNIT, 1mm ≈ 283.46 HWPUNIT, 1pt = 100 HWPUNIT, 1cm = 2834.6 HWPUNIT.
+    /// A4 width = 59528 HWPUNIT ≈ 210mm.
+    /// </summary>
+    private static int ParseDimensionToHwpUnit(string dim)
+    {
+        dim = dim.Trim();
+        if (int.TryParse(dim, out var rawVal)) return rawVal; // already in HWPUNIT
+
+        // Extract numeric part and unit
+        var i = 0;
+        while (i < dim.Length && (char.IsDigit(dim[i]) || dim[i] == '.'))
+            i++;
+        if (i == 0) return 14400; // default 2in
+
+        var number = double.Parse(dim[..i], System.Globalization.CultureInfo.InvariantCulture);
+        var unit = dim[i..].Trim().ToLowerInvariant();
+
+        return unit switch
+        {
+            "in" or "inch" => (int)(number * 7200),
+            "mm" => (int)(number * 283.46),
+            "cm" => (int)(number * 2834.6),
+            "pt" => (int)(number * 100),
+            "hwp" => (int)number,
+            _ => (int)(number * 7200) // default to inches
+        };
     }
 
     /// <summary>
