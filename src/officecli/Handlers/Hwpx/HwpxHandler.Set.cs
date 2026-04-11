@@ -29,6 +29,28 @@ public partial class HwpxHandler
                     unsupported.AddRange(remaining.Keys);
                 return unsupported;
             }
+
+            // Document-level properties (default font, default font size)
+            var docHandled = false;
+            foreach (var (key, value) in properties)
+            {
+                switch (key.ToLowerInvariant())
+                {
+                    case "defaultfont" or "basefont":
+                        var charPrFont = FindCharPr("0");
+                        if (charPrFont != null) { ApplyCharPrProperty(charPrFont, "fonthangul", value); docHandled = true; }
+                        break;
+                    case "defaultfontsize" or "basefontsize":
+                        var charPrSize = FindCharPr("0");
+                        if (charPrSize != null) { ApplyCharPrProperty(charPrSize, "fontsize", value); docHandled = true; }
+                        break;
+                    default:
+                        unsupported.Add(key);
+                        break;
+                }
+            }
+            if (docHandled) { _dirty = true; SaveHeader(); }
+            return unsupported;
         }
 
         // Style editing: /header/style[N] path — handle before generic resolution
@@ -106,8 +128,16 @@ public partial class HwpxHandler
                     if (!SetCellProp(element, key, value))
                         unsupported.Add(key);
                     break;
+                case "tr":
+                    if (!SetRowProp(element, key, value))
+                        unsupported.Add(key);
+                    break;
                 case "tbl":
                     if (!SetTableProp(element, key, value))
+                        unsupported.Add(key);
+                    break;
+                case "sec":
+                    if (!SetSectionProp(element, key, value))
                         unsupported.Add(key);
                     break;
                 default:
@@ -142,12 +172,57 @@ public partial class HwpxHandler
     /// </summary>
     private bool SetTableProp(XElement tbl, string property, string value)
     {
-        return property.ToLowerInvariant() switch
+        var lower = property.ToLowerInvariant();
+        if (lower.StartsWith("colwidth"))
+            return SetIndividualColWidth(tbl, lower, value);
+        return lower switch
         {
             "borderfillid" or "borderfillidref" => SetAttribute(tbl, "borderFillIDRef", value),
             "cellspacing" => SetAttribute(tbl, "cellSpacing", value),
+            "align" or "tablealign" => SetTableAlignment(tbl, value),
             _ => false
         };
+    }
+
+    // ==================== Table Row ====================
+
+    private bool SetRowProp(XElement tr, string property, string value)
+    {
+        return property.ToLowerInvariant() switch
+        {
+            "height" or "rowheight" => SetRowHeight(tr, value),
+            _ => false
+        };
+    }
+
+    private static bool SetRowHeight(XElement tr, string value)
+    {
+        if (!int.TryParse(value, out var h)) return false;
+        foreach (var tc in tr.Elements(HwpxNs.Hp + "tc"))
+        {
+            var cellSz = tc.Element(HwpxNs.Hp + "cellSz");
+            cellSz?.SetAttributeValue("height", h.ToString());
+        }
+        return true;
+    }
+
+    private bool SetTableAlignment(XElement tbl, string value)
+    {
+        var parentP = tbl.Ancestors(HwpxNs.Hp + "p").FirstOrDefault();
+        if (parentP != null)
+            return SetParagraphProp(parentP, "align", value) == true;
+        return false;
+    }
+
+    private static bool SetIndividualColWidth(XElement tbl, string propName, string value)
+    {
+        var indexStr = propName.Replace("colwidth", "");
+        if (!int.TryParse(indexStr, out var colIdx)) return false;
+        colIdx--;
+        var colSzElements = tbl.Elements(HwpxNs.Hp + "colSz").ToList();
+        if (colIdx < 0 || colIdx >= colSzElements.Count) return false;
+        colSzElements[colIdx].SetAttributeValue("width", value);
+        return true;
     }
 
     // ==================== Table Cell ====================
@@ -164,6 +239,7 @@ public partial class HwpxHandler
             "colspan" => SetCellSpan(tc, "colSpan", value),
             "rowspan" => SetCellSpan(tc, "rowSpan", value),
             "borderfillid" or "borderfillidref" => SetAttribute(tc, "borderFillIDRef", value),
+            "valign" or "verticalalign" or "vertical-align" => SetCellVertAlign(tc, value),
             "shading" or "bgcolor" or "fillcolor" => SetCellShading(tc, value),
             "bordercolor" => SetCellBorder(tc, color: value),
             "borderwidth" => SetCellBorder(tc, width: value),
@@ -175,6 +251,14 @@ public partial class HwpxHandler
     /// <summary>
     /// Set text content of a table cell by navigating tc → subList → p → run → t.
     /// </summary>
+    private static bool SetCellVertAlign(XElement tc, string value)
+    {
+        var subList = tc.Element(HwpxNs.Hp + "subList");
+        if (subList == null) return false;
+        subList.SetAttributeValue("vertAlign", value.ToUpperInvariant());
+        return true;
+    }
+
     private bool SetCellText(XElement tc, string text)
     {
         var subList = tc.Element(HwpxNs.Hp + "subList");
@@ -222,6 +306,82 @@ public partial class HwpxHandler
         return true;
     }
 
+    // ==================== Section ====================
+
+    /// <summary>
+    /// Dispatch section-level property by name.
+    /// Section properties live in secPr (child of section root).
+    /// </summary>
+    private bool SetSectionProp(XElement sectionRoot, string property, string value)
+    {
+        return property.ToLowerInvariant() switch
+        {
+            "pagebackground" or "pagebg" or "backgroundcolor" => SetPageBackground(sectionRoot, value),
+            "orientation" => SetOrientation(sectionRoot, value),
+            "pagewidth" => SetPageDimension(sectionRoot, "width", value),
+            "pageheight" => SetPageDimension(sectionRoot, "height", value),
+            "margintop" or "margin-top" => SetPageMargin(sectionRoot, "top", value),
+            "marginbottom" or "margin-bottom" => SetPageMargin(sectionRoot, "bottom", value),
+            "marginleft" or "margin-left" => SetPageMargin(sectionRoot, "left", value),
+            "marginright" or "margin-right" => SetPageMargin(sectionRoot, "right", value),
+            _ => false
+        };
+    }
+
+    private bool SetOrientation(XElement sectionRoot, string value)
+    {
+        var pagePr = sectionRoot.Descendants(HwpxNs.Hp + "pagePr").FirstOrDefault();
+        if (pagePr == null) return false;
+        // Hancom: NARROWLY = landscape, WIDELY = portrait. Dimensions DON'T change.
+        var isLandscape = value.Equals("LANDSCAPE", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("NARROWLY", StringComparison.OrdinalIgnoreCase);
+        pagePr.SetAttributeValue("landscape", isLandscape ? "NARROWLY" : "WIDELY");
+        return true;
+    }
+
+    private static bool SetPageDimension(XElement sectionRoot, string attr, string value)
+    {
+        var pagePr = sectionRoot.Descendants(HwpxNs.Hp + "pagePr").FirstOrDefault();
+        pagePr?.SetAttributeValue(attr, value);
+        return pagePr != null;
+    }
+
+    private static bool SetPageMargin(XElement sectionRoot, string side, string value)
+    {
+        var margin = sectionRoot.Descendants(HwpxNs.Hp + "margin")
+            .FirstOrDefault(m => m.Parent?.Name == HwpxNs.Hp + "pagePr");
+        margin?.SetAttributeValue(side, value);
+        return margin != null;
+    }
+
+    /// <summary>
+    /// Set page background color via secPr > pageBorderFill.
+    /// Creates a borderFill with no borders and the specified fill color.
+    /// </summary>
+    private bool SetPageBackground(XElement sectionRoot, string color)
+    {
+        var bfId = CreateCustomBorderFill(
+            borderColor: "#000000", borderWidth: "0.00mm", borderType: "NONE",
+            fillColor: color);
+
+        var secPr = sectionRoot.Descendants(HwpxNs.Hp + "secPr").FirstOrDefault();
+        if (secPr == null) return false;
+
+        var pageBf = secPr.Element(HwpxNs.Hp + "pageBorderFill");
+        if (pageBf == null)
+        {
+            pageBf = new XElement(HwpxNs.Hp + "pageBorderFill",
+                new XAttribute("type", "BOTH"),
+                new XAttribute("borderFillIDRef", bfId));
+            secPr.Add(pageBf);
+        }
+        else
+        {
+            pageBf.SetAttributeValue("borderFillIDRef", bfId);
+        }
+        return true;
+    }
+
     // ==================== Paragraph ====================
 
     /// <summary>
@@ -245,6 +405,11 @@ public partial class HwpxHandler
             "linespacingtype" => SetParaPrSpacing(p, "lineSpacingType", value),
             "outlinelevel" or "heading" => SetParaPrHeadingLevel(p, value),
             "liststyle" or "list" or "bullet" => SetListStyle(p, value),
+            "keepnext" or "keepwithnext" => SetBreakSetting(p, "keepWithNext", value),
+            "keeplines" => SetBreakSetting(p, "keepLines", value),
+            "pagebreakbefore" => SetBreakSetting(p, "pageBreakBefore", value),
+            "widowcontrol" or "widoworphan" => SetBreakSetting(p, "widowOrphan", value),
+            "hangingindent" or "hanging" => SetParagraphHangingIndent(p, value),
             _ => (bool?)null // not a paragraph-level prop
         };
         if (result.HasValue) return result.Value;
@@ -413,6 +578,8 @@ public partial class HwpxHandler
                 or "fontsize" or "textcolor" or "color"
                 or "fonthangul" or "fontlatin"
                 or "superscript" or "subscript"
+                or "charspacing" or "letterspacing" or "spacing"
+                or "shadecolor" or "shading"
                 => EnsureCharPrProp(run, property.ToLowerInvariant(), value),
             "highlight" or "markpen" => SetHighlight(run, value),
             _ => false
@@ -590,6 +757,78 @@ public partial class HwpxHandler
                 heading.SetAttributeValue("level", value);
                 heading.SetAttributeValue("type", "OUTLINE");
             }
+        }
+
+        SaveHeader();
+        return true;
+    }
+
+    // ==================== Break Settings / Indent ====================
+
+    /// <summary>
+    /// Set a breakSetting attribute on a paragraph's paraPr.
+    /// XML: hh:paraPr > hh:breakSetting keepWithNext="0|1" ...
+    /// </summary>
+    private bool SetBreakSetting(XElement para, string attr, string value)
+    {
+        if (_doc.Header?.Root == null) return false;
+        var paraPr = CloneParaPrIfShared(para);
+        if (paraPr == null) return false;
+
+        var bs = paraPr.Element(HwpxNs.Hh + "breakSetting");
+        if (bs == null)
+        {
+            bs = new XElement(HwpxNs.Hh + "breakSetting",
+                new XAttribute("breakLatinWord", "KEEP_WORD"),
+                new XAttribute("breakNonLatinWord", "BREAK_WORD"),
+                new XAttribute("widowOrphan", "0"),
+                new XAttribute("keepWithNext", "0"),
+                new XAttribute("keepLines", "0"),
+                new XAttribute("pageBreakBefore", "0"),
+                new XAttribute("lineWrap", "BREAK"));
+            paraPr.Add(bs);
+        }
+        var boolVal = value.Equals("true", StringComparison.OrdinalIgnoreCase) || value == "1" ? "1" : "0";
+        bs.SetAttributeValue(attr, boolVal);
+        SaveHeader();
+        return true;
+    }
+
+    /// <summary>
+    /// Set hanging indent on a paragraph's paraPr margin.
+    /// Hanging indent = negative indent + positive left. Value in HWPML units (283 ≈ 1mm).
+    /// </summary>
+    private bool SetParagraphHangingIndent(XElement para, string value)
+    {
+        if (!int.TryParse(value, out var hangVal) || hangVal <= 0) return false;
+        if (_doc.Header?.Root == null) return false;
+        var paraPr = CloneParaPrIfShared(para);
+        if (paraPr == null) return false;
+
+        // Update direct margin element
+        var margin = paraPr.Element(HwpxNs.Hh + "margin");
+        if (margin == null)
+        {
+            margin = new XElement(HwpxNs.Hh + "margin",
+                new XAttribute("indent", "0"),
+                new XAttribute("left", "0"), new XAttribute("right", "0"),
+                new XAttribute("prev", "0"), new XAttribute("next", "0"));
+            paraPr.Add(margin);
+        }
+        margin.SetAttributeValue("indent", (-hangVal).ToString());
+        var currentLeft = (int?)margin.Attribute("left") ?? 0;
+        if (currentLeft < hangVal)
+            margin.SetAttributeValue("left", hangVal.ToString());
+
+        // Also update margins inside <hp:switch> blocks (Hancom reads these)
+        foreach (var switchMargin in paraPr.Descendants(HwpxNs.Hh + "margin"))
+        {
+            if (switchMargin == margin) continue;
+            // Update child elements: <hc:intent value="N"> and <hc:left value="N">
+            var intentEl = switchMargin.Element(HwpxNs.Hc + "intent");
+            intentEl?.SetAttributeValue("value", (-hangVal).ToString());
+            var leftEl = switchMargin.Element(HwpxNs.Hc + "left");
+            leftEl?.SetAttributeValue("value", hangVal.ToString());
         }
 
         SaveHeader();
@@ -935,11 +1174,18 @@ public partial class HwpxHandler
             var newId = NextCharPrId();
             var cloned = new XElement(charPr);
             cloned.SetAttributeValue("id", newId.ToString());
-            charPr.AddAfterSelf(cloned);
+            // CRITICAL: Hancom uses POSITIONAL indexing (array index), not id-based lookup.
+            // Append at END of container so position matches the new ID.
+            var container = charPr.Parent!;
+            container.Add(cloned);
 
             // Update this run to point to the clone
             run.SetAttributeValue("charPrIDRef", newId.ToString());
             charPr = cloned;
+
+            // Update itemCnt on the parent <hh:charProperties> container
+            var count = container.Elements(HwpxNs.Hh + "charPr").Count();
+            container.SetAttributeValue("itemCnt", count.ToString());
         }
 
         // Apply the property to the charPr
@@ -973,33 +1219,50 @@ public partial class HwpxHandler
 
             case "superscript":
                 ToggleCharPrFlag(charPr, HwpxNs.Hh + "supscript", value);
+                // Remove subscript if enabling superscript
                 if (value.Equals("true", StringComparison.OrdinalIgnoreCase) || value == "1")
-                {
                     charPr.Element(HwpxNs.Hh + "subscript")?.Remove();
-                    // Golden XML uses fontRef="0" for sup/subscript charPrs.
-                    // Cloned charPr may have fontRef="1" from template, causing Hancom to
-                    // ignore the supscript flag. Normalize to "0" (first declared font).
-                    NormalizeFontRef(charPr);
-                }
                 break;
 
             case "subscript":
                 ToggleCharPrFlag(charPr, HwpxNs.Hh + "subscript", value);
+                // Remove superscript if enabling subscript
                 if (value.Equals("true", StringComparison.OrdinalIgnoreCase) || value == "1")
-                {
                     charPr.Element(HwpxNs.Hh + "supscript")?.Remove();
-                    NormalizeFontRef(charPr);
-                }
                 break;
 
             case "fontsize":
-                // HWPX font size is in hundredths of a point: 1000 = 10pt
+                // HWPX font size in centi-points (1/100 pt): 1000 = 10pt, 2000 = 20pt
+                // User input is in pt — convert to centi-points
                 if (double.TryParse(value, out var ptSize))
                     charPr.SetAttributeValue("height", ((int)(ptSize * 100)).ToString());
                 break;
 
             case "textcolor" or "color":
                 charPr.SetAttributeValue("textColor", value);
+                break;
+
+            case "charspacing" or "letterspacing" or "spacing":
+                // Character spacing in percent per script. 0 = normal, -5 = 5% tighter.
+                if (int.TryParse(value, out var spacingVal))
+                {
+                    var spacingEl = charPr.Element(HwpxNs.Hh + "spacing");
+                    if (spacingEl == null)
+                    {
+                        spacingEl = new XElement(HwpxNs.Hh + "spacing",
+                            new XAttribute("hangul", "0"), new XAttribute("latin", "0"),
+                            new XAttribute("hanja", "0"), new XAttribute("japanese", "0"),
+                            new XAttribute("other", "0"), new XAttribute("symbol", "0"),
+                            new XAttribute("user", "0"));
+                        charPr.Add(spacingEl);
+                    }
+                    spacingEl.SetAttributeValue("hangul", spacingVal.ToString());
+                    spacingEl.SetAttributeValue("latin", spacingVal.ToString());
+                }
+                break;
+
+            case "shadecolor" or "shading":
+                charPr.SetAttributeValue("shadeColor", value);
                 break;
 
             case "fonthangul":

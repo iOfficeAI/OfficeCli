@@ -19,6 +19,14 @@ public partial class HwpxHandler
     public string Add(string parentPath, string type, int? index,
                       Dictionary<string, string> properties)
     {
+        // Section: special handling — creates new section file + manifest entry (no parent needed)
+        if (type.Equals("section", StringComparison.OrdinalIgnoreCase))
+        {
+            var newSection = AddNewSection(properties);
+            _dirty = true;
+            return $"/section[{newSection.Index + 1}]";
+        }
+
         var parent = ResolvePath(parentPath);
 
         // Header/footer: special handling — adds to secPr, not to parent directly
@@ -27,7 +35,6 @@ public partial class HwpxHandler
             var isHeader = type.Equals("header", StringComparison.OrdinalIgnoreCase);
             var hfElement = AddHeaderFooter(parent, properties, isHeader);
             _dirty = true;
-            // SaveSection needs an element from the target section document
             SaveSection(hfElement);
             return $"/{(isHeader ? "header" : "footer")}[1]";
         }
@@ -40,6 +47,17 @@ public partial class HwpxHandler
             SaveSection(memoElement);
             var memoCount = memoElement.Parent?.Elements(HwpxNs.Hp + "memo").Count() ?? 1;
             return $"/memo[{memoCount}]";
+        }
+
+        // TOC: special handling — generates multiple paragraphs from headings
+        if (type.Equals("toc", StringComparison.OrdinalIgnoreCase) || type.Equals("tableofcontents", StringComparison.OrdinalIgnoreCase))
+        {
+            var tocParas = CreateStaticToc(properties);
+            foreach (var p in tocParas)
+                parent.Add(p);
+            _dirty = true;
+            SaveSection(parent);
+            return $"/toc[{tocParas.Count} paragraphs]";
         }
 
         var newElement = type.ToLowerInvariant() switch
@@ -56,6 +74,7 @@ public partial class HwpxHandler
             "endnote"                     => CreateFootnote(properties, isEndnote: true),
             "pagenum" or "pagenumber"     => CreatePageNum(properties),
             "bookmark"                    => CreateBookmark(properties),
+            "equation" or "eq"            => CreateEquation(properties),
             _ => throw new CliException($"Unsupported element type: {type}")
         };
 
@@ -98,6 +117,21 @@ public partial class HwpxHandler
         else
         {
             parent.Add(newElement);
+        }
+
+        // Apply formatting properties (fontsize, bold, italic, color, align, etc.)
+        // to the newly created paragraph — CreateParagraph only handles text/style/IDRef
+        var createdPara = newElement.Name == HwpxNs.Hp + "p" ? newElement : null;
+        if (createdPara != null && properties != null)
+        {
+            var structuralKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                { "text", "styleidref", "styleIDRef", "charpridref", "charPrIDRef",
+                  "parapridref", "paraPrIDRef" };
+            foreach (var (key, value) in properties)
+            {
+                if (structuralKeys.Contains(key)) continue;
+                SetParagraphProp(createdPara, key, value);
+            }
         }
 
         _dirty = true;
@@ -415,20 +449,223 @@ public partial class HwpxHandler
     // ==================== Remove ====================
 
     /// <summary>
-    /// Remove the element at the given path.
+    /// Remove the element at the given path with type-aware cascading cleanup.
+    /// Special paths: /watermark, /pagebackground, /toc.
     /// Returns null on success. Throws CliException if not found.
     /// </summary>
     public string? Remove(string path)
     {
-        var element = ResolvePath(path);
+        // Special path handlers (not element-based)
+        if (path.Equals("/watermark", StringComparison.OrdinalIgnoreCase)
+            || path.Equals("/pagebackground", StringComparison.OrdinalIgnoreCase))
+            return RemovePageBackground();
+        if (path.Equals("/toc", StringComparison.OrdinalIgnoreCase))
+            return RemoveToc();
+        // Section removal: /section[N] with no further path segments
+        if (System.Text.RegularExpressions.Regex.IsMatch(path, @"^/section\[\d+\]$", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+            return RemoveSection(path);
 
-        // Capture parent for SaveSection before detaching
+        var element = ResolvePath(path);
         var parent = element.Parent
             ?? throw new CliException($"Cannot remove root element at: {path}");
+
+        // Type-aware cascade
+        var localName = element.Name.LocalName;
+        switch (localName)
+        {
+            case "tbl":
+                // Remove wrapper paragraph if tbl is the only content
+                if (IsWrapperParagraph(parent))
+                {
+                    var wrapperParent = parent.Parent!;
+                    parent.Remove();
+                    _dirty = true;
+                    SaveSection(wrapperParent);
+                    return null;
+                }
+                break;
+
+            case "pic" or "img":
+                CleanupBinData(element);
+                if (IsWrapperParagraph(parent))
+                {
+                    var wrapperParent = parent.Parent!;
+                    parent.Remove();
+                    _dirty = true;
+                    SaveSection(wrapperParent);
+                    return null;
+                }
+                break;
+
+            case "equation":
+                // equation is wrapped in p > run > equation
+                var eqRun = parent; // run
+                var eqP = eqRun?.Parent; // p
+                if (eqP != null && IsWrapperParagraph(eqP))
+                {
+                    var eqParent = eqP.Parent!;
+                    eqP.Remove();
+                    _dirty = true;
+                    SaveSection(eqParent);
+                    return null;
+                }
+                break;
+
+            case "memo":
+                CleanupMemoMarkers(element);
+                break;
+        }
 
         element.Remove();
         _dirty = true;
         SaveSection(parent);
+        return null;
+    }
+
+    // ==================== Remove Helpers ====================
+
+    /// <summary>
+    /// Check if a paragraph is just a wrapper for a single table/picture/equation.
+    /// These wrappers should be removed together with their content.
+    /// </summary>
+    private static bool IsWrapperParagraph(XElement p)
+    {
+        if (p.Name != HwpxNs.Hp + "p") return false;
+        var runs = p.Elements(HwpxNs.Hp + "run").ToList();
+        if (runs.Count != 1) return false;
+        var run = runs[0];
+        var nonTextChildren = run.Elements()
+            .Where(e => e.Name != HwpxNs.Hp + "t" || !string.IsNullOrWhiteSpace(e.Value))
+            .ToList();
+        return nonTextChildren.Count == 1 && (
+            nonTextChildren[0].Name == HwpxNs.Hp + "tbl" ||
+            nonTextChildren[0].Name == HwpxNs.Hp + "pic" ||
+            nonTextChildren[0].Name == HwpxNs.Hp + "equation");
+    }
+
+    /// <summary>
+    /// Clean up BinData ZIP entry when an image is removed.
+    /// </summary>
+    private void CleanupBinData(XElement picElement)
+    {
+        var imgEl = picElement.Descendants()
+            .FirstOrDefault(e => e.Name.LocalName == "img" || e.Name.LocalName == "binItem");
+        var binRef = imgEl?.Attribute("binaryItemIDRef")?.Value
+            ?? imgEl?.Attribute("src")?.Value;
+        if (binRef == null) return;
+
+        // Delete BinData entry directly from ZIP archive
+        var entryPath = binRef.StartsWith("BinData/") ? $"Contents/{binRef}" : $"Contents/BinData/{binRef}";
+        var entry = _doc.Archive.GetEntry(entryPath);
+        entry?.Delete();
+    }
+
+    /// <summary>
+    /// Remove inline memo markers (memoBegin/memoEnd) from body text.
+    /// </summary>
+    private void CleanupMemoMarkers(XElement memoElement)
+    {
+        var memoId = memoElement.Attribute("id")?.Value;
+        if (memoId == null) return;
+
+        foreach (var sec in _doc.Sections)
+        {
+            foreach (var ctrl in sec.Root.Descendants(HwpxNs.Hp + "ctrl").ToList())
+            {
+                var fieldBegin = ctrl.Element(HwpxNs.Hp + "fieldBegin");
+                if (fieldBegin?.Attribute("type")?.Value == "MEMO"
+                    && fieldBegin.Attribute("instId")?.Value == memoId)
+                {
+                    ctrl.Remove();
+                }
+                var fieldEnd = ctrl.Element(HwpxNs.Hp + "fieldEnd");
+                if (fieldEnd?.Attribute("type")?.Value == "MEMO")
+                {
+                    ctrl.Remove();
+                }
+            }
+        }
+    }
+
+    /// <summary>Remove page background (pageBorderFill) from all sections.</summary>
+    private string? RemovePageBackground()
+    {
+        foreach (var sec in _doc.Sections)
+        {
+            var pageBf = sec.Root.Descendants(HwpxNs.Hp + "pageBorderFill")
+                .Where(e => e.Attribute("type")?.Value == "BOTH")
+                .ToList();
+            foreach (var bf in pageBf) bf.Remove();
+            _dirty = true;
+            SaveSection(sec.Root);
+        }
+        return null;
+    }
+
+    /// <summary>Remove TOC paragraphs (static V1 or field-based V2).</summary>
+    private string? RemoveToc()
+    {
+        foreach (var sec in _doc.Sections)
+        {
+            // V2: field-based TOC (fieldBegin type="TABLEOFCONTENTS" ... fieldEnd)
+            var fieldBegins = sec.Root.Descendants(HwpxNs.Hp + "fieldBegin")
+                .Where(fb => fb.Attribute("type")?.Value == "TABLEOFCONTENTS")
+                .ToList();
+            if (fieldBegins.Count > 0)
+            {
+                foreach (var fb in fieldBegins)
+                {
+                    var instId = fb.Attribute("instId")?.Value;
+                    // Remove all paragraphs between fieldBegin and matching fieldEnd
+                    var beginCtrl = fb.Parent; // ctrl
+                    var beginPara = beginCtrl?.Parent; // p
+                    if (beginPara == null) continue;
+
+                    var parasToRemove = new List<XElement> { beginPara };
+                    var sibling = beginPara.ElementsAfterSelf(HwpxNs.Hp + "p").GetEnumerator();
+                    while (sibling.MoveNext())
+                    {
+                        parasToRemove.Add(sibling.Current);
+                        var endField = sibling.Current.Descendants(HwpxNs.Hp + "fieldEnd")
+                            .FirstOrDefault(fe => fe.Attribute("type")?.Value == "TABLEOFCONTENTS");
+                        if (endField != null) break;
+                    }
+                    foreach (var p in parasToRemove) p.Remove();
+                }
+                _dirty = true;
+                SaveSection(sec.Root);
+                continue;
+            }
+
+            // V1: static TOC (title "목차"/"차례" + entries until blank line)
+            var tocStart = -1;
+            var tocEnd = -1;
+            var paras = sec.Root.Elements(HwpxNs.Hp + "p").ToList();
+            for (int i = 0; i < paras.Count; i++)
+            {
+                var text = ExtractParagraphText(paras[i]).Trim();
+                if (text == "목차" || text == "목 차" || text == "차례"
+                    || text.StartsWith("[목차]") || text.StartsWith("[차례]"))
+                {
+                    tocStart = i;
+                    // Consume entries until blank line (CreateStaticToc adds trailing blank)
+                    for (int j = i + 1; j < paras.Count; j++)
+                    {
+                        var t = ExtractParagraphText(paras[j]).Trim();
+                        tocEnd = j;
+                        if (string.IsNullOrWhiteSpace(t)) break;
+                    }
+                    break;
+                }
+            }
+            if (tocStart >= 0 && tocEnd >= tocStart)
+            {
+                for (int i = tocEnd; i >= tocStart; i--)
+                    paras[i].Remove();
+                _dirty = true;
+                SaveSection(sec.Root);
+            }
+        }
         return null;
     }
 
@@ -970,9 +1207,16 @@ public partial class HwpxHandler
         }
 
         // Add to header.xml
+        // CRITICAL: Hancom uses POSITIONAL indexing (array index), not id-based lookup.
+        // Append at END of container so position matches the new ID.
         var lastCharPr = _doc.Header?.Root?.Descendants(HwpxNs.Hh + "charPr").LastOrDefault();
         if (lastCharPr != null)
-            lastCharPr.AddAfterSelf(newCharPr);
+        {
+            var container = lastCharPr.Parent!;
+            container.Add(newCharPr);
+            var count = container.Elements(HwpxNs.Hh + "charPr").Count();
+            container.SetAttributeValue("itemCnt", count.ToString());
+        }
 
         SaveHeader();
         return newId.ToString();
@@ -1430,6 +1674,101 @@ public partial class HwpxHandler
         };
     }
 
+    // ==================== Equation ====================
+
+    /// <summary>
+    /// Create an equation paragraph. Uses hp:equation (NOT hp:eqEdit — eqEdit is HWP5 class name).
+    /// Structure: hp:p > hp:run > hp:equation (ShapeObject) > hp:script.
+    /// Props: script (required), font, mode (LINE|CHAR), color.
+    /// Based on hwp_recog/18 (hwpxlib confirmed structure).
+    /// </summary>
+    private XElement CreateEquation(Dictionary<string, string>? props)
+    {
+        var script = props?.GetValueOrDefault("script")
+            ?? props?.GetValueOrDefault("formula")
+            ?? throw new CliException("equation requires 'script' or 'formula' property")
+                { Code = "invalid_prop" };
+
+        // Golden template analysis (test_eq_golden.hwpx):
+        // version="Equation Version 60", font="HancomEQN", lineMode="CHAR"
+        // numberingType="EQUATION", textWrap="TOP_AND_BOTTOM", textFlow="BOTH_SIDES"
+        // horzRelTo="PARA", vertAlign="TOP", outMargin top/bottom="0"
+        // NO <hp:inMargin>, HAS <hp:shapeComment>, <hp:script xml:space="preserve">
+        var font = props?.GetValueOrDefault("font") ?? "HancomEQN";
+        var lineMode = props?.GetValueOrDefault("mode")?.ToUpperInvariant() ?? "CHAR";
+        var textColor = props?.GetValueOrDefault("color") ?? "#000000";
+        var baseUnit = props?.GetValueOrDefault("baseunit") ?? "1000";
+
+        // Default sz: Hancom auto-calculates based on equation complexity.
+        // Golden examples: simple eq ~3700x975, fraction ~5500x2250, sigma ~2000x2700
+        // Use moderate defaults; Hancom recalculates on open.
+        var width = props?.GetValueOrDefault("width") ?? "5000";
+        var height = props?.GetValueOrDefault("height") ?? "2000";
+
+        if (int.TryParse(width, out _) == false)
+            width = ParseDimensionToHwpUnit(width).ToString();
+        if (int.TryParse(height, out _) == false)
+            height = ParseDimensionToHwpUnit(height).ToString();
+
+        var equation = new XElement(HwpxNs.Hp + "equation",
+            new XAttribute("id", NewId()),
+            new XAttribute("zOrder", "0"),
+            new XAttribute("numberingType", "EQUATION"),
+            new XAttribute("textWrap", "TOP_AND_BOTTOM"),
+            new XAttribute("textFlow", "BOTH_SIDES"),
+            new XAttribute("lock", "0"),
+            new XAttribute("dropcapstyle", "None"),
+            new XAttribute("version", "Equation Version 60"),
+            new XAttribute("baseLine", "85"),
+            new XAttribute("textColor", textColor),
+            new XAttribute("baseUnit", baseUnit),
+            new XAttribute("lineMode", lineMode),
+            new XAttribute("font", font),
+            // ShapeObject children (order matches golden template)
+            new XElement(HwpxNs.Hp + "sz",
+                new XAttribute("width", width),
+                new XAttribute("widthRelTo", "ABSOLUTE"),
+                new XAttribute("height", height),
+                new XAttribute("heightRelTo", "ABSOLUTE"),
+                new XAttribute("protect", "0")),
+            new XElement(HwpxNs.Hp + "pos",
+                new XAttribute("treatAsChar", "1"),
+                new XAttribute("affectLSpacing", "0"),
+                new XAttribute("flowWithText", "1"),
+                new XAttribute("allowOverlap", "0"),
+                new XAttribute("holdAnchorAndSO", "0"),
+                new XAttribute("vertRelTo", "PARA"),
+                new XAttribute("horzRelTo", "PARA"),
+                new XAttribute("vertAlign", "TOP"),
+                new XAttribute("horzAlign", "LEFT"),
+                new XAttribute("vertOffset", "0"),
+                new XAttribute("horzOffset", "0")),
+            new XElement(HwpxNs.Hp + "outMargin",
+                new XAttribute("left", "56"),
+                new XAttribute("right", "56"),
+                new XAttribute("top", "0"),
+                new XAttribute("bottom", "0")),
+            // NO <hp:inMargin> — golden template doesn't have it
+            new XElement(HwpxNs.Hp + "shapeComment", "수식입니다."),
+            // xml:space="preserve" + trailing newline matches golden
+            new XElement(HwpxNs.Hp + "script",
+                new XAttribute(XNamespace.Xml + "space", "preserve"),
+                script + "\n"));
+
+        // Wrap: hp:p > hp:run > hp:equation + hp:t (empty, matches golden)
+        return new XElement(HwpxNs.Hp + "p",
+            new XAttribute("id", NewId()),
+            new XAttribute("styleIDRef", "0"),
+            new XAttribute("paraPrIDRef", "0"),
+            new XAttribute("pageBreak", "0"),
+            new XAttribute("columnBreak", "0"),
+            new XAttribute("merged", "0"),
+            new XElement(HwpxNs.Hp + "run",
+                new XAttribute("charPrIDRef", "0"),
+                equation,
+                new XElement(HwpxNs.Hp + "t")));
+    }
+
     /// <summary>
     /// Generate a unique numeric ID string.
     /// Hancom requires numeric IDs (not hex) for elements to render properly.
@@ -1439,5 +1778,297 @@ public partial class HwpxHandler
     private string NewId()
     {
         return Interlocked.Increment(ref _idCounter).ToString();
+    }
+
+    // ==================== TOC ====================
+
+    /// <summary>
+    /// Create a static Table of Contents from document headings.
+    /// Returns multiple paragraph elements — one title + one per heading.
+    /// Props: "maxlevel" → max heading depth (default 3), "title" → TOC title (default "목차").
+    /// </summary>
+    private List<XElement> CreateStaticToc(Dictionary<string, string>? props)
+    {
+        var maxLevel = int.TryParse(props?.GetValueOrDefault("maxlevel"), out var ml) ? ml : 3;
+        var title = props?.GetValueOrDefault("title") ?? "목차";
+
+        var headings = CollectHeadings(maxLevel);
+        if (headings.Count == 0)
+            throw new CliException("No headings found in document. Set outlineLevel on paragraphs first.")
+                { Code = "no_headings" };
+
+        var result = new List<XElement>();
+        var structuralKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            { "text", "styleidref", "styleIDRef", "charpridref", "charPrIDRef",
+              "parapridref", "paraPrIDRef" };
+
+        // TOC title paragraph — bold, 14pt
+        var titleProps = new Dictionary<string, string>
+        {
+            ["text"] = title,
+            ["fontsize"] = "1400",
+            ["bold"] = "true"
+        };
+        var titlePara = CreateParagraph(titleProps);
+        foreach (var (k, v) in titleProps)
+            if (!structuralKeys.Contains(k)) SetParagraphProp(titlePara, k, v);
+        result.Add(titlePara);
+
+        // One paragraph per heading with indentation
+        foreach (var (level, text) in headings)
+        {
+            var indent = new string('\u3000', level - 1); // fullwidth space for visual indent
+            var entryProps = new Dictionary<string, string>
+            {
+                ["text"] = $"{indent}{text}"
+            };
+            // Sub-headings slightly smaller
+            if (level >= 2)
+                entryProps["fontsize"] = "900";
+            var entryPara = CreateParagraph(entryProps);
+            foreach (var (k, v) in entryProps)
+                if (!structuralKeys.Contains(k)) SetParagraphProp(entryPara, k, v);
+            result.Add(entryPara);
+        }
+
+        // Empty paragraph after TOC
+        result.Add(CreateParagraph(new Dictionary<string, string> { ["text"] = " " }));
+
+        return result;
+    }
+
+    /// <summary>
+    /// Collect headings from all sections.
+    /// Detection: style name match ("개요 N" / "Heading N") OR paraPr > heading element.
+    /// </summary>
+    private List<(int Level, string Text)> CollectHeadings(int maxLevel)
+    {
+        var headings = new List<(int Level, string Text)>();
+
+        foreach (var (section, para, localIdx) in _doc.AllParagraphs())
+        {
+            int? level = null;
+
+            // Method 1: Style-based detection (same as View.cs GetParagraphStyleInfo)
+            var styleIdRef = para.Attribute("styleIDRef")?.Value;
+            if (_doc.Header != null && styleIdRef != null)
+            {
+                var style = _doc.Header.Root!.Descendants(HwpxNs.Hh + "style")
+                    .FirstOrDefault(s => s.Attribute("id")?.Value == styleIdRef);
+                if (style != null)
+                {
+                    var name = style.Attribute("name")?.Value ?? "";
+                    var m = System.Text.RegularExpressions.Regex.Match(name, @"개요\s*(\d+)");
+                    if (!m.Success)
+                        m = System.Text.RegularExpressions.Regex.Match(name, @"(?i)heading\s*(\d+)");
+                    if (m.Success)
+                        level = int.Parse(m.Groups[1].Value);
+                }
+            }
+
+            // Method 2: paraPr > heading element with type="OUTLINE"
+            if (level == null)
+            {
+                var paraPrIdRef = para.Attribute("paraPrIDRef")?.Value;
+                if (_doc.Header != null && paraPrIdRef != null)
+                {
+                    var paraPr = _doc.Header.Root!.Descendants(HwpxNs.Hh + "paraPr")
+                        .FirstOrDefault(pp => pp.Attribute("id")?.Value == paraPrIdRef);
+                    var heading = paraPr?.Element(HwpxNs.Hh + "heading");
+                    if (heading?.Attribute("type")?.Value == "OUTLINE"
+                        && int.TryParse(heading.Attribute("level")?.Value, out var hl))
+                        level = hl;
+                }
+            }
+
+            if (level.HasValue && level.Value >= 1 && level.Value <= maxLevel)
+            {
+                var text = ExtractParagraphText(para);
+                if (!string.IsNullOrWhiteSpace(text))
+                    headings.Add((level.Value, HwpxKorean.Normalize(text)));
+            }
+        }
+
+        return headings;
+    }
+
+    // ==================== Multi-Section ====================
+
+    /// <summary>
+    /// Add a new section to the document. Creates section XML, updates manifest, increments secCnt.
+    /// Props: "orientation" (PORTRAIT/LANDSCAPE), "pageWidth", "pageHeight", "marginTop/Bottom/Left/Right"
+    /// </summary>
+    private HwpxSection AddNewSection(Dictionary<string, string>? props)
+    {
+        var newIndex = _doc.Sections.Count;
+        var entryPath = $"Contents/section{newIndex}.xml";
+
+        // Clone the first section's structure (secPr, namespaces, etc.) for compatibility
+        var sourceSection = _doc.PrimarySection;
+        var sourceRoot = sourceSection.Root;
+
+        // Deep-copy the section root element (preserves all namespaces + child structure)
+        var newRoot = new XElement(sourceRoot);
+
+        // Strip all content paragraphs except the first one (which holds secPr)
+        var paras = newRoot.Elements(HwpxNs.Hp + "p").ToList();
+        for (int i = 1; i < paras.Count; i++)
+            paras[i].Remove();
+
+        // Clear text in the first paragraph (keep secPr structure)
+        var firstPara = newRoot.Elements(HwpxNs.Hp + "p").First();
+        firstPara.SetAttributeValue("id", NewId());
+        // Remove linesegarray (stale layout cache)
+        firstPara.Elements(HwpxNs.Hp + "linesegarray").Remove();
+        // Clear text content in runs but keep secPr
+        foreach (var run in firstPara.Elements(HwpxNs.Hp + "run"))
+        {
+            foreach (var t in run.Elements(HwpxNs.Hp + "t"))
+                t.Value = "";
+        }
+
+        // Apply orientation if requested
+        // Hancom: landscape="NARROWLY" (가로), "WIDELY" (세로) — dimensions stay the same
+        var landscape = props?.GetValueOrDefault("orientation")?.Equals("LANDSCAPE", StringComparison.OrdinalIgnoreCase) == true;
+        if (landscape)
+        {
+            var pagePr = newRoot.Descendants(HwpxNs.Hp + "pagePr").FirstOrDefault();
+            pagePr?.SetAttributeValue("landscape", "NARROWLY");
+        }
+
+        // Apply custom page dimensions/margins if specified
+        if (props != null)
+        {
+            var pagePr = newRoot.Descendants(HwpxNs.Hp + "pagePr").FirstOrDefault();
+            var margin = pagePr?.Element(HwpxNs.Hp + "margin");
+            if (props.ContainsKey("pagewidth")) pagePr?.SetAttributeValue("width", props["pagewidth"]);
+            if (props.ContainsKey("pageheight")) pagePr?.SetAttributeValue("height", props["pageheight"]);
+            if (props.ContainsKey("margintop")) margin?.SetAttributeValue("top", props["margintop"]);
+            if (props.ContainsKey("marginbottom")) margin?.SetAttributeValue("bottom", props["marginbottom"]);
+            if (props.ContainsKey("marginleft")) margin?.SetAttributeValue("left", props["marginleft"]);
+            if (props.ContainsKey("marginright")) margin?.SetAttributeValue("right", props["marginright"]);
+        }
+
+        var secDoc = new XDocument(new XDeclaration("1.0", "UTF-8", null), newRoot);
+
+        var section = new HwpxSection
+        {
+            Index = newIndex,
+            EntryPath = entryPath,
+            Document = secDoc
+        };
+        _doc.Sections.Add(section);
+
+        // Update header.xml secCnt
+        var headEl = _doc.Header?.Root;
+        if (headEl != null)
+        {
+            var currentCnt = (int?)headEl.Attribute("secCnt") ?? 1;
+            headEl.SetAttributeValue("secCnt", (currentCnt + 1).ToString());
+            SaveHeader();
+        }
+
+        // Update manifest (content.hpf)
+        AddManifestEntry(entryPath);
+
+        // Save new section to ZIP
+        SaveSection(section.Root);
+        return section;
+    }
+
+    /// <summary>Add an item+spine entry to content.hpf manifest.</summary>
+    private void AddManifestEntry(string entryPath)
+    {
+        var opfDoc = _doc.ManifestDoc;
+        if (opfDoc?.Root == null) return;
+
+        var opfNs = opfDoc.Root.Name.Namespace;
+        var itemId = Path.GetFileNameWithoutExtension(entryPath);
+
+        var manifest = opfDoc.Root.Element(opfNs + "manifest");
+        manifest?.Add(new XElement(opfNs + "item",
+            new XAttribute("id", itemId),
+            new XAttribute("href", entryPath),
+            new XAttribute("media-type", "application/xml")));
+
+        var spine = opfDoc.Root.Element(opfNs + "spine");
+        spine?.Add(new XElement(opfNs + "itemref",
+            new XAttribute("idref", itemId)));
+
+        SaveManifest();
+    }
+
+    /// <summary>Remove an item+spine entry from content.hpf manifest.</summary>
+    private void RemoveManifestEntry(string entryPath)
+    {
+        var opfDoc = _doc.ManifestDoc;
+        if (opfDoc?.Root == null) return;
+
+        var opfNs = opfDoc.Root.Name.Namespace;
+        var itemId = Path.GetFileNameWithoutExtension(entryPath);
+
+        var manifest = opfDoc.Root.Element(opfNs + "manifest");
+        manifest?.Elements(opfNs + "item")
+            .FirstOrDefault(e => e.Attribute("id")?.Value == itemId
+                || e.Attribute("href")?.Value == entryPath)
+            ?.Remove();
+
+        var spine = opfDoc.Root.Element(opfNs + "spine");
+        spine?.Elements(opfNs + "itemref")
+            .FirstOrDefault(e => e.Attribute("idref")?.Value == itemId)
+            ?.Remove();
+
+        SaveManifest();
+    }
+
+    /// <summary>Save content.hpf manifest to ZIP archive.</summary>
+    private void SaveManifest()
+    {
+        if (_doc.ManifestDoc == null || _doc.ManifestEntryPath == null) return;
+
+        var entryName = _doc.ManifestEntryPath;
+        var entry = _doc.Archive.GetEntry(entryName);
+        if (entry == null) return;
+
+        entry.Delete();
+        var newEntry = _doc.Archive.CreateEntry(entryName, System.IO.Compression.CompressionLevel.Optimal);
+        using var stream = newEntry.Open();
+        var xmlStr = HwpxPacker.MinifyXml(_doc.ManifestDoc.ToString(SaveOptions.DisableFormatting));
+        xmlStr = "<?xml version='1.0' encoding='UTF-8'?>" + xmlStr;
+        var bytes = System.Text.Encoding.UTF8.GetBytes(xmlStr);
+        stream.Write(bytes, 0, bytes.Length);
+    }
+
+    /// <summary>Remove a section by path (e.g. /section[2]).</summary>
+    private string? RemoveSection(string path)
+    {
+        var segments = ParsePath(path);
+        var secIdx = (segments[0].Index ?? 1) - 1;
+        if (_doc.Sections.Count <= 1)
+            throw new CliException("Cannot remove last section") { Code = "invalid_op" };
+        if (secIdx < 0 || secIdx >= _doc.Sections.Count)
+            throw new CliException($"Section {secIdx + 1} not found");
+
+        var section = _doc.Sections[secIdx];
+        _doc.Sections.RemoveAt(secIdx);
+
+        // Reindex remaining sections
+        for (int i = secIdx; i < _doc.Sections.Count; i++)
+            _doc.Sections[i].Index = i;
+
+        // Update secCnt
+        var headEl = _doc.Header?.Root;
+        if (headEl != null)
+        {
+            headEl.SetAttributeValue("secCnt", _doc.Sections.Count.ToString());
+            SaveHeader();
+        }
+
+        // Remove manifest entry + ZIP entry
+        RemoveManifestEntry(section.EntryPath);
+        var zipEntry = _doc.Archive.GetEntry(section.EntryPath);
+        zipEntry?.Delete();
+        _dirty = true;
+        return null;
     }
 }
