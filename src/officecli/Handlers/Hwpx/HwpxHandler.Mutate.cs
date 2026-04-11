@@ -812,36 +812,157 @@ public partial class HwpxHandler
             ?? throw new CliException("hyperlink requires 'url' property");
         var text = props?.GetValueOrDefault("text") ?? url;
         var fieldId = NewId();
+        var fieldIdNum = NewId();
 
-        // Hyperlinks in HWPX use 3 runs: fieldBegin + text + fieldEnd
-        // We return a container fragment — the runs will be added to the parent paragraph.
-        // If adding to a section, wrap in a paragraph.
+        // Determine link category and command encoding (golden template 2026-04-11)
+        string category, command;
+        if (url.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase))
+        {
+            category = "HWPHYPERLINK_TYPE_EMAIL";
+            command = EscapeHyperlinkCommand(url) + ";2;0;0;";
+        }
+        else if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+              || url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            category = "HWPHYPERLINK_TYPE_URL";
+            command = EscapeHyperlinkCommand(url) + ";1;0;0;";
+        }
+        else
+        {
+            category = "HWPHYPERLINK_TYPE_EX";
+            command = EscapeHyperlinkCommand(url) + ";3;0;0;";
+        }
+
+        // Ensure hyperlink charPr exists in header.xml (blue underline)
+        var linkCharPrId = EnsureHyperlinkCharPr();
+
+        // Build parameters element
+        var parameters = new XElement(HwpxNs.Hp + "parameters",
+            new XAttribute("cnt", "6"),
+            new XAttribute("name", ""),
+            new XElement(HwpxNs.Hp + "integerParam", new XAttribute("name", "Prop"), "0"),
+            new XElement(HwpxNs.Hp + "stringParam", new XAttribute("name", "Command"), command),
+            new XElement(HwpxNs.Hp + "stringParam", new XAttribute("name", "Path"), url),
+            new XElement(HwpxNs.Hp + "stringParam", new XAttribute("name", "Category"), category),
+            new XElement(HwpxNs.Hp + "stringParam", new XAttribute("name", "TargetType"), "HWPHYPERLINK_TARGET_BOOKMARK"),
+            new XElement(HwpxNs.Hp + "stringParam", new XAttribute("name", "DocOpenType"), "HWPHYPERLINK_JUMP_CURRENTTAB"));
+
+        // Hyperlinks in HWPX use fieldBegin/fieldEnd (golden template confirmed).
+        // URL type uses double nesting; email/file use single nesting.
         var para = new XElement(HwpxNs.Hp + "p",
             new XAttribute("id", NewId()),
             new XAttribute("styleIDRef", "0"),
             new XAttribute("paraPrIDRef", "0"),
-            // Run 1: fieldBegin
+            new XAttribute("pageBreak", "0"),
+            new XAttribute("columnBreak", "0"),
+            new XAttribute("merged", "0"),
+            // Run 1: fieldBegin with parameters
             new XElement(HwpxNs.Hp + "run",
                 new XAttribute("charPrIDRef", "0"),
                 new XElement(HwpxNs.Hp + "ctrl",
                     new XElement(HwpxNs.Hp + "fieldBegin",
                         new XAttribute("id", fieldId),
                         new XAttribute("type", "HYPERLINK"),
-                        new XAttribute("name", url),
-                        new XAttribute("editable", "false"),
-                        new XAttribute("dirty", "false")))),
-            // Run 2: visible text
+                        new XAttribute("name", ""),
+                        new XAttribute("editable", "0"),
+                        new XAttribute("dirty", "1"),
+                        new XAttribute("zorder", "-1"),
+                        new XAttribute("fieldid", fieldIdNum),
+                        new XAttribute("metaTag", ""),
+                        parameters))),
+            // Run 2: visible text with hyperlink charPr (blue underline)
             new XElement(HwpxNs.Hp + "run",
-                new XAttribute("charPrIDRef", "0"),
+                new XAttribute("charPrIDRef", linkCharPrId),
                 new XElement(HwpxNs.Hp + "t", text)),
             // Run 3: fieldEnd
             new XElement(HwpxNs.Hp + "run",
                 new XAttribute("charPrIDRef", "0"),
                 new XElement(HwpxNs.Hp + "ctrl",
                     new XElement(HwpxNs.Hp + "fieldEnd",
-                        new XAttribute("beginIDRef", fieldId))))
+                        new XAttribute("beginIDRef", fieldId),
+                        new XAttribute("fieldid", fieldIdNum))),
+                new XElement(HwpxNs.Hp + "t"))
         );
         return para;
+    }
+
+    /// <summary>
+    /// Escape special characters in hyperlink Command parameter.
+    /// Colons and semicolons are escaped with backslash (golden template verified).
+    /// </summary>
+    private static string EscapeHyperlinkCommand(string url)
+        => url.Replace(":", "\\:").Replace(";", "\\;");
+
+    /// <summary>
+    /// Ensure a hyperlink charPr (blue text, bottom underline) exists in header.xml.
+    /// Returns the charPr id string. Creates one if not found.
+    /// </summary>
+    private string EnsureHyperlinkCharPr()
+    {
+        // Look for existing hyperlink charPr (textColor=#0000FF with underline BOTTOM)
+        var charPrs = _doc.Header?.Root?.Descendants(HwpxNs.Hh + "charPr");
+        if (charPrs != null)
+        {
+            foreach (var cp in charPrs)
+            {
+                if (cp.Attribute("textColor")?.Value == "#0000FF")
+                {
+                    var underline = cp.Element(HwpxNs.Hh + "underline");
+                    if (underline?.Attribute("type")?.Value == "BOTTOM")
+                        return cp.Attribute("id")?.Value ?? "0";
+                }
+            }
+        }
+
+        // Create new hyperlink charPr
+        var newId = NextCharPrId();
+
+        // Clone from charPr id=0 as base
+        var baseCharPr = FindCharPr("0");
+        XElement newCharPr;
+        if (baseCharPr != null)
+        {
+            newCharPr = new XElement(baseCharPr);
+            newCharPr.SetAttributeValue("id", newId.ToString());
+        }
+        else
+        {
+            newCharPr = new XElement(HwpxNs.Hh + "charPr",
+                new XAttribute("id", newId.ToString()),
+                new XAttribute("height", "1000"),
+                new XAttribute("shadeColor", "none"),
+                new XAttribute("useFontSpace", "0"),
+                new XAttribute("useKerning", "0"),
+                new XAttribute("symMark", "NONE"),
+                new XAttribute("borderFillIDRef", "2"));
+        }
+
+        // Set blue text color
+        newCharPr.SetAttributeValue("textColor", "#0000FF");
+
+        // Set underline to BOTTOM SOLID blue
+        var underlineEl = newCharPr.Element(HwpxNs.Hh + "underline");
+        if (underlineEl != null)
+        {
+            underlineEl.SetAttributeValue("type", "BOTTOM");
+            underlineEl.SetAttributeValue("shape", "SOLID");
+            underlineEl.SetAttributeValue("color", "#0000FF");
+        }
+        else
+        {
+            newCharPr.Add(new XElement(HwpxNs.Hh + "underline",
+                new XAttribute("type", "BOTTOM"),
+                new XAttribute("shape", "SOLID"),
+                new XAttribute("color", "#0000FF")));
+        }
+
+        // Add to header.xml
+        var lastCharPr = _doc.Header?.Root?.Descendants(HwpxNs.Hh + "charPr").LastOrDefault();
+        if (lastCharPr != null)
+            lastCharPr.AddAfterSelf(newCharPr);
+
+        SaveHeader();
+        return newId.ToString();
     }
 
     // ==================== Page Break ====================
@@ -894,8 +1015,9 @@ public partial class HwpxHandler
     // ==================== Header / Footer ====================
 
     /// <summary>
-    /// Add header or footer to the section. Uses the secPr-inline pattern with headerApply/footerApply.
-    /// Golden template based on python-hwpx header-footer-placeholder fixture.
+    /// Add header or footer to the section using the ctrl pattern (golden template verified 2026-04-11).
+    /// Structure: hp:run > hp:ctrl > hp:header/footer > hp:subList > hp:p
+    /// The ctrl is inserted into the first paragraph's secPr run (second position).
     /// Props: text (required), type (BOTH/ODD/EVEN, default=BOTH).
     /// </summary>
     private XElement AddHeaderFooter(XElement sectionRoot, Dictionary<string, string>? props, bool isHeader)
@@ -903,10 +1025,9 @@ public partial class HwpxHandler
         var text = props?.GetValueOrDefault("text") ?? "";
         var applyPageType = props?.GetValueOrDefault("type") ?? "BOTH";
         var tagName = isHeader ? "header" : "footer";
-        var applyTagName = isHeader ? "headerApply" : "footerApply";
         var vertAlign = isHeader ? "TOP" : "BOTTOM";
 
-        // Find secPr in the section document — it's typically at hp:p > hp:run > hp:secPr
+        // Find secPr in the section document
         var doc = sectionRoot.Document ?? sectionRoot.AncestorsAndSelf().Last().Document;
         var searchRoot = doc?.Root ?? sectionRoot;
 
@@ -916,22 +1037,95 @@ public partial class HwpxHandler
         if (secPr == null)
             throw new CliException("Cannot find <secPr> in section to add header/footer");
 
-        var hfId = NewId();
+        // Calculate textWidth/textHeight from pagePr margins
+        var pagePr = secPr.Element(HwpxNs.Hp + "pagePr");
+        var marginEl = pagePr?.Element(HwpxNs.Hp + "margin");
+        var pageWidth = (int?)pagePr?.Attribute("width") ?? 59528;
+        var marginLeft = (int?)marginEl?.Attribute("left") ?? 8504;
+        var marginRight = (int?)marginEl?.Attribute("right") ?? 8504;
+        var marginHf = isHeader
+            ? ((int?)marginEl?.Attribute("header") ?? 4252)
+            : ((int?)marginEl?.Attribute("footer") ?? 4252);
+        var textWidth = pageWidth - marginLeft - marginRight;
 
-        // Create header/footer element
+        // Determine header/footer id — use incremental: headers start at 1, footers at 2
+        var existingHfCount = searchRoot.Descendants(HwpxNs.Hp + "header").Count()
+                            + searchRoot.Descendants(HwpxNs.Hp + "footer").Count();
+        var hfId = (existingHfCount + 1).ToString();
+
+        // Create subList with correct dimensions (golden template: id="" empty, textWidth/Height from pagePr)
+        var subList = new XElement(HwpxNs.Hp + "subList",
+            new XAttribute("id", ""),
+            new XAttribute("textDirection", "HORIZONTAL"),
+            new XAttribute("lineWrap", "BREAK"),
+            new XAttribute("vertAlign", vertAlign),
+            new XAttribute("linkListIDRef", "0"),
+            new XAttribute("linkListNextIDRef", "0"),
+            new XAttribute("textWidth", textWidth.ToString()),
+            new XAttribute("textHeight", marginHf.ToString()),
+            new XAttribute("hasTextRef", "0"),
+            new XAttribute("hasNumRef", "0"),
+            new XElement(HwpxNs.Hp + "p",
+                new XAttribute("id", "0"),
+                new XAttribute("paraPrIDRef", "0"),
+                new XAttribute("styleIDRef", "0"),
+                new XAttribute("pageBreak", "0"),
+                new XAttribute("columnBreak", "0"),
+                new XAttribute("merged", "0"),
+                new XElement(HwpxNs.Hp + "run",
+                    new XAttribute("charPrIDRef", "0"),
+                    new XElement(HwpxNs.Hp + "t", text)),
+                new XElement(HwpxNs.Hp + "linesegarray",
+                    new XElement(HwpxNs.Hp + "lineseg",
+                        new XAttribute("textpos", "0"),
+                        new XAttribute("vertpos", "0"),
+                        new XAttribute("vertsize", "1000"),
+                        new XAttribute("textheight", "1000"),
+                        new XAttribute("baseline", "850"),
+                        new XAttribute("spacing", "600"),
+                        new XAttribute("horzpos", "0"),
+                        new XAttribute("horzsize", textWidth.ToString()),
+                        new XAttribute("flags", "393216")))));
+
+        // Create the ctrl element
         var hfElement = new XElement(HwpxNs.Hp + tagName,
             new XAttribute("id", hfId),
             new XAttribute("applyPageType", applyPageType),
-            CreateSubList(text, vertAlign));
+            subList);
 
-        // Create apply element (required sibling)
-        var applyElement = new XElement(HwpxNs.Hp + applyTagName,
-            new XAttribute("applyPageType", applyPageType),
-            new XAttribute("idRef", hfId));
+        var ctrlElement = new XElement(HwpxNs.Hp + "ctrl", hfElement);
 
-        // Add both to secPr
-        secPr.Add(hfElement);
-        secPr.Add(applyElement);
+        // Find the run that contains secPr and add the ctrl there
+        var secPrRun = secPr.Parent;
+        if (secPrRun?.Name == HwpxNs.Hp + "run")
+        {
+            // Insert ctrl after secPr run, or find existing body run to prepend
+            var bodyRun = secPrRun.ElementsAfterSelf(HwpxNs.Hp + "run").FirstOrDefault();
+            if (bodyRun != null)
+            {
+                // Add ctrl at the beginning of the body run
+                bodyRun.AddFirst(ctrlElement);
+            }
+            else
+            {
+                // No body run yet — create one with the ctrl and body text placeholder
+                var newRun = new XElement(HwpxNs.Hp + "run",
+                    new XAttribute("charPrIDRef", "0"),
+                    ctrlElement);
+                secPrRun.AddAfterSelf(newRun);
+            }
+        }
+        else
+        {
+            // Fallback: add as new run in first paragraph
+            var firstP = searchRoot.Descendants(HwpxNs.Hp + "p").FirstOrDefault();
+            if (firstP != null)
+            {
+                firstP.Add(new XElement(HwpxNs.Hp + "run",
+                    new XAttribute("charPrIDRef", "0"),
+                    ctrlElement));
+            }
+        }
 
         return hfElement;
     }
