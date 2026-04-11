@@ -230,7 +230,8 @@ public partial class HwpxHandler
     /// </summary>
     private bool SetParagraphProp(XElement p, string property, string value)
     {
-        return property.ToLowerInvariant() switch
+        var lower = property.ToLowerInvariant();
+        var result = lower switch
         {
             "text" => SetParagraphText(p, value),
             "style" or "styleidref" => SetAttribute(p, "styleIDRef", value),
@@ -244,8 +245,21 @@ public partial class HwpxHandler
             "linespacingtype" => SetParaPrSpacing(p, "lineSpacingType", value),
             "outlinelevel" or "heading" => SetParaPrHeadingLevel(p, value),
             "liststyle" or "list" or "bullet" => SetListStyle(p, value),
-            _ => false
+            _ => (bool?)null // not a paragraph-level prop
         };
+        if (result.HasValue) return result.Value;
+
+        // Delegate run-level properties (bold, italic, superscript, highlight, etc.)
+        // to ALL runs inside the paragraph
+        var runs = p.Elements(HwpxNs.Hp + "run").ToList();
+        if (runs.Count == 0) return false;
+        bool any = false;
+        foreach (var run in runs)
+        {
+            if (SetRunProp(run, property, value))
+                any = true;
+        }
+        return any;
     }
 
     /// <summary>
@@ -442,16 +456,102 @@ public partial class HwpxHandler
         if (paraPr == null)
             return false;
 
-        var spacing = paraPr.Element(HwpxNs.Hh + "spacing");
-        if (spacing == null)
+        // Remove old-style <hh:spacing> element (incorrect structure from prior implementation)
+        paraPr.Element(HwpxNs.Hh + "spacing")?.Remove();
+
+        // HWPX spacing uses <hp:switch> > <hp:case> / <hp:default> blocks
+        // containing <hh:margin> (with <hc:prev>/<hc:next>) and <hh:lineSpacing>
+        var hpSwitch = paraPr.Element(HwpxNs.Hp + "switch");
+        if (hpSwitch == null)
         {
-            spacing = new XElement(HwpxNs.Hh + "spacing");
-            paraPr.Add(spacing);
+            hpSwitch = new XElement(HwpxNs.Hp + "switch");
+            var border = paraPr.Element(HwpxNs.Hh + "border");
+            if (border != null)
+                border.AddBeforeSelf(hpSwitch);
+            else
+                paraPr.Add(hpSwitch);
         }
 
-        spacing.SetAttributeValue(attrName, value);
+        var hpCase = hpSwitch.Element(HwpxNs.Hp + "case");
+        if (hpCase == null)
+        {
+            hpCase = new XElement(HwpxNs.Hp + "case",
+                new XAttribute(HwpxNs.Hp + "required-namespace",
+                    "http://www.hancom.co.kr/hwpml/2016/HwpUnitChar"));
+            hpSwitch.AddFirst(hpCase);
+        }
+
+        var hpDefault = hpSwitch.Element(HwpxNs.Hp + "default");
+        if (hpDefault == null)
+        {
+            hpDefault = new XElement(HwpxNs.Hp + "default");
+            hpSwitch.Add(hpDefault);
+        }
+
+        if (attrName == "lineSpacing")
+        {
+            // lineSpacing value is same in both case and default
+            SetLineSpacingInBlock(hpCase, "value", value);
+            SetLineSpacingInBlock(hpDefault, "value", value);
+        }
+        else if (attrName == "lineSpacingType")
+        {
+            SetLineSpacingInBlock(hpCase, "type", value);
+            SetLineSpacingInBlock(hpDefault, "type", value);
+        }
+        else
+        {
+            // before → prev, after → next
+            var marginChild = attrName == "before" ? "prev" : "next";
+            if (!int.TryParse(value, out var caseVal))
+                return false;
+
+            var defaultVal = caseVal * 2; // default block = 2× case value
+            SetMarginChild(hpCase, marginChild, caseVal.ToString());
+            SetMarginChild(hpDefault, marginChild, defaultVal.ToString());
+        }
+
         SaveHeader();
         return true;
+    }
+
+    /// <summary>Set a child element value inside &lt;hh:margin&gt; within a switch block.</summary>
+    private static void SetMarginChild(XElement switchBlock, string childName, string value)
+    {
+        var margin = switchBlock.Element(HwpxNs.Hh + "margin");
+        if (margin == null)
+        {
+            margin = new XElement(HwpxNs.Hh + "margin");
+            switchBlock.AddFirst(margin);
+        }
+
+        var child = margin.Element(HwpxNs.Hc + childName);
+        if (child == null)
+        {
+            child = new XElement(HwpxNs.Hc + childName,
+                new XAttribute("value", value),
+                new XAttribute("unit", "HWPUNIT"));
+            margin.Add(child);
+        }
+        else
+        {
+            child.SetAttributeValue("value", value);
+        }
+    }
+
+    /// <summary>Set lineSpacing attribute inside a switch block.</summary>
+    private static void SetLineSpacingInBlock(XElement switchBlock, string attrName, string value)
+    {
+        var ls = switchBlock.Element(HwpxNs.Hh + "lineSpacing");
+        if (ls == null)
+        {
+            ls = new XElement(HwpxNs.Hh + "lineSpacing",
+                new XAttribute("type", "PERCENT"),
+                new XAttribute("value", "160"),
+                new XAttribute("unit", "HWPUNIT"));
+            switchBlock.Add(ls);
+        }
+        ls.SetAttributeValue(attrName, value);
     }
 
     // ==================== Paragraph Heading / Outline Level ====================
@@ -647,7 +747,10 @@ public partial class HwpxHandler
         var textElem = run.Element(HwpxNs.Hp + "t");
         if (textElem == null) return false;
 
-        // Remove existing markpen markers
+        // Remove existing markpen markers from INSIDE <hp:t> (correct location)
+        textElem.Elements(HwpxNs.Hp + "markpenBegin").ToList().ForEach(e => e.Remove());
+        textElem.Elements(HwpxNs.Hp + "markpenEnd").ToList().ForEach(e => e.Remove());
+        // Also clean up old-style sibling markers (wrong location from prior bug)
         run.Elements(HwpxNs.Hp + "markpenBegin").ToList().ForEach(e => e.Remove());
         run.Elements(HwpxNs.Hp + "markpenEnd").ToList().ForEach(e => e.Remove());
 
@@ -666,10 +769,12 @@ public partial class HwpxHandler
                 _ => color // assume hex
             };
 
-            textElem.AddBeforeSelf(
+            // Golden structure: markers INSIDE <hp:t>, wrapping text content
+            // <hp:t><hp:markpenBegin color="#FFFF00"/>text<hp:markpenEnd/></hp:t>
+            textElem.AddFirst(
                 new XElement(HwpxNs.Hp + "markpenBegin",
-                    new XAttribute("beginColor", hexColor)));
-            textElem.AddAfterSelf(
+                    new XAttribute("color", hexColor)));
+            textElem.Add(
                 new XElement(HwpxNs.Hp + "markpenEnd"));
         }
 
@@ -868,16 +973,23 @@ public partial class HwpxHandler
 
             case "superscript":
                 ToggleCharPrFlag(charPr, HwpxNs.Hh + "supscript", value);
-                // Remove subscript if enabling superscript
                 if (value.Equals("true", StringComparison.OrdinalIgnoreCase) || value == "1")
+                {
                     charPr.Element(HwpxNs.Hh + "subscript")?.Remove();
+                    // Golden XML uses fontRef="0" for sup/subscript charPrs.
+                    // Cloned charPr may have fontRef="1" from template, causing Hancom to
+                    // ignore the supscript flag. Normalize to "0" (first declared font).
+                    NormalizeFontRef(charPr);
+                }
                 break;
 
             case "subscript":
                 ToggleCharPrFlag(charPr, HwpxNs.Hh + "subscript", value);
-                // Remove superscript if enabling subscript
                 if (value.Equals("true", StringComparison.OrdinalIgnoreCase) || value == "1")
+                {
                     charPr.Element(HwpxNs.Hh + "supscript")?.Remove();
+                    NormalizeFontRef(charPr);
+                }
                 break;
 
             case "fontsize":
@@ -910,6 +1022,18 @@ public partial class HwpxHandler
                 fontRefLatin.SetAttributeValue("latin", value);
                 break;
         }
+    }
+
+    /// <summary>
+    /// Normalize fontRef attributes to "0" (first declared font).
+    /// Golden XML shows sup/subscript charPrs always use fontRef="0".
+    /// </summary>
+    private static void NormalizeFontRef(XElement charPr)
+    {
+        var fontRef = charPr.Element(HwpxNs.Hh + "fontRef");
+        if (fontRef == null) return;
+        foreach (var attr in fontRef.Attributes())
+            attr.Value = "0";
     }
 
     /// <summary>
