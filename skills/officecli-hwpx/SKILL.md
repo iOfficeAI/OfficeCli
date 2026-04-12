@@ -19,6 +19,7 @@ description: "Use this skill any time a .hwpx file is involved -- as input, outp
 | Markdown export | ✅ Yes | `view markdown` |
 | Object finder | ✅ Yes | `view objects` (picture/field/bookmark/equation) |
 | Query (expanded) | ✅ Yes | `query 'tc[text~=홍길동]'`, `:has()`, `>` combinator |
+| Template merge | ✅ Yes | `merge template.hwpx out.hwpx --data '{"key":"val"}'` |
 | Compare documents | ✅ Yes | `compare a.hwpx b.hwpx --mode text\|outline\|table` |
 | HTML preview | ✅ Yes | `view html --browser` |
 | Watch live preview | ✅ Yes | `watch file.hwpx` |
@@ -39,12 +40,14 @@ OFFICECLI="700_projects/cli-jaw/build-local/officecli"
 
 ## Core Commands
 
-### Create & Import
+### Create & Import & Merge
 
 ```bash
 officecli create doc.hwpx                                    # 빈 문서
 officecli create doc.hwpx --from-markdown input.md           # MD→HWPX (JUSTIFY 기본)
 officecli create doc.hwpx --from-markdown input.md --align left  # 왼쪽 정렬
+officecli merge template.hwpx output.hwpx --data '{"이름":"홍길동"}'  # 템플릿 {{키}} 치환
+officecli merge template.hwpx output.hwpx --data data.json           # JSON 파일 데이터
 ```
 
 ### View Modes
@@ -149,7 +152,16 @@ officecli view doc.hwpx markdown > output.md                # HWPX→MD
 officecli create new.hwpx --from-markdown output.md         # MD→HWPX
 ```
 
-### 4. 문서 비교
+### 4. 템플릿 대량 문서 생성
+
+```bash
+# 템플릿에 {{키}} 플레이스홀더 넣고 → 데이터로 치환
+officecli merge template.hwpx 홍길동.hwpx --data '{"이름":"홍길동","날짜":"2026-04-12"}'
+officecli merge template.hwpx 이지은.hwpx --data '{"이름":"이지은","날짜":"2026-04-12"}'
+# 테이블 안의 {{키}}도 치환됨. 미해결 키는 보고됨.
+```
+
+### 5. 문서 비교
 
 ```bash
 officecli compare before.hwpx after.hwpx --mode text
