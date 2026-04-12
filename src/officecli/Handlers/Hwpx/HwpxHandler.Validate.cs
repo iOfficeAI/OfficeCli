@@ -87,7 +87,6 @@ public partial class HwpxHandler
                 "HWPX package missing 'mimetype' entry (required by OPF spec)",
                 "/mimetype",
                 null));
-            // Not strictly critical — some HWPX files omit this
         }
         else
         {
@@ -98,6 +97,17 @@ public partial class HwpxHandler
                 errors.Add(new ValidationError(
                     "opf_mimetype_not_first",
                     "mimetype must be the first ZIP entry (found: " + (firstEntry?.FullName ?? "none") + ")",
+                    "/mimetype",
+                    null));
+            }
+
+            // Plan 81: mimetype must use ZIP_STORED (no compression)
+            // .NET ZipArchiveEntry has no CompressionMethod — use heuristic: CompressedLength == Length
+            if (mimetypeEntry.CompressedLength != mimetypeEntry.Length)
+            {
+                errors.Add(new ValidationError(
+                    "package_mimetype_compressed",
+                    $"mimetype entry should use ZIP_STORED (no compression), but appears compressed (size={mimetypeEntry.Length}, compressed={mimetypeEntry.CompressedLength})",
                     "/mimetype",
                     null));
             }
@@ -120,6 +130,48 @@ public partial class HwpxHandler
                     "/META-INF/container.xml",
                     "container.xml"));
                 critical = true;
+            }
+        }
+
+        // Plan 81: Rootfile resolution check
+        if (containerEntry != null && _doc.RootfilePath != null)
+        {
+            var rootEntry = _doc.Archive.GetEntry(_doc.RootfilePath);
+            if (rootEntry == null)
+            {
+                errors.Add(new ValidationError(
+                    "package_rootfile_missing",
+                    $"container.xml rootfile points to '{_doc.RootfilePath}' but entry not found in archive",
+                    "/META-INF/container.xml",
+                    null));
+                critical = true;
+            }
+        }
+
+        // Plan 81: version.xml check (warning only)
+        var versionEntry = _doc.Archive.GetEntry("Contents/version.xml");
+        if (versionEntry == null)
+        {
+            errors.Add(new ValidationError(
+                "package_version_missing",
+                "Contents/version.xml not found (optional but recommended by OWPML spec)",
+                "/Contents/version.xml",
+                null));
+            // Warning severity — not critical
+        }
+
+        // Plan 81: Section count consistency (manifest vs loaded)
+        if (_doc.ManifestDoc != null)
+        {
+            var manifestSectionCount = _doc.ManifestDoc.Descendants()
+                .Count(e => e.Attribute("media-type")?.Value?.Contains("section") ?? false);
+            if (manifestSectionCount != _doc.Sections.Count && manifestSectionCount > 0)
+            {
+                errors.Add(new ValidationError(
+                    "package_section_mismatch",
+                    $"Manifest declares {manifestSectionCount} sections but {_doc.Sections.Count} loaded",
+                    "/Contents/content.hpf",
+                    null));
             }
         }
 

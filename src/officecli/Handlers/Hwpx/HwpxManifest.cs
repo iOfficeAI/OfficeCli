@@ -1,8 +1,7 @@
 // Copyright 2025 OfficeCli (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
-// NOTE: Currently unused — LoadDocument uses inline parsing. Reserved for future manifest operations.
-
+using System.IO.Compression;
 using System.Xml.Linq;
 
 namespace OfficeCli.Handlers;
@@ -16,10 +15,33 @@ public class HwpxManifest
     /// <summary>Path to header.xml (typically "Contents/header.xml").</summary>
     public string HeaderPath { get; }
 
-    private HwpxManifest(List<string> sectionPaths, string headerPath)
+    private HwpxManifest(List<string> sectionPaths, string headerPath, string? rootfilePath = null)
     {
         SectionPaths = sectionPaths;
         HeaderPath = headerPath;
+        RootfilePath = rootfilePath;
+    }
+
+    /// <summary>Rootfile path selected from container.xml (null if fallback used).</summary>
+    public string? RootfilePath { get; private set; }
+
+    /// <summary>Parse directly from a ZipArchive (Plan 80).</summary>
+    public static HwpxManifest Parse(ZipArchive archive)
+    {
+        var entries = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in archive.Entries)
+        {
+            // Only read XML/text entries relevant to manifest discovery
+            if (entry.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)
+                || entry.FullName.EndsWith(".hpf", StringComparison.OrdinalIgnoreCase)
+                || entry.FullName.EndsWith(".opf", StringComparison.OrdinalIgnoreCase))
+            {
+                using var s = entry.Open();
+                using var reader = new StreamReader(s, System.Text.Encoding.UTF8);
+                entries[entry.FullName] = reader.ReadToEnd();
+            }
+        }
+        return Parse(entries);
     }
 
     /// <summary>
@@ -30,6 +52,7 @@ public class HwpxManifest
     {
         string? opfXml = null;
         string? opfPath = null;
+        string? rootfilePath = null;
 
         if (entries.TryGetValue("META-INF/container.xml", out var containerXml))
         {
@@ -42,6 +65,7 @@ public class HwpxManifest
             {
                 opfXml = found;
                 opfPath = fullPath;
+                rootfilePath = fullPath;
             }
         }
 
@@ -65,7 +89,10 @@ public class HwpxManifest
             var opfDoc = XDocument.Parse(opfXml);
             var manifest = ParseOpfManifest(opfDoc);
             if (manifest != null)
+            {
+                manifest.RootfilePath = rootfilePath;
                 return manifest;
+            }
         }
 
         var fallbackSections = FindSectionsFromEntries(entries);
@@ -73,7 +100,7 @@ public class HwpxManifest
             ? "Contents/header.xml"
             : "";
 
-        return new HwpxManifest(fallbackSections, headerPath);
+        return new HwpxManifest(fallbackSections, headerPath, rootfilePath);
     }
 
     private static HwpxManifest? ParseOpfManifest(XDocument opfDoc)

@@ -45,98 +45,34 @@ public partial class HwpxHandler : IDocumentHandler
     {
         var doc = new HwpxDocument { Archive = archive };
 
-        // Discover header and sections from content.hpf manifest
-        var hpfEntry = archive.GetEntry("Contents/content.hpf");
+        // Plan 80: Rootfile-aware loading via HwpxManifest
+        // Tries: container.xml → rootfile → OPF manifest → conventional fallback
+        var manifest = HwpxManifest.Parse(archive);
+        doc.RootfilePath = manifest.RootfilePath;
+
+        // Load manifest doc (for SaveManifest and validation)
+        var manifestPath = manifest.RootfilePath ?? "Contents/content.hpf";
+        var hpfEntry = archive.GetEntry(manifestPath);
         if (hpfEntry != null)
         {
             using var hpfStream = hpfEntry.Open();
-            var hpf = LoadAndNormalize(hpfStream);
-            doc.ManifestDoc = hpf;
+            doc.ManifestDoc = LoadAndNormalize(hpfStream);
             doc.ManifestEntryPath = hpfEntry.FullName;
-            var allItems = hpf.Descendants()
-                .Where(e => e.Name.LocalName == "item")
-                .ToList();
+        }
 
-            // Discover header from manifest: item whose href contains "header" or id contains "head"
-            var headerItem = allItems.FirstOrDefault(e =>
-                (e.Attribute("href")?.Value?.Contains("header", StringComparison.OrdinalIgnoreCase) ?? false)
-                || (e.Attribute("id")?.Value?.Contains("head", StringComparison.OrdinalIgnoreCase) ?? false));
-            if (headerItem != null)
+        // Load header
+        if (!string.IsNullOrEmpty(manifest.HeaderPath))
+        {
+            var headerEntry = archive.GetEntry(manifest.HeaderPath);
+            if (headerEntry != null)
             {
-                var headerHref = headerItem.Attribute("href")?.Value;
-                if (headerHref != null)
-                {
-                    var headerPath = headerHref.StartsWith("Contents/") ? headerHref : $"Contents/{headerHref}";
-                    var headerEntry = archive.GetEntry(headerPath);
-                    if (headerEntry != null)
-                    {
-                        doc.HeaderEntryPath = headerEntry.FullName;
-                        using var stream = headerEntry.Open();
-                        doc.Header = LoadAndNormalize(stream);
-                    }
-                }
-            }
-
-            // Build item id→href lookup for spine resolution
-            var itemById = allItems
-                .Where(e => e.Attribute("id")?.Value != null && e.Attribute("href")?.Value != null)
-                .ToDictionary(
-                    e => e.Attribute("id")!.Value,
-                    e => e,
-                    StringComparer.Ordinal);
-
-            // Discover sections: prefer spine order (OPF reading order), fall back to manifest order
-            var spine = hpf.Descendants()
-                .Where(e => e.Name.LocalName == "itemref")
-                .Select(e => e.Attribute("idref")?.Value)
-                .Where(id => id != null)
-                .ToList();
-
-            var orderedSectionHrefs = new List<string>();
-            if (spine.Count > 0)
-            {
-                // Spine order: resolve each itemref to its manifest item, keep only sections
-                foreach (var idref in spine)
-                {
-                    if (itemById.TryGetValue(idref!, out var item))
-                    {
-                        var mt = item.Attribute("media-type")?.Value;
-                        if (mt != null && mt.Contains("section"))
-                        {
-                            var href = item.Attribute("href")?.Value;
-                            if (href != null) orderedSectionHrefs.Add(href);
-                        }
-                    }
-                }
-            }
-
-            // Fall back to manifest order if spine is absent or yielded nothing
-            if (orderedSectionHrefs.Count == 0)
-            {
-                orderedSectionHrefs.AddRange(
-                    allItems
-                        .Where(e => e.Attribute("media-type")?.Value?.Contains("section") ?? false)
-                        .Select(e => e.Attribute("href")?.Value!)
-                        .Where(h => h != null));
-            }
-
-            int idx = 0;
-            foreach (var href in orderedSectionHrefs)
-            {
-                var entryPath = href.StartsWith("Contents/") ? href : $"Contents/{href}";
-                var entry = archive.GetEntry(entryPath);
-                if (entry == null) continue;
-                using var s = entry.Open();
-                doc.Sections.Add(new HwpxSection
-                {
-                    Index = idx++,
-                    EntryPath = entry.FullName,
-                    Document = LoadAndNormalize(s)
-                });
+                doc.HeaderEntryPath = headerEntry.FullName;
+                using var stream = headerEntry.Open();
+                doc.Header = LoadAndNormalize(stream);
             }
         }
 
-        // Fallback: load header from conventional path if not discovered from manifest
+        // Fallback: conventional header path
         if (doc.Header == null)
         {
             var headerEntry = archive.GetEntry("Contents/header.xml");
@@ -146,6 +82,21 @@ public partial class HwpxHandler : IDocumentHandler
                 using var stream = headerEntry.Open();
                 doc.Header = LoadAndNormalize(stream);
             }
+        }
+
+        // Load sections from manifest-discovered paths
+        int idx = 0;
+        foreach (var sectionPath in manifest.SectionPaths)
+        {
+            var entry = archive.GetEntry(sectionPath);
+            if (entry == null) continue;
+            using var s = entry.Open();
+            doc.Sections.Add(new HwpxSection
+            {
+                Index = idx++,
+                EntryPath = entry.FullName,
+                Document = LoadAndNormalize(s)
+            });
         }
 
         // Fallback: try section0.xml, section1.xml, ...

@@ -17,6 +17,8 @@ internal class HwpxDocument
     public XDocument? ManifestDoc { get; set; }
     /// <summary>ZIP entry path for the manifest (e.g. "Contents/content.hpf").</summary>
     public string? ManifestEntryPath { get; set; }
+    /// <summary>Selected rootfile path from container.xml (null if conventional fallback used).</summary>
+    public string? RootfilePath { get; set; }
     public HwpxSection PrimarySection => Sections[0];  // convenience
 
     /// <summary>Read binary data from BinData directory in the ZIP archive.</summary>
