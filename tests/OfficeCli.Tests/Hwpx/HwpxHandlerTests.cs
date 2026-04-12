@@ -950,4 +950,333 @@ public class HwpxHandlerTests : IDisposable
         Assert.Contains("<td", html);
         Assert.Contains("</table>", html);
     }
+
+    // ============================================================
+    // Plan 70: Label-Based Table Fill
+    // ============================================================
+
+    [Fact]
+    public void Plan70_FillByLabel_RightDirection()
+    {
+        var path = CreateTemp("Label fill test");
+        using var handler = new HwpxHandler(path, editable: true);
+
+        // Create a table with label cells
+        handler.Add("/section[1]", "table", null,
+            new Dictionary<string, string> { ["rows"] = "3", ["cols"] = "2" });
+
+        // Set labels in left column
+        handler.Set("/section/p[2]/tbl[1]/tr[1]/tc[1]",
+            new Dictionary<string, string> { ["text"] = "이름" });
+        handler.Set("/section/p[2]/tbl[1]/tr[2]/tc[1]",
+            new Dictionary<string, string> { ["text"] = "직위" });
+        handler.Set("/section/p[2]/tbl[1]/tr[3]/tc[1]",
+            new Dictionary<string, string> { ["text"] = "연락처" });
+
+        // Fill by label (default right direction)
+        handler.Set("/table/fill", new Dictionary<string, string>
+        {
+            ["이름"] = "홍길동",
+            ["직위"] = "이사",
+            ["연락처"] = "010-1234-5678"
+        });
+
+        // Verify right-adjacent cells were filled
+        var text = handler.ViewAsText();
+        Assert.Contains("홍길동", text);
+        Assert.Contains("이사", text);
+        Assert.Contains("010-1234-5678", text);
+    }
+
+    [Fact]
+    public void Plan70_FillByLabel_WithFillPrefix()
+    {
+        var path = CreateTemp("Fill prefix test");
+        using var handler = new HwpxHandler(path, editable: true);
+
+        handler.Add("/section[1]", "table", null,
+            new Dictionary<string, string> { ["rows"] = "2", ["cols"] = "2" });
+        handler.Set("/section/p[2]/tbl[1]/tr[1]/tc[1]",
+            new Dictionary<string, string> { ["text"] = "대표자" });
+
+        // Use fill: prefix on root path
+        handler.Set("/", new Dictionary<string, string>
+        {
+            ["fill:대표자"] = "김철수"
+        });
+
+        var text = handler.ViewAsText();
+        Assert.Contains("김철수", text);
+    }
+
+    [Fact]
+    public void Plan70_FillByLabel_DownDirection()
+    {
+        var path = CreateTemp("Direction test");
+        using var handler = new HwpxHandler(path, editable: true);
+
+        handler.Add("/section[1]", "table", null,
+            new Dictionary<string, string> { ["rows"] = "3", ["cols"] = "2" });
+        handler.Set("/section/p[2]/tbl[1]/tr[1]/tc[1]",
+            new Dictionary<string, string> { ["text"] = "항목" });
+        handler.Set("/section/p[2]/tbl[1]/tr[1]/tc[2]",
+            new Dictionary<string, string> { ["text"] = "값" });
+
+        // Fill using down direction
+        handler.Set("/table/fill", new Dictionary<string, string>
+        {
+            ["항목>down"] = "매출액"
+        });
+
+        var text = handler.ViewAsText();
+        Assert.Contains("매출액", text);
+    }
+
+    [Fact]
+    public void Plan70_NormalizeLabel_TrimsColonAndSpaces()
+    {
+        // Test label normalization directly
+        Assert.Equal("대표자", HwpxHandler.NormalizeLabel("대표자:"));
+        Assert.Equal("대표자", HwpxHandler.NormalizeLabel("대표자 :"));
+        Assert.Equal("대표자", HwpxHandler.NormalizeLabel("  대표자  "));
+        Assert.Equal("설립배경 및 목적", HwpxHandler.NormalizeLabel("설립배경  및  목적"));
+        Assert.Equal("", HwpxHandler.NormalizeLabel(""));
+    }
+
+    [Fact]
+    public void Plan70_ParseLabelSpec_DirectionParsing()
+    {
+        var (label1, dir1) = HwpxHandler.ParseLabelSpec("대표자");
+        Assert.Equal("대표자", label1);
+        Assert.Equal("right", dir1);
+
+        var (label2, dir2) = HwpxHandler.ParseLabelSpec("주소>down");
+        Assert.Equal("주소", label2);
+        Assert.Equal("down", dir2);
+
+        var (label3, dir3) = HwpxHandler.ParseLabelSpec("이름>left");
+        Assert.Equal("이름", label3);
+        Assert.Equal("left", dir3);
+    }
+
+    // ==================== Plan 70.2: Form Recognition ====================
+
+    [Fact]
+    public void Plan702_IsLabelCell_Keywords()
+    {
+        // Keyword matches (substring)
+        Assert.True(HwpxHandler.IsLabelCell("성명"));
+        Assert.True(HwpxHandler.IsLabelCell("전화번호"));
+        Assert.True(HwpxHandler.IsLabelCell("  대표자:  "));
+        Assert.True(HwpxHandler.IsLabelCell("생년월일"));
+        Assert.True(HwpxHandler.IsLabelCell("1학년"));    // contains keyword "학년"
+        Assert.True(HwpxHandler.IsLabelCell("3반"));       // contains keyword "반"
+
+        // Non-label: digits only, empty, too long
+        Assert.False(HwpxHandler.IsLabelCell("12345"));
+        Assert.False(HwpxHandler.IsLabelCell(""));
+        Assert.False(HwpxHandler.IsLabelCell("이것은 매우 긴 텍스트로 라벨이 될 수 없는 문장입니다 삼십자를 넘기는 셀 텍스트"));
+    }
+
+    [Fact]
+    public void Plan702_IsLabelCell_ShortKorean()
+    {
+        // Short Korean text (2-8 chars, no digits) → heuristic label match
+        Assert.True(HwpxHandler.IsLabelCell("동아리"));
+        Assert.True(HwpxHandler.IsLabelCell("학 과"));
+        Assert.True(HwpxHandler.IsLabelCell("비고"));
+        Assert.True(HwpxHandler.IsLabelCell("홍길동"));    // 3 Korean chars, no digits → heuristic match
+
+        // Non-label: single char (too short), English, digits mixed with non-keyword
+        Assert.False(HwpxHandler.IsLabelCell("명"));
+        Assert.False(HwpxHandler.IsLabelCell("abcdef"));
+        Assert.False(HwpxHandler.IsLabelCell("값123입력"));  // >8 after normalize, has digits
+    }
+
+    [Fact]
+    public void Plan702_RecognizeFormFields_Strategy1()
+    {
+        var path = CreateTemp("Form recognize Strategy1");
+        using var handler = new HwpxHandler(path, editable: true);
+
+        handler.Add("/section[1]", "table", null,
+            new Dictionary<string, string> { ["rows"] = "2", ["cols"] = "2" });
+
+        handler.Set("/section/p[2]/tbl[1]/tr[1]/tc[1]",
+            new Dictionary<string, string> { ["text"] = "성 명" });
+        handler.Set("/section/p[2]/tbl[1]/tr[1]/tc[2]",
+            new Dictionary<string, string> { ["text"] = "홍길동" });
+        handler.Set("/section/p[2]/tbl[1]/tr[2]/tc[1]",
+            new Dictionary<string, string> { ["text"] = "전화번호" });
+        handler.Set("/section/p[2]/tbl[1]/tr[2]/tc[2]",
+            new Dictionary<string, string> { ["text"] = "010-1234-5678" });
+
+        var fields = handler.RecognizeFormFields();
+
+        Assert.True(fields.Count >= 2, $"Expected >=2 fields, got {fields.Count}");
+        Assert.Contains(fields, f => f.Label.Contains("성") && f.Value == "홍길동");
+        Assert.Contains(fields, f => f.Label.Contains("전화") && f.Value == "010-1234-5678");
+        Assert.All(fields, f => Assert.Equal("adjacent", f.Strategy));
+    }
+
+    [Fact]
+    public void Plan702_RecognizeFormFields_Strategy2()
+    {
+        // Strategy 2 triggers when Strategy 1 finds nothing (no IsLabelCell matches).
+        // Use short non-keyword headers that don't match IsLabelCell:
+        // "No", "Score", "Grade" — English short headers, not Korean keywords.
+        var path = CreateTemp("Form recognize Strategy2");
+        using var handler = new HwpxHandler(path, editable: true);
+
+        handler.Add("/section[1]", "table", null,
+            new Dictionary<string, string> { ["rows"] = "3", ["cols"] = "3" });
+
+        // Header row — English/mixed, NOT in LabelKeywords, NOT short Korean
+        handler.Set("/section/p[2]/tbl[1]/tr[1]/tc[1]",
+            new Dictionary<string, string> { ["text"] = "No." });
+        handler.Set("/section/p[2]/tbl[1]/tr[1]/tc[2]",
+            new Dictionary<string, string> { ["text"] = "Score" });
+        handler.Set("/section/p[2]/tbl[1]/tr[1]/tc[3]",
+            new Dictionary<string, string> { ["text"] = "Grade" });
+        // Data row 1
+        handler.Set("/section/p[2]/tbl[1]/tr[2]/tc[1]",
+            new Dictionary<string, string> { ["text"] = "1" });
+        handler.Set("/section/p[2]/tbl[1]/tr[2]/tc[2]",
+            new Dictionary<string, string> { ["text"] = "95" });
+        handler.Set("/section/p[2]/tbl[1]/tr[2]/tc[3]",
+            new Dictionary<string, string> { ["text"] = "A+" });
+        // Data row 2
+        handler.Set("/section/p[2]/tbl[1]/tr[3]/tc[1]",
+            new Dictionary<string, string> { ["text"] = "2" });
+        handler.Set("/section/p[2]/tbl[1]/tr[3]/tc[2]",
+            new Dictionary<string, string> { ["text"] = "82" });
+        handler.Set("/section/p[2]/tbl[1]/tr[3]/tc[3]",
+            new Dictionary<string, string> { ["text"] = "B+" });
+
+        var fields = handler.RecognizeFormFields();
+
+        Assert.True(fields.Count >= 6, $"Expected >=6 fields (2 data rows × 3 cols), got {fields.Count}");
+        Assert.Contains(fields, f => f.Label == "No." && f.Value == "1");
+        Assert.Contains(fields, f => f.Label == "Score" && f.Value == "95");
+        Assert.All(fields, f => Assert.Equal("header-data", f.Strategy));
+    }
+
+    [Fact]
+    public void Plan702_RecognizeFormFields_EmptyTable()
+    {
+        var path = CreateTemp("Form recognize empty");
+        using var handler = new HwpxHandler(path, editable: true);
+
+        handler.Add("/section[1]", "table", null,
+            new Dictionary<string, string> { ["rows"] = "2", ["cols"] = "2" });
+
+        // Leave cells empty (default text is empty after table creation)
+        var fields = handler.RecognizeFormFields();
+        Assert.Empty(fields);
+    }
+
+    // ==================== Plan 70.3: Forms CLI Wiring ====================
+
+    [Fact]
+    public void Plan703_ViewAsForms_AutoFlag()
+    {
+        var path = CreateTemp("Forms auto test");
+        using var handler = new HwpxHandler(path, editable: true);
+
+        handler.Add("/section[1]", "table", null,
+            new Dictionary<string, string> { ["rows"] = "2", ["cols"] = "2" });
+        handler.Set("/section/p[2]/tbl[1]/tr[1]/tc[1]",
+            new Dictionary<string, string> { ["text"] = "성 명" });
+        handler.Set("/section/p[2]/tbl[1]/tr[1]/tc[2]",
+            new Dictionary<string, string> { ["text"] = "홍길동" });
+
+        // Without auto — only CLICK_HERE section
+        var textNoAuto = handler.ViewAsForms(auto: false);
+        Assert.DoesNotContain("[auto:", textNoAuto);
+
+        // With auto — includes auto-recognized fields
+        var textAuto = handler.ViewAsForms(auto: true);
+        Assert.Contains("[auto:adjacent]", textAuto);
+        Assert.Contains("홍길동", textAuto);
+    }
+
+    [Fact]
+    public void Plan703_ViewAsFormsJson_Output()
+    {
+        var path = CreateTemp("Forms JSON test");
+        using var handler = new HwpxHandler(path, editable: true);
+
+        handler.Add("/section[1]", "table", null,
+            new Dictionary<string, string> { ["rows"] = "2", ["cols"] = "2" });
+        handler.Set("/section/p[2]/tbl[1]/tr[1]/tc[1]",
+            new Dictionary<string, string> { ["text"] = "대표자" });
+        handler.Set("/section/p[2]/tbl[1]/tr[1]/tc[2]",
+            new Dictionary<string, string> { ["text"] = "홍길동" });
+
+        var json = handler.ViewAsFormsJson(auto: true);
+        var obj = json.AsObject();
+
+        // Verify structure: clickHere array + autoRecognized array
+        Assert.True(obj.ContainsKey("clickHere"));
+        Assert.True(obj.ContainsKey("autoRecognized"));
+
+        var autoArr = obj["autoRecognized"]!.AsArray();
+        Assert.True(autoArr.Count >= 1, $"Expected >=1 auto fields, got {autoArr.Count}");
+
+        // Check first field has all required properties
+        var first = autoArr[0]!.AsObject();
+        Assert.True(first.ContainsKey("label"));
+        Assert.True(first.ContainsKey("value"));
+        Assert.True(first.ContainsKey("path"));
+        Assert.True(first.ContainsKey("strategy"));
+        Assert.Equal("adjacent", first["strategy"]!.GetValue<string>());
+    }
+
+    // ==================== Plan 70.4: Golden File + Pipeline ====================
+
+    [Fact]
+    public void Plan704_LabelContract_Roundtrip()
+    {
+        // Step 1: Create form HWPX with label-value table
+        var path = CreateTemp("Label contract roundtrip");
+        using (var setup = new HwpxHandler(path, editable: true))
+        {
+            setup.Add("/section[1]", "table", null,
+                new Dictionary<string, string> { ["rows"] = "2", ["cols"] = "2" });
+            setup.Set("/section/p[2]/tbl[1]/tr[1]/tc[1]",
+                new Dictionary<string, string> { ["text"] = "성 명" });
+            setup.Set("/section/p[2]/tbl[1]/tr[1]/tc[2]",
+                new Dictionary<string, string> { ["text"] = "홍길동" });
+            setup.Set("/section/p[2]/tbl[1]/tr[2]/tc[1]",
+                new Dictionary<string, string> { ["text"] = "전화번호" });
+            setup.Set("/section/p[2]/tbl[1]/tr[2]/tc[2]",
+                new Dictionary<string, string> { ["text"] = "010-1234-5678" });
+        }
+
+        // Step 2: Recognize fields
+        List<HwpxHandler.RecognizedField> fields;
+        using (var reader = new HwpxHandler(path, editable: false))
+        {
+            fields = reader.RecognizeFormFields();
+        }
+        Assert.True(fields.Count >= 2, $"Expected >=2 fields, got {fields.Count}");
+        var nameField = fields.First(f => f.Label.Contains("성"));
+        Assert.Equal("홍길동", nameField.Value);
+
+        // Step 3: Fill using public API (/table/fill)
+        using (var writer = new HwpxHandler(path, editable: true))
+        {
+            writer.Set("/table/fill", new Dictionary<string, string> {
+                [nameField.Label] = "김서준"
+            });
+        }
+
+        // Step 4: Verify roundtrip
+        using (var verifier = new HwpxHandler(path, editable: false))
+        {
+            var updated = verifier.RecognizeFormFields();
+            var updatedName = updated.First(f => f.Label.Contains("성"));
+            Assert.Equal("김서준", updatedName.Value);
+        }
+    }
 }
