@@ -81,6 +81,7 @@ public partial class HwpxHandler
             "picture" or "image" or "pic" => CreatePicture(properties),
             "hyperlink" or "link"         => CreateHyperlink(properties),
             "pagebreak" or "page-break"   => CreatePageBreak(),
+            "columnbreak" or "column-break" => CreateColumnBreak(properties),
             "footnote"                    => CreateFootnote(properties),
             "endnote"                     => CreateFootnote(properties, isEndnote: true),
             "pagenum" or "pagenumber"     => CreatePageNum(properties),
@@ -99,6 +100,10 @@ public partial class HwpxHandler
             "filepath" or "path"          => CreateField(MergeProps(properties, "type", "PATH")),
             "clickhere"                   => CreateField(MergeProps(properties, "type", "CLICK_HERE")),
             "summary" or "summery"        => CreateField(MergeProps(properties, "type", "SUMMERY")),
+            "author"                      => CreateField(MergeProps(properties, "type", "SUMMERY", "command", "$author")),
+            "title"                       => CreateField(MergeProps(properties, "type", "SUMMERY", "command", "$title")),
+            "lastsaveby"                  => CreateField(MergeProps(properties, "type", "SUMMERY", "command", "$lastsaveby")),
+            "filename"                    => CreateField(MergeProps(properties, "type", "PATH", "command", "$F")),
             "watermark"                   => CreateWatermark(properties),
             _ => throw new CliException($"Unsupported element type: {type}")
         };
@@ -499,6 +504,23 @@ public partial class HwpxHandler
     // ==================== Remove ====================
 
     /// <summary>
+    /// <summary>Swap two elements in the document (Plan 96).</summary>
+    public (string NewPath1, string NewPath2) Swap(string pathA, string pathB)
+    {
+        var elemA = ResolvePath(pathA);
+        var elemB = ResolvePath(pathB);
+        var placeholder = new XElement(HwpxNs.Hp + "_swap");
+        elemA.ReplaceWith(placeholder);
+        elemB.ReplaceWith(elemA);
+        placeholder.ReplaceWith(elemB);
+        var secA = elemA.AncestorsAndSelf().FirstOrDefault(e => e.Name.LocalName == "sec");
+        if (secA != null) SaveSection(secA);
+        var secB = elemB.AncestorsAndSelf().FirstOrDefault(e => e.Name.LocalName == "sec");
+        if (secB != null && secB != secA) SaveSection(secB);
+        _dirty = true;
+        return (BuildPath(elemA), BuildPath(elemB));
+    }
+
     /// Remove the element at the given path with type-aware cascading cleanup.
     /// Special paths: /watermark, /pagebackground, /toc.
     /// Returns null on success. Throws CliException if not found.
@@ -709,7 +731,9 @@ public partial class HwpxHandler
         var imageId = GetNextImageId();
         var binFileName = $"image{imageId}.{ext}";
 
-        var binEntry = _doc.Archive.CreateEntry($"Contents/BinData/{binFileName}",
+        // BinData lives at ZIP root (BinData/), NOT under Contents/.
+        // Hancom resolves manifest href relative to ZIP root, not content.hpf location.
+        var binEntry = _doc.Archive.CreateEntry($"BinData/{binFileName}",
             System.IO.Compression.CompressionLevel.Optimal);
         using (var binStream = binEntry.Open())
             binStream.Write(imageBytes, 0, imageBytes.Length);
@@ -1149,8 +1173,8 @@ public partial class HwpxHandler
         var imageId = GetNextImageId();
         var binFileName = $"image{imageId}.{ext}";
 
-        // 3. Add image to ZIP at Contents/BinData/
-        var binEntry = _doc.Archive.CreateEntry($"Contents/BinData/{binFileName}", System.IO.Compression.CompressionLevel.Optimal);
+        // 3. Add image to ZIP — BinData/ at archive root (not Contents/BinData/)
+        var binEntry = _doc.Archive.CreateEntry($"BinData/{binFileName}", System.IO.Compression.CompressionLevel.Optimal);
         using (var binStream = binEntry.Open())
             binStream.Write(imageBytes, 0, imageBytes.Length);
 
@@ -1419,6 +1443,30 @@ public partial class HwpxHandler
             new XAttribute("pageBreak", "1"),
             new XAttribute("columnBreak", "0"),
             new XAttribute("merged", "0"));
+    }
+
+    /// <summary>Create column break — changes colCount via colPr (Plan 96).</summary>
+    private XElement CreateColumnBreak(Dictionary<string, string>? props)
+    {
+        var cols = int.Parse(props?.GetValueOrDefault("cols") ?? "2");
+        var gap = props?.GetValueOrDefault("gap") ?? (cols > 1 ? "2268" : "0");
+        return new XElement(HwpxNs.Hp + "p",
+            new XAttribute("id", NewId()),
+            new XAttribute("styleIDRef", "0"),
+            new XAttribute("paraPrIDRef", "0"),
+            new XAttribute("pageBreak", "0"),
+            new XAttribute("columnBreak", "0"),
+            new XAttribute("merged", "0"),
+            new XElement(HwpxNs.Hp + "run",
+                new XAttribute("charPrIDRef", "0"),
+                new XElement(HwpxNs.Hp + "ctrl",
+                    new XElement(HwpxNs.Hp + "colPr",
+                        new XAttribute("id", ""),
+                        new XAttribute("type", "NEWSPAPER"),
+                        new XAttribute("layout", "LEFT"),
+                        new XAttribute("colCount", cols.ToString()),
+                        new XAttribute("sameSz", cols > 1 ? "1" : "1"),
+                        new XAttribute("sameGap", gap)))));
     }
 
     // ==================== Footnote ====================
@@ -2101,6 +2149,13 @@ public partial class HwpxHandler
     {
         var result = props != null ? new Dictionary<string, string>(props, StringComparer.OrdinalIgnoreCase) : new(StringComparer.OrdinalIgnoreCase);
         result[key] = value;
+        return result;
+    }
+
+    private static Dictionary<string, string> MergeProps(Dictionary<string, string>? props, string key1, string value1, string key2, string value2)
+    {
+        var result = MergeProps(props, key1, value1);
+        result[key2] = value2;
         return result;
     }
 

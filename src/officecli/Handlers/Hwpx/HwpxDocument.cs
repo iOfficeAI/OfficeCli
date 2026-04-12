@@ -22,10 +22,17 @@ internal class HwpxDocument
     public HwpxSection PrimarySection => Sections[0];  // convenience
 
     /// <summary>Read binary data from BinData directory in the ZIP archive.</summary>
+    /// <remarks>
+    /// Hancom stores BinData at the archive root (BinData/imageN.ext), not under Contents/.
+    /// We try root-level first (canonical), then Contents/ prefix (legacy fallback).
+    /// </remarks>
     public byte[]? GetBinData(string reference)
     {
-        var path = reference.StartsWith("BinData/") ? $"Contents/{reference}" : $"Contents/BinData/{reference}";
-        var entry = Archive.GetEntry(path);
+        var name = reference.StartsWith("BinData/") ? reference : $"BinData/{reference}";
+        // Try root-level first (Hancom canonical path)
+        var entry = Archive.GetEntry(name)
+            // Fallback: Contents/ prefix (legacy officecli path)
+            ?? Archive.GetEntry($"Contents/{name}");
         if (entry == null) return null;
         using var stream = entry.Open();
         using var ms = new MemoryStream();
