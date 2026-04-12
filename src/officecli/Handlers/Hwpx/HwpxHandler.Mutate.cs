@@ -99,6 +99,7 @@ public partial class HwpxHandler
             "filepath" or "path"          => CreateField(MergeProps(properties, "type", "PATH")),
             "clickhere"                   => CreateField(MergeProps(properties, "type", "CLICK_HERE")),
             "summary" or "summery"        => CreateField(MergeProps(properties, "type", "SUMMERY")),
+            "watermark"                   => CreateWatermark(properties),
             _ => throw new CliException($"Unsupported element type: {type}")
         };
 
@@ -687,6 +688,100 @@ public partial class HwpxHandler
             SaveSection(sec.Root);
         }
         return null;
+    }
+
+    /// <summary>Add image watermark via pageBorderFill + imgBrush (Plan 98).</summary>
+    private XElement CreateWatermark(Dictionary<string, string>? props)
+    {
+        var path = props?.GetValueOrDefault("path") ?? props?.GetValueOrDefault("src")
+            ?? throw new CliException("watermark requires 'path' or 'src' property");
+        if (!File.Exists(path))
+            throw new CliException($"Watermark image not found: {path}");
+
+        var bright = props?.GetValueOrDefault("bright") ?? "70";
+        var contrast = props?.GetValueOrDefault("contrast") ?? "-50";
+
+        // 1. Add image to BinData
+        var imageBytes = File.ReadAllBytes(path);
+        var ext = Path.GetExtension(path).TrimStart('.').ToLowerInvariant();
+        if (ext == "jpg") ext = "jpeg";
+        var mediaType = ext switch { "png" => "image/png", "jpeg" => "image/jpeg", _ => $"image/{ext}" };
+        var imageId = GetNextImageId();
+        var binFileName = $"image{imageId}.{ext}";
+
+        var binEntry = _doc.Archive.CreateEntry($"Contents/BinData/{binFileName}",
+            System.IO.Compression.CompressionLevel.Optimal);
+        using (var binStream = binEntry.Open())
+            binStream.Write(imageBytes, 0, imageBytes.Length);
+        RegisterImageInManifest($"image{imageId}", $"BinData/{binFileName}", mediaType);
+
+        // 2. Create borderFill with imgBrush (golden template pattern)
+        var bfId = NextBorderFillId();
+        var bf = new XElement(HwpxNs.Hh + "borderFill",
+            new XAttribute("id", bfId),
+            new XAttribute("threeD", "0"),
+            new XAttribute("shadow", "0"),
+            new XAttribute("centerLine", "NONE"),
+            new XAttribute("breakCellSeparateLine", "0"),
+            new XElement(HwpxNs.Hh + "slash",
+                new XAttribute("type", "NONE"), new XAttribute("Crooked", "0"), new XAttribute("isCounter", "0")),
+            new XElement(HwpxNs.Hh + "backSlash",
+                new XAttribute("type", "NONE"), new XAttribute("Crooked", "0"), new XAttribute("isCounter", "0")),
+            MakeBorder("leftBorder", "NONE", "0.1 mm", "#000000"),
+            MakeBorder("rightBorder", "NONE", "0.1 mm", "#000000"),
+            MakeBorder("topBorder", "NONE", "0.1 mm", "#000000"),
+            MakeBorder("bottomBorder", "NONE", "0.1 mm", "#000000"),
+            MakeBorder("diagonal", "SOLID", "0.1 mm", "#000000"),
+            new XElement(HwpxNs.Hc + "fillBrush",
+                new XElement(HwpxNs.Hc + "imgBrush",
+                    new XAttribute("mode", "TOTAL"),
+                    new XElement(HwpxNs.Hc + "img",
+                        new XAttribute("binaryItemIDRef", $"image{imageId}"),
+                        new XAttribute("bright", bright),
+                        new XAttribute("contrast", contrast),
+                        new XAttribute("effect", "REAL_PIC"),
+                        new XAttribute("alpha", "0")))));
+
+        var container = _doc.Header!.Root!.Descendants(HwpxNs.Hh + "borderFills").FirstOrDefault();
+        container?.Add(bf);
+        if (container != null)
+            container.SetAttributeValue("itemCnt", container.Elements(HwpxNs.Hh + "borderFill").Count().ToString());
+        SaveHeader();
+
+        // 3. Set pageBorderFill on all sections
+        foreach (var sec in _doc.Sections)
+        {
+            var secPr = sec.Root.Descendants(HwpxNs.Hp + "secPr").FirstOrDefault();
+            if (secPr == null) continue;
+
+            // Update BOTH type pageBorderFill
+            var pageBf = secPr.Elements(HwpxNs.Hp + "pageBorderFill")
+                .FirstOrDefault(e => e.Attribute("type")?.Value == "BOTH");
+            if (pageBf != null)
+                pageBf.SetAttributeValue("borderFillIDRef", bfId);
+            else
+                secPr.Add(new XElement(HwpxNs.Hp + "pageBorderFill",
+                    new XAttribute("type", "BOTH"),
+                    new XAttribute("borderFillIDRef", bfId),
+                    new XAttribute("textBorder", "PAPER"),
+                    new XAttribute("headerInside", "0"),
+                    new XAttribute("footerInside", "0"),
+                    new XAttribute("fillArea", "PAPER"),
+                    new XElement(HwpxNs.Hp + "offset",
+                        new XAttribute("left", "1417"),
+                        new XAttribute("right", "1417"),
+                        new XAttribute("top", "1417"),
+                        new XAttribute("bottom", "1417"))));
+
+            SaveSection(sec.Root);
+        }
+
+        _dirty = true;
+        // Return empty paragraph as placeholder (watermark is page-level, not inline)
+        return new XElement(HwpxNs.Hp + "p",
+            new XAttribute("id", "0"),
+            new XAttribute("paraPrIDRef", "0"),
+            new XAttribute("styleIDRef", "0"));
     }
 
     /// <summary>Remove TOC paragraphs (static V1 or field-based V2).</summary>

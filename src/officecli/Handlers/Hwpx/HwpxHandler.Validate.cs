@@ -39,6 +39,9 @@ public partial class HwpxHandler
         // Level 8: Field pair consistency (Plan 94)
         ValidateFieldPairs(errors);
 
+        // Level 9: Section count consistency (Plan 94)
+        ValidateSectionCount(errors);
+
         return errors;
     }
 
@@ -582,6 +585,20 @@ public partial class HwpxHandler
                 errors.Add(new ValidationError("field_pair_mismatch",
                     $"Section {sec.Index + 1}: {begins} fieldBegin vs {ends} fieldEnd",
                     $"/section[{sec.Index + 1}]", null));
+        }
+    }
+
+    // Plan 94: Section count consistency (merged from ViewAsIssues Level 9)
+    private void ValidateSectionCount(List<ValidationError> errors)
+    {
+        if (_doc.ManifestDoc == null) return;
+        var manifestSectionCount = _doc.ManifestDoc.Descendants()
+            .Count(e => e.Attribute("media-type")?.Value?.Contains("section") ?? false);
+        if (manifestSectionCount > 0 && manifestSectionCount != _doc.Sections.Count)
+        {
+            errors.Add(new ValidationError("package_section_mismatch",
+                $"Manifest declares {manifestSectionCount} sections but {_doc.Sections.Count} loaded",
+                "/Contents/content.hpf", null));
         }
     }
 }
