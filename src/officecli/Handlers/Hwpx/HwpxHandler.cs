@@ -25,8 +25,9 @@ public partial class HwpxHandler : IDocumentHandler
         ZipArchive? archive = null;
         try
         {
-            stream = File.Open(filePath, FileMode.Open,
-                editable ? FileAccess.ReadWrite : FileAccess.Read);
+            stream = new FileStream(filePath, FileMode.Open,
+                editable ? FileAccess.ReadWrite : FileAccess.Read,
+                FileShare.ReadWrite);
             archive = new ZipArchive(stream,
                 editable ? ZipArchiveMode.Update : ZipArchiveMode.Read);
             _doc = LoadDocument(archive);

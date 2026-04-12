@@ -58,6 +58,27 @@ public partial class HwpxHandler
             return unsupported;
         }
 
+        // Label-based table fill: fill:라벨=값 (Plan 70)
+        var fillKeys = properties.Keys
+            .Where(k => k.StartsWith("fill:", StringComparison.OrdinalIgnoreCase)).ToList();
+        if (fillKeys.Count > 0)
+        {
+            var fillProps = fillKeys.ToDictionary(
+                k => k["fill:".Length..],
+                k => properties[k],
+                StringComparer.OrdinalIgnoreCase);
+            FillByLabel(fillProps);
+            // If only fill: props were provided, return (don't mark as unsupported)
+            if (fillKeys.Count == properties.Count) return unsupported;
+        }
+
+        // /table/fill pseudo-path: all props are label=value
+        if (path.Equals("/table/fill", StringComparison.OrdinalIgnoreCase))
+        {
+            FillByLabel(properties);
+            return unsupported;
+        }
+
         // Document-level properties
         if (path is "/" or "" or "/body")
         {
@@ -379,10 +400,18 @@ public partial class HwpxHandler
         var subList = tc.Element(HwpxNs.Hp + "subList");
         if (subList == null) return false;
 
-        var para = subList.Element(HwpxNs.Hp + "p");
-        if (para == null) return false;
+        var paragraphs = subList.Elements(HwpxNs.Hp + "p").ToList();
+        if (paragraphs.Count == 0) return false;
 
-        return SetParagraphText(para, text);
+        // Set text on the first paragraph
+        var result = SetParagraphText(paragraphs[0], text);
+
+        // Remove ALL remaining paragraphs (guide text, placeholders, etc.)
+        // This ensures template guide text like "※ 내용을 입력하세요" is cleared.
+        foreach (var extra in paragraphs.Skip(1))
+            extra.Remove();
+
+        return result;
     }
 
     /// <summary>
@@ -1375,8 +1404,11 @@ public partial class HwpxHandler
             }
         }
 
-        // If more than one run uses this charPr, we must clone
-        if (refCount > 1)
+        // Clone if shared: either multiple runs reference this charPr,
+        // or it's charPr 0 (the global default used by all new elements).
+        // Without this, modifying charPr 0 via fontsize=22 on one paragraph
+        // contaminates ALL paragraphs and table cells that use the default.
+        if (refCount > 1 || charPrIdRef == "0")
         {
             var newId = NextCharPrId();
             var cloned = new XElement(charPr);
@@ -1620,6 +1652,43 @@ public partial class HwpxHandler
     {
         element.SetAttributeValue(name, value);
         return true;
+    }
+
+    // ==================== Find & Replace ====================
+
+    /// <summary>
+    // ==================== Label-Based Table Fill (Plan 70) ====================
+
+    /// <summary>
+    /// Fill table cells by label matching. For each mapping, find a cell whose text
+    /// matches the label, then set the adjacent cell's text to the value.
+    /// </summary>
+    private void FillByLabel(Dictionary<string, string> mappings)
+    {
+        var anyFilled = false;
+        var filledSections = new HashSet<XElement>();
+
+        foreach (var (key, value) in mappings)
+        {
+            var (label, direction) = ParseLabelSpec(key);
+            var tc = FindCellByLabel(label, direction);
+            if (tc == null) continue;
+
+            SetCellText(tc, value);
+            anyFilled = true;
+
+            // Track which sections need saving
+            var sectionRoot = tc.AncestorsAndSelf()
+                .FirstOrDefault(e => e.Name.LocalName == "sec");
+            if (sectionRoot != null) filledSections.Add(sectionRoot);
+        }
+
+        if (anyFilled)
+        {
+            foreach (var sec in filledSections)
+                SaveSection(sec);
+            _dirty = true;
+        }
     }
 
     // ==================== Find & Replace ====================

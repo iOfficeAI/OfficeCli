@@ -2651,6 +2651,7 @@ public partial class HwpxHandler
         var newEntry = _doc.Archive.CreateEntry(entryName, System.IO.Compression.CompressionLevel.Optimal);
         using var stream = newEntry.Open();
         var xmlStr = HwpxPacker.MinifyXml(_doc.ManifestDoc.ToString(SaveOptions.DisableFormatting));
+        xmlStr = HwpxPacker.RestoreOriginalNamespaces(xmlStr);
         xmlStr = "<?xml version='1.0' encoding='UTF-8'?>" + xmlStr;
         var bytes = System.Text.Encoding.UTF8.GetBytes(xmlStr);
         stream.Write(bytes, 0, bytes.Length);

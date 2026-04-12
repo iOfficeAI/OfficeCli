@@ -308,6 +308,79 @@ public partial class HwpxHandler
             });
         }
 
+        // Level 7: BinData integrity — orphan/missing binary references
+        var referencedBinData = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var sec in _doc.Sections)
+        {
+            foreach (var el in sec.Root.Descendants())
+            {
+                var binRef = el.Attribute("binaryItemIDRef")?.Value;
+                if (binRef != null) referencedBinData.Add(binRef);
+            }
+        }
+        var actualBinData = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in _doc.Archive.Entries)
+        {
+            if (entry.FullName.Contains("BinData/", StringComparison.OrdinalIgnoreCase))
+                actualBinData.Add(System.IO.Path.GetFileName(entry.FullName));
+        }
+        foreach (var missing in referencedBinData.Except(actualBinData))
+        {
+            issues.Add(new DocumentIssue
+            {
+                Id = $"HWPX-{++issueId:D3}", Type = IssueType.Structure,
+                Severity = IssueSeverity.Error, Path = "/BinData",
+                Message = $"Referenced binary '{missing}' not found in archive",
+                Context = null
+            });
+        }
+        foreach (var orphan in actualBinData.Except(referencedBinData))
+        {
+            issues.Add(new DocumentIssue
+            {
+                Id = $"HWPX-{++issueId:D3}", Type = IssueType.Structure,
+                Severity = IssueSeverity.Info, Path = "/BinData",
+                Message = $"Orphan binary '{orphan}' not referenced by any element",
+                Context = null
+            });
+        }
+
+        // Level 8: Field pair validation — unclosed fieldBegin/fieldEnd
+        foreach (var sec in _doc.Sections)
+        {
+            var fieldBegins = sec.Root.Descendants(HwpxNs.Hp + "fieldBegin").ToList();
+            var fieldEnds = sec.Root.Descendants(HwpxNs.Hp + "fieldEnd").ToList();
+            if (fieldBegins.Count != fieldEnds.Count)
+            {
+                issues.Add(new DocumentIssue
+                {
+                    Id = $"HWPX-{++issueId:D3}", Type = IssueType.Structure,
+                    Severity = IssueSeverity.Warning,
+                    Path = $"/section[{sec.Index + 1}]",
+                    Message = $"Field count mismatch: {fieldBegins.Count} opens vs {fieldEnds.Count} closes",
+                    Context = null
+                });
+            }
+        }
+
+        // Level 9: Section count consistency — manifest vs actual
+        if (_doc.ManifestDoc != null)
+        {
+            var manifestSections = _doc.ManifestDoc.Descendants()
+                .Count(e => e.Attribute("media-type")?.Value == "application/xml"
+                    && (e.Attribute("href")?.Value?.StartsWith("section") ?? false));
+            if (manifestSections != _doc.Sections.Count)
+            {
+                issues.Add(new DocumentIssue
+                {
+                    Id = $"HWPX-{++issueId:D3}", Type = IssueType.Structure,
+                    Severity = IssueSeverity.Error, Path = "/content.hpf",
+                    Message = $"Section count mismatch: manifest={manifestSections}, loaded={_doc.Sections.Count}",
+                    Context = null
+                });
+            }
+        }
+
         // Filter by type
         if (issueType != null)
         {
@@ -324,7 +397,7 @@ public partial class HwpxHandler
 
     // ==================== Forms ====================
 
-    public string ViewAsForms()
+    public string ViewAsForms(bool auto = false)
     {
         var sb = new StringBuilder();
         int count = 0;
@@ -338,10 +411,8 @@ public partial class HwpxHandler
 
                 count++;
                 var instId = fieldBegin.Attribute("id")?.Value ?? "?";
-                // Direction = help text for the field
                 var direction = fieldBegin.Descendants(HwpxNs.Hp + "stringParam")
                     .FirstOrDefault(p => p.Attribute("name")?.Value == "Direction")?.Value ?? "";
-                // Find display text in the next run
                 var nextRun = run.ElementsAfterSelf(HwpxNs.Hp + "run").FirstOrDefault();
                 var text = nextRun?.Elements(HwpxNs.Hp + "t").FirstOrDefault()?.Value ?? "";
                 var isDefault = text == direction;
@@ -350,7 +421,153 @@ public partial class HwpxHandler
             }
         }
         sb.Insert(0, $"Form fields (CLICK_HERE): {count}\n");
+
+        if (auto)
+        {
+            var recognized = RecognizeFormFields();
+            if (recognized.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine($"Auto-recognized fields: {recognized.Count}");
+                foreach (var f in recognized)
+                    sb.AppendLine($"  [auto:{f.Strategy}] {f.Label}: {f.Value} ({f.Path})");
+            }
+        }
+
         return sb.ToString().TrimEnd();
+    }
+
+    /// <summary>JSON output for forms view. Supports CLICK_HERE + auto-recognized fields.</summary>
+    public JsonNode ViewAsFormsJson(bool auto = false)
+    {
+        var result = new JsonObject();
+
+        var clickFields = new JsonArray();
+        foreach (var sec in _doc.Sections)
+        {
+            foreach (var run in sec.Root.Descendants(HwpxNs.Hp + "run"))
+            {
+                var ctrl = run.Element(HwpxNs.Hp + "ctrl");
+                var fieldBegin = ctrl?.Element(HwpxNs.Hp + "fieldBegin");
+                if (fieldBegin?.Attribute("type")?.Value != "CLICK_HERE") continue;
+
+                var instId = fieldBegin.Attribute("id")?.Value ?? "?";
+                var direction = fieldBegin.Descendants(HwpxNs.Hp + "stringParam")
+                    .FirstOrDefault(p => p.Attribute("name")?.Value == "Direction")?.Value ?? "";
+                var nextRun = run.ElementsAfterSelf(HwpxNs.Hp + "run").FirstOrDefault();
+                var text = nextRun?.Elements(HwpxNs.Hp + "t").FirstOrDefault()?.Value ?? "";
+
+                clickFields.Add(new JsonObject {
+                    ["id"] = instId, ["text"] = text,
+                    ["helpText"] = direction, ["isDefault"] = text == direction
+                });
+            }
+        }
+        result["clickHere"] = clickFields;
+
+        if (auto)
+        {
+            var autoFields = new JsonArray();
+            foreach (var f in RecognizeFormFields())
+            {
+                autoFields.Add(new JsonObject {
+                    ["label"] = f.Label, ["value"] = f.Value,
+                    ["path"] = f.Path, ["row"] = f.Row, ["col"] = f.Col,
+                    ["strategy"] = f.Strategy
+                });
+            }
+            result["autoRecognized"] = autoFields;
+        }
+
+        return result;
+    }
+
+    // ==================== Object Finder (Plan 82) ====================
+
+    private static readonly string[] DefaultObjectTypes = ["picture", "field", "bookmark", "equation"];
+
+    /// <summary>List objects of specified type(s) with paths and previews.</summary>
+    public string ViewAsObjects(string? objectType = null)
+    {
+        var types = objectType != null ? [objectType] : DefaultObjectTypes;
+        var sb = new StringBuilder();
+        int total = 0;
+
+        foreach (var type in types)
+        {
+            List<System.Xml.Linq.XElement> elements;
+            try { elements = ExecuteSelector(type); }
+            catch { continue; }
+
+            // formfield: filter to CLICK_HERE only
+            if (type == "formfield")
+                elements = elements.Where(e => e.Attribute("type")?.Value == "CLICK_HERE").ToList();
+
+            if (elements.Count == 0) continue;
+            total += elements.Count;
+            sb.AppendLine($"{type}: {elements.Count}");
+            foreach (var el in elements)
+            {
+                var path = BuildPath(el);
+                var preview = GetElementText(el);
+                if (preview.Length > 60) preview = preview[..60] + "…";
+                if (string.IsNullOrWhiteSpace(preview)) preview = $"({el.Name.LocalName})";
+
+                // Extra info per type
+                var extra = type switch
+                {
+                    "picture" or "img" => el.Attribute("binaryItemIDRef")?.Value is { } r ? $" [{r}]" : "",
+                    "field" or "formfield" => el.Attribute("type")?.Value is { } t ? $" [{t}]" : "",
+                    "equation" => "",
+                    "bookmark" => el.Attribute("name")?.Value is { } n ? $" [{n}]" : "",
+                    _ => ""
+                };
+                sb.AppendLine($"  {path}{extra}: {preview}");
+            }
+            sb.AppendLine();
+        }
+
+        if (total == 0)
+            return "(no objects found)";
+        sb.Insert(0, $"Objects: {total}\n\n");
+        return sb.ToString().TrimEnd();
+    }
+
+    /// <summary>JSON output for object finder.</summary>
+    public JsonNode ViewAsObjectsJson(string? objectType = null)
+    {
+        var types = objectType != null ? [objectType] : DefaultObjectTypes;
+        var result = new JsonObject();
+
+        foreach (var type in types)
+        {
+            List<System.Xml.Linq.XElement> elements;
+            try { elements = ExecuteSelector(type); }
+            catch { continue; }
+
+            if (type == "formfield")
+                elements = elements.Where(e => e.Attribute("type")?.Value == "CLICK_HERE").ToList();
+
+            if (elements.Count == 0) continue;
+
+            var arr = new JsonArray();
+            foreach (var el in elements)
+            {
+                var obj = new JsonObject
+                {
+                    ["path"] = BuildPath(el),
+                    ["text"] = GetElementText(el)
+                };
+                // Type-specific attributes
+                if (el.Attribute("binaryItemIDRef")?.Value is { } binRef) obj["binaryRef"] = binRef;
+                if (el.Attribute("type")?.Value is { } ft) obj["fieldType"] = ft;
+                if (el.Attribute("name")?.Value is { } bname) obj["name"] = bname;
+                arr.Add(obj);
+            }
+            result[type] = arr;
+        }
+
+        return result;
     }
 
     // ==================== Styles ====================
@@ -373,6 +590,265 @@ public partial class HwpxHandler
             sb.AppendLine($"  [{id}] {name}{eng} [{type}] charPr={charPrId} paraPr={paraPrId}");
         }
         return sb.ToString().TrimEnd();
+    }
+
+    // ==================== Table Map (Plan 71) ====================
+
+    /// <summary>
+    /// Display all tables with grid structure, recognized labels, and cell paths.
+    /// </summary>
+    public string ViewAsTables()
+    {
+        var sb = new StringBuilder();
+        int tblCount = 0;
+
+        foreach (var (sec, tbl, localTblIdx) in _doc.AllTables())
+        {
+            tblCount++;
+            var (grid, cellList) = BuildTableGrid(tbl);
+            if (cellList.Count == 0) continue;
+
+            int maxRow = grid.GetLength(0), maxCol = grid.GetLength(1);
+            var basePath = $"/section[{sec.Index + 1}]/tbl[{localTblIdx + 1}]";
+            sb.AppendLine($"Table {tblCount} ({basePath}, {maxRow}×{maxCol}):");
+
+            // Grid visualization
+            for (int r = 0; r < maxRow; r++)
+            {
+                sb.Append($"  [{r}] ");
+                for (int c = 0; c < maxCol; c++)
+                {
+                    var cell = grid[r, c];
+                    if (cell == null) { sb.Append("·  "); continue; }
+
+                    // Skip duplicate merged cell refs (only show on first occurrence)
+                    var (cr, cc, rs, cs) = GetCellAddr(cell);
+                    if (cr != r || cc != c) { sb.Append("↕  "); continue; }
+
+                    var text = ExtractCellText(cell).Trim();
+                    var preview = text.Length > 12 ? text[..12] + "…" : text;
+                    if (string.IsNullOrEmpty(preview)) preview = "(empty)";
+
+                    var span = (rs > 1 || cs > 1) ? $"[{rs}×{cs}]" : "";
+                    sb.Append($"{preview}{span}  ");
+                }
+                sb.AppendLine();
+            }
+
+            // Recognized fields for this table
+            var fields = new List<RecognizedField>();
+            var tableGrid = grid; // reuse
+            var seen = new HashSet<XElement>();
+            foreach (var (tc, row, col, rowSpan, colSpan) in cellList)
+            {
+                if (seen.Contains(tc)) continue;
+                seen.Add(tc);
+                var cellText = ExtractCellText(tc);
+                if (!IsLabelCell(cellText)) continue;
+                int targetCol = col + colSpan;
+                if (targetCol < maxCol)
+                {
+                    var valueCell = grid[row, targetCol];
+                    if (valueCell != null && valueCell != tc)
+                    {
+                        var value = ExtractCellText(valueCell).Trim();
+                        if (!string.IsNullOrEmpty(value))
+                            fields.Add(new RecognizedField(
+                                NormalizeLabel(cellText), value, basePath, row, col, "adjacent"));
+                    }
+                }
+            }
+            if (fields.Count > 0)
+            {
+                sb.AppendLine($"  Labels: {fields.Count}");
+                foreach (var f in fields)
+                    sb.AppendLine($"    {f.Label}: {f.Value} (r{f.Row},c{f.Col})");
+            }
+            sb.AppendLine();
+        }
+
+        if (tblCount == 0)
+            sb.AppendLine("(no tables)");
+        else
+            sb.Insert(0, $"Tables: {tblCount}\n\n");
+
+        return sb.ToString().TrimEnd();
+    }
+
+    // ==================== Markdown Export (Plan 72) ====================
+
+    /// <summary>Export document as GitHub Flavored Markdown.</summary>
+    public string ViewAsMarkdown()
+    {
+        var sb = new StringBuilder();
+
+        foreach (var (section, element, path) in _doc.AllContentInOrder())
+        {
+            var localName = element.Name.LocalName;
+            if (localName == "p")
+            {
+                // Check if this paragraph is inside a table cell (skip — handled by table renderer)
+                if (element.Ancestors().Any(a => a.Name.LocalName == "tc")) continue;
+
+                var styleInfo = GetParagraphStyleInfo(element);
+                var mdLine = ParagraphToMarkdown(element);
+                if (string.IsNullOrWhiteSpace(mdLine)) { sb.AppendLine(); continue; }
+
+                if (!string.IsNullOrEmpty(styleInfo.HeadingLevel))
+                {
+                    var level = Math.Clamp(int.Parse(styleInfo.HeadingLevel), 1, 6);
+                    sb.AppendLine($"{new string('#', level)} {mdLine}");
+                }
+                else
+                {
+                    sb.AppendLine(mdLine);
+                }
+                sb.AppendLine();
+            }
+        }
+
+        // Render tables
+        foreach (var (sec, tbl, localTblIdx) in _doc.AllTables())
+        {
+            var (grid, cellList) = BuildTableGrid(tbl);
+            if (cellList.Count == 0) continue;
+            int maxRow = grid.GetLength(0), maxCol = grid.GetLength(1);
+
+            for (int r = 0; r < maxRow; r++)
+            {
+                sb.Append("| ");
+                for (int c = 0; c < maxCol; c++)
+                {
+                    var cell = grid[r, c];
+                    if (cell == null) { sb.Append("| "); continue; }
+                    var (cr, cc, _, _) = GetCellAddr(cell);
+                    if (cr != r || cc != c) { sb.Append("| "); continue; } // merged continuation
+                    var text = ExtractCellText(cell).Trim().Replace("\n", " ").Replace("|", "\\|");
+                    sb.Append($"{text} | ");
+                }
+                sb.AppendLine();
+
+                // Separator after header row
+                if (r == 0)
+                {
+                    sb.Append("| ");
+                    for (int c = 0; c < maxCol; c++)
+                        sb.Append("--- | ");
+                    sb.AppendLine();
+                }
+            }
+            sb.AppendLine();
+        }
+
+        return sb.ToString().Trim();
+    }
+
+    private string ParagraphToMarkdown(XElement p)
+    {
+        var sb = new StringBuilder();
+        foreach (var run in p.Elements(HwpxNs.Hp + "run"))
+            sb.Append(RunToMarkdown(run));
+        return sb.ToString().Trim();
+    }
+
+    private string RunToMarkdown(XElement run)
+    {
+        var sb = new StringBuilder();
+        var charPrId = run.Attribute("charPrIDRef")?.Value ?? "0";
+        var charPr = FindCharPr(charPrId);
+        var hasBold = charPr?.Element(HwpxNs.Hh + "bold") != null;
+        var hasItalic = charPr?.Element(HwpxNs.Hh + "italic") != null;
+        var soEl = charPr?.Element(HwpxNs.Hh + "strikeout");
+        var hasStrikeout = soEl != null && soEl.Attribute("shape")?.Value != "NONE";
+
+        var textParts = new StringBuilder();
+        foreach (var child in run.Elements())
+        {
+            switch (child.Name.LocalName)
+            {
+                case "t":
+                    textParts.Append(child.Value);
+                    break;
+                case "lineBreak":
+                    textParts.Append("  \n"); // MD hard line break
+                    break;
+                case "tab":
+                    textParts.Append('\t');
+                    break;
+                case "equation":
+                    var script = child.Element(HwpxNs.Hp + "script")?.Value
+                        ?? child.Attribute("script")?.Value ?? child.Value;
+                    textParts.Append($"`{script.Trim()}`");
+                    break;
+                case "img": case "picture":
+                    var src = child.Attribute("binaryItemIDRef")?.Value ?? "image";
+                    textParts.Append($"![{src}]({src})");
+                    break;
+            }
+        }
+
+        var text = textParts.ToString();
+        if (string.IsNullOrEmpty(text)) return "";
+
+        if (hasStrikeout) text = $"~~{text}~~";
+        if (hasBold && hasItalic) text = $"***{text}***";
+        else if (hasBold) text = $"**{text}**";
+        else if (hasItalic) text = $"*{text}*";
+
+        sb.Append(text);
+        return sb.ToString();
+    }
+
+    /// <summary>JSON output for table map view.</summary>
+    public JsonNode ViewAsTablesJson()
+    {
+        var result = new JsonObject();
+        var tablesArr = new JsonArray();
+
+        foreach (var (sec, tbl, localTblIdx) in _doc.AllTables())
+        {
+            var (grid, cellList) = BuildTableGrid(tbl);
+            if (cellList.Count == 0) continue;
+
+            int maxRow = grid.GetLength(0), maxCol = grid.GetLength(1);
+            var basePath = $"/section[{sec.Index + 1}]/tbl[{localTblIdx + 1}]";
+
+            var tblObj = new JsonObject
+            {
+                ["path"] = basePath,
+                ["rows"] = maxRow,
+                ["cols"] = maxCol
+            };
+
+            // Cells grid
+            var cellsArr = new JsonArray();
+            for (int r = 0; r < maxRow; r++)
+            {
+                var rowArr = new JsonArray();
+                for (int c = 0; c < maxCol; c++)
+                {
+                    var cell = grid[r, c];
+                    if (cell == null) { rowArr.Add((JsonNode?)null); continue; }
+                    var (cr, cc, rs, cs) = GetCellAddr(cell);
+                    if (cr != r || cc != c) { rowArr.Add("↕"); continue; }
+                    var text = ExtractCellText(cell).Trim();
+                    rowArr.Add(new JsonObject
+                    {
+                        ["text"] = text,
+                        ["path"] = $"{basePath}/tr[{r + 1}]/tc[{c + 1}]",
+                        ["rowSpan"] = rs,
+                        ["colSpan"] = cs
+                    });
+                }
+                cellsArr.Add(rowArr);
+            }
+            tblObj["cells"] = cellsArr;
+
+            tablesArr.Add(tblObj);
+        }
+
+        result["tables"] = tablesArr;
+        return result;
     }
 
     // ==================== HTML Preview ====================

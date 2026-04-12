@@ -259,84 +259,176 @@ public partial class HwpxHandler
     /// </summary>
     internal List<XElement> ExecuteSelector(string selector)
     {
-        var results = new List<XElement>();
         var trimmed = selector.Trim();
 
-        // Simple element selectors
-        if (trimmed == "p")
+        // Child combinator: "tbl > tr > tc", "p > run"
+        if (trimmed.Contains(" > "))
         {
-            foreach (var sec in _doc.Sections)
-                results.AddRange(sec.Paragraphs);
-            return results;
+            var parts = trimmed.Split(" > ", StringSplitOptions.TrimEntries);
+            var current = GetAllElements(parts[0]);
+            for (int i = 1; i < parts.Length; i++)
+                current = current.SelectMany(parent => FilterChildren(parent, parts[i])).ToList();
+            return current;
         }
 
-        if (trimmed == "tbl")
-        {
-            foreach (var sec in _doc.Sections)
-                results.AddRange(sec.Tables);
-            return results;
-        }
+        // element:pseudo or element[attr op value]
+        var selectorMatch = Regex.Match(trimmed, @"^(\w+)(?::(\w+)(?:\((.+)\))?)?(?:\[(.+)\])?$");
+        if (!selectorMatch.Success)
+            throw new ArgumentException($"Unsupported selector: '{selector}'. " +
+                "Supported: p, tbl, tr, tc, run, picture, p:empty, element:contains(text), element:has(child), element[attr=value], element[attr!=value], element[attr~=text], parent > child");
 
-        // Pseudo-selector: p:empty
-        if (trimmed == "p:empty")
+        var elemType = selectorMatch.Groups[1].Value;
+        var pseudo = selectorMatch.Groups[2].Value;
+        var pseudoArg = selectorMatch.Groups[3].Value;
+        var attrExpr = selectorMatch.Groups[4].Value;
+
+        // Get base elements
+        var results = GetAllElements(elemType);
+
+        // Apply pseudo-selector
+        if (!string.IsNullOrEmpty(pseudo))
         {
-            foreach (var sec in _doc.Sections)
+            results = pseudo switch
             {
-                foreach (var p in sec.Paragraphs)
-                {
-                    var text = HwpxKorean.Normalize(ExtractParagraphText(p));
-                    if (string.IsNullOrWhiteSpace(text))
-                        results.Add(p);
-                }
-            }
-            return results;
-        }
-
-        // Pseudo-selector: p:contains(text)
-        var containsMatch = Regex.Match(trimmed, @"^p:contains\((.+)\)$");
-        if (containsMatch.Success)
-        {
-            var searchText = containsMatch.Groups[1].Value.Trim('"', '\'');
-            foreach (var sec in _doc.Sections)
-            {
-                foreach (var p in sec.Paragraphs)
-                {
-                    var text = HwpxKorean.Normalize(ExtractParagraphText(p));
-                    if (text.Contains(searchText, StringComparison.OrdinalIgnoreCase))
-                        results.Add(p);
-                }
-            }
-            return results;
-        }
-
-        // Attribute selector: p[attr=value]
-        var attrMatch = Regex.Match(trimmed, @"^(\w+)\[(\w+)=(\w+)\]$");
-        if (attrMatch.Success)
-        {
-            var elemType = attrMatch.Groups[1].Value;
-            var attrName = attrMatch.Groups[2].Value;
-            var attrValue = attrMatch.Groups[3].Value;
-
-            XName xname = elemType switch
-            {
-                "p" => HwpxNs.Hp + "p",
-                "tbl" => HwpxNs.Hp + "tbl",
-                "tr" => HwpxNs.Hp + "tr",
-                "tc" => HwpxNs.Hp + "tc",
-                _ => throw new ArgumentException($"Unsupported element in selector: '{elemType}'")
+                "empty" => results.Where(e => string.IsNullOrWhiteSpace(GetElementText(e))).ToList(),
+                "contains" => results.Where(e =>
+                    GetElementText(e).Contains(pseudoArg.Trim('"', '\''), StringComparison.OrdinalIgnoreCase)).ToList(),
+                "has" => results.Where(e =>
+                    e.Descendants(ResolveXName(pseudoArg)).Any()).ToList(),
+                "first" => results.Take(1).ToList(),
+                "last" => results.TakeLast(1).ToList(),
+                _ => throw new ArgumentException($"Unsupported pseudo-selector: ':{pseudo}'")
             };
-
-            foreach (var sec in _doc.Sections)
-            {
-                results.AddRange(
-                    sec.Root.Descendants(xname)
-                        .Where(e => e.Attribute(attrName)?.Value == attrValue));
-            }
-            return results;
         }
 
-        throw new ArgumentException(
-            $"Unsupported selector: '{selector}'. " +
-            "Supported: p, tbl, p:empty, p:contains(text), element[attr=value]");
+        // Apply attribute filter
+        if (!string.IsNullOrEmpty(attrExpr))
+            results = ApplyAttributeFilter(results, attrExpr);
+
+        return results;
+    }
+
+    private List<XElement> GetAllElements(string elemType)
+    {
+        var results = new List<XElement>();
+        // Strip pseudo/attr for base element resolution
+        var baseType = Regex.Replace(elemType, @"[:[].*$", "");
+
+        foreach (var sec in _doc.Sections)
+        {
+            var xname = ResolveXName(baseType);
+            if (baseType == "p")
+                results.AddRange(sec.Paragraphs);
+            else if (baseType == "tbl")
+                results.AddRange(sec.Tables);
+            else
+                results.AddRange(sec.Root.Descendants(xname));
+        }
+        return results;
+    }
+
+    private static XName ResolveXName(string elemType) => elemType switch
+    {
+        "p" => HwpxNs.Hp + "p",
+        "tbl" => HwpxNs.Hp + "tbl",
+        "tr" => HwpxNs.Hp + "tr",
+        "tc" => HwpxNs.Hp + "tc",
+        "run" => HwpxNs.Hp + "run",
+        "picture" or "img" => HwpxNs.Hp + "picture",
+        "equation" => HwpxNs.Hp + "equation",
+        "shape" => HwpxNs.Hp + "shapeObject",
+        "field" or "fieldBegin" or "formfield" => HwpxNs.Hp + "fieldBegin",
+        "bookmark" => HwpxNs.Hp + "bookmark",
+        "ctrl" => HwpxNs.Hp + "ctrl",
+        _ => HwpxNs.Hp + elemType
+    };
+
+    private string GetElementText(XElement e) => e.Name.LocalName switch
+    {
+        "p" => HwpxKorean.Normalize(ExtractParagraphText(e)),
+        "tc" => ExtractCellText(e),
+        "run" => string.Join("", e.Elements(HwpxNs.Hp + "t").Select(t => t.Value)),
+        _ => e.Value
+    };
+
+    private List<XElement> FilterChildren(XElement parent, string childSelector)
+    {
+        var childMatch = Regex.Match(childSelector, @"^(\w+)(?:\[(.+)\])?$");
+        if (!childMatch.Success) return new();
+        var childType = childMatch.Groups[1].Value;
+        var xname = ResolveXName(childType);
+        var children = parent.Elements(xname).ToList();
+        if (!string.IsNullOrEmpty(childMatch.Groups[2].Value))
+            children = ApplyAttributeFilter(children, childMatch.Groups[2].Value);
+        return children;
+    }
+
+    private List<XElement> ApplyAttributeFilter(List<XElement> elements, string attrExpr)
+    {
+        // Operators: =, !=, ~= (contains), >=, <=
+        var opMatch = Regex.Match(attrExpr, @"^(\w+)(~=|!=|>=|<=|=)(.+)$");
+        if (!opMatch.Success) return elements;
+
+        var attrName = opMatch.Groups[1].Value;
+        var op = opMatch.Groups[2].Value;
+        var attrValue = opMatch.Groups[3].Value.Trim('"', '\'');
+
+        return elements.Where(e =>
+        {
+            var actual = ResolveVirtualAttribute(e, attrName);
+            if (actual == null) return op == "!="; // null != anything is true
+            return op switch
+            {
+                "=" => actual.Equals(attrValue, StringComparison.OrdinalIgnoreCase),
+                "!=" => !actual.Equals(attrValue, StringComparison.OrdinalIgnoreCase),
+                "~=" => actual.Contains(attrValue, StringComparison.OrdinalIgnoreCase),
+                ">=" => int.TryParse(actual, out var av) && int.TryParse(attrValue, out var tv) && av >= tv,
+                "<=" => int.TryParse(actual, out var av2) && int.TryParse(attrValue, out var tv2) && av2 <= tv2,
+                _ => false
+            };
+        }).ToList();
+    }
+
+    /// <summary>Resolve virtual attributes (computed on-the-fly) or real XML attributes.</summary>
+    private string? ResolveVirtualAttribute(XElement e, string attrName)
+    {
+        // Virtual attributes
+        switch (attrName)
+        {
+            case "text":
+                return GetElementText(e);
+            case "bold":
+            {
+                var charPrId = e.Attribute("charPrIDRef")?.Value ?? e.Elements(HwpxNs.Hp + "run").FirstOrDefault()?.Attribute("charPrIDRef")?.Value;
+                var charPr = charPrId != null ? FindCharPr(charPrId) : null;
+                return charPr?.Element(HwpxNs.Hh + "bold") != null ? "true" : "false";
+            }
+            case "italic":
+            {
+                var charPrId = e.Attribute("charPrIDRef")?.Value ?? e.Elements(HwpxNs.Hp + "run").FirstOrDefault()?.Attribute("charPrIDRef")?.Value;
+                var charPr = charPrId != null ? FindCharPr(charPrId) : null;
+                return charPr?.Element(HwpxNs.Hh + "italic") != null ? "true" : "false";
+            }
+            case "fontsize":
+            {
+                var charPrId = e.Attribute("charPrIDRef")?.Value ?? e.Elements(HwpxNs.Hp + "run").FirstOrDefault()?.Attribute("charPrIDRef")?.Value;
+                var charPr = charPrId != null ? FindCharPr(charPrId) : null;
+                var height = (int?)charPr?.Attribute("height");
+                return height.HasValue ? (height.Value / 100).ToString() : null;
+            }
+            case "colSpan":
+                return e.Name.LocalName == "tc" ? GetCellAddr(e).ColSpan.ToString() : e.Attribute("colSpan")?.Value;
+            case "rowSpan":
+                return e.Name.LocalName == "tc" ? GetCellAddr(e).RowSpan.ToString() : e.Attribute("rowSpan")?.Value;
+            case "heading":
+            {
+                if (e.Name.LocalName != "p") return null;
+                var info = GetParagraphStyleInfo(e);
+                return info.HeadingLevel;
+            }
+        }
+
+        // Real XML attribute
+        return e.Attribute(attrName)?.Value;
     }
 }

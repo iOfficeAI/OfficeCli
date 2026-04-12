@@ -26,7 +26,8 @@ public static class HwpxPacker
 
         var entries = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        using var zip = ZipFile.OpenRead(path);
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var zip = new ZipArchive(fs, ZipArchiveMode.Read);
         foreach (var entry in zip.Entries)
         {
             if (!entry.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)
@@ -185,7 +186,8 @@ public static class HwpxPacker
 
     private static void ValidateZip(string path)
     {
-        using var zip = ZipFile.OpenRead(path);
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var zip = new ZipArchive(fs, ZipArchiveMode.Read);
         foreach (var entry in zip.Entries)
         {
             using var stream = entry.Open();
