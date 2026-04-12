@@ -655,6 +655,11 @@ public class ResidentServer : IDisposable
 
     private void NotifyWatchSlideChanged(string? changedPath)
     {
+        if (_handler is OfficeCli.Handlers.HwpxHandler hwpx)
+        {
+            WatchNotifier.NotifyIfWatching(_filePath, new WatchMessage { Action = "full", FullHtml = hwpx.ViewAsHtml() });
+            return;
+        }
         if (_handler is OfficeCli.Handlers.ExcelHandler excel)
         {
             string? scrollTo = null;
@@ -689,6 +694,11 @@ public class ResidentServer : IDisposable
 
     private void NotifyWatchRootChanged(int oldSlideCount)
     {
+        if (_handler is OfficeCli.Handlers.HwpxHandler hwpx)
+        {
+            WatchNotifier.NotifyIfWatching(_filePath, new WatchMessage { Action = "full", FullHtml = hwpx.ViewAsHtml() });
+            return;
+        }
         if (_handler is OfficeCli.Handlers.WordHandler word)
         {
             var html = word.ViewAsHtml();
@@ -730,6 +740,8 @@ public class ResidentServer : IDisposable
             fullHtml = excel.ViewAsHtml();
         else if (_handler is OfficeCli.Handlers.WordHandler word)
             fullHtml = word.ViewAsHtml();
+        else if (_handler is OfficeCli.Handlers.HwpxHandler hwpx)
+            fullHtml = hwpx.ViewAsHtml();
         if (fullHtml != null)
             WatchNotifier.NotifyIfWatching(_filePath, new WatchMessage { Action = "full", FullHtml = fullHtml });
     }
@@ -819,8 +831,21 @@ public class ResidentServer : IDisposable
                 else
                     Console.Error.WriteLine("Forms view is only supported for .docx and .hwpx files.");
             }
+            else if (modeKey is "tables" or "tbl")
+            {
+                if (_handler is OfficeCli.Handlers.HwpxHandler hwpxTblRes)
+                    Console.WriteLine(hwpxTblRes.ViewAsTablesJson().ToJsonString(OutputFormatter.PublicJsonOptions));
+                else Console.Error.WriteLine("Tables view is only supported for .hwpx files.");
+            }
+            else if (modeKey is "objects" or "obj")
+            {
+                if (_handler is OfficeCli.Handlers.HwpxHandler hwpxObjRes)
+                    Console.WriteLine(hwpxObjRes.ViewAsObjectsJson(
+                        req.Args.TryGetValue("object-type", out var ot2) ? ot2 : null).ToJsonString(OutputFormatter.PublicJsonOptions));
+                else Console.Error.WriteLine("Objects view is only supported for .hwpx files.");
+            }
             else
-                Console.WriteLine($"Unknown mode: {mode}. Available: text, annotated, outline, stats, issues, html, forms");
+                Console.WriteLine($"Unknown mode: {mode}. Available: text, annotated, outline, stats, issues, html, forms, tables, markdown, objects");
         }
         else
         {
@@ -837,7 +862,16 @@ public class ResidentServer : IDisposable
                         req.Args.TryGetValue("auto", out var a2) && a2 == "true"),
                     _ => "Forms view is only supported for .docx and .hwpx files.",
                 },
-                _ => $"Unknown mode: {mode}. Available: text, annotated, outline, stats, issues, html, forms"
+                "tables" or "tbl" => _handler is OfficeCli.Handlers.HwpxHandler htbl
+                    ? htbl.ViewAsTables() : "Tables view is only supported for .hwpx files.",
+                "markdown" or "md" => _handler is OfficeCli.Handlers.HwpxHandler hmd
+                    ? hmd.ViewAsMarkdown() : "Markdown view is only supported for .hwpx files.",
+                "objects" or "obj" => _handler is OfficeCli.Handlers.HwpxHandler hobj
+                    ? hobj.ViewAsObjects(req.Args.TryGetValue("object-type", out var ot) ? ot : null)
+                    : "Objects view is only supported for .hwpx files.",
+                "styles" => _handler is OfficeCli.Handlers.HwpxHandler hstyle
+                    ? hstyle.ViewAsStyles() : "Styles view is only supported for .hwpx files.",
+                _ => $"Unknown mode: {mode}. Available: text, annotated, outline, stats, issues, html, forms, tables, markdown, objects, styles"
             };
             Console.WriteLine(output);
         }

@@ -240,6 +240,15 @@ public static class McpServer
                         Handlers.HwpxHandler hfh => hfh.ViewAsFormsJson().ToJsonString(OutputFormatter.PublicJsonOptions),
                         _ => throw new ArgumentException("Forms view is only supported for .docx and .hwpx files."),
                     },
+                    "tables" or "tbl" => handler is Handlers.HwpxHandler htm
+                        ? htm.ViewAsTablesJson().ToJsonString(OutputFormatter.PublicJsonOptions)
+                        : throw new ArgumentException("Tables view is only supported for .hwpx files."),
+                    "markdown" or "md" => handler is Handlers.HwpxHandler hmm
+                        ? hmm.ViewAsMarkdown()
+                        : throw new ArgumentException("Markdown view is only supported for .hwpx files."),
+                    "objects" or "obj" => handler is Handlers.HwpxHandler hom
+                        ? hom.ViewAsObjectsJson().ToJsonString(OutputFormatter.PublicJsonOptions)
+                        : throw new ArgumentException("Objects view is only supported for .hwpx files."),
                     _ => throw new ArgumentException($"Unknown mode: {mode}")
                 };
             }
