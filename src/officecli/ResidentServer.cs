@@ -811,10 +811,13 @@ public class ResidentServer : IDisposable
                 Console.WriteLine(OutputFormatter.FormatIssues(_handler.ViewAsIssues(issueType, limit), format));
             else if (modeKey is "forms" or "f")
             {
+                var auto = req.Args.TryGetValue("auto", out var a) && a == "true";
                 if (_handler is OfficeCli.Handlers.WordHandler wordFormsHandler)
                     Console.WriteLine(wordFormsHandler.ViewAsFormsJson().ToJsonString(OutputFormatter.PublicJsonOptions));
+                else if (_handler is OfficeCli.Handlers.HwpxHandler hwpxFormsHandler)
+                    Console.WriteLine(hwpxFormsHandler.ViewAsFormsJson(auto).ToJsonString(OutputFormatter.PublicJsonOptions));
                 else
-                    Console.Error.WriteLine("Forms view is only supported for .docx files.");
+                    Console.Error.WriteLine("Forms view is only supported for .docx and .hwpx files.");
             }
             else
                 Console.WriteLine($"Unknown mode: {mode}. Available: text, annotated, outline, stats, issues, html, forms");
@@ -828,9 +831,12 @@ public class ResidentServer : IDisposable
                 "outline" or "o" => _handler.ViewAsOutline(),
                 "stats" or "s" => _handler.ViewAsStats(),
                 "issues" or "i" => OutputFormatter.FormatIssues(_handler.ViewAsIssues(issueType, limit), format),
-                "forms" or "f" => _handler is OfficeCli.Handlers.WordHandler wfh
-                    ? wfh.ViewAsForms()
-                    : "Forms view is only supported for .docx files.",
+                "forms" or "f" => _handler switch {
+                    OfficeCli.Handlers.WordHandler wfh => wfh.ViewAsForms(),
+                    OfficeCli.Handlers.HwpxHandler hfh => hfh.ViewAsForms(
+                        req.Args.TryGetValue("auto", out var a2) && a2 == "true"),
+                    _ => "Forms view is only supported for .docx and .hwpx files.",
+                },
                 _ => $"Unknown mode: {mode}. Available: text, annotated, outline, stats, issues, html, forms"
             };
             Console.WriteLine(output);
