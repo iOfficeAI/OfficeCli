@@ -1,303 +1,160 @@
 ---
 name: officecli-hwpx
-description: "Use this skill any time a .hwpx file is involved -- as input or for analysis. This includes: reading, parsing, or extracting text from any .hwpx file; editing or modifying existing HWPX documents; querying document structure; validating HWPX integrity; working with Korean (한글) office documents. Trigger whenever the user mentions 'HWP', 'HWPX', '한글 문서', '한글 파일', 'Hancom', or references a .hwpx filename. NOTE: creating new .hwpx files is NOT supported -- use python-hwpx or hwp_origin tools instead."
+description: "Use this skill any time a .hwpx file is involved -- as input, output, or for analysis. This includes: creating new HWPX from scratch or from Markdown; reading, parsing, or extracting text; editing or modifying existing documents; querying document structure; validating integrity; comparing documents; working with Korean (한글) office documents. Trigger whenever the user mentions 'HWP', 'HWPX', '한글 문서', '한글 파일', 'Hancom', or references a .hwpx filename."
 ---
 
 # OfficeCLI HWPX Skill
 
 ## Quick Decision
 
-| Task | Supported? | Action |
-|------|-----------|--------|
-| Read / analyze .hwpx | ✅ Yes | Use `view`, `get`, `query` commands below |
-| Edit existing .hwpx | ✅ Yes | Use `set`, `raw-set`, `move`, `remove`, `copy` |
-| Validate .hwpx | ✅ Yes | Use `validate` command |
-| View raw XML parts | ✅ Yes | Use `raw` command |
-| Create new .hwpx | ❌ No | Use `python-hwpx` or `hwp_origin` Python tools |
-| Open .hwp (binary) | ❌ No | Convert to .hwpx first (Hancom Office or LibreOffice) |
-| Visual preview (html/svg) | ❌ No | Open in Hancom Office or LibreOffice for visual check |
-| Watch for changes | ❌ No | Not implemented for HWPX |
+| Task | Supported? | Command |
+|------|-----------|---------|
+| Create new .hwpx | ✅ Yes | `officecli create file.hwpx` |
+| Create from Markdown | ✅ Yes | `officecli create file.hwpx --from-markdown input.md` |
+| Read / analyze .hwpx | ✅ Yes | `view text`, `annotated`, `outline`, `stats`, `html`, `markdown`, `tables`, `forms`, `objects` |
+| Edit existing .hwpx | ✅ Yes | `set`, `add`, `remove`, `move`, `swap` |
+| Label-based fill | ✅ Yes | `set /table/fill --prop '라벨=값'` or `--prop 'fill:라벨=값'` |
+| Form recognize | ✅ Yes | `view forms --auto` (label-value auto-detect) |
+| Table map | ✅ Yes | `view tables` (2D grid + labels) |
+| Markdown export | ✅ Yes | `view markdown` |
+| Object finder | ✅ Yes | `view objects` (picture/field/bookmark/equation) |
+| Query (expanded) | ✅ Yes | `query 'tc[text~=홍길동]'`, `:has()`, `>` combinator |
+| Compare documents | ✅ Yes | `compare a.hwpx b.hwpx --mode text\|outline\|table` |
+| HTML preview | ✅ Yes | `view html --browser` |
+| Watch live preview | ✅ Yes | `watch file.hwpx` |
+| Validate .hwpx | ✅ Yes | `validate` (9-level: ZIP, package, XML, IDRef, table, NS, BinData, field, section) |
+| Raw XML | ✅ Yes | `raw`, `raw-set` |
+| Open .hwp (binary) | ❌ No | Convert to .hwpx first (Hancom Office) |
 
 ---
 
-## Core Command Model
-
-### Binary Location
+## Binary Location
 
 ```bash
-OFFICECLI="700_projects/cli-jaw/officecli/build-local/officecli"
-
-# Build if missing
-if [ ! -f "$OFFICECLI" ]; then
-    cd 700_projects/cli-jaw/officecli && dotnet publish -c Release -o build-local
-fi
-```
-
-### Text Extraction
-
-```bash
-officecli view file.hwpx text
-officecli view file.hwpx text --max-lines 200
-officecli view file.hwpx text --start 1 --end 50
-```
-
-`text` mode extracts body text with automatic Korean normalization: PUA character stripping, shape alt-text removal (e.g., "사각형입니다."), and uniform-distribution spacing collapse (현 장 대 응 → 현장대응).
-
-### Structure Overview
-
-```bash
-officecli view file.hwpx outline
-```
-
-Shows section count, paragraph/table counts, and document structure tree.
-
-### Detailed Inspection
-
-```bash
-officecli view file.hwpx annotated
-```
-
-Shows per-element detail with namespace-aware rendering of `hp:`, `hs:`, `hh:`, `hc:` elements.
-
-### Statistics
-
-```bash
-officecli view file.hwpx stats
-```
-
-Element counts, section distribution, and structural summary.
-
-### Issue Detection
-
-```bash
-officecli view file.hwpx issues
-officecli view file.hwpx issues --type format
-officecli view file.hwpx issues --type content
-officecli view file.hwpx issues --type structure
-```
-
-### Element Inspection (get)
-
-```bash
-# Document root
-officecli get file.hwpx /
-
-# Specific paragraph in a section (1-based)
-officecli get file.hwpx "/section[1]/p[1]"
-
-# Table in a section
-officecli get file.hwpx "/section[2]/tbl[1]" --depth 3
-
-# Table cell
-officecli get file.hwpx "/section[1]/tbl[1]/tr[2]/tc[3]"
-
-# Search across all sections (omit section index)
-officecli get file.hwpx "/p[5]"
-officecli get file.hwpx "/tbl[1]"
-```
-
-### CSS-like Queries
-
-```bash
-# Find paragraphs containing text
-officecli query file.hwpx 'p:contains("분기")'
-
-# Find empty elements
-officecli query file.hwpx 'p:empty'
-
-# Find elements with specific children
-officecli query file.hwpx 'tbl:has(tr)'
-```
-
-**Available pseudo-selectors:** `:contains("text")`, `:empty`, `:has(child)`
-**NOT available:** `:heading` (not implemented for HWPX)
-
-### Set Properties
-
-```bash
-# Set paragraph text (use --prop, NOT --props)
-officecli set file.hwpx "/section[1]/p[1]" --prop text="새로운 텍스트"
-
-# Set multiple properties
-officecli set file.hwpx "/section[1]/p[2]" --prop text="Hello" --prop bold=true
-```
-
-**Critical:** The flag is `--prop` (singular), not `--props`.
-
-### Raw XML Access
-
-```bash
-# View a raw XML part inside the HWPX archive
-officecli raw file.hwpx 'Contents/section0.xml'
-
-# Modify raw XML
-officecli raw-set file.hwpx 'Contents/section0.xml' \
-    --xpath '//hp:p[1]' \
-    --action replace \
-    --xml '<hp:p>replacement content</hp:p>'
-```
-
-**`raw-set` actions (7 total):**
-
-| Action | Description |
-|--------|-------------|
-| `append` | Add as last child of matched element |
-| `prepend` | Add as first child of matched element |
-| `insertbefore` | Insert before matched element |
-| `insertafter` | Insert after matched element |
-| `replace` | Replace matched element entirely |
-| `remove` | Remove matched element |
-| `setattr` | Set attribute on matched element |
-
-### Mutation Commands
-
-```bash
-# Move element
-officecli move file.hwpx "/section[1]/p[3]" --to "/section[1]/p[1]"
-
-# Remove element
-officecli remove file.hwpx "/section[1]/p[2]"
-
-# Copy element
-officecli copy file.hwpx "/section[1]/p[1]" --to "/section[2]"
-```
-
-### Validation
-
-```bash
-officecli validate file.hwpx
-```
-
-Six-level validation:
-1. **ZIP integrity** — archive is valid and extractable
-2. **Required files** — `mimetype`, `container.xml`, `content.hpf` present
-3. **XML well-formedness** — all XML parts parse correctly
-4. **ID reference consistency** — internal ID references resolve
-5. **Table structure** — row/cell counts are consistent
-6. **Namespace declarations** — `hp:`, `hs:`, `hh:`, `hc:` prefixes declared
-
----
-
-## Path Syntax (HWPX-Specific)
-
-HWPX uses section-based paths, unlike DOCX's `/body/` root:
-
-```
-/section[N]/p[M]                  # Mth paragraph in Nth section (1-based)
-/section[N]/tbl[M]                # Mth table in Nth section
-/section[N]/tbl[M]/tr[R]/tc[C]    # Cell at row R, column C
-/p[N]                             # Nth paragraph (searches all sections)
-/tbl[N]                           # Nth table (searches all sections)
-```
-
-**Always quote paths in shell** to prevent glob expansion of `[N]`:
-```bash
-officecli get file.hwpx "/section[1]/p[1]"   # ✅ correct
-officecli get file.hwpx /section[1]/p[1]      # ❌ shell glob expansion
+OFFICECLI="700_projects/cli-jaw/build-local/officecli"
+# Build: cd 700_projects/cli-jaw/officecli && dotnet publish -c Release -r osx-arm64 -o ../build-local
 ```
 
 ---
 
-## Common Workflows
+## Core Commands
 
-### 1. Analyze an Unknown HWPX Document
-
-```bash
-# Step 1: Quick overview
-officecli view file.hwpx outline
-
-# Step 2: Full text extraction
-officecli view file.hwpx text
-
-# Step 3: Check for issues
-officecli view file.hwpx issues
-
-# Step 4: Validate structure
-officecli validate file.hwpx
-```
-
-### 2. Find and Replace Text
+### Create & Import
 
 ```bash
-# Step 1: Find paragraphs containing target text
-officecli query file.hwpx 'p:contains("기존 텍스트")'
-
-# Step 2: Note the path from results, then set new text
-officecli set file.hwpx "/section[1]/p[3]" --prop text="새로운 텍스트"
+officecli create doc.hwpx                                    # 빈 문서
+officecli create doc.hwpx --from-markdown input.md           # MD→HWPX (JUSTIFY 기본)
+officecli create doc.hwpx --from-markdown input.md --align left  # 왼쪽 정렬
 ```
 
-### 3. Inspect Table Data
+### View Modes
 
 ```bash
-# Find all tables
-officecli query file.hwpx 'tbl:has(tr)'
-
-# Inspect table structure
-officecli get file.hwpx "/section[1]/tbl[1]" --depth 3
-
-# Read specific cell
-officecli get file.hwpx "/section[1]/tbl[1]/tr[1]/tc[1]"
+officecli view doc.hwpx text                    # 줄번호 텍스트
+officecli view doc.hwpx annotated               # 경로+스타일 상세
+officecli view doc.hwpx outline                 # 제목만
+officecli view doc.hwpx stats                   # 문서 통계
+officecli view doc.hwpx html --browser          # A4 HTML 미리보기
+officecli view doc.hwpx markdown                # GFM 마크다운 변환
+officecli view doc.hwpx tables                  # 테이블 2D 그리드 + 라벨 맵
+officecli view doc.hwpx forms --auto            # CLICK_HERE + label-value 자동 인식
+officecli view doc.hwpx forms --auto --json     # AI 파이프라인용 JSON
+officecli view doc.hwpx objects                 # picture/field/bookmark/equation 목록
+officecli view doc.hwpx objects --object-type field  # 특정 타입 필터
+officecli view doc.hwpx styles                  # charPr/paraPr 스타일
+officecli view doc.hwpx issues                  # 9-level 검증 이슈
 ```
 
-### 4. Raw XML Surgery
+### Edit
 
 ```bash
-# Step 1: View the raw XML to understand structure
-officecli raw file.hwpx 'Contents/section0.xml'
-
-# Step 2: Modify with precise XPath
-officecli raw-set file.hwpx 'Contents/section0.xml' \
-    --xpath '//hp:run[1]/hp:t' \
-    --action replace \
-    --xml '<hp:t>수정된 텍스트</hp:t>'
+officecli add doc.hwpx /section[1] --type paragraph --prop text="내용" --prop fontsize=11
+officecli add doc.hwpx /section[1] --type table --prop rows=3 --prop cols=4
+officecli set doc.hwpx '/section[1]/p[1]' --prop bold=true --prop align=CENTER
+officecli set doc.hwpx / --prop find="old" --prop replace="new"
+officecli remove doc.hwpx /section[1]/p[3]
 ```
+
+### Label Fill (테이블 자동 채우기)
+
+```bash
+officecli set doc.hwpx / --prop 'fill:대표자=홍길동' --prop 'fill:연락처=010-1234'
+officecli set doc.hwpx / --prop 'fill:주소>down=서울시'   # 방향: right(기본), down, left, up
+officecli set doc.hwpx /table/fill --prop '이름=김서준'    # fill: prefix 생략
+```
+
+### Query (확장 문법)
+
+```bash
+officecli query doc.hwpx 'p'                          # 모든 단락
+officecli query doc.hwpx 'tc[text~=홍길동]'           # 셀 텍스트 검색
+officecli query doc.hwpx 'run[bold=true]'              # 굵은 글씨
+officecli query doc.hwpx 'p:has(tbl)'                  # 테이블 포함 단락
+officecli query doc.hwpx 'tbl > tr > tc[colSpan!=1]'   # 병합 셀
+officecli query doc.hwpx 'run[fontsize>=20]'           # 20pt 이상
+officecli query doc.hwpx 'p[heading=1]'                # heading 1
+```
+
+Operators: `=`, `!=`, `~=` (contains), `>=`, `<=`
+Pseudo: `:empty`, `:contains(text)`, `:has(child)`, `:first`, `:last`
+Virtual attrs: `text`, `bold`, `italic`, `fontsize`, `colSpan`, `rowSpan`, `heading`
+
+### Compare
+
+```bash
+officecli compare a.hwpx b.hwpx                    # text diff (기본)
+officecli compare a.hwpx b.hwpx --mode outline      # heading diff
+officecli compare a.hwpx b.hwpx --mode table --json  # table diff JSON
+```
+
+### Watch
+
+```bash
+officecli watch doc.hwpx           # 파일 변경 시 HTML 자동 갱신
+officecli unwatch doc.hwpx         # 중지
+```
+
+### Validate
+
+```bash
+officecli validate doc.hwpx
+```
+
+9-level: ZIP integrity, package (mimetype/rootfile/version), XML, IDRef, table structure, namespace, BinData orphan, field pairs, section count.
 
 ---
 
-## CJK / Korean Handling
+## Key Workflows
 
-HWPX is the native format for Korean (한글) documents. Korean text normalization is **automatic** during text extraction:
+### 1. AI 양식 자동 채우기 (recognize → fill)
 
-| Normalization | Example | Notes |
-|--------------|---------|-------|
-| PUA character stripping | U+E000–U+F8FF removed | Hancom proprietary chars |
-| Uniform spacing collapse | 현 장 대 응 → 현장대응 | Common in scanned/OCR docs |
-| Shape alt-text removal | "사각형입니다." stripped | Auto-generated by Hancom |
+```bash
+officecli view form.hwpx forms --auto --json > fields.json  # Step 1: 인식
+# Step 2: AI가 label→value 매핑
+officecli set form.hwpx /table/fill --prop '성 명=홍길동'   # Step 3: 채우기
+```
 
-**When working with Korean text in commands:**
-- Use UTF-8 terminal encoding
-- Quote text arguments: `--prop text="한글 텍스트"`
-- `:contains()` queries work with Korean: `'p:contains("보고서")'`
+### 2. 테이블 구조 파악 → 편집
 
----
+```bash
+officecli view doc.hwpx tables                              # 2D 그리드 맵
+officecli query doc.hwpx 'tc[text~=대표자]'                # 셀 검색
+officecli set doc.hwpx /table/fill --prop '대표자=홍길동'   # label fill
+```
 
-## QA Verification (Required)
+### 3. Markdown 왕복 변환
 
-**Assume there are problems. Your job is to find them.**
+```bash
+officecli view doc.hwpx markdown > output.md                # HWPX→MD
+officecli create new.hwpx --from-markdown output.md         # MD→HWPX
+```
 
-### Verification Loop
+### 4. 문서 비교
 
-1. Run `view outline` — check section/element counts
-2. Run `view text` — verify content extraction is complete
-3. Run `view issues` — review all flagged issues
-4. Run `validate` — ensure structural integrity
-5. Fix any issues found
-6. Re-verify — one fix often creates another problem
-7. Repeat until a full pass reveals no new issues
-
-**Do not declare success until you've completed at least one fix-and-verify cycle.**
-
-### Pre-Delivery Checklist
-
-- [ ] All text extracted cleanly (no garbled characters)
-- [ ] Korean normalization applied correctly
-- [ ] No structural issues in `view issues`
-- [ ] Validation passes all 6 levels
-- [ ] Table structures are consistent
-- [ ] No orphaned ID references
-- [ ] Namespace declarations are complete
-
-**NOTE:** There is no visual preview mode (html/svg) for HWPX. Content verification relies on `view text`, `view annotated`, `view outline`, `view issues`, and `validate`. For visual verification, the user must open the file in Hancom Office or LibreOffice.
+```bash
+officecli compare before.hwpx after.hwpx --mode text
+officecli compare before.hwpx after.hwpx --json > diff.json
+```
 
 ---
 
@@ -305,49 +162,22 @@ HWPX is the native format for Korean (한글) documents. Korean text normalizati
 
 | Pitfall | Correct Approach |
 |---------|-----------------|
-| `--props text=Hello` | Use `--prop text=Hello` — singular `--prop` flag |
-| Using `/body/p[1]` path | HWPX uses `/section[1]/p[1]` — section-based, not body-based |
-| Opening `.hwp` (binary) | Convert to `.hwpx` first — binary HWP is not supported |
-| Trying `officecli create *.hwpx` | Not supported — use `python-hwpx` or `hwp_origin` |
-| Unquoted `[N]` in shell | Always quote: `"/section[1]/p[1]"` to prevent glob expansion |
-| Assuming `:heading` works | `:heading` pseudo-selector is NOT available for HWPX |
-| Forgetting namespace prefixes in raw XML | HWPX uses `hp:`, `hs:`, `hh:`, `hc:` prefixes |
-| Using `add-part` for HWPX | Not supported — HWPX uses OPF packaging, not OPC |
-| Expecting `watch/unwatch` | Not implemented for HWPX yet |
-
----
-
-## HWPX Format Reference
-
-- **Standard:** OWPML (Open Word-Processor Markup Language) by Hancom
-- **Packaging:** ZIP archive with XML parts (similar to OOXML but OPF-based)
-- **Namespace prefixes:** `hp:` (paragraph), `hs:` (section), `hh:` (header), `hc:` (character)
-- **Key archive entries:**
-  - `mimetype` — MIME type declaration
-  - `META-INF/container.xml` — container manifest
-  - `Contents/content.hpf` — OPF content package file (manifest + spine)
-  - `Contents/header.xml` — styles, fonts, numbering definitions
-  - `Contents/section0.xml`, `section1.xml`, ... — section content
-- **Encoding:** UTF-8
-
----
-
-## Dependencies
-
-- **Binary:** `700_projects/cli-jaw/officecli/build-local/officecli`
-- **Build:** `cd 700_projects/cli-jaw/officecli && dotnet publish -c Release -o build-local`
-- **Runtime:** .NET 10+ SDK
-- **For creating HWPX:** Use `python-hwpx` or `hwp_origin` (separate Python tools)
+| `--props text=Hello` | `--prop text=Hello` — 반드시 singular `--prop` |
+| `/body/p[1]` path | HWPX는 `/section[1]/p[1]` — body가 아닌 section 기반 |
+| `.hwp` (binary) 열기 | `.hwpx`로 변환 필수 |
+| Unquoted `[N]` in shell | `"/section[1]/p[1]"` — 반드시 따옴표 |
+| fontsize 미지정 | `--prop fontsize=11` 항상 명시 — charPr 오염 방지 |
+| 테이블 수동 매핑 | `view tables` 한 줄로 대체 가능 |
 
 ---
 
 ## Essential Rules
 
-1. **View mode is REQUIRED** — `officecli view file.hwpx` alone will error; specify `text`, `annotated`, `outline`, `stats`, or `issues`
-2. **Paths are 1-based** — `/section[1]/p[1]` is the first paragraph in the first section
-3. **Always quote paths** — prevent shell glob expansion of bracket syntax
-4. **Use `--prop` not `--props`** — singular flag for property setting
-5. **No create support** — use external Python tools for HWPX creation
-6. **Binary HWP is rejected** — officecli throws a helpful error suggesting .hwpx conversion
-7. **Korean normalization is automatic** — no flags needed for PUA stripping or spacing collapse
-8. **Verify after every edit** — run `view issues` + `validate` after mutations
+1. **View mode 필수** — `officecli view file.hwpx` 만으로는 에러; `text`/`markdown`/`tables` 등 지정
+2. **경로 1-based** — `/section[1]/p[1]`
+3. **경로 따옴표** — shell glob 방지
+4. **`--prop` singular** — `--props` 아님
+5. **fontsize 항상 명시** — charPr 0 오염 방지
+6. **편집 후 검증** — `view issues` + `validate` (9-level 동일 검사 범위)
+7. **한글 자동 정규화** — PUA 제거, 균등 분배 축소 자동 적용
+8. **Transport parity** — CLI/Resident/MCP 모두 같은 view 모드 지원 (tables, markdown, objects, forms)
