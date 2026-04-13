@@ -28,15 +28,21 @@ public partial class ExcelHandler
         string? typeEquals = null;
         string? typeNotEquals = null;
 
-        // Reject path-style selectors (e.g. "/Sheet1/cell", "cell /Sheet1")
-        if (selector.Contains('/'))
-            throw new OfficeCli.Core.CliException(
-                $"Invalid selector: '{selector}'. Use '!' to filter by sheet, not '/'.")
+        // Normalize path-style selectors: "/Sheet1/cell[...]" → "Sheet1!cell[...]"
+        if (selector.StartsWith('/'))
+        {
+            var slashIdx = selector.IndexOf('/', 1);
+            if (slashIdx > 0)
             {
-                Code = "invalid_selector",
-                Suggestion = "Sheet1!cell, Sheet1!A1:D10, Sheet1!cell[type=Number]",
-                Help = "officecli xlsx query"
-            };
+                sheet = selector[1..slashIdx];
+                selector = selector[(slashIdx + 1)..];
+            }
+            else
+            {
+                // Just "/cell" — strip leading slash
+                selector = selector[1..];
+            }
+        }
 
         // Check for sheet prefix: Sheet1!cell[...]
         // Only treat '!' as sheet separator if NOT part of '!=' operator
