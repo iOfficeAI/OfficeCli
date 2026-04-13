@@ -1,6 +1,7 @@
 // File: tests/OfficeCli.Tests/Hwpx/HwpxHandlerTests.cs
 using OfficeCli.Core;
 using OfficeCli.Handlers;
+using System.Xml.Linq;
 
 namespace OfficeCli.Tests.Hwpx;
 
@@ -11,6 +12,16 @@ public class HwpxHandlerTests : IDisposable
     private string CreateTemp(string text = "테스트 문단")
     {
         var path = HwpxTestHelper.CreateMinimalHwpx(text);
+        _tempFiles.Add(path);
+        return path;
+    }
+
+    private string CreateTempPng()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"test_{Guid.NewGuid():N}.png");
+        var bytes = Convert.FromBase64String(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Z0ioAAAAASUVORK5CYII=");
+        File.WriteAllBytes(path, bytes);
         _tempFiles.Add(path);
         return path;
     }
@@ -482,6 +493,208 @@ public class HwpxHandlerTests : IDisposable
 
         Assert.NotNull(resultPath);
         Assert.NotEmpty(resultPath);
+    }
+
+    [Fact]
+    public void Add_Picture_Default_RemainsInline()
+    {
+        var path = CreateTemp("Picture test");
+        var imagePath = CreateTempPng();
+        using var handler = new HwpxHandler(path, editable: true);
+
+        handler.Add("/section[1]", "picture", null,
+            new Dictionary<string, string>
+            {
+                ["path"] = imagePath
+            });
+
+        var xml = XDocument.Parse(handler.Raw("Contents/section0.xml"));
+        var pic = xml.Descendants().First(e => e.Name.LocalName == "pic");
+        var pos = pic.Elements().First(e => e.Name.LocalName == "pos");
+
+        Assert.Equal("TOP_AND_BOTTOM", pic.Attribute("textWrap")?.Value);
+        Assert.Equal("1", pos.Attribute("treatAsChar")?.Value);
+        Assert.Equal("PARA", pos.Attribute("vertRelTo")?.Value);
+        Assert.Equal("PARA", pos.Attribute("horzRelTo")?.Value);
+    }
+
+    [Fact]
+    public void Add_Picture_WrapSquare_CreatesFloatingParaAnchor()
+    {
+        var path = CreateTemp("Picture test");
+        var imagePath = CreateTempPng();
+        using var handler = new HwpxHandler(path, editable: true);
+
+        handler.Add("/section[1]", "picture", null,
+            new Dictionary<string, string>
+            {
+                ["path"] = imagePath,
+                ["wrap"] = "square",
+                ["width"] = "10000",
+                ["height"] = "5000"
+            });
+
+        var xml = XDocument.Parse(handler.Raw("Contents/section0.xml"));
+        var pic = xml.Descendants().First(e => e.Name.LocalName == "pic");
+        var pos = pic.Elements().First(e => e.Name.LocalName == "pos");
+
+        Assert.Equal("SQUARE", pic.Attribute("textWrap")?.Value);
+        Assert.Equal("0", pos.Attribute("treatAsChar")?.Value);
+        Assert.Equal("PARA", pos.Attribute("vertRelTo")?.Value);
+        Assert.Equal("PARA", pos.Attribute("horzRelTo")?.Value);
+    }
+
+    [Fact]
+    public void Add_Picture_AnchorPage_UsesPaperReference()
+    {
+        var path = CreateTemp("Picture test");
+        var imagePath = CreateTempPng();
+        using var handler = new HwpxHandler(path, editable: true);
+
+        handler.Add("/section[1]", "picture", null,
+            new Dictionary<string, string>
+            {
+                ["path"] = imagePath,
+                ["anchor"] = "page",
+                ["width"] = "10000",
+                ["height"] = "5000"
+            });
+
+        var xml = XDocument.Parse(handler.Raw("Contents/section0.xml"));
+        var pic = xml.Descendants().First(e => e.Name.LocalName == "pic");
+        var pos = pic.Elements().First(e => e.Name.LocalName == "pos");
+
+        Assert.Equal("TOP_AND_BOTTOM", pic.Attribute("textWrap")?.Value);
+        Assert.Equal("0", pos.Attribute("treatAsChar")?.Value);
+        Assert.Equal("PAPER", pos.Attribute("vertRelTo")?.Value);
+        Assert.Equal("PAPER", pos.Attribute("horzRelTo")?.Value);
+    }
+
+    [Fact]
+    public void Add_Picture_AnchorPage_Center_ComputesOffsets()
+    {
+        var path = CreateTemp("Picture test");
+        var imagePath = CreateTempPng();
+        using var handler = new HwpxHandler(path, editable: true);
+
+        handler.Add("/section[1]", "picture", null,
+            new Dictionary<string, string>
+            {
+                ["path"] = imagePath,
+                ["anchor"] = "page",
+                ["halign"] = "center",
+                ["valign"] = "middle",
+                ["width"] = "10000",
+                ["height"] = "5000"
+            });
+
+        var xml = XDocument.Parse(handler.Raw("Contents/section0.xml"));
+        var pic = xml.Descendants().First(e => e.Name.LocalName == "pic");
+        var pos = pic.Elements().First(e => e.Name.LocalName == "pos");
+
+        Assert.Equal(((59528 - 10000) / 2).ToString(), pos.Attribute("horzOffset")?.Value);
+        Assert.Equal(((84186 - 5000) / 2).ToString(), pos.Attribute("vertOffset")?.Value);
+    }
+
+    [Fact]
+    public void Add_Picture_AnchorPara_OnSectionParent_UsesBodyWidthAndExplicitY()
+    {
+        var path = CreateTemp("Picture test");
+        var imagePath = CreateTempPng();
+        using var handler = new HwpxHandler(path, editable: true);
+
+        handler.Add("/section[1]", "picture", null,
+            new Dictionary<string, string>
+            {
+                ["path"] = imagePath,
+                ["anchor"] = "para",
+                ["halign"] = "center",
+                ["width"] = "10000",
+                ["height"] = "5000",
+                ["y"] = "1234"
+            });
+
+        var xml = XDocument.Parse(handler.Raw("Contents/section0.xml"));
+        var pic = xml.Descendants().First(e => e.Name.LocalName == "pic");
+        var pos = pic.Elements().First(e => e.Name.LocalName == "pos");
+
+        Assert.Equal(((59528 - 8504 - 8504 - 10000) / 2).ToString(), pos.Attribute("horzOffset")?.Value);
+        Assert.Equal("1234", pos.Attribute("vertOffset")?.Value);
+        Assert.Equal("PARA", pos.Attribute("vertRelTo")?.Value);
+        Assert.Equal("PARA", pos.Attribute("horzRelTo")?.Value);
+    }
+
+    [Fact]
+    public void Add_Picture_WrapBehind_SetsBehindText()
+    {
+        var path = CreateTemp("Picture test");
+        var imagePath = CreateTempPng();
+        using var handler = new HwpxHandler(path, editable: true);
+
+        handler.Add("/section[1]", "picture", null,
+            new Dictionary<string, string>
+            {
+                ["path"] = imagePath,
+                ["wrap"] = "behind"
+            });
+
+        var xml = XDocument.Parse(handler.Raw("Contents/section0.xml"));
+        var pic = xml.Descendants().First(e => e.Name.LocalName == "pic");
+
+        Assert.Equal("BEHIND_TEXT", pic.Attribute("textWrap")?.Value);
+        Assert.Equal("0", pic.Attribute("zOrder")?.Value);
+    }
+
+    [Fact]
+    public void Add_Picture_LockTrue_SetsLockAttribute()
+    {
+        var path = CreateTemp("Picture test");
+        var imagePath = CreateTempPng();
+        using var handler = new HwpxHandler(path, editable: true);
+
+        handler.Add("/section[1]", "picture", null,
+            new Dictionary<string, string>
+            {
+                ["path"] = imagePath,
+                ["lock"] = "true"
+            });
+
+        var xml = XDocument.Parse(handler.Raw("Contents/section0.xml"));
+        var pic = xml.Descendants().First(e => e.Name.LocalName == "pic");
+
+        Assert.Equal("1", pic.Attribute("lock")?.Value);
+    }
+
+    [Fact]
+    public void Set_Picture_PositionAndLock_UpdatesShapeProperties()
+    {
+        var path = CreateTemp("Picture test");
+        var imagePath = CreateTempPng();
+        using var handler = new HwpxHandler(path, editable: true);
+
+        handler.Add("/section[1]", "picture", null,
+            new Dictionary<string, string>
+            {
+                ["path"] = imagePath,
+                ["wrap"] = "square"
+            });
+
+        handler.Set("/section[1]/p[2]/run[1]/pic[1]", new Dictionary<string, string>
+        {
+            ["x"] = "1111",
+            ["y"] = "2222",
+            ["lock"] = "1",
+            ["wrap"] = "topbottom"
+        });
+
+        var xml = XDocument.Parse(handler.Raw("Contents/section0.xml"));
+        var pic = xml.Descendants().First(e => e.Name.LocalName == "pic");
+        var pos = pic.Elements().First(e => e.Name.LocalName == "pos");
+
+        Assert.Equal("TOP_AND_BOTTOM", pic.Attribute("textWrap")?.Value);
+        Assert.Equal("1111", pos.Attribute("horzOffset")?.Value);
+        Assert.Equal("2222", pos.Attribute("vertOffset")?.Value);
+        Assert.Equal("1", pic.Attribute("lock")?.Value);
     }
 
     // ============================================================

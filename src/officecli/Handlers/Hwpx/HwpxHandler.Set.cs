@@ -956,6 +956,9 @@ public partial class HwpxHandler
             "wrap" or "textwrap" => SetShapeWrap(shape, value),
             "width" => SetShapeDimension(shape, "width", value),
             "height" => SetShapeDimension(shape, "height", value),
+            "x" => SetShapeOffset(shape, isVertical: false, value),
+            "y" => SetShapeOffset(shape, isVertical: true, value),
+            "lock" => SetShapeLock(shape, value),
             _ => false
         };
     }
@@ -971,12 +974,28 @@ public partial class HwpxHandler
             "SQUARE" => "SQUARE",
             "BEHIND" => "BEHIND_TEXT",
             "FRONT" => "IN_FRONT_OF_TEXT",
-            "TIGHT" or "WRAP" => "TOP_AND_BOTTOM",
+            "TIGHT" or "WRAP" or "TOPBOTTOM" or "TOP_AND_BOTTOM" => "TOP_AND_BOTTOM",
             _ => value.ToUpperInvariant()
         };
         shape.SetAttributeValue("textWrap", wrapValue);
         var pos = shape.Element(HwpxNs.Hp + "pos");
         pos?.SetAttributeValue("treatAsChar", isInline ? "1" : "0");
+        return true;
+    }
+
+    private static bool SetShapeOffset(XElement shape, bool isVertical, string value)
+    {
+        var pos = shape.Element(HwpxNs.Hp + "pos");
+        if (pos == null) return false;
+        var attr = isVertical ? "vertOffset" : "horzOffset";
+        pos.SetAttributeValue(attr, ParseDimensionToHwpUnit(value).ToString());
+        return true;
+    }
+
+    private static bool SetShapeLock(XElement shape, string value)
+    {
+        var boolValue = value.Equals("true", StringComparison.OrdinalIgnoreCase) || value == "1";
+        shape.SetAttributeValue("lock", boolValue ? "1" : "0");
         return true;
     }
 

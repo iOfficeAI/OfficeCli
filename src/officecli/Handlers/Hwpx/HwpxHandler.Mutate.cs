@@ -79,7 +79,7 @@ public partial class HwpxHandler
             "run"              => CreateRun(properties),
             "row" or "tr"      => CreateRow(parent, properties),
             "cell" or "tc"     => CreateCell(parent, properties),
-            "picture" or "image" or "pic" => CreatePicture(properties),
+            "picture" or "image" or "pic" => CreatePicture(parent, properties),
             "hyperlink" or "link"         => CreateHyperlink(properties),
             "pagebreak" or "page-break"   => CreatePageBreak(),
             "columnbreak" or "column-break" => CreateColumnBreak(properties),
@@ -1148,15 +1148,31 @@ public partial class HwpxHandler
     /// Golden template based on real Hancom documents: uses hc:img (NOT hp:img), hc:pt0-pt3 for imgRect.
     /// Props: path (required), width (e.g. "2in"), height (e.g. "1in"), alt.
     /// </summary>
-    private XElement CreatePicture(Dictionary<string, string>? props)
+    private readonly record struct PictureReferenceBox(int Width, int Height);
+
+    private XElement CreatePicture(XElement parent, Dictionary<string, string>? props)
     {
         var path = props?.GetValueOrDefault("path")
+            ?? props?.GetValueOrDefault("src")
             ?? throw new CliException("picture requires 'path' property");
         if (!File.Exists(path))
             throw new CliException($"Image file not found: {path}");
 
         var widthHwp = ParseDimensionToHwpUnit(props?.GetValueOrDefault("width") ?? "2in");
         var heightHwp = ParseDimensionToHwpUnit(props?.GetValueOrDefault("height") ?? "1in");
+        var wrapMode = ResolvePictureWrap(props);
+        var anchorMode = ResolvePictureAnchor(props, wrapMode);
+        var (horizontalAlign, verticalAlign) = ParsePictureAlignment(props);
+        var sectionRoot = ResolvePictureSectionRoot(parent);
+        var anchorParagraph = ResolvePictureAnchorParagraph(parent);
+        var referenceBox = ResolvePictureReferenceBox(anchorMode, sectionRoot, anchorParagraph);
+        var (offsetX, offsetY) = ResolvePictureOffsets(props, anchorMode, widthHwp, heightHwp,
+            referenceBox, horizontalAlign, verticalAlign);
+        var treatAsChar = wrapMode == "char";
+        var textWrap = MapPictureWrap(wrapMode);
+        var lockValue = ParseBoolProp(props, "lock") ? "1" : "0";
+        var zOrder = ResolvePictureZOrder(props, wrapMode).ToString();
+        var relativeTarget = anchorMode == "page" ? "PAPER" : "PARA";
 
         // 1. Read image bytes and determine format
         var imageBytes = File.ReadAllBytes(path);
@@ -1189,11 +1205,11 @@ public partial class HwpxHandler
         var instId = NewId();
         return new XElement(HwpxNs.Hp + "pic",
             new XAttribute("id", id),
-            new XAttribute("zOrder", "0"),
+            new XAttribute("zOrder", zOrder),
             new XAttribute("numberingType", "PICTURE"),
-            new XAttribute("textWrap", "TOP_AND_BOTTOM"),
+            new XAttribute("textWrap", textWrap),
             new XAttribute("textFlow", "BOTH_SIDES"),
-            new XAttribute("lock", "0"),
+            new XAttribute("lock", lockValue),
             new XAttribute("dropcapstyle", "None"),
             new XAttribute("href", ""),
             new XAttribute("groupLevel", "0"),
@@ -1246,16 +1262,167 @@ public partial class HwpxHandler
                 new XAttribute("height", heightHwp), new XAttribute("heightRelTo", "ABSOLUTE"),
                 new XAttribute("protect", "0")),
             new XElement(HwpxNs.Hp + "pos",
-                new XAttribute("treatAsChar", "1"), new XAttribute("affectLSpacing", "0"),
+                new XAttribute("treatAsChar", treatAsChar ? "1" : "0"), new XAttribute("affectLSpacing", "0"),
                 new XAttribute("flowWithText", "1"), new XAttribute("allowOverlap", "0"),
                 new XAttribute("holdAnchorAndSO", "0"),
-                new XAttribute("vertRelTo", "PARA"), new XAttribute("horzRelTo", "COLUMN"),
+                new XAttribute("vertRelTo", relativeTarget), new XAttribute("horzRelTo", relativeTarget),
                 new XAttribute("vertAlign", "TOP"), new XAttribute("horzAlign", "LEFT"),
-                new XAttribute("vertOffset", "0"), new XAttribute("horzOffset", "0")),
+                new XAttribute("vertOffset", offsetY), new XAttribute("horzOffset", offsetX)),
             new XElement(HwpxNs.Hp + "outMargin",
                 new XAttribute("left", "0"), new XAttribute("right", "0"),
                 new XAttribute("top", "0"), new XAttribute("bottom", "0"))
         );
+    }
+
+    private static string ResolvePictureWrap(Dictionary<string, string>? props)
+    {
+        var rawWrap = props?.GetValueOrDefault("wrap")
+            ?? props?.GetValueOrDefault("textwrap")
+            ?? "";
+        var normalizedWrap = rawWrap.Trim().ToLowerInvariant() switch
+        {
+            "char" or "inline" => "char",
+            "square" => "square",
+            "front" or "infront" or "in_front" => "front",
+            "behind" or "back" => "behind",
+            "topbottom" or "top_bottom" or "top-and-bottom" or "tight" or "wrap" => "topbottom",
+            _ => "char"
+        };
+        if (normalizedWrap != "char")
+            return normalizedWrap;
+
+        var anchor = props?.GetValueOrDefault("anchor")?.Trim().ToLowerInvariant();
+        var hasPositioningProps = props != null && (props.ContainsKey("x") || props.ContainsKey("y")
+            || props.ContainsKey("halign") || props.ContainsKey("valign"));
+        return (anchor is "page" or "para") || hasPositioningProps ? "topbottom" : "char";
+    }
+
+    private static string ResolvePictureAnchor(Dictionary<string, string>? props, string wrapMode)
+    {
+        var anchor = props?.GetValueOrDefault("anchor")?.Trim().ToLowerInvariant();
+        if (anchor is "page" or "paper")
+            return "page";
+        if (anchor == "para")
+            return "para";
+        return wrapMode == "char" ? "para" : "para";
+    }
+
+    private static (string Horizontal, string Vertical) ParsePictureAlignment(Dictionary<string, string>? props)
+    {
+        var horizontal = props?.GetValueOrDefault("halign")?.Trim().ToLowerInvariant() switch
+        {
+            "center" or "middle" => "center",
+            "right" => "right",
+            _ => "left"
+        };
+        var vertical = props?.GetValueOrDefault("valign")?.Trim().ToLowerInvariant() switch
+        {
+            "middle" or "center" => "middle",
+            "bottom" => "bottom",
+            _ => "top"
+        };
+        return (horizontal, vertical);
+    }
+
+    private XElement ResolvePictureSectionRoot(XElement parent)
+    {
+        if (parent.Name == HwpxNs.Hs + "sec")
+            return parent;
+        var sectionRoot = parent.AncestorsAndSelf()
+            .FirstOrDefault(e => e.Name == HwpxNs.Hs + "sec");
+        return sectionRoot ?? _doc.PrimarySection.Root;
+    }
+
+    private static XElement? ResolvePictureAnchorParagraph(XElement parent)
+    {
+        if (parent.Name == HwpxNs.Hp + "p")
+            return parent;
+        if (parent.Name == HwpxNs.Hp + "run" && parent.Parent?.Name == HwpxNs.Hp + "p")
+            return parent.Parent;
+        return null;
+    }
+
+    private static PictureReferenceBox ResolvePictureReferenceBox(string anchorMode, XElement sectionRoot,
+        XElement? anchorParagraph)
+    {
+        var secPr = sectionRoot.Descendants(HwpxNs.Hp + "secPr").FirstOrDefault();
+        var pagePr = secPr?.Element(HwpxNs.Hp + "pagePr");
+        var margin = pagePr?.Element(HwpxNs.Hp + "margin");
+        var pageWidth = (int?)pagePr?.Attribute("width") ?? 59528;
+        var pageHeight = (int?)pagePr?.Attribute("height") ?? 84186;
+        var marginLeft = (int?)margin?.Attribute("left") ?? 8504;
+        var marginRight = (int?)margin?.Attribute("right") ?? 8504;
+        var marginTop = (int?)margin?.Attribute("top") ?? 5668;
+        var marginBottom = (int?)margin?.Attribute("bottom") ?? 4252;
+
+        if (anchorMode == "page")
+            return new PictureReferenceBox(pageWidth, pageHeight);
+
+        var bodyWidth = Math.Max(pageWidth - marginLeft - marginRight, 0);
+        var bodyHeight = Math.Max(pageHeight - marginTop - marginBottom, 0);
+        if (anchorParagraph == null)
+            return new PictureReferenceBox(bodyWidth, bodyHeight);
+        return new PictureReferenceBox(bodyWidth, bodyHeight);
+    }
+
+    private static (int X, int Y) ResolvePictureOffsets(Dictionary<string, string>? props, string anchorMode,
+        int widthHwp, int heightHwp, PictureReferenceBox referenceBox, string horizontalAlign, string verticalAlign)
+    {
+        var explicitX = ParsePictureOffset(props?.GetValueOrDefault("x"));
+        var explicitY = ParsePictureOffset(props?.GetValueOrDefault("y"));
+
+        var baseX = horizontalAlign switch
+        {
+            "center" => (referenceBox.Width - widthHwp) / 2,
+            "right" => referenceBox.Width - widthHwp,
+            _ => 0
+        };
+
+        var baseY = 0;
+        if (anchorMode == "page")
+        {
+            baseY = verticalAlign switch
+            {
+                "middle" => (referenceBox.Height - heightHwp) / 2,
+                "bottom" => referenceBox.Height - heightHwp,
+                _ => 0
+            };
+        }
+
+        return (baseX + explicitX, baseY + explicitY);
+    }
+
+    private static int ParsePictureOffset(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return 0;
+        return ParseDimensionToHwpUnit(value);
+    }
+
+    private static string MapPictureWrap(string wrapMode) => wrapMode switch
+    {
+        "square" => "SQUARE",
+        "front" => "IN_FRONT_OF_TEXT",
+        "behind" => "BEHIND_TEXT",
+        _ => "TOP_AND_BOTTOM"
+    };
+
+    private static bool ParseBoolProp(Dictionary<string, string>? props, string key)
+    {
+        var value = props?.GetValueOrDefault(key);
+        return value != null && (value.Equals("true", StringComparison.OrdinalIgnoreCase) || value == "1");
+    }
+
+    private static int ResolvePictureZOrder(Dictionary<string, string>? props, string wrapMode)
+    {
+        if (int.TryParse(props?.GetValueOrDefault("z"), out var zOrder))
+            return zOrder;
+        return wrapMode switch
+        {
+            "front" => 1,
+            "behind" => 0,
+            _ => 0
+        };
     }
 
     // ==================== Hyperlink ====================

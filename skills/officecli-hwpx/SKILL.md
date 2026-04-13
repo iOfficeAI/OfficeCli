@@ -23,6 +23,7 @@ description: "Use this skill any time a .hwpx file is involved -- as input, outp
 | Swap elements | ✅ Yes | `swap file.hwpx '/p[1]' '/p[2]'` |
 | Column break | ✅ Yes | `add --type columnbreak --prop cols=2` |
 | Watermark (image) | 🟡 Plan 98 active | `build-local/officecli` 1.0.42 기준 동작 확인. Opaque RGB 권장, 밝은 자산은 `bright=0`, `contrast=0` 권장 |
+| Image anchor / floating picture | ✅ Yes | `add --type picture --prop anchor=page --prop halign=center --prop valign=middle` |
 | Field types | ✅ Yes | `add --type author\|title\|lastsaveby\|filename` |
 | Compare documents | ✅ Yes | `compare a.hwpx b.hwpx --mode text\|outline\|table` |
 | HTML preview | ✅ Yes | `view html --browser` |
@@ -98,6 +99,56 @@ Validation notes:
 - 투명 PNG는 피하고, **opaque RGB PNG**를 우선 사용
 - 매우 밝은/단순한 자산은 기본 `bright=70`, `contrast=-50`에서 희미해질 수 있음
 - 설치된 `~/.local/bin/officecli`가 `Unsupported element type: watermark`를 반환하면 최신 `build-local/officecli` 사용 또는 재설치
+
+### Image anchor / floating picture
+
+```bash
+# 기본: inline (글자처럼 취급)
+officecli add doc.hwpx /section[1] --type picture --prop path=/path/to/image.png
+
+# 페이지 기준 정중앙
+officecli add doc.hwpx /section[1] --type picture \
+  --prop path=/path/to/image.png \
+  --prop anchor=page \
+  --prop halign=center \
+  --prop valign=middle \
+  --prop width=10000 \
+  --prop height=5000
+
+# 페이지 기준 중앙에서 약간 이동
+officecli add doc.hwpx /section[1] --type picture \
+  --prop path=/path/to/image.png \
+  --prop anchor=page \
+  --prop halign=center \
+  --prop valign=middle \
+  --prop x=1200 \
+  --prop y=800
+
+# 문단 기준 floating
+officecli add doc.hwpx /section[1] --type picture \
+  --prop path=/path/to/image.png \
+  --prop anchor=para \
+  --prop wrap=square \
+  --prop halign=center \
+  --prop y=1200
+
+# 글 뒤로
+officecli add doc.hwpx /section[1] --type picture \
+  --prop path=/path/to/image.png \
+  --prop wrap=behind
+
+# 생성 후 위치/잠금 조정
+officecli set doc.hwpx '/section[1]/p[2]/run[1]/pic[1]' \
+  --prop x=1111 --prop y=2222 --prop lock=1 --prop wrap=topbottom
+```
+
+Rules:
+- `path`가 기본이며 `src`도 허용됨
+- `anchor=page`는 **용지 전체(PAPER)** 기준 offset 계산
+- `halign`/`valign`은 별도 정렬 enum이 아니라 `horzOffset`/`vertOffset` 계산으로 처리됨
+- `anchor=para`는 V1에서 본문 폭 기준 가로 배치 + `y` explicit only
+- set 경로는 현재 `x`, `y`, `lock`, `wrap=topbottom`까지만 문서화한다
+- picture path는 `'/section[1]/p[N]/run[1]/pic[1]'` 형태를 사용
 
 ### Label Fill (테이블 자동 채우기)
 
