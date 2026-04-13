@@ -153,7 +153,7 @@ public partial class ExcelHandler
             var isRtl = sheetView?.RightToLeft?.Value == true;
             var dirAttr = isRtl ? " dir=\"rtl\"" : "";
             sb.AppendLine($"<div class=\"sheet-content{activeClass}\" data-sheet=\"{sheetIdx}\"{dirAttr}>");
-            var charts = CollectSheetCharts(worksheetPart);
+            var charts = CollectSheetCharts(worksheetPart, sheetName);
             RenderSheetTable(sb, sheetName, renderPart, stylesheet, charts, sheetIdx);
             sb.AppendLine("</div>");
         }
