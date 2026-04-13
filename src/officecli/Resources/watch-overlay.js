@@ -483,8 +483,11 @@
     // Non-Excel elements: shift/ctrl/cmd = toggle multi-select.
     // Skipped if a rubber-band or cell drag just finished.
     var _suppressNextClick = false;
+    var _lastInlineClickTime = 0;
     document.addEventListener('click', function(e) {
-        if (_suppressNextClick) { _suppressNextClick = false; return; }
+        if (_suppressNextClick || Date.now() - _lastInlineClickTime < 100) {
+            _suppressNextClick = false; return;
+        }
         var target = e.target.closest('[data-path]');
         if (!target) {
             // Don't clear selection when clicking UI chrome (sheet tabs, sidebar, etc.)
@@ -718,9 +721,10 @@
             }
             applySelectionToDom(); // immediate visual feedback
             postSelection(_selection);
-            // preventDefault on mousedown suppresses click for Ctrl but not Meta/Shift.
-            // Suppress the click event for those to avoid double-processing.
-            if (e.metaKey || e.shiftKey) _suppressNextClick = true;
+            // Suppress the click event that may follow (Meta/Shift are not
+            // suppressed by mousedown's preventDefault on macOS).
+            _lastInlineClickTime = Date.now();
+            _suppressNextClick = true;
             return;
         }
 
