@@ -551,7 +551,21 @@
                 e.stopPropagation();
                 return;
             }
-            // Didn't move enough — fall through to normal click handler
+            // Didn't move enough — mousedown's preventDefault() suppressed the
+            // click event, so handle click logic (Ctrl/Shift/plain) inline here.
+            var path = cd.anchor.sheet + '/' + cd.anchor.col + cd.anchor.row;
+            var cell = cd.anchor;
+            if (e.shiftKey && _anchor && cell.sheet === _anchor.sheet) {
+                _selection = _expandCellRange(_anchor.sheet, _anchor.col, _anchor.row, cell.col, cell.row);
+            } else if (e.ctrlKey || e.metaKey) {
+                var idx = _selection.indexOf(path);
+                if (idx >= 0) _selection.splice(idx, 1);
+                else { _selection.push(path); _anchor = cell; }
+            } else {
+                _selection = [path];
+                _anchor = cell;
+            }
+            postSelection(_selection);
             return;
         }
 
@@ -596,7 +610,11 @@
 
     function _cancelDrags() {
         if (_rubber) { if (_rubber.div) _rubber.div.remove(); _rubber = null; }
-        if (_cellDrag) { _cellDrag = null; }
+        if (_cellDrag) {
+            _selection = _cellDrag.base.slice();
+            applySelectionToDom();
+            _cellDrag = null;
+        }
     }
 
     document.addEventListener('keydown', function(e) {
