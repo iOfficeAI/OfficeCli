@@ -289,6 +289,26 @@ Key patterns: lineseg strip (R1), checkbox (R6), label detect (R7-R8), uniform s
 checkbox hierarchy (R21), appendix ref (R22), digit-title concat (R23).
 Full inventory → `devlog/_plan/office/hwp/plan/99.7-kice-regex-parsing-implementation.md`.
 
+### Exam XML Structure Patterns (시험지 특화, 신규)
+
+KICE 시험지는 일반 양식과 다른 XML 구조를 가짐:
+
+| Pattern | Description | Detection |
+|---------|-------------|-----------|
+| Page/Column breaks | `pageBreak="1"` / `columnBreak="1"` on `<hp:p>` | 페이지 경계 = 문제 그룹 경계 |
+| p[0] Monster | secPr + colPr + title tbl + 문제1 텍스트 합체 | 첫 paragraph에 모든 것 |
+| Equation interleaving | `<t>` ↔ `<equation>` 교차 패턴 | 문제 텍스트 추출 시 equation 스킵 |
+| Answer choices | `①` + 5 `<equation>` (5지선다) | 답안 paragraph 자동 감지 |
+| Text fragmentation | 1-2자 단위 `<t>` 분할 (HWP 변환) | 전체 텍스트 연결 후 매칭 |
+| 2-column layout | `<hp:colPr type="NEWSPAPER" colCount="2">` | 시험지 고유 레이아웃 |
+
+**officecli가 커버하는 것**: `view text`, `view stats`, `view forms --auto`, `validate`
+**Python fallback 필요**: 페이지 단위 삭제, 문제 텍스트 교체, section 축소
+
+**검증 (2026-04-13)**: 2025 수능 수학 → 1페이지 4문제로 축소 + 텍스트 교체 + lineseg strip. Hancom OK.
+
+상세 → `hwp_recog/24-exam-xml-structure-patterns.md`, Plan 99.7.
+
 ---
 
 ## Common Pitfalls
