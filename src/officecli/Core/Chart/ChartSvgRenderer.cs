@@ -1118,6 +1118,9 @@ internal partial class ChartSvgRenderer
         public bool IsStacked { get; set; }
         public bool IsPercent { get; set; }
         public bool Is3D { get; set; }
+        public int RotateX { get; set; }
+        public int RotateY { get; set; }
+        public int Perspective { get; set; }
         public double? AxisMax { get; set; }
         public double? AxisMin { get; set; }
         public double? MajorUnit { get; set; }
@@ -1222,6 +1225,21 @@ internal partial class ChartSvgRenderer
         info.Is3D = info.ChartType.Contains("3d");
         info.IsStacked = info.ChartType.Contains("stacked") || info.ChartType.Contains("Stacked");
         info.IsPercent = info.ChartType.Contains("percent") || info.ChartType.Contains("Percent");
+
+        // View3D parameters
+        if (chart != null)
+        {
+            var view3dEl = chart.Elements().FirstOrDefault(e => e.LocalName == "view3D");
+            if (view3dEl != null)
+            {
+                var rotXEl = view3dEl.Elements().FirstOrDefault(e => e.LocalName == "rotX");
+                var rotYEl = view3dEl.Elements().FirstOrDefault(e => e.LocalName == "rotY");
+                var perspEl = view3dEl.Elements().FirstOrDefault(e => e.LocalName == "perspective");
+                if (rotXEl != null && int.TryParse(rotXEl.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value, out var rx)) info.RotateX = rx;
+                if (rotYEl != null && int.TryParse(rotYEl.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value, out var ry)) info.RotateY = ry;
+                if (perspEl != null && int.TryParse(perspEl.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value, out var pv)) info.Perspective = pv;
+            }
+        }
 
         // Locate chart type element (barChart, lineChart, pieChart, etc.)
         var chartTypeEl = plotArea.Elements().FirstOrDefault(e =>
@@ -1598,7 +1616,9 @@ internal partial class ChartSvgRenderer
         if (chartType.Contains("pie") || chartType.Contains("doughnut"))
         {
             if (info.Is3D)
-                RenderPie3DSvg(sb, info.Series, info.Categories, info.Colors, svgW, svgH);
+                RenderPie3DSvg(sb, info.Series, info.Categories, info.Colors, svgW, svgH,
+                    info.ShowDataLabels, info.ShowDataLabelVal, info.ShowDataLabelPercent,
+                    info.RotateX > 0 ? info.RotateX : 30);
             else
                 RenderPieChartSvg(sb, info.Series, info.Categories, info.Colors, svgW, svgH, info.HoleRatio, info.ShowDataLabels,
                     info.ShowDataLabelVal, info.ShowDataLabelPercent);
@@ -1606,7 +1626,11 @@ internal partial class ChartSvgRenderer
         else if (chartType.Contains("area"))
         {
             var areaW = plotW - (int)(plotW * 0.03);
-            RenderAreaChartSvg(sb, info.Series, info.Categories, info.Colors, marginLeft, marginTop, areaW, plotH, info.IsStacked);
+            if (info.Is3D)
+                RenderArea3DSvg(sb, info.Series, info.Categories, info.Colors, marginLeft, marginTop, areaW, plotH,
+                    info.IsStacked, info.RotateX, info.RotateY);
+            else
+                RenderAreaChartSvg(sb, info.Series, info.Categories, info.Colors, marginLeft, marginTop, areaW, plotH, info.IsStacked);
         }
         else if (chartType == "combo")
         {
@@ -1644,8 +1668,11 @@ internal partial class ChartSvgRenderer
             // Horizontal bars have their own hLabelMargin inside, so reduce outer marginLeft
             var barMarginLeft = isHorizontal ? 5 : marginLeft;
             var barPlotW = isHorizontal ? svgW - barMarginLeft - marginRight : plotW;
-            if (info.Is3D && !info.IsStacked)
-                RenderBar3DSvg(sb, info.Series, info.Categories, info.Colors, barMarginLeft, marginTop, barPlotW, plotH, isHorizontal);
+            if (info.Is3D)
+                RenderBar3DSvg(sb, info.Series, info.Categories, info.Colors, barMarginLeft, marginTop, barPlotW, plotH, isHorizontal,
+                    info.IsStacked, info.IsPercent, info.AxisMax, info.AxisMin, info.MajorUnit,
+                    info.GapWidth, info.ShowDataLabels, info.ValNumFmt,
+                    info.ReferenceLines, info.RotateX, info.RotateY);
             else
                 RenderBarChartSvg(sb, info.Series, info.Categories, info.Colors, barMarginLeft, marginTop, barPlotW, plotH,
                     isHorizontal, info.IsStacked, info.IsPercent, info.AxisMax, info.AxisMin, info.MajorUnit,
@@ -1788,123 +1815,226 @@ internal partial class ChartSvgRenderer
         return $"#{r:X2}{g:X2}{b:X2}";
     }
 
-    // 3D isometric offsets
+    // 3D isometric offsets (defaults for 0/0 view3D)
     private const double Depth3D = 12;
     private const double DxIso = 8;
     private const double DyIso = -6;
 
+    /// <summary>Compute 3D isometric offsets from view3D parameters.</summary>
+    private static (double dx, double dy) Compute3DOffsets(int rotateX, int rotateY, double baseDepth = 10)
+    {
+        if (rotateX == 0 && rotateY == 0) return (DxIso, DyIso);
+        var ry = Math.Clamp(rotateY, 0, 360) * Math.PI / 180;
+        var rx = Math.Clamp(rotateX, 0, 90) * Math.PI / 180;
+        var dx = baseDepth * Math.Sin(ry) * 0.9;
+        var dy = -baseDepth * Math.Sin(rx) * 0.7;
+        if (Math.Abs(dx) < 2) dx = dx >= 0 ? 2 : -2;
+        if (Math.Abs(dy) < 2) dy = -2;
+        return (dx, dy);
+    }
+
     private void RenderBar3DSvg(StringBuilder sb, List<(string name, double[] values)> series,
-        string[] categories, List<string> colors, int ox, int oy, int pw, int ph, bool horizontal)
+        string[] categories, List<string> colors, int ox, int oy, int pw, int ph, bool horizontal,
+        bool stacked = false, bool percentStacked = false,
+        double? ooxmlMax = null, double? ooxmlMin = null, double? ooxmlMajorUnit = null,
+        int? ooxmlGapWidth = null, bool showDataLabels = false, string? valNumFmt = null,
+        List<(string Name, double Value, string Color, double WidthPt, string Dash)>? referenceLines = null,
+        int rotateX = 15, int rotateY = 20)
     {
         var allValues = series.SelectMany(s => s.values).ToArray();
         if (allValues.Length == 0) return;
-        var (maxVal, _, _) = ComputeNiceAxis(allValues.Max());
         var catCount = Math.Max(categories.Length, series.Max(s => s.values.Length));
         var serCount = series.Count;
+        var (dx3d, dy3d) = Compute3DOffsets(rotateX, rotateY);
+
+        // Compute axis range (mirrors 2D RenderBarChartSvg logic)
+        double maxVal, minVal = 0;
+        if (stacked || percentStacked)
+        {
+            var catSums = new double[catCount];
+            for (int c = 0; c < catCount; c++)
+                catSums[c] = series.Sum(s => c < s.values.Length ? s.values[c] : 0);
+            maxVal = percentStacked ? 100 : catSums.Max();
+        }
+        else
+            maxVal = allValues.Max();
+
+        if (ooxmlMax.HasValue) maxVal = ooxmlMax.Value;
+        if (ooxmlMin.HasValue) minVal = ooxmlMin.Value;
+        if (maxVal <= minVal) maxVal = minVal + 1;
+        var range = maxVal - minVal;
+
+        // Grid ticks
+        int tickCount;
+        double majorUnit;
+        if (ooxmlMajorUnit.HasValue && ooxmlMajorUnit.Value > 0) { majorUnit = ooxmlMajorUnit.Value; tickCount = (int)(range / majorUnit); }
+        else { var (nm, _, nu) = ComputeNiceAxis(maxVal); maxVal = nm; range = maxVal - minVal; majorUnit = nu > 0 ? nu : range / 4; tickCount = majorUnit > 0 ? (int)(range / majorUnit) : 4; }
+
+        void Draw3DBar(double bx, double by, double barW2, double barH2, string color)
+        {
+            if (barH2 < 0.5) return;
+            var sideColor = AdjustColor(color, 0.65);
+            var topColor = AdjustColor(color, 1.25);
+            // Front face
+            sb.AppendLine($"        <rect x=\"{bx:0.#}\" y=\"{by:0.#}\" width=\"{barW2:0.#}\" height=\"{barH2:0.#}\" fill=\"{color}\" opacity=\"0.9\"/>");
+            // Top face
+            sb.AppendLine($"        <polygon points=\"{bx:0.#},{by:0.#} {bx + barW2:0.#},{by:0.#} {bx + barW2 + dx3d:0.#},{by + dy3d:0.#} {bx + dx3d:0.#},{by + dy3d:0.#}\" fill=\"{topColor}\" opacity=\"0.9\"/>");
+            // Right side face
+            sb.AppendLine($"        <polygon points=\"{bx + barW2:0.#},{by:0.#} {bx + barW2 + dx3d:0.#},{by + dy3d:0.#} {bx + barW2 + dx3d:0.#},{by + barH2 + dy3d:0.#} {bx + barW2:0.#},{by + barH2:0.#}\" fill=\"{sideColor}\" opacity=\"0.9\"/>");
+        }
 
         if (horizontal)
         {
-            // Estimate label width from longest category name (approx 0.5 × fontSize per char)
             var maxLabelLen = categories.Length > 0 ? categories.Max(c => c.Length) : 0;
             var hLabelMargin = (int)(maxLabelLen * CatFontPx * 0.5) + 4;
             var plotOx = ox + hLabelMargin;
             var plotPw = pw - hLabelMargin;
             var groupH = (double)ph / Math.Max(catCount, 1);
-            var barH = groupH * 0.5 / serCount;
+            var barH = stacked || percentStacked ? groupH * 0.5 : groupH * 0.5 / serCount;
             var gap = groupH * 0.2;
 
-            for (int t = 1; t <= 4; t++)
+            // Gridlines
+            for (int t = 1; t <= tickCount; t++)
             {
-                var gx = plotOx + (double)plotPw * t / 4;
-                sb.AppendLine($"        <line x1=\"{gx:0.#}\" y1=\"{oy}\" x2=\"{gx:0.#}\" y2=\"{oy + ph}\" stroke=\"{GridColor}\" stroke-width=\"0.5\" stroke-dasharray=\"none\"/>");
+                var gx = plotOx + (double)plotPw * t / tickCount;
+                sb.AppendLine($"        <line x1=\"{gx:0.#}\" y1=\"{oy}\" x2=\"{gx:0.#}\" y2=\"{oy + ph}\" stroke=\"{GridColor}\" stroke-width=\"0.5\"/>");
             }
             sb.AppendLine($"        <line x1=\"{plotOx}\" y1=\"{oy}\" x2=\"{plotOx}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
             sb.AppendLine($"        <line x1=\"{plotOx}\" y1=\"{oy + ph}\" x2=\"{plotOx + plotPw}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
 
-            for (int s = 0; s < serCount; s++)
+            for (int c = 0; c < catCount; c++)
             {
-                var color = colors[s % colors.Count];
-                var sideColor = AdjustColor(color, 0.7);
-                var topColor = AdjustColor(color, 1.3);
-                for (int c = 0; c < series[s].values.Length && c < catCount; c++)
+                if (stacked || percentStacked)
                 {
-                    var val = series[s].values[c];
-                    var barW = (val / maxVal) * plotPw;
-                    var bx = plotOx;
-                    var by = oy + c * groupH + gap + s * barH;
-                    sb.AppendLine($"        <polygon points=\"{bx:0.#},{by:0.#} {bx + barW:0.#},{by:0.#} {bx + barW + DxIso:0.#},{by + DyIso:0.#} {bx + DxIso:0.#},{by + DyIso:0.#}\" fill=\"{topColor}\" opacity=\"0.9\"/>");
-                    sb.AppendLine($"        <rect x=\"{bx:0.#}\" y=\"{by:0.#}\" width=\"{barW:0.#}\" height=\"{barH:0.#}\" fill=\"{color}\" opacity=\"0.9\"/>");
-                    sb.AppendLine($"        <polygon points=\"{bx + barW:0.#},{by:0.#} {bx + barW + DxIso:0.#},{by + DyIso:0.#} {bx + barW + DxIso:0.#},{by + barH + DyIso:0.#} {bx + barW:0.#},{by + barH:0.#}\" fill=\"{sideColor}\" opacity=\"0.9\"/>");
-                    var vlabel = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
-                    sb.AppendLine($"        <text x=\"{bx + barW + DxIso + 4:0.#}\" y=\"{by + barH / 2:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"start\" dominant-baseline=\"middle\">{vlabel}</text>");
+                    var catTotal = series.Sum(s => c < s.values.Length ? s.values[c] : 0);
+                    double cumX = 0;
+                    for (int s = 0; s < serCount; s++)
+                    {
+                        var val = c < series[s].values.Length ? series[s].values[c] : 0;
+                        var normVal = percentStacked && catTotal > 0 ? val / catTotal * 100 : val;
+                        var segW = (normVal / range) * plotPw;
+                        var by = oy + c * groupH + gap;
+                        var color = colors[s % colors.Count];
+                        Draw3DBar(plotOx + cumX, by, segW, barH, color);
+                        cumX += segW;
+                    }
+                }
+                else
+                {
+                    for (int s = 0; s < serCount; s++)
+                    {
+                        if (c >= series[s].values.Length) continue;
+                        var val = series[s].values[c];
+                        var barW2 = ((val - minVal) / range) * plotPw;
+                        var by = oy + c * groupH + gap + s * barH;
+                        Draw3DBar(plotOx, by, barW2, barH, colors[s % colors.Count]);
+                    }
                 }
             }
             for (int c = 0; c < catCount; c++)
             {
                 var label = c < categories.Length ? categories[c] : "";
-                var ly = oy + c * groupH + groupH / 2;
-                sb.AppendLine($"        <text x=\"{plotOx - 4}\" y=\"{ly:0.#}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{HtmlEncode(label)}</text>");
+                sb.AppendLine($"        <text x=\"{plotOx - 4}\" y=\"{oy + c * groupH + groupH / 2:0.#}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{HtmlEncode(label)}</text>");
             }
-            for (int t = 0; t <= 4; t++)
+            for (int t = 0; t <= tickCount; t++)
             {
-                var val = maxVal * t / 4;
-                var label = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
-                var tx = plotOx + (double)plotPw * t / 4;
-                sb.AppendLine($"        <text x=\"{tx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"middle\">{label}</text>");
+                var val = minVal + majorUnit * t;
+                var label = FormatAxisValue(val, valNumFmt);
+                sb.AppendLine($"        <text x=\"{plotOx + (double)plotPw * t / tickCount:0.#}\" y=\"{oy + ph + 16}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"middle\">{label}</text>");
             }
         }
         else
         {
+            var gapPct = ooxmlGapWidth.HasValue ? ooxmlGapWidth.Value / 100.0 : 1.5;
             var groupW = (double)pw / Math.Max(catCount, 1);
-            var barW = groupW * 0.5 / serCount;
-            var gap = groupW * 0.2;
+            double barW;
+            if (stacked || percentStacked)
+                barW = groupW / (1 + gapPct);
+            else
+                barW = groupW / (serCount + gapPct);
+            var gapW = (groupW - (stacked || percentStacked ? barW : barW * serCount)) / 2;
 
-            for (int t = 1; t <= 4; t++)
+            // Gridlines
+            for (int t = 1; t <= tickCount; t++)
             {
-                var gy = oy + ph - (double)ph * t / 4;
-                sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{gy:0.#}\" x2=\"{ox + pw}\" y2=\"{gy:0.#}\" stroke=\"{GridColor}\" stroke-width=\"0.5\" stroke-dasharray=\"none\"/>");
+                var gy = oy + ph - (double)ph * t / tickCount;
+                sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{gy:0.#}\" x2=\"{ox + pw}\" y2=\"{gy:0.#}\" stroke=\"{GridColor}\" stroke-width=\"0.5\"/>");
             }
             sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy}\" x2=\"{ox}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
             sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy + ph}\" x2=\"{ox + pw}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
 
-            for (int c = 0; c < catCount; c++)
+            // Reference lines
+            if (referenceLines != null)
             {
-                for (int s = 0; s < serCount; s++)
+                foreach (var rl in referenceLines)
                 {
-                    if (c >= series[s].values.Length) continue;
-                    var val = series[s].values[c];
-                    var color = colors[s % colors.Count];
-                    var sideColor = AdjustColor(color, 0.65);
-                    var topColor = AdjustColor(color, 1.25);
-                    var barH2 = (val / maxVal) * ph;
-                    var bx = ox + c * groupW + gap + s * barW;
-                    var by = oy + ph - barH2;
-
-                    sb.AppendLine($"        <rect x=\"{bx:0.#}\" y=\"{by:0.#}\" width=\"{barW:0.#}\" height=\"{barH2:0.#}\" fill=\"{color}\" opacity=\"0.9\"/>");
-                    sb.AppendLine($"        <polygon points=\"{bx:0.#},{by:0.#} {bx + barW:0.#},{by:0.#} {bx + barW + DxIso:0.#},{by + DyIso:0.#} {bx + DxIso:0.#},{by + DyIso:0.#}\" fill=\"{topColor}\" opacity=\"0.9\"/>");
-                    sb.AppendLine($"        <polygon points=\"{bx + barW:0.#},{by:0.#} {bx + barW + DxIso:0.#},{by + DyIso:0.#} {bx + barW + DxIso:0.#},{oy + ph + DyIso:0.#} {bx + barW:0.#},{oy + ph:0.#}\" fill=\"{sideColor}\" opacity=\"0.9\"/>");
-                    var vlabel = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
-                    sb.AppendLine($"        <text x=\"{bx + barW / 2 + DxIso / 2:0.#}\" y=\"{by + DyIso - 3:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{vlabel}</text>");
+                    var rly = oy + ph - ((rl.Value - minVal) / range) * ph;
+                    var rlDash = rl.Dash == "dash" ? "stroke-dasharray=\"6,3\"" : rl.Dash == "dot" ? "stroke-dasharray=\"2,2\"" : "";
+                    sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{rly:0.#}\" x2=\"{ox + pw}\" y2=\"{rly:0.#}\" stroke=\"{rl.Color}\" stroke-width=\"{rl.WidthPt:0.#}\" {rlDash}/>");
                 }
             }
+
+            for (int c = 0; c < catCount; c++)
+            {
+                if (stacked || percentStacked)
+                {
+                    var catTotal = series.Sum(s => c < s.values.Length ? s.values[c] : 0);
+                    double cumH = 0;
+                    for (int s = 0; s < serCount; s++)
+                    {
+                        var val = c < series[s].values.Length ? series[s].values[c] : 0;
+                        var normVal = percentStacked && catTotal > 0 ? val / catTotal * 100 : val;
+                        var segH = ((normVal) / range) * ph;
+                        var bx = ox + c * groupW + gapW;
+                        var by = oy + ph - cumH - segH;
+                        Draw3DBar(bx, by, barW, segH, colors[s % colors.Count]);
+                        if (showDataLabels && segH > 10)
+                        {
+                            var vlabel = FormatAxisValue(val, valNumFmt);
+                            sb.AppendLine($"        <text x=\"{bx + barW / 2:0.#}\" y=\"{by + segH / 2:0.#}\" fill=\"white\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\" dominant-baseline=\"middle\">{vlabel}</text>");
+                        }
+                        cumH += segH;
+                    }
+                }
+                else
+                {
+                    for (int s = 0; s < serCount; s++)
+                    {
+                        if (c >= series[s].values.Length) continue;
+                        var val = series[s].values[c];
+                        var barH2 = ((val - minVal) / range) * ph;
+                        var bx = ox + c * groupW + gapW + s * barW;
+                        var by = oy + ph - barH2;
+                        Draw3DBar(bx, by, barW, barH2, colors[s % colors.Count]);
+                        if (showDataLabels)
+                        {
+                            var vlabel = FormatAxisValue(val, valNumFmt);
+                            sb.AppendLine($"        <text x=\"{bx + barW / 2 + dx3d / 2:0.#}\" y=\"{by + dy3d - 3:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{vlabel}</text>");
+                        }
+                    }
+                }
+            }
+            // Category labels
             for (int c = 0; c < catCount; c++)
             {
                 var label = c < categories.Length ? categories[c] : "";
-                var lx = ox + c * groupW + groupW / 2;
-                sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"middle\">{HtmlEncode(label)}</text>");
+                sb.AppendLine($"        <text x=\"{ox + c * groupW + groupW / 2:0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"middle\">{HtmlEncode(label)}</text>");
             }
-            for (int t = 0; t <= 4; t++)
+            // Value axis labels
+            for (int t = 0; t <= tickCount; t++)
             {
-                var val = maxVal * t / 4;
-                var label = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
-                var ty = oy + ph - (double)ph * t / 4;
+                var val = minVal + majorUnit * t;
+                var label = FormatAxisValue(val, valNumFmt);
+                var ty = oy + ph - ((val - minVal) / range) * ph;
                 sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
             }
         }
     }
 
     private void RenderPie3DSvg(StringBuilder sb, List<(string name, double[] values)> series,
-        string[] categories, List<string> colors, int svgW, int svgH)
+        string[] categories, List<string> colors, int svgW, int svgH,
+        bool showDataLabels = false, bool showVal = false, bool showPercent = false,
+        int rotateX = 30)
     {
         var values = series.FirstOrDefault().values ?? [];
         if (values.Length == 0) return;
@@ -1914,8 +2044,10 @@ internal partial class ChartSvgRenderer
         var cx = svgW / 2.0;
         var cy = svgH / 2.0;
         var rx = Math.Min(svgW, svgH) * 0.35;
-        var ry = rx * 0.55;
-        var depth = rx * 0.15;
+        // Use rotateX to control squash: higher angle = more tilted = more elliptical
+        var tilt = Math.Clamp(rotateX > 0 ? rotateX : 30, 5, 80) * Math.PI / 180;
+        var ry = rx * Math.Cos(tilt);
+        var depth = rx * 0.08 + rx * 0.12 * (Math.Sin(tilt));
         var startAngle = -Math.PI / 2;
 
         var slices = new List<(int idx, double start, double end, string color)>();
@@ -1928,31 +2060,36 @@ internal partial class ChartSvgRenderer
             angle += sliceAngle;
         }
 
-        foreach (var (idx, start, end, color) in slices)
+        // Side walls — sort by midpoint closeness to PI (front) for correct z-order
+        var wallSlices = slices.Where(s => s.start < Math.PI && s.end > 0).OrderBy(s =>
+        {
+            var mid = (s.start + s.end) / 2;
+            return -Math.Abs(mid - Math.PI / 2); // draw furthest from front first
+        }).ToList();
+
+        foreach (var (idx, start, end, color) in wallSlices)
         {
             var sideColor = AdjustColor(color, 0.6);
-            if (start < Math.PI && end > 0)
+            var clampedStart = Math.Max(start, -0.01);
+            var clampedEnd = Math.Min(end, Math.PI + 0.01);
+            var steps = Math.Max(8, (int)((clampedEnd - clampedStart) / 0.1));
+            var pathPoints = new StringBuilder();
+            pathPoints.Append($"M {cx + rx * Math.Cos(clampedStart):0.#},{cy + ry * Math.Sin(clampedStart):0.#} ");
+            for (int step = 0; step <= steps; step++)
             {
-                var clampedStart = Math.Max(start, -0.01);
-                var clampedEnd = Math.Min(end, Math.PI + 0.01);
-                var steps = Math.Max(8, (int)((clampedEnd - clampedStart) / 0.1));
-                var pathPoints = new StringBuilder();
-                pathPoints.Append($"M {cx + rx * Math.Cos(clampedStart):0.#},{cy + ry * Math.Sin(clampedStart):0.#} ");
-                for (int step = 0; step <= steps; step++)
-                {
-                    var a = clampedStart + (clampedEnd - clampedStart) * step / steps;
-                    pathPoints.Append($"L {cx + rx * Math.Cos(a):0.#},{cy + ry * Math.Sin(a):0.#} ");
-                }
-                for (int step = steps; step >= 0; step--)
-                {
-                    var a = clampedStart + (clampedEnd - clampedStart) * step / steps;
-                    pathPoints.Append($"L {cx + rx * Math.Cos(a):0.#},{cy + ry * Math.Sin(a) + depth:0.#} ");
-                }
-                pathPoints.Append("Z");
-                sb.AppendLine($"        <path d=\"{pathPoints}\" fill=\"{sideColor}\" opacity=\"0.9\"/>");
+                var a = clampedStart + (clampedEnd - clampedStart) * step / steps;
+                pathPoints.Append($"L {cx + rx * Math.Cos(a):0.#},{cy + ry * Math.Sin(a):0.#} ");
             }
+            for (int step = steps; step >= 0; step--)
+            {
+                var a = clampedStart + (clampedEnd - clampedStart) * step / steps;
+                pathPoints.Append($"L {cx + rx * Math.Cos(a):0.#},{cy + ry * Math.Sin(a) + depth:0.#} ");
+            }
+            pathPoints.Append("Z");
+            sb.AppendLine($"        <path d=\"{pathPoints}\" fill=\"{sideColor}\" opacity=\"0.9\"/>");
         }
 
+        // Top face slices
         startAngle = -Math.PI / 2;
         for (int i = 0; i < values.Length; i++)
         {
@@ -1972,12 +2109,29 @@ internal partial class ChartSvgRenderer
                 sb.AppendLine($"        <path d=\"M {cx:0.#},{cy:0.#} L {x1:0.#},{y1:0.#} A {rx:0.#},{ry:0.#} 0 {largeArc},1 {x2:0.#},{y2:0.#} Z\" fill=\"{color}\" opacity=\"0.9\"/>");
             }
 
+            // Data labels
             var midAngle = startAngle + sliceAngle / 2;
-            var lx = cx + rx * 0.55 * Math.Cos(midAngle);
-            var ly = cy + ry * 0.55 * Math.Sin(midAngle);
-            var label = i < categories.Length ? categories[i] : "";
-            if (!string.IsNullOrEmpty(label))
-                sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{ly:0.#}\" fill=\"white\" font-size=\"9\" text-anchor=\"middle\" dominant-baseline=\"middle\">{HtmlEncode(label)}</text>");
+            var labelR = rx * 0.65;
+            var lx = cx + labelR * Math.Cos(midAngle);
+            var ly = cy + (labelR * Math.Cos(tilt)) * Math.Sin(midAngle);
+            var pct = total > 0 ? values[i] / total * 100 : 0;
+
+            if (showDataLabels || showVal || showPercent)
+            {
+                var parts = new List<string>();
+                if (showVal) parts.Add(values[i] % 1 == 0 ? $"{(int)values[i]}" : $"{values[i]:0.#}");
+                if (showPercent) parts.Add($"{pct:0}%");
+                if (parts.Count == 0) parts.Add($"{pct:0}%"); // default to percent
+                var labelText = string.Join("\n", parts);
+                sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{ly:0.#}\" fill=\"white\" font-size=\"9\" font-weight=\"bold\" text-anchor=\"middle\" dominant-baseline=\"middle\">{HtmlEncode(labelText)}</text>");
+            }
+            else
+            {
+                // Category name label
+                var catLabel = i < categories.Length ? categories[i] : "";
+                if (!string.IsNullOrEmpty(catLabel))
+                    sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{ly:0.#}\" fill=\"white\" font-size=\"9\" text-anchor=\"middle\" dominant-baseline=\"middle\">{HtmlEncode(catLabel)}</text>");
+            }
 
             startAngle = endAngle;
         }
@@ -2037,6 +2191,165 @@ internal partial class ChartSvgRenderer
             var val = maxVal * t / 4;
             var label = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
             var ty = oy + ph - (double)ph * t / 4;
+            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
+        }
+    }
+
+    private void RenderArea3DSvg(StringBuilder sb, List<(string name, double[] values)> series,
+        string[] categories, List<string> colors, int ox, int oy, int pw, int ph,
+        bool stacked = false, int rotateX = 15, int rotateY = 20)
+    {
+        var allValues = series.SelectMany(s => s.values).ToArray();
+        if (allValues.Length == 0) return;
+        var catCount = Math.Max(categories.Length, series.Max(s => s.values.Length));
+        var serCount = series.Count;
+
+        double maxVal;
+        if (stacked)
+        {
+            var catSums = new double[catCount];
+            for (int c = 0; c < catCount; c++)
+                catSums[c] = series.Sum(s => c < s.values.Length ? s.values[c] : 0);
+            maxVal = catSums.Max();
+        }
+        else
+            maxVal = allValues.Max();
+        var (niceMax, _, _) = ComputeNiceAxis(maxVal);
+        maxVal = niceMax;
+        if (maxVal <= 0) maxVal = 1;
+
+        // 3D layout: reserve space for depth lanes
+        // Each series gets a "lane" along the depth (diagonal) direction
+        var laneCount = stacked ? 1 : serCount;
+        var laneStep = Math.Min(pw, ph) * 0.10; // step between lane starts (includes gap)
+        var laneThickness = laneStep * 0.55;     // actual wall thickness (rest is gap)
+        var totalDepthX = laneStep * laneCount * 0.7;  // total horizontal depth shift
+        var totalDepthY = -laneStep * laneCount * 0.5;  // total vertical depth shift (upward)
+
+        // Shrink front plot area to make room for depth
+        var plotW = (int)(pw - totalDepthX);
+        var plotH = (int)(ph + totalDepthY); // totalDepthY is negative
+
+        // Axes & gridlines on the front plane
+        for (int t = 1; t <= 4; t++)
+        {
+            var gy = oy + plotH - (double)plotH * t / 4;
+            sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{gy:0.#}\" x2=\"{ox + plotW}\" y2=\"{gy:0.#}\" stroke=\"{GridColor}\" stroke-width=\"0.5\"/>");
+        }
+        sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy + totalDepthY}\" x2=\"{ox}\" y2=\"{oy + plotH}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
+        sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy + plotH}\" x2=\"{ox + pw}\" y2=\"{oy + plotH}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
+
+        // Draw depth guide lines on the floor (baseline) to show perspective
+        for (int c = 0; c < catCount; c++)
+        {
+            var frontX = ox + (catCount > 1 ? (double)plotW * c / (catCount - 1) : plotW / 2.0);
+            var backX = frontX + totalDepthX;
+            var backY = oy + plotH + totalDepthY;
+            sb.AppendLine($"        <line x1=\"{frontX:0.#}\" y1=\"{oy + plotH}\" x2=\"{backX:0.#}\" y2=\"{backY:0.#}\" stroke=\"{GridColor}\" stroke-width=\"0.3\"/>");
+        }
+
+        var stackBase = new double[catCount];
+
+        // Draw back-to-front: back series first (farthest), front series last (nearest)
+        for (int si = (stacked ? 0 : serCount - 1); stacked ? si < serCount : si >= 0; si += stacked ? 1 : -1)
+        {
+            var color = colors[si % colors.Count];
+            var wallColor = AdjustColor(color, 0.6);
+            var topColor = AdjustColor(color, 0.85);
+
+            // Compute this series' lane position
+            int lane = stacked ? 0 : si;
+            // Front edge of this lane (start of wall)
+            var laneDx = laneStep * lane * 0.7;
+            var laneDy = -laneStep * lane * 0.5;
+            // Back edge of this lane (end of wall = front + thickness)
+            var nextDx = laneDx + laneThickness * 0.7;
+            var nextDy = laneDy - laneThickness * 0.5;
+
+            // Front edge points (data line at this lane's Z)
+            var frontPts = new List<(double x, double y)>();
+            // Back edge points (same data but shifted deeper)
+            var backPts = new List<(double x, double y)>();
+
+            for (int c = 0; c < catCount; c++)
+            {
+                var val = c < series[si].values.Length ? series[si].values[c] : 0;
+                var baseVal = stacked ? stackBase[c] : 0;
+                var topVal = baseVal + val;
+                var dataH = (topVal / maxVal) * plotH;
+                var baseH = (baseVal / maxVal) * plotH;
+
+                var frontBaseX = ox + (catCount > 1 ? (double)plotW * c / (catCount - 1) : plotW / 2.0);
+
+                var fx = frontBaseX + laneDx;
+                var fy = oy + plotH - dataH + laneDy;
+                frontPts.Add((fx, fy));
+
+                var bx = frontBaseX + nextDx;
+                var by = oy + plotH - dataH + nextDy;
+                backPts.Add((bx, by));
+            }
+
+            if (frontPts.Count < 2) continue;
+
+            // 1) Top ribbon: polygon connecting front data edge to back data edge (shows "roof" of the wall)
+            var topPath = new StringBuilder("M ");
+            foreach (var pt in frontPts) topPath.Append($"{pt.x:0.#},{pt.y:0.#} L ");
+            for (int p = backPts.Count - 1; p >= 0; p--)
+                topPath.Append($"{backPts[p].x:0.#},{backPts[p].y:0.#} L ");
+            topPath.Length -= 2;
+            topPath.Append(" Z");
+            sb.AppendLine($"        <path d=\"{topPath}\" fill=\"{topColor}\" opacity=\"0.8\"/>");
+
+            // 2) Front face: area from front baseline up to front data line
+            var frontBaseY = oy + plotH + laneDy;
+            var areaPath = new StringBuilder($"M {frontPts[0].x:0.#},{frontBaseY + (stacked ? -(stackBase[0] / maxVal) * plotH : 0):0.#} ");
+            foreach (var pt in frontPts) areaPath.Append($"L {pt.x:0.#},{pt.y:0.#} ");
+            areaPath.Append($"L {frontPts[^1].x:0.#},{frontBaseY + (stacked ? -(stackBase[catCount - 1] / maxVal) * plotH : 0):0.#} ");
+            if (stacked)
+            {
+                for (int c = catCount - 1; c >= 0; c--)
+                {
+                    var baseX = ox + laneDx + (catCount > 1 ? (double)plotW * c / (catCount - 1) : plotW / 2.0);
+                    var baseY2 = oy + plotH + laneDy - (stackBase[c] / maxVal) * plotH;
+                    areaPath.Append($"L {baseX:0.#},{baseY2:0.#} ");
+                }
+            }
+            areaPath.Append("Z");
+            sb.AppendLine($"        <path d=\"{areaPath}\" fill=\"{color}\" opacity=\"0.9\"/>");
+
+            // 3) Front edge line
+            sb.AppendLine($"        <polyline points=\"{string.Join(" ", frontPts.Select(p => $"{p.x:0.#},{p.y:0.#}"))}\" fill=\"none\" stroke=\"{AdjustColor(color, 0.7)}\" stroke-width=\"1.5\"/>");
+
+            // 4) Right-side wall (last category): connects front-right to back-right edge
+            {
+                var frX = frontPts[^1].x; var frY = frontPts[^1].y;
+                var brX = backPts[^1].x; var brY = backPts[^1].y;
+                var frBaseY2 = frontBaseY + (stacked ? -(stackBase[catCount - 1] / maxVal) * plotH : 0);
+                var brBaseY = oy + plotH + nextDy + (stacked ? -(stackBase[catCount - 1] / maxVal) * plotH : 0);
+                sb.AppendLine($"        <polygon points=\"{frX:0.#},{frY:0.#} {brX:0.#},{brY:0.#} {brX:0.#},{brBaseY:0.#} {frX:0.#},{frBaseY2:0.#}\" fill=\"{wallColor}\" opacity=\"0.8\"/>");
+            }
+
+            if (stacked)
+            {
+                for (int c = 0; c < catCount; c++)
+                    stackBase[c] += c < series[si].values.Length ? series[si].values[c] : 0;
+            }
+        }
+
+        // Category labels
+        for (int c = 0; c < catCount; c++)
+        {
+            var label = c < categories.Length ? categories[c] : "";
+            var lx = ox + (catCount > 1 ? (double)plotW * c / (catCount - 1) : plotW / 2.0);
+            sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{oy + plotH + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"middle\">{HtmlEncode(label)}</text>");
+        }
+        // Value axis
+        for (int t = 0; t <= 4; t++)
+        {
+            var val = maxVal * t / 4;
+            var label = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
+            var ty = oy + plotH - (double)plotH * t / 4;
             sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
         }
     }
