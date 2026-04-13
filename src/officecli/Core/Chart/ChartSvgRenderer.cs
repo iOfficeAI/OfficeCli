@@ -75,7 +75,7 @@ internal partial class ChartSvgRenderer
         int? ooxmlGapWidth = null, int valFontSize = 9, int catFontSize = 9,
         bool showDataLabels = false, string? valNumFmt = null, string? plotFillColor = null,
         List<(string Name, double Value, string Color, double WidthPt, string Dash)>? referenceLines = null,
-        bool isWaterfall = false)
+        bool isWaterfall = false, List<ErrorBarInfo?>? errorBars = null)
     {
         var allValues = series.SelectMany(s => s.values).ToArray();
         if (allValues.Length == 0) return;
@@ -263,6 +263,43 @@ internal partial class ChartSvgRenderer
                 if (isWaterfall)
                     wfPrevTopY = oy + ph - (stackY / niceMax) * ph;
             }
+            // Error bars on vertical (column) bar charts
+            if (errorBars != null && !stacked)
+            {
+                for (int s = 0; s < serCount; s++)
+                {
+                    var eb = s < errorBars.Count ? errorBars[s] : null;
+                    if (eb == null) continue;
+                    var ebColor = eb.Color ?? "#333";
+                    var capW = Math.Max(2, barW * 0.3);
+                    double errAmount = eb.Value;
+                    if (eb.ValueType is "stdDev" or "stdErr")
+                    {
+                        var vals = series[s].values;
+                        var mean = vals.Average();
+                        var variance = vals.Sum(v => (v - mean) * (v - mean)) / vals.Length;
+                        var stddev = Math.Sqrt(variance);
+                        errAmount = eb.ValueType == "stdErr" ? stddev / Math.Sqrt(vals.Length) : stddev;
+                    }
+                    for (int c = 0; c < catCount; c++)
+                    {
+                        var rawVal = c < series[s].values.Length ? series[s].values[c] : 0;
+                        var bx = ox + c * groupW + gap + s * barW + barW / 2;
+                        var byTop = oy + ph - (rawVal / niceMax) * ph;
+                        double plusErr = eb.ValueType == "percentage" ? Math.Abs(rawVal) * eb.Value / 100.0 : errAmount;
+                        double minusErr = plusErr;
+                        var showPlus = eb.BarType is "both" or "plus";
+                        var showMinus = eb.BarType is "both" or "minus";
+                        var yTop = showPlus ? oy + ph - ((rawVal + plusErr) / niceMax) * ph : byTop;
+                        var yBot = showMinus ? oy + ph - ((rawVal - minusErr) / niceMax) * ph : byTop;
+                        sb.AppendLine($"        <line x1=\"{bx:0.#}\" y1=\"{yTop:0.#}\" x2=\"{bx:0.#}\" y2=\"{yBot:0.#}\" stroke=\"{ebColor}\" stroke-width=\"{eb.Width:0.#}\"/>");
+                        if (showPlus)
+                            sb.AppendLine($"        <line x1=\"{bx - capW:0.#}\" y1=\"{yTop:0.#}\" x2=\"{bx + capW:0.#}\" y2=\"{yTop:0.#}\" stroke=\"{ebColor}\" stroke-width=\"{eb.Width:0.#}\"/>");
+                        if (showMinus)
+                            sb.AppendLine($"        <line x1=\"{bx - capW:0.#}\" y1=\"{yBot:0.#}\" x2=\"{bx + capW:0.#}\" y2=\"{yBot:0.#}\" stroke=\"{ebColor}\" stroke-width=\"{eb.Width:0.#}\"/>");
+                    }
+                }
+            }
             for (int c = 0; c < catCount; c++)
             {
                 var label = c < categories.Length ? categories[c] : "";
@@ -300,7 +337,8 @@ internal partial class ChartSvgRenderer
         List<(string Name, double Value, string Color, double WidthPt, string Dash)>? referenceLines = null,
         List<bool>? smooth = null, List<string>? lineDashes = null, List<double>? lineWidths = null,
         string? dropLineColor = null, double dropLineWidth = 0.7, string? dropLineDash = null,
-        string? highLowLineColor = null, double highLowLineWidth = 1)
+        string? highLowLineColor = null, double highLowLineWidth = 1,
+        List<TrendlineInfo?>? trendlines = null, List<ErrorBarInfo?>? errorBars = null)
     {
         var allValues = series.SelectMany(s => s.values).ToArray();
         if (allValues.Length == 0) return;
@@ -468,6 +506,214 @@ internal partial class ChartSvgRenderer
                     var val = pts[p].val;
                     var vlabel = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
                     sb.AppendLine($"        <text x=\"{pts[p].x:0.#}\" y=\"{pts[p].y - 6:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{vlabel}</text>");
+                }
+            }
+        }
+
+        // Error bars
+        if (errorBars != null)
+        {
+            for (int s = 0; s < series.Count; s++)
+            {
+                var eb = s < errorBars.Count ? errorBars[s] : null;
+                if (eb == null) continue;
+                var pts = allPoints[s];
+                var ebColor = eb.Color ?? "#666";
+                var capW = 4.0; // half-width of the cap line
+
+                // Compute error amount per point
+                double errAmount = eb.Value;
+                if (eb.ValueType is "stdDev" or "stdErr")
+                {
+                    var vals = series[s].values;
+                    var mean = vals.Average();
+                    var variance = vals.Sum(v => (v - mean) * (v - mean)) / vals.Length;
+                    var stddev = Math.Sqrt(variance);
+                    errAmount = eb.ValueType == "stdErr" ? stddev / Math.Sqrt(vals.Length) : stddev;
+                }
+
+                for (int p = 0; p < pts.Count; p++)
+                {
+                    var val = pts[p].val;
+                    double plusErr, minusErr;
+                    if (eb.ValueType == "percentage")
+                    {
+                        plusErr = minusErr = Math.Abs(val) * eb.Value / 100.0;
+                    }
+                    else
+                    {
+                        plusErr = minusErr = errAmount;
+                    }
+
+                    var showPlus = eb.BarType is "both" or "plus";
+                    var showMinus = eb.BarType is "both" or "minus";
+
+                    var yTop = showPlus ? MapY(val + plusErr) : pts[p].y;
+                    var yBot = showMinus ? MapY(val - minusErr) : pts[p].y;
+
+                    // Vertical line
+                    sb.AppendLine($"        <line x1=\"{pts[p].x:0.#}\" y1=\"{yTop:0.#}\" x2=\"{pts[p].x:0.#}\" y2=\"{yBot:0.#}\" stroke=\"{ebColor}\" stroke-width=\"{eb.Width:0.#}\"/>");
+                    // Top cap
+                    if (showPlus)
+                        sb.AppendLine($"        <line x1=\"{pts[p].x - capW:0.#}\" y1=\"{yTop:0.#}\" x2=\"{pts[p].x + capW:0.#}\" y2=\"{yTop:0.#}\" stroke=\"{ebColor}\" stroke-width=\"{eb.Width:0.#}\"/>");
+                    // Bottom cap
+                    if (showMinus)
+                        sb.AppendLine($"        <line x1=\"{pts[p].x - capW:0.#}\" y1=\"{yBot:0.#}\" x2=\"{pts[p].x + capW:0.#}\" y2=\"{yBot:0.#}\" stroke=\"{ebColor}\" stroke-width=\"{eb.Width:0.#}\"/>");
+                }
+            }
+        }
+
+        // Trendlines
+        if (trendlines != null)
+        {
+            for (int s = 0; s < series.Count; s++)
+            {
+                var tl = s < trendlines.Count ? trendlines[s] : null;
+                if (tl == null) continue;
+                var pts = allPoints[s];
+                if (pts.Count < 2) continue;
+                var lineColor = tl.Color ?? colors[s % colors.Count];
+                var dashArr = tl.Dash != "solid" ? $" stroke-dasharray=\"{RefLineDashArray(tl.Dash)}\"" : "";
+
+                // Build x/y data arrays (using category indices as x, values as y)
+                var xData = new double[pts.Count];
+                var yData = new double[pts.Count];
+                for (int i = 0; i < pts.Count; i++)
+                {
+                    xData[i] = i + 1; // 1-based like Excel
+                    yData[i] = series[s].values[i];
+                }
+
+                // Compute trendline function
+                Func<double, double>? trendFn = null;
+                string? eqText = null;
+                double rSquared = 0;
+
+                switch (tl.Type)
+                {
+                    case "linear":
+                    {
+                        var (slope, intercept) = FitLinear(xData, yData);
+                        trendFn = x => slope * x + intercept;
+                        eqText = $"y = {slope:0.####}x {(intercept >= 0 ? "+" : "−")} {Math.Abs(intercept):0.####}";
+                        rSquared = ComputeRSquared(xData, yData, trendFn);
+                        break;
+                    }
+                    case "exp":
+                    {
+                        var (a, b) = FitExponential(xData, yData);
+                        if (!double.IsNaN(a))
+                        {
+                            trendFn = x => a * Math.Exp(b * x);
+                            eqText = $"y = {a:0.####}e^({b:0.####}x)";
+                            rSquared = ComputeRSquared(xData, yData, trendFn);
+                        }
+                        break;
+                    }
+                    case "log":
+                    {
+                        var (a, b) = FitLogarithmic(xData, yData);
+                        if (!double.IsNaN(a))
+                        {
+                            trendFn = x => a * Math.Log(x) + b;
+                            eqText = $"y = {a:0.####}ln(x) {(b >= 0 ? "+" : "−")} {Math.Abs(b):0.####}";
+                            rSquared = ComputeRSquared(xData, yData, trendFn);
+                        }
+                        break;
+                    }
+                    case "poly":
+                    {
+                        var coeffs = FitPolynomial(xData, yData, tl.Order);
+                        if (coeffs != null)
+                        {
+                            trendFn = x =>
+                            {
+                                double result = 0;
+                                for (int i = 0; i < coeffs.Length; i++)
+                                    result += coeffs[i] * Math.Pow(x, i);
+                                return result;
+                            };
+                            var eqParts = new List<string>();
+                            for (int i = coeffs.Length - 1; i >= 0; i--)
+                            {
+                                if (i == 0) eqParts.Add($"{coeffs[i]:0.####}");
+                                else if (i == 1) eqParts.Add($"{coeffs[i]:0.####}x");
+                                else eqParts.Add($"{coeffs[i]:0.####}x^{i}");
+                            }
+                            eqText = "y = " + string.Join(" + ", eqParts).Replace("+ -", "− ");
+                            rSquared = ComputeRSquared(xData, yData, trendFn);
+                        }
+                        break;
+                    }
+                    case "power":
+                    {
+                        var (a, b) = FitPower(xData, yData);
+                        if (!double.IsNaN(a))
+                        {
+                            trendFn = x => a * Math.Pow(x, b);
+                            eqText = $"y = {a:0.####}x^{b:0.####}";
+                            rSquared = ComputeRSquared(xData, yData, trendFn);
+                        }
+                        break;
+                    }
+                    case "movingAvg":
+                    {
+                        // Moving average: render as polyline of averaged points
+                        var period = Math.Max(2, tl.Period);
+                        var maPoints = new List<(double x, double y)>();
+                        for (int i = period - 1; i < xData.Length; i++)
+                        {
+                            double sum = 0;
+                            for (int j = 0; j < period; j++) sum += yData[i - j];
+                            var avgVal = sum / period;
+                            var px = ox + (catCount > 1 ? (double)pw * i / (catCount - 1) : pw / 2.0);
+                            var py = MapY(avgVal);
+                            maPoints.Add((px, py));
+                        }
+                        if (maPoints.Count >= 2)
+                        {
+                            var maPath = string.Join(" ", maPoints.Select(p => $"{p.x:0.#},{p.y:0.#}"));
+                            sb.AppendLine($"        <polyline points=\"{maPath}\" fill=\"none\" stroke=\"{lineColor}\" stroke-width=\"{tl.Width:0.#}\"{dashArr}/>");
+                        }
+                        continue; // no equation/R² for moving average
+                    }
+                }
+
+                if (trendFn == null) continue;
+
+                // Render trendline curve
+                var xMin = xData[0] - tl.Backward;
+                var xMax = xData[^1] + tl.Forward;
+                var steps = 50;
+                var tlPoints = new List<(double px, double py)>();
+                for (int i = 0; i <= steps; i++)
+                {
+                    var x = xMin + (xMax - xMin) * i / steps;
+                    var y = trendFn(x);
+                    if (double.IsNaN(y) || double.IsInfinity(y)) continue;
+                    // Map x to pixel: x is 1-based category index
+                    var px = ox + (catCount > 1 ? pw * (x - 1) / (catCount - 1) : pw / 2.0);
+                    var py = MapY(y);
+                    tlPoints.Add((px, py));
+                }
+
+                if (tlPoints.Count >= 2)
+                {
+                    var pathStr = string.Join(" ", tlPoints.Select(p => $"{p.px:0.#},{p.py:0.#}"));
+                    sb.AppendLine($"        <polyline points=\"{pathStr}\" fill=\"none\" stroke=\"{lineColor}\" stroke-width=\"{tl.Width:0.#}\"{dashArr}/>");
+                }
+
+                // Equation / R² label
+                if (tl.DisplayEquation || tl.DisplayRSquared)
+                {
+                    var labelParts = new List<string>();
+                    if (tl.DisplayEquation && eqText != null) labelParts.Add(eqText);
+                    if (tl.DisplayRSquared) labelParts.Add($"R² = {rSquared:0.####}");
+                    var label = string.Join("  ", labelParts);
+                    // Position label near the end of the trendline
+                    var labelX = tlPoints.Count > 0 ? tlPoints[^1].px - 4 : ox + pw;
+                    var labelY = tlPoints.Count > 0 ? tlPoints[^1].py - 8 : oy + 12;
+                    sb.AppendLine($"        <text x=\"{labelX:0.#}\" y=\"{labelY:0.#}\" fill=\"{lineColor}\" font-size=\"8\" text-anchor=\"end\" font-style=\"italic\">{HtmlEncode(label)}</text>");
                 }
             }
         }
@@ -1202,6 +1448,39 @@ internal partial class ChartSvgRenderer
 
         // --- Radar style (standard, marker, filled) ---
         public string RadarStyle { get; set; } = "filled";
+
+        // --- Trendlines per series ---
+        public List<TrendlineInfo?> Trendlines { get; set; } = [];
+
+        // --- Error bars per series ---
+        public List<ErrorBarInfo?> ErrorBars { get; set; } = [];
+    }
+
+    /// <summary>Trendline metadata extracted from OOXML for SVG rendering.</summary>
+    public class TrendlineInfo
+    {
+        public string Type { get; set; } = "linear"; // linear, exp, log, poly, power, movingAvg
+        public int Order { get; set; } = 2; // polynomial order
+        public int Period { get; set; } = 2; // moving average period
+        public double Forward { get; set; } // forward extrapolation
+        public double Backward { get; set; } // backward extrapolation
+        public double? Intercept { get; set; }
+        public bool DisplayEquation { get; set; }
+        public bool DisplayRSquared { get; set; }
+        public string? Color { get; set; }
+        public double Width { get; set; } = 1.5;
+        public string Dash { get; set; } = "dash";
+    }
+
+    /// <summary>Error bar metadata extracted from OOXML for SVG rendering.</summary>
+    public class ErrorBarInfo
+    {
+        public string ValueType { get; set; } = "fixedValue"; // fixedValue, percentage, stdDev, stdErr
+        public string Direction { get; set; } = "y"; // x, y
+        public string BarType { get; set; } = "both"; // both, plus, minus
+        public double Value { get; set; } = 1; // the error amount
+        public string? Color { get; set; }
+        public double Width { get; set; } = 1;
     }
 
     /// <summary>
@@ -1460,6 +1739,78 @@ internal partial class ChartSvgRenderer
                 // Per-series line width (a:ln w="..." in EMU, convert to pt: 1pt = 12700 EMU)
                 var lnWidth = ln?.GetAttributes().FirstOrDefault(a => a.LocalName == "w").Value;
                 info.LineWidths.Add(lnWidth != null && int.TryParse(lnWidth, out var lw) ? Math.Round(lw / 12700.0, 1) : 2);
+
+                // Per-series trendline
+                var trendlineEl = ser.Elements().FirstOrDefault(e => e.LocalName == "trendline");
+                if (trendlineEl != null)
+                {
+                    var tlInfo = new TrendlineInfo();
+                    var tlType = trendlineEl.Elements().FirstOrDefault(e => e.LocalName == "trendlineType");
+                    tlInfo.Type = tlType?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value ?? "linear";
+                    var polyOrder = trendlineEl.Elements().FirstOrDefault(e => e.LocalName == "order");
+                    if (polyOrder != null && int.TryParse(polyOrder.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value, out var po))
+                        tlInfo.Order = po;
+                    var period = trendlineEl.Elements().FirstOrDefault(e => e.LocalName == "period");
+                    if (period != null && int.TryParse(period.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value, out var per))
+                        tlInfo.Period = per;
+                    var fwd = trendlineEl.Elements().FirstOrDefault(e => e.LocalName == "forward");
+                    if (fwd != null && double.TryParse(fwd.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value,
+                        System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var fv))
+                        tlInfo.Forward = fv;
+                    var bwd = trendlineEl.Elements().FirstOrDefault(e => e.LocalName == "backward");
+                    if (bwd != null && double.TryParse(bwd.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value,
+                        System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var bv))
+                        tlInfo.Backward = bv;
+                    var intercept = trendlineEl.Elements().FirstOrDefault(e => e.LocalName == "intercept");
+                    if (intercept != null && double.TryParse(intercept.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value,
+                        System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var iv))
+                        tlInfo.Intercept = iv;
+                    var dispEq = trendlineEl.Elements().FirstOrDefault(e => e.LocalName == "dispEq");
+                    tlInfo.DisplayEquation = dispEq?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value == "1";
+                    var dispRSqr = trendlineEl.Elements().FirstOrDefault(e => e.LocalName == "dispRSqr");
+                    tlInfo.DisplayRSquared = dispRSqr?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value == "1";
+                    // Trendline styling
+                    var tlSpPr = trendlineEl.Elements().FirstOrDefault(e => e.LocalName == "spPr");
+                    var tlLn = tlSpPr?.Elements().FirstOrDefault(e => e.LocalName == "ln");
+                    tlInfo.Color = ExtractLineColor(tlSpPr);
+                    if (tlLn?.GetAttributes().FirstOrDefault(a => a.LocalName == "w").Value is string tlw
+                        && int.TryParse(tlw, out var tlwPt))
+                        tlInfo.Width = Math.Round(tlwPt / 12700.0, 1);
+                    var tlDash = tlLn?.Elements().FirstOrDefault(e => e.LocalName == "prstDash");
+                    tlInfo.Dash = tlDash?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value ?? "dash";
+                    info.Trendlines.Add(tlInfo);
+                }
+                else
+                    info.Trendlines.Add(null);
+
+                // Per-series error bars
+                var errBarsEl = ser.Elements().FirstOrDefault(e => e.LocalName == "errBars");
+                if (errBarsEl != null)
+                {
+                    var ebInfo = new ErrorBarInfo();
+                    var ebType = errBarsEl.Elements().FirstOrDefault(e => e.LocalName == "errValType");
+                    ebInfo.ValueType = ebType?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value ?? "fixedValue";
+                    var ebDir = errBarsEl.Elements().FirstOrDefault(e => e.LocalName == "errDir");
+                    ebInfo.Direction = ebDir?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value ?? "y";
+                    var ebBarType = errBarsEl.Elements().FirstOrDefault(e => e.LocalName == "errBarType");
+                    ebInfo.BarType = ebBarType?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value ?? "both";
+                    // Read error value from Plus/Minus > NumLit > NumericPoint > v
+                    var plusEl = errBarsEl.Elements().FirstOrDefault(e => e.LocalName == "plus");
+                    var numPt = plusEl?.Descendants().FirstOrDefault(e => e.LocalName == "v");
+                    if (numPt != null && double.TryParse(numPt.InnerText,
+                        System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ebVal))
+                        ebInfo.Value = ebVal;
+                    // Error bar styling
+                    var ebSpPr = errBarsEl.Elements().FirstOrDefault(e => e.LocalName == "spPr");
+                    ebInfo.Color = ExtractLineColor(ebSpPr);
+                    var ebLn = ebSpPr?.Elements().FirstOrDefault(e => e.LocalName == "ln");
+                    if (ebLn?.GetAttributes().FirstOrDefault(a => a.LocalName == "w").Value is string ebw
+                        && int.TryParse(ebw, out var ebwPt))
+                        ebInfo.Width = Math.Round(ebwPt / 12700.0, 1);
+                    info.ErrorBars.Add(ebInfo);
+                }
+                else
+                    info.ErrorBars.Add(null);
             }
 
             // Line elements: dropLines, hiLowLines, upDownBars
@@ -1679,7 +2030,8 @@ internal partial class ChartSvgRenderer
                     info.UpBarColor, info.DownBarColor, info.AxisMin, info.AxisMax, info.MajorUnit, info.ValNumFmt,
                     info.ReferenceLines, info.Smooth, info.LineDashes, info.LineWidths,
                     info.DropLineColor, info.DropLineWidth, info.DropLineDash,
-                    info.HighLowLineColor, info.HighLowLineWidth);
+                    info.HighLowLineColor, info.HighLowLineWidth,
+                    info.Trendlines, info.ErrorBars);
         }
         else
         {
@@ -1698,7 +2050,7 @@ internal partial class ChartSvgRenderer
                     isHorizontal, info.IsStacked, info.IsPercent, info.AxisMax, info.AxisMin, info.MajorUnit,
                     info.GapWidth, ValFontPx, CatFontPx, info.ShowDataLabels, info.ValNumFmt,
                     isHorizontal ? info.PlotFillColor : null, info.ReferenceLines,
-                    info.IsWaterfall);
+                    info.IsWaterfall, info.ErrorBars);
         }
 
         // Axis titles inside SVG — for horizontal bar charts, value axis is on bottom and category axis is on left
@@ -2373,5 +2725,127 @@ internal partial class ChartSvgRenderer
             var ty = oy + plotH - (double)plotH * t / 4;
             sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
         }
+    }
+
+    // ==================== Trendline Regression Math ====================
+
+    /// <summary>Least-squares linear regression: y = slope * x + intercept.</summary>
+    private static (double slope, double intercept) FitLinear(double[] x, double[] y)
+    {
+        int n = x.Length;
+        double sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+        for (int i = 0; i < n; i++)
+        {
+            sumX += x[i]; sumY += y[i];
+            sumXY += x[i] * y[i]; sumX2 += x[i] * x[i];
+        }
+        var denom = n * sumX2 - sumX * sumX;
+        if (Math.Abs(denom) < 1e-15) return (0, sumY / n);
+        var slope = (n * sumXY - sumX * sumY) / denom;
+        var intercept = (sumY - slope * sumX) / n;
+        return (slope, intercept);
+    }
+
+    /// <summary>Exponential fit: y = a * e^(b*x). Uses ln(y) linear regression.</summary>
+    private static (double a, double b) FitExponential(double[] x, double[] y)
+    {
+        // Filter to positive y values only
+        var validIdx = Enumerable.Range(0, y.Length).Where(i => y[i] > 0).ToArray();
+        if (validIdx.Length < 2) return (double.NaN, double.NaN);
+        var lnY = validIdx.Select(i => Math.Log(y[i])).ToArray();
+        var xv = validIdx.Select(i => x[i]).ToArray();
+        var (slope, intercept) = FitLinear(xv, lnY);
+        return (Math.Exp(intercept), slope);
+    }
+
+    /// <summary>Logarithmic fit: y = a * ln(x) + b. Uses ln(x) linear regression.</summary>
+    private static (double a, double b) FitLogarithmic(double[] x, double[] y)
+    {
+        var validIdx = Enumerable.Range(0, x.Length).Where(i => x[i] > 0).ToArray();
+        if (validIdx.Length < 2) return (double.NaN, double.NaN);
+        var lnX = validIdx.Select(i => Math.Log(x[i])).ToArray();
+        var yv = validIdx.Select(i => y[i]).ToArray();
+        var (slope, intercept) = FitLinear(lnX, yv);
+        return (slope, intercept);
+    }
+
+    /// <summary>Power fit: y = a * x^b. Uses ln(x),ln(y) linear regression.</summary>
+    private static (double a, double b) FitPower(double[] x, double[] y)
+    {
+        var validIdx = Enumerable.Range(0, x.Length).Where(i => x[i] > 0 && y[i] > 0).ToArray();
+        if (validIdx.Length < 2) return (double.NaN, double.NaN);
+        var lnX = validIdx.Select(i => Math.Log(x[i])).ToArray();
+        var lnY = validIdx.Select(i => Math.Log(y[i])).ToArray();
+        var (slope, intercept) = FitLinear(lnX, lnY);
+        return (Math.Exp(intercept), slope);
+    }
+
+    /// <summary>Polynomial fit: y = c0 + c1*x + c2*x² + ... using normal equations.</summary>
+    private static double[]? FitPolynomial(double[] x, double[] y, int order)
+    {
+        int n = x.Length;
+        order = Math.Min(order, n - 1);
+        if (order < 1) return null;
+        int m = order + 1;
+
+        // Build normal equations: (X^T X) c = X^T y
+        var xtx = new double[m, m];
+        var xty = new double[m];
+        for (int i = 0; i < n; i++)
+        {
+            var xPow = new double[2 * order + 1];
+            xPow[0] = 1;
+            for (int p = 1; p <= 2 * order; p++) xPow[p] = xPow[p - 1] * x[i];
+            for (int r = 0; r < m; r++)
+            {
+                for (int c = 0; c < m; c++) xtx[r, c] += xPow[r + c];
+                xty[r] += xPow[r] * y[i];
+            }
+        }
+
+        // Gaussian elimination with partial pivoting
+        var aug = new double[m, m + 1];
+        for (int r = 0; r < m; r++)
+        {
+            for (int c = 0; c < m; c++) aug[r, c] = xtx[r, c];
+            aug[r, m] = xty[r];
+        }
+        for (int col = 0; col < m; col++)
+        {
+            int pivotRow = col;
+            for (int r = col + 1; r < m; r++)
+                if (Math.Abs(aug[r, col]) > Math.Abs(aug[pivotRow, col])) pivotRow = r;
+            if (pivotRow != col)
+                for (int c = 0; c <= m; c++) (aug[col, c], aug[pivotRow, c]) = (aug[pivotRow, c], aug[col, c]);
+            if (Math.Abs(aug[col, col]) < 1e-15) return null;
+            for (int r = col + 1; r < m; r++)
+            {
+                var factor = aug[r, col] / aug[col, col];
+                for (int c = col; c <= m; c++) aug[r, c] -= factor * aug[col, c];
+            }
+        }
+        // Back substitution
+        var coeffs = new double[m];
+        for (int r = m - 1; r >= 0; r--)
+        {
+            coeffs[r] = aug[r, m];
+            for (int c = r + 1; c < m; c++) coeffs[r] -= aug[r, c] * coeffs[c];
+            coeffs[r] /= aug[r, r];
+        }
+        return coeffs;
+    }
+
+    /// <summary>Compute R² (coefficient of determination).</summary>
+    private static double ComputeRSquared(double[] x, double[] y, Func<double, double> fn)
+    {
+        var mean = y.Average();
+        double ssTot = 0, ssRes = 0;
+        for (int i = 0; i < y.Length; i++)
+        {
+            ssTot += (y[i] - mean) * (y[i] - mean);
+            var predicted = fn(x[i]);
+            ssRes += (y[i] - predicted) * (y[i] - predicted);
+        }
+        return ssTot > 0 ? 1 - ssRes / ssTot : 0;
     }
 }
