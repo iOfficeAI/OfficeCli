@@ -800,7 +800,11 @@
             var msg;
             try { msg = JSON.parse(e.data); } catch (err) { return; }
             if (msg.action === 'selection-update') {
-                _selection = msg.paths || [];
+                var newPaths = msg.paths || [];
+                // Skip re-apply if selection unchanged (avoids flicker when
+                // SSE echoes back the same selection we just set locally)
+                if (JSON.stringify(newPaths) === JSON.stringify(_selection)) return;
+                _selection = newPaths;
                 applySelectionToDom();
             } else if (msg.action === 'mark-update') {
                 // Monotonic version: clients may CAS on this value to skip
