@@ -569,24 +569,40 @@
         cd.el.style.cursor = '';
         cd.el.style.left = '';
         cd.el.style.top = '';
-        // Compute delta in pt (1px ≈ 0.75pt)
-        var dx = (e.clientX - cd.startX) * 0.75;
-        var dy = (e.clientY - cd.startY) * 0.75;
-        if (Math.abs(dx) < 2 && Math.abs(dy) < 2) return;
-        // Send position delta as x/y set
-        // Get current position from chart's computed style or bounding rect
-        var rect = cd.el.getBoundingClientRect();
-        var parentRect = cd.el.offsetParent ? cd.el.offsetParent.getBoundingClientRect() : { left: 0, top: 0 };
-        var newXPt = (rect.left - parentRect.left) * 0.75 + dx;
-        var newYPt = (rect.top - parentRect.top) * 0.75 + dy;
-        fetch('/api/edit', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: cd.path, props: {
-                x: Math.round(newXPt) + 'pt',
-                y: Math.round(newYPt) + 'pt'
-            }})
-        }).catch(function() {});
+        var dx = e.clientX - cd.startX;
+        var dy = e.clientY - cd.startY;
+        if (Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
+        // Find the cell under the drop point to determine target row/col index.
+        // The chart x/y in set command are 0-based col/row indices.
+        var dropEl = document.elementFromPoint(e.clientX, e.clientY);
+        var dropTd = dropEl ? dropEl.closest('td[data-path], th[data-path]') : null;
+        if (dropTd) {
+            var dp = dropTd.getAttribute('data-path');
+            // Try cell path: /{Sheet}/{Col}{Row}
+            var cm = dp ? dp.match(/^(\/[^/]+)\/([A-Za-z]+)(\d+)$/) : null;
+            if (cm) {
+                var col = 0;
+                for (var i = 0; i < cm[2].length; i++) col = col * 26 + (cm[2].toUpperCase().charCodeAt(i) - 64);
+                var row = parseInt(cm[3], 10);
+                fetch('/api/edit', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: cd.path, props: {
+                        x: String(col - 1),  // 0-based col index
+                        y: String(row - 1)    // 0-based row index
+                    }})
+                }).catch(function() {});
+            }
+            // Try row header: /{Sheet}/row[N]
+            var rm = dp ? dp.match(/^(\/[^/]+)\/row\[(\d+)\]$/) : null;
+            if (rm) {
+                fetch('/api/edit', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: cd.path, props: { y: String(parseInt(rm[2], 10) - 1) }})
+                }).catch(function() {});
+            }
+        }
         _suppressNextClick = true;
     }, true);
 
