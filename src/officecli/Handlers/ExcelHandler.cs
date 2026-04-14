@@ -15,6 +15,12 @@ public partial class ExcelHandler : IDocumentHandler
     private readonly SpreadsheetDocument _doc;
     private readonly string _filePath;
     private readonly HashSet<string> _initialSheetNames;
+    private readonly HashSet<WorksheetPart> _dirtyWorksheets = new();
+    private bool _dirtyStylesheet;
+    // Row index cache: SheetData → sorted map of rowIndex → Row.
+    // Turns the O(n) linear scan in FindOrCreateCell into O(1) lookup + O(log n) insert.
+    // Invalidated by InvalidateRowIndex() whenever rows are structurally modified (shift, remove).
+    private Dictionary<SheetData, SortedList<uint, Row>>? _rowIndex;
     public int LastFindMatchCount { get; internal set; }
 
     public ExcelHandler(string filePath, bool editable)
@@ -261,6 +267,10 @@ public partial class ExcelHandler : IDocumentHandler
 
     public List<ValidationError> Validate() => RawXmlHelper.ValidateDocument(_doc);
 
-    public void Dispose() => _doc.Dispose();
+    public void Dispose()
+    {
+        try { FlushDirtyParts(); }
+        finally { _doc.Dispose(); }
+    }
 
 }
