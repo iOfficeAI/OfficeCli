@@ -325,8 +325,12 @@ public partial class HwpxHandler
                 {
                     if (start > end) (start, end) = (end, start);
                     end = Math.Min(end, start + 999);
+                    if (end > 100_000) end = start + 999; // absolute safety cap
                     for (int p = start; p <= end; p++)
+                    {
                         pages.Add(p);
+                        if (p == end) break; // prevent int overflow wrap
+                    }
                 }
             }
             else
@@ -369,7 +373,7 @@ public partial class HwpxHandler
         foreach (var (section, para, path) in _doc.AllContentInOrder())
         {
             if (!sectionFilter.Contains(section.Index + 1)) continue;
-            var text = HwpxKorean.Normalize(ExtractParagraphText(para));
+            var text = HwpxKorean.Normalize(ExtractParagraphText(para)).Trim();
             if (!string.IsNullOrWhiteSpace(text))
                 lines.Add(text);
         }
