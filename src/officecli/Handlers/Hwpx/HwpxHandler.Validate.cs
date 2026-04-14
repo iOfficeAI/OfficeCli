@@ -120,6 +120,26 @@ public partial class HwpxHandler
                     "/mimetype",
                     null));
             }
+
+            // G5: Validate mimetype content value
+            using var mimeStream = mimetypeEntry.Open();
+            using var mimeReader = new StreamReader(mimeStream, System.Text.Encoding.ASCII);
+            var mimeContent = mimeReader.ReadToEnd().Trim();
+            var validMimeTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "application/hwp+zip",
+                "application/vnd.hancom.hwp",
+                "application/vnd.hancom.hwpx",
+                "application/haansofthwp"
+            };
+            if (!validMimeTypes.Contains(mimeContent))
+            {
+                errors.Add(new ValidationError(
+                    "package_mimetype_invalid",
+                    $"Unexpected MIME type '{mimeContent}' (expected one of: {string.Join(", ", validMimeTypes)})",
+                    "/mimetype",
+                    mimeContent));
+            }
         }
 
         // Check META-INF/container.xml

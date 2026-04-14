@@ -43,6 +43,60 @@ public partial class HwpxHandler : IDocumentHandler
 
     private static HwpxDocument LoadDocument(ZipArchive archive)
     {
+        // Plan 99.9.E1: Path traversal defense
+        foreach (var entry in archive.Entries)
+        {
+            var name = entry.FullName;
+            if (string.IsNullOrEmpty(name)) continue;
+            if (name.Contains('\0') ||
+                name.StartsWith('/') || name.StartsWith('\\') ||
+                (name.Length >= 2 && name[1] == ':') ||
+                name.Split('/', '\\').Any(seg => seg == ".."))
+            {
+                throw new InvalidDataException(
+                    $"Suspicious ZIP entry path detected: '{name}'. " +
+                    "Path traversal or absolute path entries are not allowed.");
+            }
+            if ((entry.ExternalAttributes & 0xF0000000) == 0xA0000000)
+            {
+                throw new InvalidDataException(
+                    $"Symlink ZIP entry detected: '{name}'. Symlinks are not allowed.");
+            }
+        }
+
+        // Plan 99.9.E2: ZIP bomb precheck
+        const int MaxEntries = 1000;
+        const long MaxUncompressedBytes = 200L * 1024 * 1024; // 200MB
+        const double MaxCompressionRatio = 100.0;
+
+        if (archive.Entries.Count > MaxEntries)
+            throw new InvalidDataException(
+                $"ZIP entry count ({archive.Entries.Count}) exceeds safety limit ({MaxEntries}).");
+
+        long totalUncompressed = 0;
+        foreach (var entry in archive.Entries)
+        {
+            if (entry.Length < 0 || totalUncompressed > MaxUncompressedBytes - entry.Length)
+                throw new InvalidDataException(
+                    $"Total uncompressed size exceeds safety limit ({MaxUncompressedBytes / (1024*1024)}MB).");
+            totalUncompressed += entry.Length;
+            if (entry.CompressedLength > 0)
+            {
+                double ratio = (double)entry.Length / entry.CompressedLength;
+                if (ratio > MaxCompressionRatio)
+                    throw new InvalidDataException(
+                        $"ZIP entry '{entry.FullName}' has suspicious compression ratio ({ratio:F1}:1).");
+            }
+            else if (entry.Length > 0)
+            {
+                throw new InvalidDataException(
+                    $"ZIP entry '{entry.FullName}' has zero compressed size but non-zero length — suspicious.");
+            }
+        }
+        if (totalUncompressed > MaxUncompressedBytes)
+            throw new InvalidDataException(
+                $"Total uncompressed size ({totalUncompressed / (1024*1024)}MB) exceeds safety limit ({MaxUncompressedBytes / (1024*1024)}MB).");
+
         var doc = new HwpxDocument { Archive = archive };
 
         // Plan 80: Rootfile-aware loading via HwpxManifest
@@ -129,7 +183,17 @@ public partial class HwpxHandler : IDocumentHandler
         var raw = reader.ReadToEnd();
         foreach (var (old, canonical) in HwpxNs.LegacyToCanonical)
             raw = raw.Replace(old, canonical, StringComparison.Ordinal);
-        return XDocument.Parse(raw);
+
+        // Plan 99.9.E5: XXE defense via secure parser settings
+        var settings = new System.Xml.XmlReaderSettings
+        {
+            DtdProcessing = System.Xml.DtdProcessing.Prohibit,
+            XmlResolver = null,
+            MaxCharactersFromEntities = 0
+        };
+        using var stringReader = new StringReader(raw);
+        using var xmlReader = System.Xml.XmlReader.Create(stringReader, settings);
+        return XDocument.Load(xmlReader);
     }
 
     public bool TryExtractBinary(string path, string destPath, out string? contentType, out long byteCount)
@@ -142,6 +206,7 @@ public partial class HwpxHandler : IDocumentHandler
 
     public void Dispose()
     {
+        // Plan 99.9.E6: Ensure no lingering temp files
         _doc.Archive.Dispose();
         _stream.Dispose();
     }

@@ -42,6 +42,48 @@ public partial class HwpxHandler
             // Skip image-only lines: ![alt](url)
             if (Regex.IsMatch(line.Trim(), @"^!\[.*\]\(.*\)$")) { i++; continue; }
 
+            // G7: Blockquote: > text (preserve marker for round-trip)
+            if (line.TrimStart().StartsWith('>'))
+            {
+                var text = StripInlineMarkdown(line.TrimStart().TrimStart('>').Trim());
+                if (!string.IsNullOrEmpty(text))
+                {
+                    var props = new Dictionary<string, string> { ["text"] = $"> {text}" };
+                    if (align != null) props["align"] = align.ToUpperInvariant();
+                    Add("/section[1]", "paragraph", null, props);
+                    blockCount++;
+                }
+                i++;
+                continue;
+            }
+
+            // G7: Unordered list: - item, * item, + item
+            var ulMatch = Regex.Match(line, @"^\s*[-*+]\s+(.+)$");
+            if (ulMatch.Success)
+            {
+                var text = StripInlineMarkdown(ulMatch.Groups[1].Value);
+                var props = new Dictionary<string, string> { ["text"] = $"  - {text}" };
+                if (align != null) props["align"] = align.ToUpperInvariant();
+                Add("/section[1]", "paragraph", null, props);
+                blockCount++;
+                i++;
+                continue;
+            }
+
+            // G7: Ordered list: 1. item
+            var olMatch = Regex.Match(line, @"^\s*(\d+)\.\s+(.+)$");
+            if (olMatch.Success)
+            {
+                var num = olMatch.Groups[1].Value;
+                var text = StripInlineMarkdown(olMatch.Groups[2].Value);
+                var props = new Dictionary<string, string> { ["text"] = $"  {num}. {text}" };
+                if (align != null) props["align"] = align.ToUpperInvariant();
+                Add("/section[1]", "paragraph", null, props);
+                blockCount++;
+                i++;
+                continue;
+            }
+
             // Heading: # ... ######
             var headingMatch = Regex.Match(line, @"^(#{1,6})\s+(.+)$");
             if (headingMatch.Success)
@@ -153,19 +195,30 @@ public partial class HwpxHandler
 
     private static string StripInlineMarkdown(string text)
     {
-        // ***bold italic*** → bold italic
+        // Bold+italic (*** and ___)
         text = Regex.Replace(text, @"\*{3}(.+?)\*{3}", "$1");
-        // **bold** → bold
+        text = Regex.Replace(text, @"_{3}(.+?)_{3}", "$1");
+        // Bold (** and __)
         text = Regex.Replace(text, @"\*{2}(.+?)\*{2}", "$1");
-        // *italic* → italic
+        text = Regex.Replace(text, @"_{2}(.+?)_{2}", "$1");
+        // Italic (* and _)
         text = Regex.Replace(text, @"\*(.+?)\*", "$1");
-        // ~~strikethrough~~ → strikethrough
+        text = Regex.Replace(text, @"(?<!\w)_(.+?)_(?!\w)", "$1");
+        // Strikethrough
         text = Regex.Replace(text, @"~~(.+?)~~", "$1");
-        // `code` → code
+        // Inline code
         text = Regex.Replace(text, @"`(.+?)`", "$1");
-        // [text](url) → text
+        // Images: ![alt](url) → alt
+        text = Regex.Replace(text, @"!\[(.+?)\]\(.+?\)", "$1");
+        // Links: [text](url) → text
         text = Regex.Replace(text, @"\[(.+?)\]\(.+?\)", "$1");
-        // \| → |
+        // HTML entities
+        text = text.Replace("&amp;", "&").Replace("&lt;", "<")
+                   .Replace("&gt;", ">").Replace("&quot;", "\"")
+                   .Replace("&#39;", "'");
+        // Escaped markdown chars
+        text = Regex.Replace(text, @"\\([*_~`\[\]\\|#>!\-])", "$1");
+        // Escaped pipe
         text = text.Replace("\\|", "|");
         return text.Trim();
     }

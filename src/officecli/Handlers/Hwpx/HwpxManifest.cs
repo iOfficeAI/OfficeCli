@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using System.IO.Compression;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
 namespace OfficeCli.Handlers;
@@ -177,21 +178,33 @@ public class HwpxManifest
         return new HwpxManifest(sectionPaths, headerPath);
     }
 
+    // G1: Regex-based section file matching for non-standard paths
+    private static readonly Regex SectionFileRegex = new(
+        @"(?:^|[/\\])section[_\-]?(\d+)\.xml$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private static List<string> FindSectionsFromEntries(Dictionary<string, string> entries)
     {
-        var sectionPaths = entries.Keys
-            .Where(k => k.StartsWith("Contents/section", StringComparison.OrdinalIgnoreCase)
-                     && k.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
-            .OrderBy(ExtractSectionNumber)
-            .ToList();
+        var sectionPaths = new List<(string Path, int Number)>();
+        foreach (var key in entries.Keys)
+        {
+            var m = SectionFileRegex.Match(key);
+            if (m.Success)
+            {
+                var num = int.TryParse(m.Groups[1].Value, out var n) ? n : 0;
+                sectionPaths.Add((key, num));
+            }
+        }
 
-        return sectionPaths;
+        return sectionPaths
+            .OrderBy(x => x.Number)
+            .Select(x => x.Path)
+            .ToList();
     }
 
     private static int ExtractSectionNumber(string path)
     {
-        var fileName = Path.GetFileNameWithoutExtension(path);
-        var numStr = new string(fileName.Where(char.IsDigit).ToArray());
-        return int.TryParse(numStr, out var num) ? num : 0;
+        var m = SectionFileRegex.Match(path);
+        return m.Success && int.TryParse(m.Groups[1].Value, out var num) ? num : 0;
     }
 }
