@@ -11,6 +11,13 @@ Usage:
     python hwpx_form_edit.py appendix doc.hwpx
     python hwpx_form_edit.py strip-lineseg doc.hwpx output.hwpx
     python hwpx_form_edit.py extract doc.hwpx
+    python hwpx_form_edit.py digit-headings doc.hwpx
+    python hwpx_form_edit.py pages doc.hwpx
+    python hwpx_form_edit.py problems doc.hwpx
+    python hwpx_form_edit.py incell doc.hwpx
+    python hwpx_form_edit.py markers doc.hwpx
+    python hwpx_form_edit.py headers-footers doc.hwpx
+    python hwpx_form_edit.py fill doc.hwpx output.hwpx '성명=홍길동,주소=서울'
 """
 
 from __future__ import annotations
@@ -22,9 +29,21 @@ import re
 import shutil
 import sys
 import tempfile
-import xml.etree.ElementTree as ET
 import zipfile
 from typing import Any
+
+# Security: Use defusedxml if available (XXE defense)
+try:
+    import defusedxml.ElementTree as ET
+except ImportError:
+    import xml.etree.ElementTree as ET
+    import warnings
+    warnings.warn(
+        "defusedxml not available - using stdlib ElementTree. "
+        "Install defusedxml for enhanced security: pip install defusedxml",
+        ImportWarning,
+        stacklevel=2,
+    )
 
 # ---------------------------------------------------------------------------
 # HWPX Namespaces
@@ -140,6 +159,48 @@ R24_PAREN_TEXT = re.compile(r"\((.+?)\)")
 # R25: Leading number strip
 R25_LEADING_NUMBER = re.compile(r"^\d{1,2}[.)]?\s*")
 
+# -- Phase C: New Patterns (R26-R41) --
+
+# R26: Problem/question number (KICE exam style)
+R26_PROBLEM_NUMBER = re.compile(
+    r"^\s*(?:"
+    r"(\d{1,2})\s*[..]"            # "1." or "1."
+    r"|(\d{1,2})\s*번"              # "1번"
+    r"|\[(\d{1,2})\]"              # "[1]"
+    r"|\((\d{1,2})\)"              # "(1)"
+    r")"
+    r"\s*(.*)",
+    re.DOTALL,
+)
+
+# R27-R30: Table context patterns (in-cell detection)
+R27_CELL_LABEL = re.compile(r"^([가-힣]{2,6})\s*$")  # Short Korean label only
+R28_CELL_VALUE = re.compile(r"^[^\uAC00-\uD7A3\s]+$")  # Non-Korean value only
+R29_CELL_MIXED = re.compile(r"([가-힣]{2,6})\s*[:：]\s*(.+)")  # Label: value
+R30_CELL_CHECKBOX = re.compile(r"^[□■☐☑]")  # Cell starts with checkbox
+
+# R31-R33: Page number patterns (footer detection)
+R31_PAGE_NUM_DASH = re.compile(r"^\s*-\s*\d+\s*-\s*$")  # "- 5 -"
+R32_PAGE_NUM_PLAIN = re.compile(r"^\s*\d+\s*$")  # "5"
+R33_PAGE_NUM_OF = re.compile(r"^\s*\d+\s*/\s*\d+\s*$")  # "5 / 10"
+
+# R34-R36: Header/footer spatial markers
+R34_HEADER_MARKER = re.compile(r"^(?:제목|머리말|Header)")  # Header keywords
+R35_FOOTER_MARKER = re.compile(r"^(?:바닥글|Footer|페이지)")  # Footer keywords
+R36_SHORT_LINE = re.compile(r"^.{1,15}$")  # Short line (header/footer candidate)
+
+# R37-R40: Korean punctuation markers (kordoc P13)
+R37_KR_COMMA = re.compile(r"[,，、]")  # Korean/CJK comma variants
+R38_KR_PERIOD = re.compile(r"[.。．]")  # Korean/CJK period variants
+R39_KR_SPACE_COMMA = re.compile(r"\s+,")  # Space before comma (error)
+R40_KR_DOUBLE_SPACE = re.compile(r"  +")  # Multiple spaces
+
+# R41: Merge-line heuristic (cross-script boundary)
+R41_CROSS_SCRIPT = re.compile(
+    r"([\uAC00-\uD7A3])\s*$"  # Korean char at end
+    r"|\s*([\uAC00-\uD7A3])"  # or Korean char at start
+)
+
 # ---------------------------------------------------------------------------
 # Label keywords for form field detection
 # ---------------------------------------------------------------------------
@@ -210,9 +271,40 @@ def _list_section_files(zf: zipfile.ZipFile) -> list[str]:
 
 
 def _parse_section(zf: zipfile.ZipFile, section_path: str) -> ET.Element:
-    """Parse a section XML file from a HWPX zip into an ElementTree root."""
+    """Parse a section XML file from a HWPX zip into an ElementTree root.
+    
+    Args:
+        zf: Open ZipFile object.
+        section_path: Path to section XML within the ZIP.
+        
+    Returns:
+        Parsed XML root element.
+        
+    Raises:
+        ValueError: If section_path contains suspicious path components (ZipSlip defense).
+    """
+    # ZipSlip defense
+    _validate_zip_path(section_path)
+    
     with zf.open(section_path) as f:
         return ET.fromstring(f.read())
+
+
+def _validate_zip_path(path: str) -> None:
+    """Validate ZIP entry path for ZipSlip attacks.
+    
+    Args:
+        path: ZIP entry filename to validate.
+        
+    Raises:
+        ValueError: If path contains '..', absolute paths, or null bytes.
+    """
+    if ".." in path.split("/"):
+        raise ValueError(f"ZipSlip attack detected: path contains '..': {path}")
+    if os.path.isabs(path):
+        raise ValueError(f"ZipSlip attack detected: absolute path: {path}")
+    if "\x00" in path:
+        raise ValueError(f"ZipSlip attack detected: null byte in path: {path}")
 
 
 def normalize_uniform_spaces(text: str) -> str:
@@ -239,6 +331,33 @@ def normalize_uniform_spaces(text: str) -> str:
     return text
 
 
+# F7: Phone spacing normalization
+R_PHONE_SPACED = re.compile(
+    r"(?<!\d)"
+    r"(\d(?:[ ]?\d){1,3})"        # group 1: 2-4 digits with optional spaces
+    r"\s*-\s*"
+    r"(\d(?:[ ]?\d){2,3})"        # group 2: 3-4 digits with optional spaces
+    r"\s*-\s*"
+    r"(\d(?:[ ]?\d){2,3})"        # group 3: 3-4 digits (mandatory for phone)
+    r"(?!\d)"
+)
+
+
+def normalize_phone_spacing(text: str) -> str:
+    """Collapse uniform-spaced phone numbers.
+
+    Examples:
+        "45 0 -7 3 40" -> "450-7340"
+        "0 1 0 -1 2 3 4 -5 6 7 8" -> "010-1234-5678"
+    """
+    def _collapse(m: re.Match) -> str:
+        return "-".join(
+            m.group(i).replace(" ", "") for i in (1, 2, 3)
+        )
+
+    return R_PHONE_SPACED.sub(_collapse, text)
+
+
 # ---------------------------------------------------------------------------
 # Core: extract_paragraphs
 # ---------------------------------------------------------------------------
@@ -262,7 +381,7 @@ def extract_paragraphs(hwpx_path: str) -> list[str]:
         for section_path in _list_section_files(zf):
             root = _parse_section(zf, section_path)
             for p in find_all_paragraphs(root):
-                texts.append(collect_text(p))
+                texts.append(normalize_phone_spacing(collect_text(p)))
     return texts
 
 
@@ -511,14 +630,682 @@ def detect_digit_headings(
 
 
 # ---------------------------------------------------------------------------
+# Phase C: New Functions (C1-C9)
+# ---------------------------------------------------------------------------
+
+
+def parse_field_string(fields_str: str) -> dict[str, str]:
+    """Parse a comma-separated key=value field string with comma protection (C9).
+
+    Splits on commas only when followed by a Korean/English key and '='.
+    This allows values to contain commas safely.
+
+    Examples:
+        "성명=홍길동,주소=서울시 강남구" -> {"성명": "홍길동", "주소": "서울시 강남구"}
+        "목적=연구, 개발,기간=1년" -> {"목적": "연구, 개발", "기간": "1년"}
+
+    Args:
+        fields_str: Comma-separated "key=value" string.
+
+    Returns:
+        Dict mapping field labels to values.
+
+    Raises:
+        ValueError: If a pair lacks '=' separator.
+    """
+    # Split only on comma followed by a key pattern (Korean or Latin + '=')
+    pairs = re.split(r",(?=[가-힣A-Za-z][가-힣A-Za-z\s]*=)", fields_str)
+
+    result: dict[str, str] = {}
+    for pair in pairs:
+        pair = pair.strip()
+        if not pair:
+            continue
+        if "=" not in pair:
+            raise ValueError(f"Invalid field pair (missing '='): {pair!r}")
+        key, value = pair.split("=", 1)
+        result[key.strip()] = value.strip()
+
+    return result
+
+
+def find_page_boundaries(hwpx_path: str) -> list[dict[str, Any]]:
+    """Detect page/column boundaries from paragraph attributes (C1).
+
+    HWPX paragraphs can carry pageBreak="1" or columnBreak="1" attributes
+    on their <p> element or nested <paraShape>/<lineseg> nodes. This scans
+    all section files and returns an ordered list of boundaries.
+
+    Args:
+        hwpx_path: Path to the .hwpx file.
+
+    Returns:
+        List of dicts with keys:
+          - paragraph_index (int): global paragraph index
+          - break_type (str): "page" | "column" | "section"
+          - section (str): section filename (e.g. "Contents/section0.xml")
+    """
+    boundaries: list[dict[str, Any]] = []
+    global_idx = 0
+
+    with zipfile.ZipFile(hwpx_path, "r") as zf:
+        section_files = _list_section_files(zf)
+
+        for sec_idx, section_path in enumerate(section_files):
+            # Each new section file is implicitly a section break
+            if sec_idx > 0:
+                boundaries.append({
+                    "paragraph_index": global_idx,
+                    "break_type": "section",
+                    "section": section_path,
+                })
+
+            root = _parse_section(zf, section_path)
+            paragraphs = find_all_paragraphs(root)
+
+            for p in paragraphs:
+                # Check direct attributes on <p>
+                page_break = p.get("pageBreak", "0")
+                col_break = p.get("columnBreak", "0")
+
+                # Also check namespace-prefixed attributes
+                for attr_name in list(p.attrib.keys()):
+                    local = attr_name.split("}")[-1] if "}" in attr_name else attr_name
+                    if local == "pageBreak" and p.get(attr_name) == "1":
+                        page_break = "1"
+                    elif local == "columnBreak" and p.get(attr_name) == "1":
+                        col_break = "1"
+
+                # Also scan child elements for break attributes
+                for child in p.iter():
+                    ltag = local_tag(child)
+                    if ltag in ("paraShape", "paraPr", "lineseg"):
+                        if child.get("pageBreak") == "1":
+                            page_break = "1"
+                        if child.get("columnBreak") == "1":
+                            col_break = "1"
+
+                if page_break == "1":
+                    boundaries.append({
+                        "paragraph_index": global_idx,
+                        "break_type": "page",
+                        "section": section_path,
+                    })
+                elif col_break == "1":
+                    boundaries.append({
+                        "paragraph_index": global_idx,
+                        "break_type": "column",
+                        "section": section_path,
+                    })
+
+                global_idx += 1
+
+    return boundaries
+
+
+def find_problem_starts(hwpx_path: str) -> list[dict[str, Any]]:
+    """Map problem/question numbers to paragraph indices (exam documents, C2).
+
+    Scans all paragraphs for patterns like "1.", "1번", "[1]", "(1)" at the
+    start of text. Returns ordered list of problem starts with their paragraph
+    positions.
+
+    Args:
+        hwpx_path: Path to the .hwpx file.
+
+    Returns:
+        List of dicts with keys:
+          - problem_number (int): detected problem number
+          - paragraph_index (int): global paragraph index
+          - preview (str): first 60 chars of problem text
+          - pattern (str): which pattern matched ("dot", "번", "bracket", "paren")
+    """
+    problems: list[dict[str, Any]] = []
+    paragraphs = extract_paragraphs(hwpx_path)
+
+    for i, text in enumerate(paragraphs):
+        stripped = text.strip()
+        if not stripped:
+            continue
+
+        m = R26_PROBLEM_NUMBER.match(stripped)
+        if not m:
+            continue
+
+        # Determine which group matched
+        if m.group(1) is not None:
+            num, pattern = int(m.group(1)), "dot"
+        elif m.group(2) is not None:
+            num, pattern = int(m.group(2)), "번"
+        elif m.group(3) is not None:
+            num, pattern = int(m.group(3)), "bracket"
+        elif m.group(4) is not None:
+            num, pattern = int(m.group(4)), "paren"
+        else:
+            continue
+
+        # Filter: problem numbers should be reasonable (1-50)
+        if num < 1 or num > 50:
+            continue
+
+        # Extract preview text
+        rest = m.group(5) or ""
+        preview = rest[:60].strip() if rest else "(no text)"
+
+        problems.append({
+            "problem_number": num,
+            "paragraph_index": i,
+            "preview": preview,
+            "pattern": pattern,
+        })
+
+    return problems
+
+
+def detect_incell_patterns(hwpx_path: str) -> dict[str, Any]:
+    """Detect in-cell form patterns (labels, values, checkboxes) in tables (C3).
+
+    Analyzes table cell contents to identify common patterns:
+    - Short Korean labels (e.g., "성명", "주소")
+    - Value-only cells (numbers, dates)
+    - Label: value cells (e.g., "성명: 홍길동")
+    - Checkbox cells
+
+    Args:
+        hwpx_path: Path to the .hwpx file.
+
+    Returns:
+        Dict with keys:
+          - label_cells (int): count of label-only cells
+          - value_cells (int): count of value-only cells
+          - mixed_cells (int): count of label:value cells
+          - checkbox_cells (int): count of checkbox cells
+          - total_cells (int): total cells analyzed
+    """
+    stats = {
+        "label_cells": 0,
+        "value_cells": 0,
+        "mixed_cells": 0,
+        "checkbox_cells": 0,
+        "total_cells": 0,
+    }
+
+    with zipfile.ZipFile(hwpx_path, "r") as zf:
+        section_files = _list_section_files(zf)
+
+        for section_path in section_files:
+            root = _parse_section(zf, section_path)
+
+            # Find all table cells (tbl > tc or similar)
+            for el in root.iter():
+                ltag = local_tag(el)
+                if ltag == "tc":  # table cell
+                    stats["total_cells"] += 1
+                    cell_text = collect_text(el).strip()
+
+                    if not cell_text:
+                        continue
+
+                    # Check patterns in order of specificity
+                    if R30_CELL_CHECKBOX.match(cell_text):
+                        stats["checkbox_cells"] += 1
+                    elif R29_CELL_MIXED.match(cell_text):
+                        stats["mixed_cells"] += 1
+                    elif R27_CELL_LABEL.match(cell_text):
+                        stats["label_cells"] += 1
+                    elif R28_CELL_VALUE.match(cell_text):
+                        stats["value_cells"] += 1
+
+    return stats
+
+
+def strip_page_numbers(
+    hwpx_path: str,
+    output_path: str,
+    patterns: list[str] | None = None,
+) -> dict[str, Any]:
+    """Remove page number paragraphs from HWPX (C4).
+
+    Detects and removes paragraphs that contain only page numbers in common
+    formats: "- 5 -", "5", "5 / 10".
+
+    Args:
+        hwpx_path: Path to input .hwpx file.
+        output_path: Path for output .hwpx file.
+        patterns: List of pattern names to use ("dash", "plain", "of").
+                  If None, uses all patterns.
+
+    Returns:
+        Dict with keys:
+          - removed_count (int): number of paragraphs removed
+          - patterns_used (list[str]): patterns that matched
+    """
+    if patterns is None:
+        patterns = ["dash", "plain", "of"]
+
+    pattern_map = {
+        "dash": R31_PAGE_NUM_DASH,
+        "plain": R32_PAGE_NUM_PLAIN,
+        "of": R33_PAGE_NUM_OF,
+    }
+
+    active_patterns = [pattern_map[p] for p in patterns if p in pattern_map]
+    removed_count = 0
+    matched_patterns: set[str] = set()
+
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".hwpx")
+    os.close(tmp_fd)
+
+    try:
+        with zipfile.ZipFile(hwpx_path, "r") as zf_in:
+            with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zf_out:
+                for item in zf_in.infolist():
+                    _validate_zip_path(item.filename)
+                    data = zf_in.read(item.filename)
+
+                    is_section = (
+                        item.filename.endswith(".xml")
+                        and re.search(r"[Ss]ection\d+\.xml$", item.filename)
+                    )
+
+                    if is_section:
+                        root = ET.fromstring(data.decode("utf-8"))
+                        paragraphs = find_all_paragraphs(root)
+
+                        # Mark paragraphs for removal
+                        to_remove: list[ET.Element] = []
+                        for p in paragraphs:
+                            p_text = collect_text(p).strip()
+                            for pat_name, regex in zip(patterns, active_patterns):
+                                if regex.match(p_text):
+                                    to_remove.append(p)
+                                    matched_patterns.add(pat_name)
+                                    break
+
+                        # Remove marked paragraphs
+                        for p in to_remove:
+                            parent = None
+                            for candidate in root.iter():
+                                if p in list(candidate):
+                                    parent = candidate
+                                    break
+                            if parent is not None:
+                                parent.remove(p)
+                                removed_count += 1
+
+                        # Serialize back
+                        xml_text = ET.tostring(root, encoding="unicode", xml_declaration=False)
+                        if data.decode("utf-8").startswith("<?xml"):
+                            xml_text = '<?xml version="1.0" encoding="UTF-8"?>\n' + xml_text
+                        data = xml_text.encode("utf-8")
+
+                    # Write entry
+                    if item.filename == "mimetype":
+                        zf_out.writestr(item, data, compress_type=zipfile.ZIP_STORED)
+                    else:
+                        zf_out.writestr(item, data)
+
+        shutil.move(tmp_path, output_path)
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+    return {
+        "removed_count": removed_count,
+        "patterns_used": sorted(matched_patterns),
+    }
+
+
+def detect_headers_footers(hwpx_path: str) -> dict[str, Any]:
+    """Detect header/footer paragraphs based on spatial markers (C5).
+
+    Identifies paragraphs that likely represent headers or footers based on:
+    - Short length (<= 15 chars)
+    - Header/footer keywords
+    - Position in section (first/last paragraphs)
+
+    Args:
+        hwpx_path: Path to the .hwpx file.
+
+    Returns:
+        Dict with keys:
+          - headers (list[dict]): detected headers with paragraph_index, text
+          - footers (list[dict]): detected footers with paragraph_index, text
+          - total_candidates (int): total header/footer candidates found
+    """
+    headers: list[dict[str, Any]] = []
+    footers: list[dict[str, Any]] = []
+    global_idx = 0
+
+    with zipfile.ZipFile(hwpx_path, "r") as zf:
+        section_files = _list_section_files(zf)
+
+        for section_path in section_files:
+            root = _parse_section(zf, section_path)
+            paragraphs = find_all_paragraphs(root)
+
+            for local_idx, p in enumerate(paragraphs):
+                p_text = collect_text(p).strip()
+
+                # Short line heuristic
+                if not R36_SHORT_LINE.match(p_text):
+                    global_idx += 1
+                    continue
+
+                # Check for header markers
+                if R34_HEADER_MARKER.search(p_text) or local_idx < 2:
+                    headers.append({
+                        "paragraph_index": global_idx,
+                        "text": p_text,
+                        "section": section_path,
+                    })
+                # Check for footer markers
+                elif R35_FOOTER_MARKER.search(p_text) or local_idx >= len(paragraphs) - 2:
+                    footers.append({
+                        "paragraph_index": global_idx,
+                        "text": p_text,
+                        "section": section_path,
+                    })
+
+                global_idx += 1
+
+    return {
+        "headers": headers,
+        "footers": footers,
+        "total_candidates": len(headers) + len(footers),
+    }
+
+
+def detect_korean_markers(paragraphs: list[str]) -> dict[str, Any]:
+    """Detect Korean punctuation markers and spacing errors (C6).
+
+    Analyzes text for:
+    - Korean comma variants (,，、)
+    - Korean period variants (.。．)
+    - Space before comma errors
+    - Multiple consecutive spaces
+
+    Args:
+        paragraphs: List of paragraph text strings.
+
+    Returns:
+        Dict with keys:
+          - kr_commas (int): paragraphs with Korean commas
+          - kr_periods (int): paragraphs with Korean periods
+          - space_comma_errors (int): paragraphs with space before comma
+          - double_space_errors (int): paragraphs with multiple spaces
+    """
+    stats = {
+        "kr_commas": 0,
+        "kr_periods": 0,
+        "space_comma_errors": 0,
+        "double_space_errors": 0,
+    }
+
+    for text in paragraphs:
+        if R37_KR_COMMA.search(text):
+            stats["kr_commas"] += 1
+        if R38_KR_PERIOD.search(text):
+            stats["kr_periods"] += 1
+        if R39_KR_SPACE_COMMA.search(text):
+            stats["space_comma_errors"] += 1
+        if R40_KR_DOUBLE_SPACE.search(text):
+            stats["double_space_errors"] += 1
+
+    return stats
+
+
+def _is_marker_line(text: str) -> bool:
+    """Helper: Check if a line is likely a structural marker (C7 helper).
+
+    Args:
+        text: Paragraph text.
+
+    Returns:
+        True if the line appears to be a heading, label, or marker.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return False
+
+    # Check for structural patterns
+    if R1_CHAPTER_HEADING.match(stripped):
+        return True
+    if R2_ARTICLE.match(stripped):
+        return True
+    if R3_CIRCLED_NUMBER.match(stripped):
+        return True
+    if R4_NUMBERED_LIST.match(stripped):
+        return True
+    if R5_KOREAN_LETTER.match(stripped):
+        return True
+    if R6_CHECKBOX_FLAT.match(stripped):
+        return True
+
+    # Short all-caps or all-Korean lines
+    if len(stripped) <= 20 and (stripped.isupper() or R20_SHORT_KOREAN_LABEL.match(stripped)):
+        return True
+
+    return False
+
+
+def should_merge_lines(line1: str, line2: str) -> bool:
+    """Determine if two lines should be merged based on cross-script boundaries (C7).
+
+    Korean text often gets split mid-sentence when mixed with English/numbers.
+    This detects cases where:
+    - Line 1 ends with Korean but no sentence-ending punctuation
+    - Line 2 starts with Korean or continues the sentence
+    - Neither line is a structural marker (heading, list item, etc.)
+
+    Args:
+        line1: First line text.
+        line2: Second line text.
+
+    Returns:
+        True if lines should be merged.
+    """
+    if not line1 or not line2:
+        return False
+
+    # Don't merge if either is a marker line
+    if _is_marker_line(line1) or _is_marker_line(line2):
+        return False
+
+    # Check for sentence-ending punctuation
+    if line1.rstrip().endswith((".", "。", "!", "?", ":", "：")):
+        return False
+
+    # Cross-script merge heuristic
+    # If line1 ends with Korean char and no punctuation, likely continuation
+    if R41_CROSS_SCRIPT.search(line1):
+        return True
+
+    # If line2 starts with lowercase or number, likely continuation
+    if line2 and line2[0].islower():
+        return True
+
+    return False
+
+
+def merge_lines(paragraphs: list[str]) -> list[str]:
+    """Merge paragraphs that were incorrectly split mid-sentence (C7).
+
+    Uses cross-script boundary heuristics to identify and merge split lines.
+
+    Args:
+        paragraphs: List of paragraph text strings.
+
+    Returns:
+        New list of paragraphs with splits merged.
+    """
+    if not paragraphs:
+        return []
+
+    merged: list[str] = [paragraphs[0]]
+
+    for current in paragraphs[1:]:
+        if merged and should_merge_lines(merged[-1], current):
+            merged[-1] = merged[-1].rstrip() + " " + current.lstrip()
+        else:
+            merged.append(current)
+
+    return merged
+
+
+def fill_hwpx_preserve(
+    hwpx_path: str,
+    output_path: str,
+    fields: dict[str, str],
+) -> dict[str, Any]:
+    """Fill form fields in HWPX by direct XML surgery, preserving styles (C8).
+
+    Strategy:
+    1. Open HWPX as ZIP
+    2. Find section XML files matching /[Ss]ection\\d+\\.xml$/
+    3. For each field, find the paragraph containing the label
+    4. Replace text in the first <t> element of the first <run>
+       (preserving charPrIDRef for style continuity)
+    5. Clear remaining runs in that paragraph
+    6. Strip all linesegarray elements (force recalc)
+    7. Rewrite ZIP preserving original structure
+
+    Args:
+        hwpx_path: Path to input .hwpx file.
+        output_path: Path for output .hwpx file.
+        fields: Dict of {label: value} to fill.
+
+    Returns:
+        Dict with keys:
+          - filled (list[str]): labels that were successfully filled
+          - not_found (list[str]): labels not found in document
+          - lineseg_stripped (int): count of lineseg elements removed
+    """
+    filled: list[str] = []
+    not_found: list[str] = list(fields.keys())
+    total_lineseg = 0
+
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".hwpx")
+    os.close(tmp_fd)
+
+    try:
+        with zipfile.ZipFile(hwpx_path, "r") as zf_in:
+            with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zf_out:
+                for item in zf_in.infolist():
+                    _validate_zip_path(item.filename)
+                    data = zf_in.read(item.filename)
+
+                    is_section = (
+                        item.filename.endswith(".xml")
+                        and re.search(r"[Ss]ection\d+\.xml$", item.filename)
+                    )
+
+                    if is_section:
+                        xml_text = data.decode("utf-8")
+
+                        # Parse and process
+                        root = ET.fromstring(xml_text)
+                        paragraphs = find_all_paragraphs(root)
+
+                        for p in paragraphs:
+                            p_text = collect_text(p).strip()
+                            normalized_p = normalize_uniform_spaces(p_text)
+
+                            for label, value in list(fields.items()):
+                                if label in not_found and label in normalized_p:
+                                    t_elements = [
+                                        el for el in p.iter()
+                                        if local_tag(el) == "t"
+                                    ]
+
+                                    if t_elements:
+                                        # Strategy: find "label: ___" pattern and replace the value part
+                                        # NOT the label itself
+                                        import re as _re
+                                        colon_pat = _re.compile(
+                                            _re.escape(label) + r"\s*[:：]\s*(.*)",
+                                            _re.DOTALL,
+                                        )
+
+                                        replaced = False
+                                        for t_el in t_elements:
+                                            if t_el.text is None:
+                                                continue
+                                            m = colon_pat.search(normalize_uniform_spaces(t_el.text))
+                                            if m:
+                                                # Replace only the value portion after label:
+                                                t_el.text = colon_pat.sub(
+                                                    label + ": " + value,
+                                                    t_el.text,
+                                                    count=1,
+                                                )
+                                                replaced = True
+                                                break
+
+                                        if not replaced:
+                                            # Fallback: look for adjacent <t> after the label <t>
+                                            label_idx = -1
+                                            for i, t_el in enumerate(t_elements):
+                                                if t_el.text and label in normalize_uniform_spaces(t_el.text):
+                                                    label_idx = i
+                                                    break
+
+                                            if label_idx >= 0 and label_idx + 1 < len(t_elements):
+                                                # Set the NEXT <t> element (value cell)
+                                                t_elements[label_idx + 1].text = value
+                                                replaced = True
+
+                                        if replaced:
+                                            filled.append(label)
+                                            not_found.remove(label)
+
+                        # Serialize back
+                        xml_text = ET.tostring(
+                            root, encoding="unicode", xml_declaration=False
+                        )
+
+                        # Add XML declaration if it was present
+                        if data.decode("utf-8").startswith("<?xml"):
+                            xml_text = '<?xml version="1.0" encoding="UTF-8"?>\n' + xml_text
+
+                        # Strip lineseg
+                        count_open = len(_LINESEG_OPEN.findall(xml_text))
+                        count_self = len(_LINESEG_SELF.findall(xml_text))
+                        xml_text = _LINESEG_OPEN.sub("", xml_text)
+                        xml_text = _LINESEG_SELF.sub("", xml_text)
+                        total_lineseg += count_open + count_self
+
+                        data = xml_text.encode("utf-8")
+
+                    # Write entry
+                    if item.filename == "mimetype":
+                        zf_out.writestr(item, data, compress_type=zipfile.ZIP_STORED)
+                    else:
+                        zf_out.writestr(item, data)
+
+        shutil.move(tmp_path, output_path)
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+    return {
+        "filled": filled,
+        "not_found": not_found,
+        "lineseg_stripped": total_lineseg,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Core: strip_lineseg
 # ---------------------------------------------------------------------------
 
 _LINESEG_OPEN = re.compile(
-    r"<(?:hp:)?linesegarray[^>]*>.*?</(?:hp:)?linesegarray>",
+    r"<(?:\w+:)?linesegarray[^>]*>.*?</(?:\w+:)?linesegarray>",
     re.DOTALL,
 )
-_LINESEG_SELF = re.compile(r"<(?:hp:)?linesegarray[^/]*/>")
+_LINESEG_SELF = re.compile(r"<(?:\w+:)?linesegarray[^/]*/>")
 
 
 def strip_lineseg(hwpx_path: str, output_path: str) -> int:
@@ -664,6 +1451,97 @@ def _cmd_digit_headings(args: argparse.Namespace) -> None:
         print(f"  {h['number']}. {h['title']} (p{h['paragraph_index']})")
 
 
+def _cmd_pages(args: argparse.Namespace) -> None:
+    """Handle the 'pages' subcommand (C1)."""
+    boundaries = find_page_boundaries(args.hwpx_path)
+
+    if not boundaries:
+        print("No page/column/section boundaries found.")
+        return
+
+    print(f"Boundaries ({len(boundaries)} found):")
+    for b in boundaries:
+        print(
+            f"  [{b['break_type']:7s}] paragraph {b['paragraph_index']:4d} "
+            f"({b['section']})"
+        )
+
+
+def _cmd_problems(args: argparse.Namespace) -> None:
+    """Handle the 'problems' subcommand (C2)."""
+    problems = find_problem_starts(args.hwpx_path)
+
+    if not problems:
+        print("No problem numbers found.")
+        return
+
+    print(f"Problems ({len(problems)} found):")
+    for prob in problems:
+        print(
+            f"  Problem {prob['problem_number']:2d} [{prob['pattern']:7s}] "
+            f"p{prob['paragraph_index']:4d}: {prob['preview']}"
+        )
+
+
+def _cmd_incell(args: argparse.Namespace) -> None:
+    """Handle the 'incell' subcommand (C3)."""
+    stats = detect_incell_patterns(args.hwpx_path)
+
+    print(f"In-cell pattern analysis:")
+    print(f"  Total cells:     {stats['total_cells']}")
+    print(f"  Label cells:     {stats['label_cells']}")
+    print(f"  Value cells:     {stats['value_cells']}")
+    print(f"  Mixed cells:     {stats['mixed_cells']}")
+    print(f"  Checkbox cells:  {stats['checkbox_cells']}")
+
+
+def _cmd_markers(args: argparse.Namespace) -> None:
+    """Handle the 'markers' subcommand (C6)."""
+    paragraphs = extract_paragraphs(args.hwpx_path)
+    stats = detect_korean_markers(paragraphs)
+
+    print(f"Korean marker analysis:")
+    print(f"  Paragraphs with Korean commas:     {stats['kr_commas']}")
+    print(f"  Paragraphs with Korean periods:    {stats['kr_periods']}")
+    print(f"  Space before comma errors:         {stats['space_comma_errors']}")
+    print(f"  Multiple space errors:             {stats['double_space_errors']}")
+
+
+def _cmd_headers_footers(args: argparse.Namespace) -> None:
+    """Handle the 'headers-footers' subcommand (C5)."""
+    result = detect_headers_footers(args.hwpx_path)
+
+    print(f"Header/footer detection ({result['total_candidates']} found):")
+    
+    if result["headers"]:
+        print(f"\nHeaders ({len(result['headers'])}):")
+        for h in result["headers"]:
+            print(f"  p{h['paragraph_index']:4d}: {h['text']}")
+    
+    if result["footers"]:
+        print(f"\nFooters ({len(result['footers'])}):")
+        for f in result["footers"]:
+            print(f"  p{f['paragraph_index']:4d}: {f['text']}")
+
+
+def _cmd_fill(args: argparse.Namespace) -> None:
+    """Handle the 'fill' subcommand (C8)."""
+    fields = parse_field_string(args.fields)
+    result = fill_hwpx_preserve(args.hwpx_path, args.output_path, fields)
+
+    print(f"Filled {len(result['filled'])} field(s):")
+    for label in result["filled"]:
+        print(f"  + {label}")
+
+    if result["not_found"]:
+        print(f"Not found ({len(result['not_found'])}):")
+        for label in result["not_found"]:
+            print(f"  - {label}")
+
+    print(f"Lineseg stripped: {result['lineseg_stripped']}")
+    print(f"Output: {args.output_path}")
+
+
 def main() -> None:
     """Entry point with argparse-based CLI."""
     parser = argparse.ArgumentParser(
@@ -677,6 +1555,12 @@ def main() -> None:
             "  %(prog)s strip-lineseg doc.hwpx output.hwpx\n"
             "  %(prog)s extract doc.hwpx\n"
             "  %(prog)s digit-headings doc.hwpx\n"
+            "  %(prog)s pages doc.hwpx\n"
+            "  %(prog)s problems doc.hwpx\n"
+            "  %(prog)s incell doc.hwpx\n"
+            "  %(prog)s markers doc.hwpx\n"
+            "  %(prog)s headers-footers doc.hwpx\n"
+            "  %(prog)s fill doc.hwpx output.hwpx '성명=홍길동,주소=서울'\n"
         ),
     )
 
@@ -724,6 +1608,53 @@ def main() -> None:
     )
     p_digit.add_argument("hwpx_path", help="Path to .hwpx file")
     p_digit.set_defaults(func=_cmd_digit_headings)
+
+    # pages (C1)
+    p_pages = subparsers.add_parser(
+        "pages", help="Detect page/column/section boundaries"
+    )
+    p_pages.add_argument("hwpx_path", help="Path to .hwpx file")
+    p_pages.set_defaults(func=_cmd_pages)
+
+    # problems (C2)
+    p_problems = subparsers.add_parser(
+        "problems", help="Map problem/question numbers to paragraphs"
+    )
+    p_problems.add_argument("hwpx_path", help="Path to .hwpx file")
+    p_problems.set_defaults(func=_cmd_problems)
+
+    # incell (C3)
+    p_incell = subparsers.add_parser(
+        "incell", help="Detect in-cell form patterns (tables)"
+    )
+    p_incell.add_argument("hwpx_path", help="Path to .hwpx file")
+    p_incell.set_defaults(func=_cmd_incell)
+
+    # markers (C6)
+    p_markers = subparsers.add_parser(
+        "markers", help="Detect Korean punctuation markers and spacing errors"
+    )
+    p_markers.add_argument("hwpx_path", help="Path to .hwpx file")
+    p_markers.set_defaults(func=_cmd_markers)
+
+    # headers-footers (C5)
+    p_hf = subparsers.add_parser(
+        "headers-footers", help="Detect header/footer paragraphs"
+    )
+    p_hf.add_argument("hwpx_path", help="Path to .hwpx file")
+    p_hf.set_defaults(func=_cmd_headers_footers)
+
+    # fill (C8)
+    p_fill = subparsers.add_parser(
+        "fill", help="Fill form fields via XML surgery (style-preserving)"
+    )
+    p_fill.add_argument("hwpx_path", help="Path to input .hwpx file")
+    p_fill.add_argument("output_path", help="Path for output .hwpx file")
+    p_fill.add_argument(
+        "fields",
+        help="Comma-separated key=value pairs (e.g. '성명=홍길동,주소=서울')"
+    )
+    p_fill.set_defaults(func=_cmd_fill)
 
     args = parser.parse_args()
     args.func(args)
