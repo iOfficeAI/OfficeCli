@@ -18,6 +18,7 @@ description: "Use this skill any time a .hwpx file is involved -- as input, outp
 | Form recognize | ✅ Yes | `view forms --auto` (label-value auto-detect) |
 | Table map | ✅ Yes | `view tables` (2D grid + labels) |
 | Markdown export | ✅ Yes | `view markdown` |
+| Equation (수식) | ✅ Yes | `add --type equation --prop 'script={1 over 2}'` |
 | Object finder | ✅ Yes | `view objects` (picture/field/bookmark/equation) |
 | Query (expanded) | ✅ Yes | `query 'tc[text~=홍길동]'`, `:has()`, `>` combinator |
 | Template merge | ✅ Yes | `merge template.hwpx out.hwpx --data '{"key":"val"}'` |
@@ -26,7 +27,10 @@ description: "Use this skill any time a .hwpx file is involved -- as input, outp
 | Watermark (image) | 🟡 Plan 98 active | `build-local/officecli` 1.0.42 기준 동작 확인. Opaque RGB 권장, 밝은 자산은 `bright=0`, `contrast=0` 권장 |
 | Image anchor / floating picture | ✅ Yes | `add --type picture --prop anchor=page --prop halign=center --prop valign=middle` |
 | Field types | ✅ Yes | `add --type author\|title\|lastsaveby\|filename` |
-| Compare documents | ✅ Yes | `compare a.hwpx b.hwpx --mode text\|outline\|table` |
+| Compare documents | ✅ Yes | `compare a.hwpx b.hwpx` (LCS-based diff + table comparison) |
+| Security validation | ✅ Yes | ZIP bomb, path traversal, symlink, XXE defense |
+| Form fill feedback | ✅ Yes | `set /table/fill` returns unmatched labels |
+| Broken ZIP recovery | ✅ Yes | corrupted HWPX auto-recovery via Local File Header scan |
 | HTML preview | ✅ Yes | `view html --browser` |
 | Watch live preview | ✅ Yes | `watch file.hwpx` |
 | Validate .hwpx | ✅ Yes | `validate` (9-level: ZIP, package, XML, IDRef, table, NS, BinData, field, section) |
@@ -247,7 +251,9 @@ officecli compare before.hwpx after.hwpx --json > diff.json
 
 ---
 
-## Document Classification & Pattern-Match Editing (Plan 90.999 + 99.7)
+## Document Classification & Pattern-Match Editing (Plan 90.999 + 99.7 + 99.9)
+
+> Updated 2026-04-14: Plan 99.9 Phase A-I fully implemented.
 
 officecli `view forms --auto` handles standard label-value detection. For **complex templates**
 (KICE exams, regulation docs, checkbox hierarchies), use the Python pattern-match fallback:
@@ -262,7 +268,51 @@ officecli `view forms --auto` handles standard label-value detection. For **comp
 | `report` | long text, few tables | 보고서, 논문 |
 | `mixed` | none of above | 사업계획서 |
 
-### Regulation-Specific Patterns (new)
+### Form Recognition (4 strategies)
+
+1. **Adjacent cell label-value** — original table label→value detection
+2. **Header+data rows** — original column-header recognition
+3. **In-cell patterns** (Phase B1) — `□` checkbox, `keyword(  )` paren-blank, `(label：  )` annotation
+4. **KV table detection** (Phase B2) — 16 Korean keywords trigger auto-detection
+
+### Form Fill (3-phase pipeline)
+
+1. **In-cell patterns** (Phase B6) — checkbox `□`→`☑`, paren-blank, annotation fill
+2. **Table label-value** (Phase B3) — exact + prefix 60% matching, 4-directional (`right`/`down`/`left`/`up`)
+3. **Inline paragraph** (Phase B6) — regex lookbehind for `"label: value"` outside tables
+
+### Security Suite (Phase E)
+
+| Check | Limits |
+|-------|--------|
+| ZIP bomb | 1000 entries, 200 MB, 100:1 ratio |
+| Path traversal | null byte, `..`, absolute, drive letter, symlink |
+| XXE | `DtdProcessing.Prohibit` |
+| Table size | 200 cols x 10000 rows |
+
+### Diff/Compare (Phase H)
+
+- **LCS DP alignment** (fallback greedy for >10M cells)
+- **Table similarity**: dimension weight 0.3 + content weight 0.7
+- **Page range filtering**: `--pages "1-3,5"`
+
+### Text Quality (Phase F)
+
+- **Shape alt-text removal**: 50+ Korean shape names
+- **PUA stripping**: 3 Unicode planes
+- **Pseudo-table demotion**: rows <= 3 + empty >= 30%
+- **GFM tilde escape**
+- **Form confidence score**
+
+### Phase I Enhancements
+
+- **Unmatched label feedback** in fill results (labels without matching cells reported)
+- **Broken ZIP recovery** via Local File Header scan
+- **Font-size heading detection**: H1 >= 1.5x, H2 >= 1.3x, H3 >= 1.15x base size
+- **LCS-based diff** for text and table comparison
+- **Multi-`<hp:t>` in-cell replacement** (handles fragmented text nodes)
+
+### Regulation-Specific Patterns
 
 - **Checkbox hierarchy**: `□` (section) → `○` (item) → `-` (detail) → `*` (footnote)
 - **Appendix references**: `[별첨 제N호]`, `[별지 N]` — linked to form templates
@@ -280,16 +330,18 @@ from lxml import etree
 # ... strip linesegarray, edit <t> nodes, repack ZIP
 "
 ```
-**Verified on**: KICE exam (193 lineseg), application form (472p), regulation doc (599 lineseg, HWP→HWPX).
+**Verified on 4+ document types**: KICE exam (193 lineseg), application form (472p), regulation doc (599 lineseg, HWP→HWPX), 공문.
 All opened correctly in Hancom after full lineseg strip + text edits.
+Python CLI now has **12 commands**.
 
-### 25 Regex Patterns Available (R1-R25)
+### 98+ Regex Patterns (Plan 99.8) / 58 Implementation Tasks (Plan 99.9)
 
 Key patterns: lineseg strip (R1), checkbox (R6), label detect (R7-R8), uniform space normalization (R10),
 checkbox hierarchy (R21), appendix ref (R22), digit-title concat (R23).
+Plan 99.8 expanded to 98+ patterns. Plan 99.9 defined 58 implementation tasks (Phase A-I).
 Full inventory → `devlog/_plan/office/hwp/plan/99.7-kice-regex-parsing-implementation.md`.
 
-### Exam XML Structure Patterns (시험지 특화, 신규)
+### Exam XML Structure Patterns (시험지 특화)
 
 KICE 시험지는 일반 양식과 다른 XML 구조를 가짐:
 
@@ -302,7 +354,16 @@ KICE 시험지는 일반 양식과 다른 XML 구조를 가짐:
 | Text fragmentation | 1-2자 단위 `<t>` 분할 (HWP 변환) | 전체 텍스트 연결 후 매칭 |
 | 2-column layout | `<hp:colPr type="NEWSPAPER" colCount="2">` | 시험지 고유 레이아웃 |
 
-**officecli가 커버하는 것**: `view text`, `view stats`, `view forms --auto`, `validate`
+**Equation editing via script**: Hancom equations are stored as `<hp:script>` text.
+To modify an equation, replace the script text (Python or officecli find-replace):
+```bash
+# View all equations
+officecli view exam.hwpx objects --type equation
+# Edit via Python: modify <hp:script> text nodes, strip lineseg, repack ZIP
+```
+KICE template at `/private/tmp/kice-full-edit-v2.hwpx` (836 equations, verified editable).
+
+**officecli가 커버하는 것**: `view text`, `view stats`, `view forms --auto`, `validate`, `add --type equation`
 **Python fallback 필요**: 페이지 단위 삭제, 문제 텍스트 교체, section 축소
 
 **검증 (2026-04-13)**: 2025 수능 수학 → 1페이지 4문제로 축소 + 텍스트 교체 + lineseg strip. Hancom OK.
