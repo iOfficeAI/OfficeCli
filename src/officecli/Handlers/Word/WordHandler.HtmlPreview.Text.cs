@@ -296,11 +296,15 @@ public partial class WordHandler
                         var curPos = orderedStops[tabIdx].Position!.Value / 20.0; // twips → pt
                         var prevPos = tabIdx > 0 ? orderedStops[tabIdx - 1].Position!.Value / 20.0 : 0;
                         widthPt = curPos - prevPos;
-                        // Handle tab leader (dot, hyphen, underscore) for positional tabs
+                        // Handle tab leader (dot, middleDot, hyphen, underscore) for positional tabs
                         var leader = orderedStops[tabIdx].Leader?.InnerText;
                         var cssLeader = leader switch
                         {
                             "dot" => "border-bottom:1px dotted #000;",
+                            // middleDot is centered dot between stops — best CSS equivalent is a
+                            // thicker dotted border with larger spacing; browsers render dotted
+                            // borders with square dots which read as middle dots at 2px width.
+                            "middleDot" => "border-bottom:2px dotted #555;",
                             "hyphen" => "border-bottom:1px dashed #000;",
                             "underscore" => "border-bottom:1px solid #000;",
                             _ => "",
