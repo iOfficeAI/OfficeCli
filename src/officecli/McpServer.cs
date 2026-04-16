@@ -235,9 +235,20 @@ public static class McpServer
                     "outline" or "o" => handler.ViewAsOutline(),
                     "stats" or "s" => handler.ViewAsStats(),
                     "issues" or "i" => OutputFormatter.FormatIssues(handler.ViewAsIssues(null, null), OutputFormat.Json),
-                    "forms" or "f" => handler is Handlers.WordHandler wfh
-                        ? wfh.ViewAsFormsJson().ToJsonString(OutputFormatter.PublicJsonOptions)
-                        : throw new ArgumentException("Forms view is only supported for .docx files."),
+                    "forms" or "f" => handler switch {
+                        Handlers.WordHandler wfh => wfh.ViewAsFormsJson().ToJsonString(OutputFormatter.PublicJsonOptions),
+                        Handlers.HwpxHandler hfh => hfh.ViewAsFormsJson().ToJsonString(OutputFormatter.PublicJsonOptions),
+                        _ => throw new ArgumentException("Forms view is only supported for .docx and .hwpx files."),
+                    },
+                    "tables" or "tbl" => handler is Handlers.HwpxHandler htm
+                        ? htm.ViewAsTablesJson().ToJsonString(OutputFormatter.PublicJsonOptions)
+                        : throw new ArgumentException("Tables view is only supported for .hwpx files."),
+                    "markdown" or "md" => handler is Handlers.HwpxHandler hmm
+                        ? hmm.ViewAsMarkdown()
+                        : throw new ArgumentException("Markdown view is only supported for .hwpx files."),
+                    "objects" or "obj" => handler is Handlers.HwpxHandler hom
+                        ? hom.ViewAsObjectsJson().ToJsonString(OutputFormatter.PublicJsonOptions)
+                        : throw new ArgumentException("Objects view is only supported for .hwpx files."),
                     _ => throw new ArgumentException($"Unknown mode: {mode}")
                 };
             }
@@ -381,7 +392,7 @@ public static class McpServer
                 var format = Arg("format").ToLowerInvariant();
                 const string strategy = @"## Strategy
 Use view (outline/stats/issues/annotated) to understand the document first, then get/query to inspect details, then set/add/remove to modify.
-View modes: text, annotated, outline, stats, issues, html, svg (pptx only), forms (docx only).
+View modes: text, annotated, outline, stats, issues, html, svg (pptx only), forms (docx/hwpx, --auto for label recognition).
 For 3+ mutations on the same file, use batch (one open/save cycle) instead of separate calls.
 Get output keys can be used directly as Set input keys (round-trip safe).
 Colors: FF0000, red, rgb(255,0,0), accent1. Sizes: 24pt. Positions: 2cm, 1in, 72pt, or raw EMU.
@@ -583,7 +594,7 @@ Paths are 1-based: /slide[1]/shape[2], /body/p[3], /Sheet1/A1. Props are key=val
         w.WriteStartObject("items"); w.WriteString("type", "string"); w.WriteEndObject();
         w.WriteString("description", "key=value pairs (e.g. bold=true, color=FF0000, text=Hello)"); w.WriteEndObject();
         // mode
-        w.WriteStartObject("mode"); w.WriteString("type", "string"); w.WriteString("description", "View mode: text, annotated, outline, stats, issues, html, svg (pptx), forms (docx)"); w.WriteEndObject();
+        w.WriteStartObject("mode"); w.WriteString("type", "string"); w.WriteString("description", "View mode: text, annotated, outline, stats, issues, html, svg (pptx), forms (docx/hwpx)"); w.WriteEndObject();
         // depth
         w.WriteStartObject("depth"); w.WriteString("type", "number"); w.WriteString("description", "Child depth for get (default 1)"); w.WriteEndObject();
         // index

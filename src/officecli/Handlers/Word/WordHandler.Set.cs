@@ -901,8 +901,18 @@ public partial class WordHandler
                 switch (key.ToLowerInvariant())
                 {
                     case "text":
+                        if (properties.Count == 1 && CjkHelper.SegmentText(value).Count > 1 && run.Parent is OpenXmlElement runParent)
+                        {
+                            var template = run.GetFirstChild<RunProperties>()?.CloneNode(true) as RunProperties;
+                            foreach (var segmentedRun in BuildSegmentedRuns(value, template))
+                                runParent.InsertBefore(segmentedRun, run);
+                            run.Remove();
+                            break;
+                        }
+
                         var textEl = run.GetFirstChild<Text>();
                         if (textEl != null) textEl.Text = value;
+                        CjkHelper.ApplyToWordRunIfCjk(run, value);
                         break;
                     case "bold":
                         EnsureRunProperties(run).Bold = IsTruthy(value) ? new Bold() : null;
@@ -1458,7 +1468,15 @@ public partial class WordHandler
                     {
                         // Update text in all runs within the hyperlink
                         var runs = hl.Elements<Run>().ToList();
-                        if (runs.Count > 0)
+                        if (CjkHelper.SegmentText(value).Count > 1)
+                        {
+                            var template = runs.FirstOrDefault()?.GetFirstChild<RunProperties>()?.CloneNode(true) as RunProperties;
+                            foreach (var existingRun in runs)
+                                existingRun.Remove();
+                            foreach (var segmentedRun in BuildSegmentedRuns(value, template))
+                                hl.AppendChild(segmentedRun);
+                        }
+                        else if (runs.Count > 0)
                         {
                             // Set text on the first run, remove the rest
                             var firstRun = runs[0];
@@ -1466,6 +1484,7 @@ public partial class WordHandler
                                 ?? firstRun.AppendChild(new Text());
                             t.Text = value;
                             t.Space = SpaceProcessingModeValues.Preserve;
+                            CjkHelper.ApplyToWordRunIfCjk(firstRun, value);
                             for (int i = 1; i < runs.Count; i++)
                                 runs[i].Remove();
                         }
@@ -1473,6 +1492,7 @@ public partial class WordHandler
                         {
                             // No runs yet, create one
                             var newRun = new Run(new Text(value) { Space = SpaceProcessingModeValues.Preserve });
+                            CjkHelper.ApplyToWordRunIfCjk(newRun, value);
                             hl.AppendChild(newRun);
                         }
                         break;
