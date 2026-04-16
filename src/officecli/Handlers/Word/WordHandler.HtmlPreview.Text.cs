@@ -194,6 +194,22 @@ public partial class WordHandler
             return;
         }
 
+        // Form field checkbox: fldChar begin with ffData/ffCheckBox — emit ☑ / ☐ glyph
+        var fldChar = run.GetFirstChild<FieldChar>();
+        if (fldChar?.FieldCharType?.Value == FieldCharValues.Begin)
+        {
+            var ffData = fldChar.GetFirstChild<FormFieldData>();
+            var checkBox = ffData?.GetFirstChild<CheckBox>();
+            if (checkBox != null)
+            {
+                var defaultChecked = checkBox.GetFirstChild<DefaultCheckBoxFormFieldState>()?.Val?.Value == true;
+                var currentChecked = checkBox.GetFirstChild<Checked>()?.Val?.Value == true;
+                var isChecked = currentChecked || defaultChecked;
+                sb.Append(isChecked ? "☑" : "☐");
+                return;
+            }
+        }
+
         // Footnote/endnote reference — render superscript number (don't return, run may also have text)
         var fnRef = run.GetFirstChild<FootnoteReference>();
         if (fnRef?.Id?.HasValue == true && fnRef.Id.Value > 0)

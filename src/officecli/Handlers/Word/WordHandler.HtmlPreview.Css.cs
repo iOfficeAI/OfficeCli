@@ -759,6 +759,16 @@ public partial class WordHandler
                 parts.Add($"letter-spacing:{sp / 20.0:0.##}pt");
         }
 
+        // Character scale (w:w, horizontal stretch as a percentage). Use inline-block +
+        // transform scaleX so rendering width actually changes — transform alone collapses
+        // space reservation. Default/unit value 100% → skip.
+        var charScale = rProps.CharacterScale?.Val?.Value;
+        if (charScale.HasValue && charScale.Value > 0 && charScale.Value != 100)
+        {
+            var ratio = charScale.Value / 100.0;
+            parts.Add($"display:inline-block;transform:scaleX({ratio:0.##});transform-origin:left");
+        }
+
         // Color: w:color val is the pre-computed color (already has themeColor+themeTint applied).
         // Use val directly; only fall back to theme resolution if val is missing.
         var colorVal = rProps.Color?.Val?.Value;

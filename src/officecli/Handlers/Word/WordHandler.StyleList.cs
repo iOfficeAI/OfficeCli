@@ -140,6 +140,11 @@ public partial class WordHandler
         if (srcSpacing != null)
             target.Spacing = srcSpacing.CloneNode(true) as Spacing;
 
+        // Character scale (w:w horizontal stretch percentage)
+        var srcCharScale = source.GetFirstChild<CharacterScale>();
+        if (srcCharScale != null)
+            target.CharacterScale = srcCharScale.CloneNode(true) as CharacterScale;
+
         // Rendering effects: outline, shadow, emboss, imprint
         var srcOutline = source.GetFirstChild<Outline>();
         if (srcOutline != null)
