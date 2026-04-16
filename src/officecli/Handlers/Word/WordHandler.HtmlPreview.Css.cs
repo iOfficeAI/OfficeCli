@@ -1297,10 +1297,11 @@ public partial class WordHandler
             "dotted" => "dotted",
             _ => "solid"
         };
-        var widthPx = sz != null && int.TryParse(sz, out var s) ? Math.Max(1, s / 8.0) : 1.0;
-        // CSS double border needs at least 3px to render two visible lines
-        if (style == "double" && widthPx < 3) widthPx = 3;
-        var width = $"{widthPx:0.#}px";
+        // OOXML border sz is in 1/8 of a point (8 = 1pt, 24 = 3pt, etc.)
+        var widthPt = sz != null && int.TryParse(sz, out var s) ? Math.Max(0.5, s / 8.0) : 1.0;
+        // CSS double border style needs at least ~2.25pt (≈3px) to show two visible lines
+        if (style == "double" && widthPt < 2.25) widthPt = 2.25;
+        var width = $"{widthPt:0.##}pt";
 
         // Resolve color: try direct color, then themeColor with tint/shade
         string cssColor;
