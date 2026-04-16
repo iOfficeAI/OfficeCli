@@ -893,6 +893,10 @@ officecli add doc.docx "/body/p[1]" --type field --prop fieldType=author
 
 # Field at body level (creates paragraph)
 officecli add doc.docx /body --type pagenum --prop alignment=center
+
+# Merge field (for mail merge templates)
+officecli add doc.docx "/body/p[1]" --type mergefield --prop fieldName=CustomerName
+officecli add doc.docx "/body/p[1]" --type mergefield --prop fieldName=CompanyName --prop text="[Company]"
 ```
 
 ### Comments

@@ -279,6 +279,17 @@ public partial class WordHandler
                   ?? properties.GetValueOrDefault("type");
             if (ft != null) effectiveType = ft.ToLowerInvariant();
         }
+        // For mergefield, extract the field name from properties
+        string? mergeFieldName = null;
+        if (effectiveType == "mergefield")
+        {
+            mergeFieldName = properties.GetValueOrDefault("fieldName")
+                          ?? properties.GetValueOrDefault("fieldname")
+                          ?? properties.GetValueOrDefault("name");
+            if (string.IsNullOrWhiteSpace(mergeFieldName))
+                throw new ArgumentException("MERGEFIELD requires a 'fieldName' property (e.g. --prop fieldName=CustomerName).");
+        }
+
         var fieldInstr = effectiveType switch
         {
             "pagenum" or "pagenumber" or "page" => " PAGE ",
@@ -289,6 +300,7 @@ public partial class WordHandler
             "subject" => " SUBJECT ",
             "filename" => " FILENAME ",
             "time" => " TIME ",
+            "mergefield" => $" MERGEFIELD {mergeFieldName} ",
             _ => properties.ContainsKey("instruction")
                 ? properties["instruction"]
                 : throw new ArgumentException($"Unknown field type '{effectiveType}'. Provide a known type or an 'instruction' property.")
@@ -297,7 +309,9 @@ public partial class WordHandler
         if (properties.TryGetValue("instruction", out var instr))
             fieldInstr = instr.StartsWith(" ") ? instr : $" {instr} ";
 
-        var fieldPlaceholder = properties.GetValueOrDefault("text", "1");
+        var fieldPlaceholder = effectiveType == "mergefield" && !properties.ContainsKey("text")
+            ? $"\u00AB{mergeFieldName}\u00BB"
+            : properties.GetValueOrDefault("text", "1");
 
         // Build complex field: fldChar(begin) + instrText + fldChar(separate) + result + fldChar(end)
         var fieldRunBegin = new Run(new FieldChar { FieldCharType = FieldCharValues.Begin });

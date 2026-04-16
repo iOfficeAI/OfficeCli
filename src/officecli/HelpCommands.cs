@@ -550,9 +550,10 @@ Types and properties:
   footer  -- parent: /
     text, type (default|first|even), font, size, bold, italic, color, alignment
 
-  field (pagenum, pagenumber, numpages, date)  -- parent: /body/p[N] or /body
+  field (pagenum, pagenumber, numpages, date, mergefield)  -- parent: /body/p[N] or /body
     instruction (field code, e.g. " PAGE ", " NUMPAGES ", " DATE \\@ \"yyyy-MM-dd\" ")
     text (placeholder value), font, size, bold, color, alignment (body-level)
+    For mergefield: fieldName (required) — the merge field name (e.g. "CustomerName")
 
   pagebreak (break)  -- parent: /body/p[N] or /body
     type (page|column|textwrapping, default: page)
@@ -663,6 +664,7 @@ Examples:
   officecli add doc.docx '/body/p[5]' --type pagebreak
   officecli add doc.docx '/body/p[5]' --type columnbreak
   officecli add doc.docx /body --type field --prop instruction=" NUMPAGES "
+  officecli add doc.docx '/body/p[1]' --type mergefield --prop fieldName=CustomerName
   officecli add doc.docx /body --type sdt --prop sdtType=dropdown --prop alias="Status" --prop items="Draft,Review,Final"
   officecli add doc.docx '/body/p[1]' --type sdt --prop sdtType=text --prop alias="Name" --prop text="Enter name"
   officecli set doc.docx '/section[1]' --prop columns=2 --prop separator=true
