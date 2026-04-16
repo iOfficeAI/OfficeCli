@@ -78,16 +78,43 @@ public partial class WordHandler
             }
         }
 
-        // Table width: explicit tblW, or 100% of page content area
+        // Table width: explicit tblW → use it; pct → percentage; otherwise sum gridCol widths
         var tblW = tblPr?.TableWidth;
-        if (tblW?.Type?.InnerText == "dxa" && int.TryParse(tblW.Width?.Value, out var twW) && twW > 0)
+        var tblWType = tblW?.Type?.InnerText;
+        if (tblWType == "dxa" && int.TryParse(tblW!.Width?.Value, out var twW) && twW > 0)
         {
             tableStyles.Add($"width:{twW / 20.0:0.##}pt");
         }
+        else if (tblWType == "pct" && int.TryParse(tblW!.Width?.Value, out var pctW) && pctW > 0)
+        {
+            // pct values are in 1/50th of a percent (5000 = 100%)
+            tableStyles.Add($"width:{pctW / 50.0:0.##}%");
+        }
         else
         {
-            // Default: fill available page width (Word auto-fit behavior)
-            tableStyles.Add("width:100%");
+            // No explicit tblW or type=auto: use gridCol sum as max-width (Word auto-fit behavior)
+            // auto layout tables in Word shrink to content; max-width lets browser do the same
+            var isFixed = tblPr?.TableLayout?.Type?.InnerText == "fixed";
+            var grid = table.GetFirstChild<TableGrid>();
+            var gridCols = grid?.Elements<GridColumn>().ToList();
+            if (gridCols != null && gridCols.Count > 0)
+            {
+                int totalTwips = 0;
+                bool allValid = true;
+                foreach (var gc in gridCols)
+                {
+                    if (gc.Width?.Value is string gw && int.TryParse(gw, out var gwVal))
+                        totalTwips += gwVal;
+                    else
+                        allValid = false;
+                }
+                if (allValid && totalTwips > 0)
+                {
+                    var prop = isFixed ? "width" : "max-width";
+                    tableStyles.Add($"{prop}:{totalTwips / 20.0:0.##}pt");
+                }
+            }
+            // else: no grid info — browser auto-fits to content
         }
 
         var tableClass = tableBordersNone ? "borderless" : "";
