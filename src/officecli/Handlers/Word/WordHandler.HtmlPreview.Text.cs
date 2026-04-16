@@ -93,13 +93,26 @@ public partial class WordHandler
             }
             else if (child.LocalName is "ins" or "moveTo")
             {
-                // Tracked insertions — render their child runs
+                // Tracked insertions — underline to match Word's default revision mark style
+                var author = child.GetAttributes().FirstOrDefault(a => a.LocalName == "author").Value;
+                var authorAttr = string.IsNullOrEmpty(author) ? "" : $" title=\"Inserted by {HtmlEncodeAttr(author)}\"";
+                sb.Append($"<span class=\"track-ins\" style=\"text-decoration:underline;color:#2E7D32\"{authorAttr}>");
                 foreach (var insRun in child.Elements<Run>())
                     RenderRunHtml(sb, insRun, para);
+                sb.Append("</span>");
             }
             else if (child.LocalName is "del" or "moveFrom")
             {
-                // Tracked deletions — skip (deleted content should not be displayed)
+                // Tracked deletions — strikethrough with color, preserving the deleted text
+                // The delText inside del runs carries the actual deleted content; we render it so
+                // a reader of the preview can see what was removed.
+                var author = child.GetAttributes().FirstOrDefault(a => a.LocalName == "author").Value;
+                var authorAttr = string.IsNullOrEmpty(author) ? "" : $" title=\"Deleted by {HtmlEncodeAttr(author)}\"";
+                var delText = string.Concat(child.Descendants()
+                    .Where(e => e.LocalName == "delText" || e.LocalName == "t")
+                    .Select(e => e.InnerText));
+                if (!string.IsNullOrEmpty(delText))
+                    sb.Append($"<span class=\"track-del\" style=\"text-decoration:line-through;color:#C62828\"{authorAttr}>{HtmlEncode(delText)}</span>");
             }
             else if (child is Hyperlink hyperlink)
             {

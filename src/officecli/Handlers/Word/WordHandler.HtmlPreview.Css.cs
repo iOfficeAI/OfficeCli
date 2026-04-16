@@ -1165,6 +1165,25 @@ public partial class WordHandler
                 parts.Add($"width:{w / 50.0:0.#}%");
         }
 
+        // Cell text direction (tcDir): rotate text 90° or 270° via CSS writing-mode + transform
+        // Common values: btLr (bottom→top, left→right = 90° CCW), tbRl (top→bottom, right→left = 90° CW)
+        var tcDir = tcPr.GetFirstChild<TextDirection>()?.Val?.InnerText;
+        if (tcDir != null)
+        {
+            var wm = tcDir switch
+            {
+                "btLr" => "vertical-rl;transform:rotate(180deg)", // read bottom-up
+                "tbRl" => "vertical-rl",                            // read top-down
+                "lrTb" or null => null,                             // default horizontal
+                _ => null,
+            };
+            if (wm != null) parts.Add($"writing-mode:{wm}");
+        }
+
+        // Cell noWrap — prevents content wrapping within the cell
+        if (tcPr.NoWrap != null)
+            parts.Add("white-space:nowrap");
+
         // Padding — add vertical compensation for CSS line-height:1 clipping glyph ascenders
         const double CellPadVComp = 3.0; // pt
         var margins = tcPr?.TableCellMargin;
