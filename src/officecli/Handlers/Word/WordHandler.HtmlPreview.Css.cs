@@ -17,12 +17,40 @@ public partial class WordHandler
 {
     private Dictionary<string, string>? _themeColors;
 
+    // Microsoft Office default "Office" theme palette. When a document has
+    // no <a:theme> part (blank docs created via BlankDocCreator), Word
+    // applies this palette; our HTML preview now does the same so
+    // w:themeColor="accent1" resolves instead of silently dropping.
+    private static readonly Dictionary<string, string> OfficeDefaultThemeColors = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["accent1"] = "4472C4",
+        ["accent2"] = "ED7D31",
+        ["accent3"] = "A5A5A5",
+        ["accent4"] = "FFC000",
+        ["accent5"] = "5B9BD5",
+        ["accent6"] = "70AD47",
+        ["dark1"] = "000000", ["tx1"] = "000000", ["dk1"] = "000000", ["text1"] = "000000",
+        ["dark2"] = "44546A", ["tx2"] = "44546A", ["dk2"] = "44546A", ["text2"] = "44546A",
+        ["light1"] = "FFFFFF", ["bg1"] = "FFFFFF", ["lt1"] = "FFFFFF", ["background1"] = "FFFFFF",
+        ["light2"] = "E7E6E6", ["bg2"] = "E7E6E6", ["lt2"] = "E7E6E6", ["background2"] = "E7E6E6",
+        ["hyperlink"] = "0563C1",
+        ["followedHyperlink"] = "954F72",
+    };
+
     private Dictionary<string, string> GetThemeColors()
     {
         if (_themeColors != null) return _themeColors;
 
         var colorScheme = _doc.MainDocumentPart?.ThemePart?.Theme?.ThemeElements?.ColorScheme;
         _themeColors = ThemeColorResolver.BuildColorMap(colorScheme, includePptAliases: false);
+
+        // Fill in any missing standard names from the Office default theme so
+        // themeColor references resolve even when the docx has no theme part.
+        foreach (var (name, hex) in OfficeDefaultThemeColors)
+        {
+            if (!_themeColors.ContainsKey(name))
+                _themeColors[name] = hex;
+        }
         return _themeColors;
     }
 
@@ -818,22 +846,13 @@ public partial class WordHandler
             parts.Add($"display:inline-block;transform:scaleX({ratio:0.##});transform-origin:left");
         }
 
-        // Color: w:color val is the pre-computed color (already has themeColor+themeTint applied).
-        // Use val directly; only fall back to theme resolution if val is missing.
-        var colorVal = rProps.Color?.Val?.Value;
-        if (colorVal != null && colorVal != "auto")
+        // Color: w:color val + themeColor with tint/shade. Route through
+        // ResolveRunColor for consistency with conditional-format and border
+        // paths. Val wins if not "auto"; else fall through to themeColor.
+        var resolvedColor = ResolveRunColor(rProps.Color);
+        if (resolvedColor != null)
         {
-            parts.Add($"color:#{colorVal}");
-        }
-        else if (rProps.Color?.ThemeColor?.InnerText is string tcName)
-        {
-            var tc = GetThemeColors();
-            if (tc.TryGetValue(tcName, out var tcHex))
-            {
-                var tint = rProps.Color?.GetAttributes().FirstOrDefault(a => a.LocalName == "themeTint").Value;
-                var shade = rProps.Color?.GetAttributes().FirstOrDefault(a => a.LocalName == "themeShade").Value;
-                parts.Add($"color:{ApplyTintShade(tcHex, tint, shade)}");
-            }
+            parts.Add($"color:{resolvedColor}");
         }
 
         // Highlight
