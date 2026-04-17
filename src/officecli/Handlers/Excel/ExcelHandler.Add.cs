@@ -1453,6 +1453,17 @@ public partial class ExcelHandler
                 var endColIdx = ColumnNameToIndex(endCol);
                 var colCount = endColIdx - startColIdx + 1;
 
+                // CONSISTENCY(table-totalrow): a:totalsRowShown MUST point at a row
+                // OUTSIDE the data area. Previously we reused endRow as the totals
+                // row, which overwrote whatever data lived on that last row. Expand
+                // the ref by one row so the totals row is appended below the data
+                // instead of stamping over it.
+                if (hasTotalRow)
+                {
+                    endRow += 1;
+                    rangeRef = $"{startCol}{startRow}:{endCol}{endRow}";
+                }
+
                 string[] colNames;
                 if (properties.TryGetValue("columns", out var tblColsStr))
                 {
