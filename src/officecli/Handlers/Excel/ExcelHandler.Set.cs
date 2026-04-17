@@ -1399,8 +1399,6 @@ public partial class ExcelHandler
                     }
                     else
                     {
-                        var hlUri = new Uri(value, UriKind.RelativeOrAbsolute);
-                        var hlRel = worksheet.AddHyperlinkRelationship(hlUri, isExternal: true);
                         if (hyperlinksEl == null)
                         {
                             hyperlinksEl = new Hyperlinks();
@@ -1409,7 +1407,24 @@ public partial class ExcelHandler
                         hyperlinksEl.Elements<Hyperlink>()
                             .Where(h => h.Reference?.Value?.Equals(cellRef, StringComparison.OrdinalIgnoreCase) == true)
                             .ToList().ForEach(h => h.Remove());
-                        hyperlinksEl.AppendChild(new Hyperlink { Reference = cellRef.ToUpperInvariant(), Id = hlRel.Id });
+                        if (value.StartsWith("#"))
+                        {
+                            // Internal target (sheet cell or named range) is
+                            // written as an in-document hyperlink via the
+                            // `location` attribute, no relationship/target.
+                            var location = value.Substring(1);
+                            hyperlinksEl.AppendChild(new Hyperlink
+                            {
+                                Reference = cellRef.ToUpperInvariant(),
+                                Location = location
+                            });
+                        }
+                        else
+                        {
+                            var hlUri = new Uri(value, UriKind.RelativeOrAbsolute);
+                            var hlRel = worksheet.AddHyperlinkRelationship(hlUri, isExternal: true);
+                            hyperlinksEl.AppendChild(new Hyperlink { Reference = cellRef.ToUpperInvariant(), Id = hlRel.Id });
+                        }
                     }
                     break;
                 }
