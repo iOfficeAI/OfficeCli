@@ -612,7 +612,9 @@ public partial class WordHandler
         // needs real polygon/path geometry (line, arrows, callouts).
         if (svgPrst)
         {
-            var svgFill = ExtractCssColor(fillCss, "background-color") ?? "transparent";
+            var svgFill = ExtractCssColor(fillCss, "background-color")
+                ?? ExtractFirstGradientColor(fillCss)
+                ?? "transparent";
             var (borderColor, borderWidth) = ExtractBorderParts(borderCss);
             RenderPrstGeomSvg(sb, prst!, svgFill, borderColor ?? "#000", borderWidth ?? 1);
         }
@@ -706,6 +708,18 @@ public partial class WordHandler
         var m = System.Text.RegularExpressions.Regex.Match(
             css, $@"{prop}\s*:\s*(#[0-9A-Fa-f]{{3,8}}|[a-zA-Z]+)");
         return m.Success ? m.Groups[1].Value : null;
+    }
+
+    // Pull the first hex color out of a `background:linear-gradient(...)`
+    // / `background-image:linear-gradient(...)` rule so SVG prstGeom shapes
+    // don't degrade to transparent when only a gradient fill is available.
+    private static string? ExtractFirstGradientColor(string css)
+    {
+        if (string.IsNullOrEmpty(css)) return null;
+        if (css.IndexOf("gradient", StringComparison.OrdinalIgnoreCase) < 0) return null;
+        var m = System.Text.RegularExpressions.Regex.Match(
+            css, @"#[0-9A-Fa-f]{3,8}");
+        return m.Success ? m.Value : null;
     }
 
     private static (string? color, double? width) ExtractBorderParts(string css)
