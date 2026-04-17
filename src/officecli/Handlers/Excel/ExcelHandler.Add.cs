@@ -153,6 +153,11 @@ public partial class ExcelHandler
                     }
                     else
                     {
+                        // CONSISTENCY(formula-stale): writing a literal value must
+                        // clear any prior CellFormula on the same cell. Otherwise
+                        // the old formula re-evaluates on open / in html preview
+                        // and overrides the literal the caller just set.
+                        cell.CellFormula = null;
                         // R2-2: strip XML-illegal chars (e.g. U+0000) from the cell
                         // value before it gets serialized to sheet1.xml. Without
                         // this, a NUL byte from upstream data would crash every
