@@ -293,11 +293,18 @@ public partial class WordHandler
             if (activeSectionIdx >= 0 && activeSectionIdx < sections.Count)
             {
                 var ln = sections[activeSectionIdx].GetFirstChild<LineNumberType>();
-                if (ln?.CountBy?.Value is short by && by > 0)
+                // LineNumberType fields are Int16Value — malformed raw docs
+                // (huge/negative start, non-numeric countBy) throw on .Value
+                // access. Parse the raw InnerText ourselves and swallow.
+                short by = 0;
+                if (ln?.CountBy != null)
+                    short.TryParse(ln.CountBy.InnerText, out by);
+                if (ln != null && by > 0)
                 {
-                    var startN = ln.Start?.Value ?? 1;
-                    var distTwips = ln.Distance?.Value is string ds
-                        && int.TryParse(ds, out var dv) ? dv : 0;
+                    short startN = 1;
+                    if (ln.Start != null) short.TryParse(ln.Start.InnerText, out startN);
+                    int distTwips = 0;
+                    if (ln.Distance != null) int.TryParse(ln.Distance.InnerText, out distTwips);
                     var distPt = distTwips / 20.0;
                     var restart = ln.Restart?.InnerText ?? "newPage";
                     lineNumAttrs =
@@ -307,7 +314,7 @@ public partial class WordHandler
                         $" data-line-num-restart=\"{restart}\"";
                 }
             }
-            sb.AppendLine($"<div class=\"page-wrapper\" data-section=\"{i + 1}\"{lineNumAttrs}>");
+            sb.AppendLine($"<div class=\"page-wrapper\" data-section=\"{i + 1}\" data-section-idx=\"{activeSectionIdx}\"{lineNumAttrs}>");
             sb.AppendLine($"<div class=\"page\" data-page=\"{i + 1}\" style=\"{pageStyle}\">");
             // #3: per-page header/footer selection. titlePg → first-page
             // variant; evenAndOddHeaders + even-numbered page → even
@@ -418,7 +425,11 @@ public partial class WordHandler
       if(firstOverflow&&firstOverflow.tagName==='TABLE'){
         var table=firstOverflow;
         var tableTop=table.offsetTop-body.offsetTop;
-        var trs=Array.from(table.querySelectorAll('tr'));
+        // Only top-level rows — querySelectorAll('tr') would also pick up
+        // nested subtable rows and mangle nested structures on page splits.
+        var trs=Array.from(table.querySelectorAll('tr')).filter(function(tr){
+          return tr.closest('table')===table;
+        });
         var hdrRows=trs.filter(function(tr){return tr.getAttribute('data-tbl-header')==='1';});
         // Find first row whose bottom exceeds availH (relative to body).
         var rowSplit=-1;
@@ -566,7 +577,7 @@ public partial class WordHandler
     var wrappers=document.querySelectorAll('.page-wrapper[data-line-num-by]');
     if(!wrappers.length)return;
     var runningNum=null;  // continuous/newSection running counter across pages
-    var prevRestart=null;
+    var prevSection=null;
     wrappers.forEach(function(wrap){
       var body=wrap.querySelector('.page-body');
       if(!body)return;
@@ -576,9 +587,13 @@ public partial class WordHandler
       var start=parseInt(wrap.dataset.lineNumStart||'1')||1;
       var dist=parseFloat(wrap.dataset.lineNumDist||'0')||0;
       var restart=wrap.dataset.lineNumRestart||'newPage';
-      var current=(restart==='newPage'||runningNum===null||prevRestart!==restart)
-        ?start:runningNum;
-      prevRestart=restart;
+      var sectionIdx=wrap.dataset.sectionIdx||'-1';
+      var sectionChanged=prevSection!==null && prevSection!==sectionIdx;
+      var current;
+      if(restart==='newPage'||runningNum===null) current=start;
+      else if(restart==='newSection') current=sectionChanged?start:runningNum;
+      else current=runningNum;  // continuous
+      prevSection=sectionIdx;
       body.style.position='relative';
       var bodyRect=body.getBoundingClientRect();
       var seenY=Object.create(null);
@@ -747,14 +762,25 @@ public partial class WordHandler
         return result;
     }
 
+    // OpenXML typed-value accessors throw on malformed raw attrs
+    // (e.g. negative on UInt32Value, overflow on Int16Value, non-numeric).
+    // These wrappers turn any access/parse exception into the fallback.
+    private static double SafeUIntTwips(Func<uint?> read, double fallback)
+    {
+        try { return (double)(read() ?? (uint)fallback); }
+        catch { return fallback; }
+    }
+
     private static PageLayout GetPageLayoutFor(SectionProperties? sectPr)
     {
         var pgSz = sectPr?.GetFirstChild<PageSize>();
         var pgMar = sectPr?.GetFirstChild<PageMargin>();
         const double c = 2.54 / 1440.0; // twips → cm
         const double p = 1.0 / 20.0;    // twips → pt (exact)
-        var wTwips = (double)(pgSz?.Width?.Value ?? 11906);
-        var hTwips = (double)(pgSz?.Height?.Value ?? 16838);
+        // OOXML schema types (UInt32Value) throw on .Value access when the
+        // raw attribute is malformed (negative, non-numeric). Tolerate it.
+        double wTwips = SafeUIntTwips(() => pgSz?.Width?.Value, 11906);
+        double hTwips = SafeUIntTwips(() => pgSz?.Height?.Value, 16838);
         // Landscape: OOXML orient=landscape flips the width/height semantics.
         // w:w/w:h already reflect the orientation in most real-world docs,
         // but guard against the rare case where w:w < w:h but orient=landscape.
@@ -1335,6 +1361,13 @@ public partial class WordHandler
                 {
                     var ilvl = para.ParagraphProperties?.NumberingProperties?.NumberingLevelReference?.Val?.Value ?? 0;
                     var numId = para.ParagraphProperties?.NumberingProperties?.NumberingId?.Val?.Value ?? 0;
+                    // Clamp ilvl to the OOXML-legal range [0, 8]. Malformed
+                    // docs with huge ilvl (observed via raw-zip fuzz: 10000
+                    // or Int32.MaxValue) otherwise explode the nested <ul>
+                    // stack — crash on stack pop, or inflate HTML by 50× per
+                    // paragraph (DoS). Negative values snap to 0 as well.
+                    if (ilvl < 0) ilvl = 0;
+                    else if (ilvl > 8) ilvl = 8;
                     var numFmt = GetNumberingFormat(numId, ilvl);
                     var lvlText = GetLevelText(numId, ilvl);
                     var isMultiLevel = lvlText != null && System.Text.RegularExpressions.Regex.Matches(lvlText, @"%\d").Count > 1;
@@ -1800,8 +1833,12 @@ public partial class WordHandler
             using var reader = new StreamReader(stream);
             var content = reader.ReadToEnd();
             var contentType = (part.ContentType ?? "").ToLowerInvariant();
+            // Strip media-type parameters (e.g. "text/html; charset=utf-8")
+            // before comparison: Pandoc/non-Word authors commonly emit them.
+            var mediaType = contentType.Split(';', 2)[0].Trim();
 
-            if (contentType is "text/html" or "application/xhtml+xml")
+            if (mediaType is "text/html" or "application/xhtml+xml"
+                || mediaType.EndsWith("+xml") && mediaType.Contains("xhtml"))
             {
                 var bodyMatch = Regex.Match(content,
                     @"<body[^>]*>(.*?)</body>",
@@ -1817,7 +1854,7 @@ public partial class WordHandler
                     RegexOptions.IgnoreCase);
                 sb.AppendLine($"<div class=\"alt-chunk-html\">{inner}</div>");
             }
-            else if (contentType is "text/plain" or "text/css")
+            else if (mediaType is "text/plain" or "text/css")
             {
                 sb.AppendLine($"<pre class=\"alt-chunk-text\">{HtmlEncode(content)}</pre>");
             }
