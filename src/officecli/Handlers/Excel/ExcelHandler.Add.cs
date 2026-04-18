@@ -1264,22 +1264,93 @@ public partial class ExcelHandler
                 long picWholeRows = phEmu / EmuPerRowApprox;
                 long picRemRows = phEmu % EmuPerRowApprox;
 
-                var anchor = new XDR.TwoCellAnchor(
-                    new XDR.FromMarker(
-                        new XDR.ColumnId(px.ToString()),
-                        new XDR.ColumnOffset("0"),
-                        new XDR.RowId(py.ToString()),
-                        new XDR.RowOffset("0")
-                    ),
-                    new XDR.ToMarker(
-                        new XDR.ColumnId((px + (int)picWholeCols).ToString()),
-                        new XDR.ColumnOffset(picRemCols.ToString()),
-                        new XDR.RowId((py + (int)picWholeRows).ToString()),
-                        new XDR.RowOffset(picRemRows.ToString())
-                    ),
-                    BuildPictureElementWithTransform(picId, alt ?? "", imgRelId, xlSvgRelId, properties),
-                    new XDR.ClientData()
-                );
+                // DEFERRED(xlsx/picture-anchor-mode) P12: honor `anchorMode=`
+                // oneCell|absolute|twoCell. Default remains twoCell for back-compat.
+                // oneCell → <xdr:oneCellAnchor> with from + ext; picture auto-scales
+                //           if the column/row containing "from" is resized.
+                // absolute → <xdr:absoluteAnchor> with pos (x/y EMU) + ext; picture
+                //            does not move or resize with cells.
+                // twoCell  → <xdr:twoCellAnchor> with from + to markers (default).
+                var picAnchorMode = (properties.GetValueOrDefault("anchorMode")
+                    ?? properties.GetValueOrDefault("anchor")
+                    ?? "twoCell").Trim().ToLowerInvariant();
+
+                var picShape = BuildPictureElementWithTransform(picId, alt ?? "", imgRelId, xlSvgRelId, properties);
+
+                // For oneCell / absolute anchors the size is carried by an <xdr:ext>
+                // element instead of a To marker, so we must also stamp the extent
+                // onto the picture's Transform2D so rotation / flip metadata plus
+                // the rendered size stay in sync.
+                if (picAnchorMode is "onecell" or "absolute")
+                {
+                    var picXfrm = picShape.Descendants<Drawing.Transform2D>().FirstOrDefault();
+                    if (picXfrm != null)
+                    {
+                        var ext2d = picXfrm.Extents ?? new Drawing.Extents();
+                        ext2d.Cx = pwEmu;
+                        ext2d.Cy = phEmu;
+                        picXfrm.Extents = ext2d;
+                    }
+                }
+
+                OpenXmlElement anchor;
+                switch (picAnchorMode)
+                {
+                    case "onecell":
+                    {
+                        var oneAnchor = new XDR.OneCellAnchor(
+                            new XDR.FromMarker(
+                                new XDR.ColumnId(px.ToString()),
+                                new XDR.ColumnOffset("0"),
+                                new XDR.RowId(py.ToString()),
+                                new XDR.RowOffset("0")
+                            ),
+                            new XDR.Extent { Cx = pwEmu, Cy = phEmu },
+                            picShape,
+                            new XDR.ClientData()
+                        );
+                        anchor = oneAnchor;
+                        break;
+                    }
+                    case "absolute":
+                    {
+                        // Absolute anchor pos: accept `x=`/`y=` in the same unit
+                        // syntax as width/height (bare EMU, or "1in", "2cm").
+                        long absX = 0, absY = 0;
+                        if (properties.TryGetValue("x", out var absXs))
+                            absX = OfficeCli.Core.EmuConverter.ParseEmu(absXs);
+                        if (properties.TryGetValue("y", out var absYs))
+                            absY = OfficeCli.Core.EmuConverter.ParseEmu(absYs);
+                        var absAnchor = new XDR.AbsoluteAnchor(
+                            new XDR.Position { X = absX, Y = absY },
+                            new XDR.Extent { Cx = pwEmu, Cy = phEmu },
+                            picShape,
+                            new XDR.ClientData()
+                        );
+                        anchor = absAnchor;
+                        break;
+                    }
+                    default:
+                    {
+                        anchor = new XDR.TwoCellAnchor(
+                            new XDR.FromMarker(
+                                new XDR.ColumnId(px.ToString()),
+                                new XDR.ColumnOffset("0"),
+                                new XDR.RowId(py.ToString()),
+                                new XDR.RowOffset("0")
+                            ),
+                            new XDR.ToMarker(
+                                new XDR.ColumnId((px + (int)picWholeCols).ToString()),
+                                new XDR.ColumnOffset(picRemCols.ToString()),
+                                new XDR.RowId((py + (int)picWholeRows).ToString()),
+                                new XDR.RowOffset(picRemRows.ToString())
+                            ),
+                            picShape,
+                            new XDR.ClientData()
+                        );
+                        break;
+                    }
+                }
 
                 picDrawingsPart.WorksheetDrawing.AppendChild(anchor);
 
@@ -1338,8 +1409,13 @@ public partial class ExcelHandler
 
                 picDrawingsPart.WorksheetDrawing.Save();
 
-                var picAnchors = picDrawingsPart.WorksheetDrawing.Elements<XDR.TwoCellAnchor>()
-                    .Where(a => a.Descendants<XDR.Picture>().Any()).ToList();
+                // DEFERRED(xlsx/picture-anchor-mode) P12: enumerate all anchor
+                // kinds (twoCell / oneCell / absolute) when counting picture slots.
+                var picAnchors = picDrawingsPart.WorksheetDrawing
+                    .Elements<OpenXmlElement>()
+                    .Where(a => (a is XDR.TwoCellAnchor || a is XDR.OneCellAnchor || a is XDR.AbsoluteAnchor)
+                        && a.Descendants<XDR.Picture>().Any())
+                    .ToList();
                 var picIdx = picAnchors.IndexOf(anchor) + 1;
 
                 return $"/{picSheetName}/picture[{picIdx}]";
