@@ -218,6 +218,9 @@ internal static partial class PivotTableHelper
             // mergeItem="1"/> which tells Excel to merge+center repeated
             // outer axis item cells.
             "showdrill", "mergelabels",
+            // PV7: labelFilter=field:type:value — row-level pre-cache filter
+            // (see ApplyLabelFilter).
+            "labelfilter",
         };
 
     /// <summary>
@@ -767,6 +770,69 @@ internal static partial class PivotTableHelper
         }
     }
 
+    // PV7 / DEFERRED(xlsx/pivot-advanced-props): row-level pre-cache label
+    // filter. Colon-separated scalar form: `labelFilter=field:type:value`
+    // where `type` is one of contains, beginsWith, endsWith, equals,
+    // notEquals, doesNotContain. Filtering happens BEFORE the cache is
+    // built so the cache, rendered cells, and totals all stay consistent
+    // (same trick the topN filter uses — the alternative, emitting
+    // <x:filters> in the pivotField, would require the cache and the
+    // filter predicate to agree at runtime and Excel is strict about it).
+    // Known limitation vs native Excel: only row-axis labels are filterable
+    // (column-axis labels are not yet addressable).
+    private static void ApplyLabelFilter(
+        string[] headers,
+        List<string[]> columnData,
+        Dictionary<string, string> properties)
+    {
+        if (!properties.TryGetValue("labelFilter", out var spec) || string.IsNullOrEmpty(spec))
+            return;
+        var parts = spec.Split(':', 3);
+        if (parts.Length != 3)
+            throw new ArgumentException(
+                $"labelFilter must be 'field:type:value', got: '{spec}'");
+        var fieldName = parts[0].Trim();
+        var opType = parts[1].Trim().ToLowerInvariant();
+        var needle = parts[2];
+
+        int fieldIdx = Array.FindIndex(headers, h => string.Equals(h, fieldName, StringComparison.Ordinal));
+        if (fieldIdx < 0)
+            throw new ArgumentException($"labelFilter field '{fieldName}' not found in source headers");
+        if (columnData.Count == 0 || fieldIdx >= columnData.Count) return;
+        var col = columnData[fieldIdx];
+        var rowCount = col.Length;
+        if (rowCount == 0) return;
+
+        Func<string, bool> match = opType switch
+        {
+            "contains" => v => v != null && v.IndexOf(needle, StringComparison.Ordinal) >= 0,
+            "doesnotcontain" => v => v == null || v.IndexOf(needle, StringComparison.Ordinal) < 0,
+            "beginswith" => v => v != null && v.StartsWith(needle, StringComparison.Ordinal),
+            "endswith" => v => v != null && v.EndsWith(needle, StringComparison.Ordinal),
+            "equals" => v => string.Equals(v, needle, StringComparison.Ordinal),
+            "notequals" => v => !string.Equals(v, needle, StringComparison.Ordinal),
+            _ => throw new ArgumentException(
+                $"labelFilter type must be one of contains/doesNotContain/beginsWith/endsWith/equals/notEquals, got: '{opType}'"),
+        };
+
+        var keep = new bool[rowCount];
+        int keepCount = 0;
+        for (int r = 0; r < rowCount; r++)
+        {
+            if (match(col[r])) { keep[r] = true; keepCount++; }
+        }
+        if (keepCount == rowCount) return;
+        for (int c = 0; c < columnData.Count; c++)
+        {
+            var src = columnData[c];
+            var dst = new string[keepCount];
+            int w = 0;
+            for (int r = 0; r < rowCount && r < src.Length; r++)
+                if (keep[r]) dst[w++] = src[r];
+            columnData[c] = dst;
+        }
+    }
+
     /// <summary>
     /// Create a pivot table on the target worksheet.
     /// </summary>
@@ -903,6 +969,10 @@ internal static partial class PivotTableHelper
                 }
             }
         }
+
+        // 2a. Apply label filter (row-level, pre-cache). Mirrors topN's
+        // filter-before-cache approach so definition/cache stay consistent.
+        ApplyLabelFilter(headers, columnData, properties);
 
         // 2b. Apply Top-N filter to the source rows (ranked by the first value
         // field's aggregate on the outermost row field). Runs BEFORE cache
