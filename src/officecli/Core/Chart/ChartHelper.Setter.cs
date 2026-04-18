@@ -2227,6 +2227,16 @@ internal static partial class ChartHelper
         var secValAxis = BuildValueAxis(secondaryValAxisId, secondaryCatAxisId, C.AxisPositionValues.Right);
         secValAxis.RemoveAllChildren<C.MajorGridlines>(); // secondary axis typically has no gridlines
 
+        // Bind secondary Y axis to the right edge by crossing the (hidden) secondary
+        // category axis at its maximum. Without this, Excel ignores axPos="r" and
+        // renders both Y axes on the left edge — BuildValueAxis defaults crosses to
+        // autoZero, which is correct for the primary axis but wrong here.
+        foreach (var c in secValAxis.Elements<C.Crosses>().ToList()) c.Remove();
+        foreach (var c in secValAxis.Elements<C.CrossesAt>().ToList()) c.Remove();
+        // Schema order: crosses comes after crossAx; append is safe as BuildValueAxis
+        // ends with Crosses and we already stripped the autoZero Crosses above.
+        secValAxis.AppendChild(new C.Crosses { Val = C.CrossesValues.Maximum });
+
         // Insert after the last existing axis to maintain schema order
         var lastAxis = plotArea.Elements<C.ValueAxis>().LastOrDefault() as OpenXmlElement
             ?? plotArea.Elements<C.CategoryAxis>().LastOrDefault() as OpenXmlElement;
