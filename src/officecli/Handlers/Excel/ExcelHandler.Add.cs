@@ -1283,6 +1283,37 @@ public partial class ExcelHandler
                 );
 
                 picDrawingsPart.WorksheetDrawing.AppendChild(anchor);
+
+                // P8: picture-level hyperlink — <a:hlinkClick> under <xdr:cNvPr>.
+                // External URL → add rel on DrawingsPart, reference its rId.
+                // Internal (starts with '#') → no rel, use Location attribute.
+                // CONSISTENCY(xlsx-hyperlink): mirrors cell link handling in
+                // commit 60e1455.
+                var picHlink = properties.GetValueOrDefault("hyperlink")
+                    ?? properties.GetValueOrDefault("link");
+                if (!string.IsNullOrWhiteSpace(picHlink))
+                {
+                    var picCNvPr = anchor.Descendants<XDR.NonVisualDrawingProperties>().FirstOrDefault();
+                    if (picCNvPr != null)
+                    {
+                        Drawing.HyperlinkOnClick hlClick;
+                        if (picHlink.StartsWith("#"))
+                        {
+                            // No rel, no @r:id — pure in-document jump via @location.
+                            hlClick = new Drawing.HyperlinkOnClick { Id = "" };
+                            hlClick.SetAttribute(new OpenXmlAttribute(
+                                "", "location", "", picHlink.Substring(1)));
+                        }
+                        else
+                        {
+                            var hlUri = new Uri(picHlink, UriKind.RelativeOrAbsolute);
+                            var hlRel = picDrawingsPart.AddHyperlinkRelationship(hlUri, isExternal: true);
+                            hlClick = new Drawing.HyperlinkOnClick { Id = hlRel.Id };
+                        }
+                        picCNvPr.AppendChild(hlClick);
+                    }
+                }
+
                 picDrawingsPart.WorksheetDrawing.Save();
 
                 var picAnchors = picDrawingsPart.WorksheetDrawing.Elements<XDR.TwoCellAnchor>()
