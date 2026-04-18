@@ -2833,7 +2833,8 @@ public partial class ExcelHandler
                         || value == "1" || value.Equals("yes", StringComparison.OrdinalIgnoreCase);
                     break;
                 case "outline" or "outlinelevel" or "group":
-                    if (!byte.TryParse(value, out var colOutline))
+                    // DEFERRED(xlsx/row-height-validation) RC2: Excel outline level max is 7.
+                    if (!byte.TryParse(value, out var colOutline) || colOutline > 7)
                         throw new ArgumentException($"Invalid 'outline' value: '{value}'. Expected an integer 0-7 (outline/group level).");
                     col.OutlineLevel = colOutline;
                     break;
@@ -2981,7 +2982,8 @@ public partial class ExcelHandler
                         || value == "1" || value.Equals("yes", StringComparison.OrdinalIgnoreCase);
                     break;
                 case "outline" or "outlinelevel" or "group":
-                    if (!byte.TryParse(value, out var outlineVal))
+                    // DEFERRED(xlsx/row-height-validation) RC2: Excel outline level max is 7.
+                    if (!byte.TryParse(value, out var outlineVal) || outlineVal > 7)
                         throw new ArgumentException($"Invalid 'outline' value: '{value}'. Expected an integer 0-7 (outline/group level).");
                     row.OutlineLevel = outlineVal;
                     break;

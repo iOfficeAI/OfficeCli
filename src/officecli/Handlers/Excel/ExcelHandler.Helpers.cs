@@ -145,6 +145,7 @@ public partial class ExcelHandler
         if (string.IsNullOrWhiteSpace(value))
             throw new ArgumentException("Row height cannot be empty.");
         var trimmed = value.Trim();
+        double pts;
         // Bare number → points (legacy behavior)
         if (double.TryParse(trimmed, System.Globalization.NumberStyles.Float,
                 System.Globalization.CultureInfo.InvariantCulture, out var bare)
@@ -152,18 +153,27 @@ public partial class ExcelHandler
         {
             if (double.IsNaN(bare) || double.IsInfinity(bare))
                 throw new ArgumentException($"Invalid 'height' value: '{value}'. Expected a finite number (row height in points, e.g. 15.75).");
-            return bare;
+            pts = bare;
         }
-        // Unit-qualified: convert via EMU then back to points.
-        try
+        else
         {
-            var emu = OfficeCli.Core.EmuConverter.ParseEmu(trimmed);
-            return emu / 12700.0;
+            // Unit-qualified: convert via EMU then back to points.
+            try
+            {
+                var emu = OfficeCli.Core.EmuConverter.ParseEmu(trimmed);
+                pts = emu / 12700.0;
+            }
+            catch (Exception ex)
+            {
+                throw new ArgumentException($"Invalid 'height' value: '{value}'. Expected a finite number or unit-qualified value (e.g. 15.75, 40pt, 40px, 1cm, 0.5in).", ex);
+            }
         }
-        catch (Exception ex)
-        {
-            throw new ArgumentException($"Invalid 'height' value: '{value}'. Expected a finite number or unit-qualified value (e.g. 15.75, 40pt, 40px, 1cm, 0.5in).", ex);
-        }
+        // DEFERRED(xlsx/row-height-validation) RC2: Excel row height is bounded
+        // [0, 409.5] points. Values outside this range are rejected by Excel at
+        // open time (file silently repaired), so validate at Set time.
+        if (pts < 0 || pts > 409.5)
+            throw new ArgumentException($"Invalid 'height' value: '{value}'. Row height must be between 0 and 409.5 points.");
+        return pts;
     }
 
     // CONSISTENCY(rc-units): Column width is in "maximum digit width" char
@@ -175,25 +185,34 @@ public partial class ExcelHandler
         if (string.IsNullOrWhiteSpace(value))
             throw new ArgumentException("Column width cannot be empty.");
         var trimmed = value.Trim();
+        double chars;
         if (double.TryParse(trimmed, System.Globalization.NumberStyles.Float,
                 System.Globalization.CultureInfo.InvariantCulture, out var bare)
             && !char.IsLetter(trimmed[^1]))
         {
             if (double.IsNaN(bare) || double.IsInfinity(bare))
                 throw new ArgumentException($"Invalid 'width' value: '{value}'. Expected a finite number (column width in char units, e.g. 8.43).");
-            return bare;
+            chars = bare;
         }
-        try
+        else
         {
-            var emu = OfficeCli.Core.EmuConverter.ParseEmu(trimmed);
-            // 9525 EMU = 1 px; 7 px ≈ 1 char unit (Calibri 11pt MDW baseline)
-            var px = emu / 9525.0;
-            return px / 7.0;
+            try
+            {
+                var emu = OfficeCli.Core.EmuConverter.ParseEmu(trimmed);
+                // 9525 EMU = 1 px; 7 px ≈ 1 char unit (Calibri 11pt MDW baseline)
+                var px = emu / 9525.0;
+                chars = px / 7.0;
+            }
+            catch (Exception ex)
+            {
+                throw new ArgumentException($"Invalid 'width' value: '{value}'. Expected a finite number or unit-qualified value (e.g. 8.43, 20px, 2cm, 1in, 60pt).", ex);
+            }
         }
-        catch (Exception ex)
-        {
-            throw new ArgumentException($"Invalid 'width' value: '{value}'. Expected a finite number or unit-qualified value (e.g. 8.43, 20px, 2cm, 1in, 60pt).", ex);
-        }
+        // DEFERRED(xlsx/row-height-validation) RC2: Excel column width is bounded
+        // [0, 255] character units. Validate at Set time.
+        if (chars < 0 || chars > 255)
+            throw new ArgumentException($"Invalid 'width' value: '{value}'. Column width must be between 0 and 255 character units.");
+        return chars;
     }
 
     internal static XDR.Picture BuildPictureElementWithTransform(
