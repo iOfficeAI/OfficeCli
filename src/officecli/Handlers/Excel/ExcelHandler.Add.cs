@@ -1907,6 +1907,19 @@ public partial class ExcelHandler
                 // x/y/width/height (column/row units) form. When both are
                 // supplied, warn and let anchor= win — it defines the full
                 // rectangle, so width/height are ambiguous.
+                // CONSISTENCY(ref-alias): `ref=<cell>` maps to single-cell
+                // anchor `<cell>:<cell>`, matching cell/comment/table which
+                // accept `ref=` as the placement address. Explicit `anchor=`
+                // wins if both are given.
+                if (!properties.ContainsKey("anchor")
+                    && properties.TryGetValue("ref", out var shpRefProp)
+                    && !string.IsNullOrWhiteSpace(shpRefProp))
+                {
+                    var refTrim = shpRefProp.Trim();
+                    if (!refTrim.Contains(':'))
+                        refTrim = $"{refTrim}:{refTrim}";
+                    properties["anchor"] = refTrim;
+                }
                 int sx, sy, sw, sh;
                 if (properties.TryGetValue("anchor", out var shpAnchorStr) && !string.IsNullOrWhiteSpace(shpAnchorStr))
                 {
