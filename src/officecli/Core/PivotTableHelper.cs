@@ -221,6 +221,10 @@ internal static partial class PivotTableHelper
             // PV7: labelFilter=field:type:value — row-level pre-cache filter
             // (see ApplyLabelFilter).
             "labelfilter",
+            // R4-3: calculatedField[N]=Name:=Formula — numbered variants are
+            // also accepted; CollectUnknownPivotKeys normalizes trailing
+            // digits before the known-set check.
+            "calculatedfield", "calculatedfields",
         };
 
     /// <summary>
@@ -240,10 +244,26 @@ internal static partial class PivotTableHelper
         {
             if (string.IsNullOrEmpty(key)) continue;
             var canonical = NormalizePivotPropKey(key);
-            if (!_knownPivotKeys.Contains(canonical))
+            // R4-3: strip trailing digits before lookup so `calculatedField1`,
+            // `calculatedField2`, etc. match the canonical `calculatedfield`.
+            var stripped = System.Text.RegularExpressions.Regex.Replace(canonical, @"\d+$", "");
+            if (!_knownPivotKeys.Contains(canonical)
+                && !_knownPivotKeys.Contains(stripped))
                 unknown.Add(key);
         }
         return unknown;
+    }
+
+    /// <summary>
+    /// Public wrapper around <see cref="_knownPivotKeys"/> + alias/digit
+    /// normalization for tests and external callers.
+    /// </summary>
+    public static bool IsKnownPivotProperty(string key)
+    {
+        if (string.IsNullOrEmpty(key)) return false;
+        var canonical = NormalizePivotPropKey(key);
+        var stripped = System.Text.RegularExpressions.Regex.Replace(canonical, @"\d+$", "");
+        return _knownPivotKeys.Contains(canonical) || _knownPivotKeys.Contains(stripped);
     }
 
     /// <summary>
