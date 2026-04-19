@@ -1299,6 +1299,21 @@ internal static partial class ChartHelper
 
     internal static C.Title BuildChartTitle(string titleText)
     {
+        // CONSISTENCY(chart-cell-ref): if titleText looks like a single-cell
+        // reference (e.g. "Sheet1!A1"), emit <c:tx><c:strRef> so Excel resolves
+        // the cell on open. Same fix family as R17-B1 (series name strRef).
+        // Applies to chart title and cat/val axis titles (R18-B1/B2).
+        if (IsCellReference(titleText))
+        {
+            var formula = NormalizeCellReference(titleText);
+            return new C.Title(
+                new C.ChartText(
+                    new C.StringReference(new C.Formula(formula))
+                ),
+                new C.Overlay { Val = false }
+            );
+        }
+
         return new C.Title(
             new C.ChartText(
                 new C.RichText(
