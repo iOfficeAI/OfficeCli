@@ -72,6 +72,45 @@ internal static partial class ChartHelper
     }
 
     /// <summary>
+    /// Returns true if the value looks like a single cell reference (A1, $A$1, Sheet1!A1,
+    /// Sheet1!$A$1) or a single-cell range (A1:A1, Sheet1!A1:A1). Used to detect when
+    /// a series.name parameter should be emitted as a c:strRef instead of literal c:v.
+    /// </summary>
+    internal static bool IsCellReference(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        var trimmed = value.Trim();
+        // Optional sheet prefix (Sheet1! or 'Sheet with spaces'!), single cell A1 or $A$1,
+        // optionally followed by :A1 range of size 1.
+        return System.Text.RegularExpressions.Regex.IsMatch(trimmed,
+            @"^(?:'[^']+'!|[A-Za-z_][\w\.]*!)?\$?[A-Za-z]+\$?\d+(?::\$?[A-Za-z]+\$?\d+)?$");
+    }
+
+    /// <summary>
+    /// Normalizes a single-cell reference for use inside a chart's c:strRef/c:f.
+    /// Ensures absolute ($col$row) form and preserves any sheet prefix. If the
+    /// input is a A1:A1 style single-cell range, the range form is kept so the
+    /// output matches what Excel writes when a user points the Name field at a
+    /// single cell via the dialog.
+    /// </summary>
+    internal static string NormalizeCellReference(string value)
+    {
+        var trimmed = value.Trim();
+        string sheetPart = "";
+        string cellPart = trimmed;
+        var bangIdx = trimmed.IndexOf('!');
+        if (bangIdx >= 0)
+        {
+            sheetPart = trimmed[..(bangIdx + 1)];
+            cellPart = trimmed[(bangIdx + 1)..];
+        }
+        var parts = cellPart.Split(':');
+        for (int i = 0; i < parts.Length; i++)
+            parts[i] = AddAbsoluteMarkers(parts[i]);
+        return sheetPart + string.Join(":", parts);
+    }
+
+    /// <summary>
     /// Normalizes a range reference by adding $ signs for absolute references.
     /// If no sheet prefix, prepends defaultSheet.
     /// </summary>

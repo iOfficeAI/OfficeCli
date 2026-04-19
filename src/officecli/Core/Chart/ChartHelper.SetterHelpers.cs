@@ -379,8 +379,18 @@ internal static partial class ChartHelper
                 var serText = ser.GetFirstChild<C.SeriesText>();
                 if (serText != null)
                 {
-                    serText.RemoveAllChildren();
-                    serText.AppendChild(new C.NumericValue(value));
+                    // If the value looks like a cell reference, rewrite c:tx as a
+                    // c:strRef so Excel resolves it to the cell's value (matches
+                    // Add-path behavior for series{N}.name=Sheet1!A1).
+                    if (IsCellReference(value))
+                    {
+                        RewriteSeriesTextAsRef(ser, NormalizeCellReference(value), cachedValue: null);
+                    }
+                    else
+                    {
+                        serText.RemoveAllChildren();
+                        serText.AppendChild(new C.NumericValue(value));
+                    }
                 }
                 break;
             }

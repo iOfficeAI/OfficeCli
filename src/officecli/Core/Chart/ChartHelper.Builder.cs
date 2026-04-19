@@ -297,8 +297,21 @@ internal static partial class ChartHelper
     private static void ApplySeriesReferences(C.PlotArea plotArea, Dictionary<string, string> properties)
     {
         var extSeries = ParseSeriesDataExtended(properties);
-        if (extSeries == null || extSeries.Count == 0) return;
-        if (!extSeries.Any(s => s.ValuesRef != null || s.CategoriesRef != null))
+        // Also detect name-only cell references (series{N}.name=Sheet1!A1) so
+        // legend text resolves to the cell value instead of a literal string.
+        bool hasNameRef = false;
+        if (extSeries != null)
+        {
+            for (int i = 0; i < extSeries.Count; i++)
+            {
+                if (IsCellReference(extSeries[i].Name)) { hasNameRef = true; break; }
+            }
+        }
+        if (extSeries == null || extSeries.Count == 0)
+        {
+            if (!hasNameRef) return;
+        }
+        if (extSeries != null && !extSeries.Any(s => s.ValuesRef != null || s.CategoriesRef != null) && !hasNameRef)
         {
             // Also check top-level categories ref
             var topCatRef = ParseCategoriesRef(properties);
@@ -311,10 +324,18 @@ internal static partial class ChartHelper
         // Top-level categories reference applies to all series
         var topCategoriesRef = ParseCategoriesRef(properties);
 
-        for (int i = 0; i < Math.Min(extSeries.Count, allSer.Count); i++)
+        for (int i = 0; i < Math.Min(extSeries!.Count, allSer.Count); i++)
         {
             var info = extSeries[i];
             var ser = allSer[i];
+
+            // Rewrite SeriesText as strRef when the name is a cell reference
+            // (e.g. series1.name=Sheet1!A1). Cache is left absent; Excel will
+            // resolve the cell on open. See RewriteSeriesTextAsRef for details.
+            if (!string.IsNullOrEmpty(info.Name) && IsCellReference(info.Name))
+            {
+                RewriteSeriesTextAsRef(ser, NormalizeCellReference(info.Name), cachedValue: null);
+            }
 
             // Replace Values with NumberReference (preserving literal data as cache)
             if (!string.IsNullOrEmpty(info.ValuesRef))
@@ -1150,6 +1171,34 @@ internal static partial class ChartHelper
         for (int i = 0; i < values.Length; i++)
             numLit.AppendChild(new C.NumericPoint(new C.NumericValue(values[i].ToString("G"))) { Index = (uint)i });
         return new C.Values(numLit);
+    }
+
+    /// <summary>
+    /// Rewrite the SeriesText (c:tx) on a series so its content is a
+    /// <c:strRef><c:f>formula</c:f>[<c:strCache>...]</c:strRef> referencing a
+    /// single cell, instead of a literal <c:v>string</c:v>. Used when users pass
+    /// series{N}.name=Sheet1!A1 — the legend/tooltip should resolve to the cell's
+    /// current value, not show "Sheet1!A1" as literal text.
+    ///
+    /// If cachedValue is non-null, a minimal c:strCache with one c:pt idx="0" is
+    /// attached so first-open viewers (before Excel recalculates) still see the
+    /// resolved text. When null, Excel fills the cache on open.
+    /// </summary>
+    internal static void RewriteSeriesTextAsRef(
+        OpenXmlCompositeElement series, string formula, string? cachedValue)
+    {
+        var serText = series.GetFirstChild<C.SeriesText>();
+        if (serText == null) return;
+        serText.RemoveAllChildren();
+        var strRef = new C.StringReference(new C.Formula(formula));
+        if (cachedValue != null)
+        {
+            var cache = new C.StringCache(
+                new C.PointCount { Val = 1U },
+                new C.StringPoint(new C.NumericValue(cachedValue)) { Index = 0U });
+            strRef.AppendChild(cache);
+        }
+        serText.AppendChild(strRef);
     }
 
     /// <summary>
