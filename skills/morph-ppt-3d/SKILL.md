@@ -8,6 +8,8 @@ description: 3D Morph PPT — extends morph-ppt with GLB model insertion, cinema
 This skill **extends** `morph-ppt`. All morph-ppt rules (naming, ghosting, design, verification) apply in full.
 This file covers **3D-specific additions** and an **enriched design system** combining morph-ppt aesthetics with concrete color palettes, font pairings, and layout quality guardrails.
 
+**Minimum officecli version:** `1.0.39` (3D bounding box auto-computation fix). Recommended: `1.0.43+` for stable name-based addressing in Phase 6 user adjustments.
+
 ---
 
 ## Use when
@@ -32,18 +34,18 @@ When the user gives a topic but no `.glb` file, **proactively help them find a m
 
 Based on the user's topic, suggest what kind of 3D model would work:
 
-| Topic type         | Model suggestion                    | Example                                               |
-| ------------------ | ----------------------------------- | ----------------------------------------------------- |
-| Product/brand      | The actual product or a similar one | "coffee brand" → coffee cup, coffee machine, bean     |
-| Animal/character   | The animal or mascot                | "fox mascot" → fox 3D model                           |
-| Architecture/space | Building, room, or structure        | "new office" → office building, interior              |
-| Vehicle/transport  | The vehicle itself                  | "EV launch" → car, motorcycle, bicycle                |
-| Food/cooking       | The dish or ingredient              | "Japanese food" → sushi platter, ramen bowl           |
-| Tech/gadget        | The device                          | "phone launch" → phone, tablet, laptop                |
-| Nature/science     | The subject                         | "solar system" → planet, sun, earth                   |
-| Abstract concept   | A symbolic object                   | "teamwork" → puzzle pieces, gears, bridge             |
+| Topic type         | Model suggestion                    | Example                                              |
+| ------------------ | ----------------------------------- | ---------------------------------------------------- |
+| Product/brand      | The actual product or a similar one | "咖啡品牌" → coffee cup, coffee machine, coffee bean |
+| Animal/character   | The animal or mascot                | "柴犬介绍" → shiba inu dog model                     |
+| Architecture/space | Building, room, or structure        | "新办公室" → office building, interior               |
+| Vehicle/transport  | The vehicle itself                  | "电动车发布" → car, motorcycle, bicycle              |
+| Food/cooking       | The dish or ingredient              | "日料介绍" → sushi platter, ramen bowl               |
+| Tech/gadget        | The device                          | "新手机发布" → phone, tablet, laptop                 |
+| Nature/science     | The subject                         | "太阳系" → planet, sun, earth                        |
+| Abstract concept   | A symbolic object                   | "团队合作" → puzzle pieces, gears, bridge            |
 
-Tell the user: "Your topic is [X]. I suggest using a 3D model of [description]. Here are some free sources to find one:"
+Tell the user: "你的主题是 [X]，建议用 [具体模型描述] 的 3D 模型。我推荐几个免费下载来源："
 
 ### Step 2: Search for models (agent-driven)
 
@@ -55,7 +57,7 @@ Tell the user: "Your topic is [X]. I suggest using a 3D model of [description]. 
 
    ```
    Search: "[topic keyword] 3d model glb free download"
-   Example: "fox 3d model glb free download"
+   Example: "shiba dog 3d model glb free download"
    ```
 
 2. **Sketchfab API** (no auth needed for search):
@@ -99,23 +101,23 @@ Show the user 2-3 model options with:
 Example response:
 
 ```
-Based on your topic "fox mascot", here are some models I found:
+根据你的主题"柴犬品牌"，我找到了这些模型：
 
-1. Fox (Khronos sample)
-   Direct download, guaranteed compatible
-   Why: clean fox model, good for mascot/character decks
+1. 🐕 Shiba Inu (Sketchfab)
+   链接：https://sketchfab.com/3d-models/shiba-xxx
+   授权：CC BY 4.0（免费可商用）
+   推荐理由：高质量柴犬模型，表情可爱
 
-2. Low Poly Fox (Poly Pizza)
-   URL: https://poly.pizza/m/xxx
-   License: CC0 (completely free)
-   Why: low-poly style, good fit for clean minimal design
+2. 🐶 Low Poly Dog (Poly Pizza)
+   链接：https://poly.pizza/m/xxx
+   授权：CC0（完全免费）
+   推荐理由：低多边形风格，适合简洁设计
 
-3. Cartoon Fox (Sketchfab)
-   URL: https://sketchfab.com/3d-models/fox-xxx
-   License: CC BY 4.0 (free, commercial use ok)
-   Why: expressive face, high detail
+3. 🦊 Fox (Khronos 官方样例)
+   可直接下载，保证兼容
+   推荐理由：狐狸和柴犬外形相似，作为备选
 
-Which one do you want? I'll download it and start building.
+你选哪个？确认后我直接下载开始做。
 ```
 
 **Wait for user confirmation before downloading.** Do not download without asking.
@@ -140,69 +142,90 @@ After download, verify:
 
 If Sketchfab requires login to download, tell the user:
 
-> "This model requires a Sketchfab login to download. You can grab the .glb file from the page and share it with me. Or I can use a Khronos sample model for a demo version first?"
+> "这个模型需要在 Sketchfab 登录后下载。你可以去页面下载 .glb 文件，然后上传给我。或者我用 Khronos 官方样例先做一版演示？"
 
-### Step 5: When user says "anything" / "you decide" / "just make a demo"
+### Step 5: When user says "随便" / "你定" / "先做个演示"
 
 **Don't just grab a random model.** First guide the user to clarify their PPT topic:
 
-> Sure! I'll handle the model — but let me confirm the topic direction first so the model matches the content:
+> 好的！模型我来搞定，但先确认一下你的 PPT 主题方向，这样我找的模型才能配合内容：
 >
-> 1. Tech/Product — headphones, phone, robot...
-> 2. Animal/Character — cute pet, cartoon character...
-> 3. Architecture/Space — building, interior, city...
-> 4. Food/Lifestyle — dishes, everyday objects...
-> 5. Other — just tell me your idea
+> 1. 🎮 科技/产品 — 耳机、手机、机器人...
+> 2. 🐾 动物/角色 — 可爱宠物、卡通人物...
+> 3. 🏗️ 建筑/空间 — 房屋、室内、城市...
+> 4. 🍕 食物/生活 — 美食、日用品...
+> 5. 🚀 其他 — 告诉我你的想法
 >
-> Pick a direction, or just give me a topic keyword.
+> 选一个方向，或者直接说个主题词也行。
 
 After user confirms a direction, THEN search and recommend models.
+
+Only if user explicitly says "真的随便" / "什么都行" / insists on no preference, use a built-in model:
+
+**Built-in models** (bundled with the skill, no download needed):
+
+| Model            | Path               | Best for                |
+| ---------------- | ------------------ | ----------------------- |
+| Shiba Inu (柴犬) | `models/shiba.glb` | 可爱/宠物/品牌/通用演示 |
+
+```bash
+# Copy built-in model to working directory
+# The model is bundled at: skills/morph-ppt-3d/models/shiba.glb (relative to officecli repo root)
+cp "$(dirname "$0")/models/shiba.glb" ./model.glb 2>/dev/null || \
+  curl -L -o model.glb "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/Duck/glTF-Binary/Duck.glb"
+```
+
+If the built-in model doesn't fit the user's topic, fall back to Khronos samples:
+
+```bash
+curl -L -o model.glb "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/Duck/glTF-Binary/Duck.glb"
+```
 
 ### Step 6: When user wants to find models themselves
 
 Give specific website links with step-by-step guidance:
 
-> **Recommended 3D model websites:**
+> **推荐的 3D 模型网站：**
 >
-> 1. **Sketchfab** (largest 3D model platform)
->    - Link: https://sketchfab.com/search?q=[keyword]&type=models&downloadable=true
->    - Filter steps: search keyword → check "Downloadable" → format "glTF" → sort by "Likes"
->    - When downloading, select **glTF (.glb)** format
->    - Note: some models require free registration to download
-> 2. **Poly Pizza** (all free low-poly)
->    - Link: https://poly.pizza/
->    - All CC0 licensed — click Download to get .glb directly
->    - Best for: minimalist or cartoon-style presentations
-> 3. **Sketchfab popular categories**
->    - Animals: https://sketchfab.com/search?q=animal&type=models&downloadable=true
->    - Food: https://sketchfab.com/search?q=food&type=models&downloadable=true
->    - Tech: https://sketchfab.com/search?q=gadget&type=models&downloadable=true
->    - Architecture: https://sketchfab.com/search?q=architecture&type=models&downloadable=true
-> 4. **Free3D** (general free model site)
->    - Link: https://free3d.com/3d-models/glb
->    - Note: check the license type before use
-> 5. **TurboSquid Free** (pro model site free section)
->    - Link: https://www.turbosquid.com/Search/3D-Models/free/glb
+> 1. **Sketchfab** (最大的 3D 模型平台)
+>    - 链接：https://sketchfab.com/search?q=[关键词]&type=models&downloadable=true
+>    - 筛选步骤：搜索关键词 → 勾选 "Downloadable" → 格式选 "glTF" → 按 "Likes" 排序
+>    - 下载时选 **glTF (.glb)** 格式
+>    - 注意：部分模型需要免费注册后才能下载
+> 2. **Poly Pizza** (全免费低多边形)
+>    - 链接：https://poly.pizza/
+>    - 特点：全部免费 CC0 授权，直接点 Download 就是 .glb
+>    - 适合：简约风格、卡通风格的 PPT
+> 3. **Sketchfab 热门分类直达**
+>    - 动物：https://sketchfab.com/search?q=animal&type=models&downloadable=true
+>    - 食物：https://sketchfab.com/search?q=food&type=models&downloadable=true
+>    - 科技：https://sketchfab.com/search?q=gadget&type=models&downloadable=true
+>    - 建筑：https://sketchfab.com/search?q=architecture&type=models&downloadable=true
+> 4. **Free3D** (综合免费模型站)
+>    - 链接：https://free3d.com/3d-models/glb
+>    - 注意：需确认授权类型
+> 5. **TurboSquid Free** (专业模型站免费区)
+>    - 链接：https://www.turbosquid.com/Search/3D-Models/free/glb
 >
-> After downloading, share the .glb file with me. If the download is a .gltf folder, use Blender to convert it to .glb.
+> 下载后把 .glb 文件发给我就行。如果下载的是 .gltf（文件夹），需要用 Blender 转成 .glb。
 
 ### Step 7: When user gives keywords and asks agent to search
 
 **Remind about token cost before searching:**
 
-> I can search for you, but web searches use extra tokens. Would you prefer:
+> 我可以帮你搜索，不过在线搜索会消耗一些额外的对话额度 (token)。你想：
 >
-> A. I search — I use the Sketchfab API and recommend 2-3 options (uses a few tokens)
-> B. Self-service — I give you search links and filter steps, you pick and share with me (no extra tokens)
+> A. 我来搜 — 我用 Sketchfab API 搜索并推荐 2-3 个（消耗少量 token）
+> B. 你自己找 — 我给你搜索链接和筛选教程，你挑好发给我（不消耗额外 token）
 >
-> A or B?
+> 选 A 还是 B？
 
 If user chooses A, proceed with Step 2 (agent-driven search).
 If user chooses B, proceed with Step 6 (self-service guidance).
 
 ### License reminder
 
-Always remind before confirming download: "Please check the model license before downloading. CC0 / CC BY = free to use; CC BY-NC = non-commercial only."
+Always remind before confirming download: "下载前请确认模型授权。CC0 / CC BY 可免费使用；CC BY-NC 仅限非商用。"
 
 ---
 
@@ -442,7 +465,7 @@ Bleed does NOT work for:
 - ❌ Small detailed models — cropping loses the detail you want to show
 - ❌ When the cropped part is the most recognizable feature
 
-**For character/animal models (like fox, duck, avocado):** keep the full model visible on all slides. Use size changes (L→M→S) for rhythm instead of bleed cropping. Use `rotx` for angle variety instead.
+**For character/animal models (like shiba, fox, duck):** keep the full model visible on all slides. Use size changes (L→M→S) for rhythm instead of bleed cropping. Use `rotx` for angle variety instead.
 
 ---
 
@@ -539,6 +562,76 @@ After standard morph verification, additionally check:
 - All models share the same `name` prop
 - Adjacent slides have model area ratio >= 1.5x or <= 0.67x
 - No two consecutive slides use the same layout pattern
+
+### Phase 6: Iterate (user adjustments)
+
+Users will often want to fine-tune after seeing the result. **Use stable name-based addressing instead of indexed paths** to avoid errors when shape order changes.
+
+#### Stable ID Addressing (officecli 1.0.33+)
+
+Instead of fragile index paths like `/slide[3]/model3d[1]`, use name-based selectors:
+
+```bash
+# ✅ RECOMMENDED — name-based (stable, won't break if shapes are added/removed)
+officecli set deck.pptx '/slide[3]/model3d[@name="!!model-hero"]' --prop roty=120
+
+# ⚠️ FRAGILE — index-based (breaks when shape order changes)
+officecli set deck.pptx '/slide[3]/model3d[1]' --prop roty=120
+```
+
+The 3D model is always named `!!model-hero` on every slide (per Morph requirement), so `@name="!!model-hero"` always works.
+
+#### "这页模型角度不对 / 换个视角"
+
+```bash
+officecli set deck.pptx '/slide[3]/model3d[@name="!!model-hero"]' --prop roty=120 --prop rotx=15
+```
+
+Quick reference for the user:
+> 当前是 roty=80（侧面）。你想要：
+> - **正面** → roty=0
+> - **3/4 视角** → roty=30-45
+> - **侧面** → roty=90
+> - **背面** → roty=180
+> - **俯视** → rotx=30
+> - **仰视** → rotx=-20
+
+#### "这页模型太大/太小了"
+
+```bash
+# Bigger
+officecli set deck.pptx '/slide[3]/model3d[@name="!!model-hero"]' --prop width=24cm --prop height=20cm
+# Smaller
+officecli set deck.pptx '/slide[3]/model3d[@name="!!model-hero"]' --prop width=12cm --prop height=10cm
+```
+
+Size tier reference:
+> - **特写充满画面** → 28-36cm (XL)
+> - **大气主视觉** → 18-24cm (L)
+> - **跟文字平衡** → 13-17cm (M)
+> - **角落小点缀** → 5-10cm (S)
+
+#### "模型位置挪一下"
+
+```bash
+officecli set deck.pptx '/slide[3]/model3d[@name="!!model-hero"]' --prop x=18cm --prop y=2cm
+```
+
+#### "某页文字内容跟模型不搭"
+
+Apply Content-Model Alignment rules:
+1. Check what angle the model is showing on that slide
+2. Rewrite the text to describe what the audience sees at that angle
+3. Use the title formula: `[What the audience sees] + [Why it matters]`
+
+For text shapes, use `@name="#sN-..."` selectors (also stable ID):
+```bash
+officecli set deck.pptx '/slide[3]/shape[@name="#s3-title"]' --prop text="新标题"
+```
+
+#### Batch adjustments
+
+For multiple changes, modify the build script's `model_shots` list and re-run. Re-running is more reliable than chained `set` commands because it avoids any state accumulation.
 
 ---
 
