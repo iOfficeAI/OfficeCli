@@ -3267,13 +3267,33 @@ public partial class ExcelHandler
                     }
                     case "aboveaverage":
                     {
-                        var aboveBelow = properties.GetValueOrDefault("above", "true");
-                        cfNewRule = new ConditionalFormattingRule
+                        // `above=` is the legacy spelling; `aboveaverage=false`
+                        // (matching the cfType name) is accepted as an alias
+                        // so users can mirror the OOXML attribute.
+                        var aboveBelow = properties.GetValueOrDefault("above",
+                            properties.GetValueOrDefault("aboveaverage", "true"));
+                        var aboveRule = new ConditionalFormattingRule
                         {
                             Type = ConditionalFormatValues.AboveAverage,
                             Priority = cfNewPriority,
                             AboveAverage = ParseHelpers.IsTruthy(aboveBelow) ? null : false
                         };
+                        // R15-3: wire stdDev= (deviations above/below mean)
+                        // and equalAverage= (include values equal to the mean)
+                        // onto the cfRule.
+                        if (properties.TryGetValue("stdDev", out var stdDevRaw)
+                            && !string.IsNullOrWhiteSpace(stdDevRaw)
+                            && int.TryParse(stdDevRaw, out var stdDevVal))
+                        {
+                            aboveRule.StdDev = stdDevVal;
+                        }
+                        if (properties.TryGetValue("equalAverage", out var eqAvgRaw)
+                            && !string.IsNullOrWhiteSpace(eqAvgRaw)
+                            && ParseHelpers.IsTruthy(eqAvgRaw))
+                        {
+                            aboveRule.EqualAverage = true;
+                        }
+                        cfNewRule = aboveRule;
                         break;
                     }
                     case "uniquevalues":
