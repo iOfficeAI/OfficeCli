@@ -2475,6 +2475,50 @@ public partial class ExcelHandler
                     tableColumns.AppendChild(new TableColumn { Id = (uint)(i + 1), Name = colNames[i] });
                 table.AppendChild(tableColumns);
 
+                // T-ext: detect uniform formula pattern per column and emit
+                // <x:calculatedColumnFormula> so Excel auto-fills the formula
+                // into new rows appended to the table. Heuristic: if every data
+                // row in a column carries a CellFormula whose relative form
+                // (row numbers stripped) is identical, treat it as a calc'd
+                // column and store the first row's formula.
+                {
+                    var ccfSheetData = GetSheet(tblWorksheet).GetFirstChild<SheetData>();
+                    var dataStart = hasHeader ? startRow + 1 : startRow;
+                    var dataEnd = hasTotalRow ? endRow - 1 : endRow;
+                    if (ccfSheetData != null && dataEnd >= dataStart)
+                    {
+                        var tblColElems = tableColumns.Elements<TableColumn>().ToList();
+                        for (int ci = 0; ci < colCount; ci++)
+                        {
+                            var colLetter = IndexToColumnName(startColIdx + ci);
+                            string? firstFormula = null;
+                            string? pattern = null;
+                            bool uniform = true;
+                            for (int r = dataStart; r <= dataEnd; r++)
+                            {
+                                var row = ccfSheetData.Elements<Row>()
+                                    .FirstOrDefault(rr => rr.RowIndex?.Value == (uint)r);
+                                if (row == null) { uniform = false; break; }
+                                var cellRefS = $"{colLetter}{r}";
+                                var c = row.Elements<Cell>()
+                                    .FirstOrDefault(x => x.CellReference?.Value == cellRefS);
+                                var f = c?.CellFormula?.Text;
+                                if (string.IsNullOrEmpty(f)) { uniform = false; break; }
+                                // Strip row numbers so =J2*K2 and =J3*K3 collapse to =J*K
+                                var relF = System.Text.RegularExpressions.Regex.Replace(
+                                    f, @"\$?\d+", "");
+                                if (pattern == null) { pattern = relF; firstFormula = f; }
+                                else if (relF != pattern) { uniform = false; break; }
+                            }
+                            if (uniform && firstFormula != null)
+                            {
+                                tblColElems[ci].CalculatedColumnFormula =
+                                    new CalculatedColumnFormula(firstFormula);
+                            }
+                        }
+                    }
+                }
+
                 // T7-ext: `columns.N.dxfId=<id>` stamps dataDxfId on the
                 // target tableColumn (N is 1-based). The id must reference
                 // an existing workbook differentialFormats entry; we do not
