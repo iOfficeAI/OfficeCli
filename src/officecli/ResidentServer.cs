@@ -43,6 +43,15 @@ public class ResidentServer : IDisposable
     private CancellationTokenSource _idleCts = new();
     private bool _disposed;
 
+    // Safe stderr logging: the parent process may have redirected our stderr
+    // to a pipe whose read-end closes when the parent exits, so any
+    // Console.Error.WriteLine after that point throws IOException.  Swallow
+    // it silently — these are best-effort diagnostics, not critical output.
+    private static void LogStderr(string message)
+    {
+        try { Console.Error.WriteLine(message); } catch (IOException) { }
+    }
+
     // Valid idle-timeout range: 1s .. 24h. Anything outside falls back to
     // the 12min default. A value of "0" is rejected (would be an infinite-
     // busy spin on the watchdog task). Shared between the startup env-var
@@ -203,7 +212,7 @@ public class ResidentServer : IDisposable
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine($"Resident error: {ex.Message}");
+                    LogStderr($"Resident error: {ex.Message}");
                     // currentMain is still the pre-created replacement; it is
                     // still valid for the next iteration's WaitForConnectionAsync.
                 }
@@ -258,7 +267,7 @@ public class ResidentServer : IDisposable
                 // cancelling _mainCts / _pingCts, so the "ping liveness ⇔
                 // file locked" invariant is preserved end-to-end: the
                 // ping pipe stays alive until handler.Dispose() completes.
-                Console.Error.WriteLine($"Resident idle for {currentTimeout.TotalMinutes} minutes, closing.");
+                LogStderr($"Resident idle for {currentTimeout.TotalMinutes} minutes, closing.");
                 _ = ShutdownAsync();
                 break;
             }
@@ -317,7 +326,7 @@ public class ResidentServer : IDisposable
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine($"Ping responder error: {ex.Message}");
+                    LogStderr($"Ping responder error: {ex.Message}");
                     // currentMain/current is already the replacement;
                     // loop continues.
                 }
@@ -383,7 +392,7 @@ public class ResidentServer : IDisposable
                 try { await ShutdownAsync(); }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine($"Shutdown error during __close__: {ex.Message}");
+                    LogStderr($"Shutdown error during __close__: {ex.Message}");
                 }
 
                 var response = MakeResponse(0, "Closing resident.", "");
@@ -397,7 +406,7 @@ public class ResidentServer : IDisposable
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Ping handler error: {ex.Message}");
+            LogStderr($"Ping handler error: {ex.Message}");
         }
         finally
         {
@@ -424,7 +433,7 @@ public class ResidentServer : IDisposable
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Resident error: {ex.Message}");
+            LogStderr($"Resident error: {ex.Message}");
         }
         finally
         {
@@ -655,6 +664,8 @@ public class ResidentServer : IDisposable
 
     private void NotifyWatchSlideChanged(string? changedPath)
     {
+        if (!WatchServer.IsWatching(_filePath)) return;
+
         if (_handler is OfficeCli.Handlers.ExcelHandler excel)
         {
             string? scrollTo = null;
@@ -689,6 +700,8 @@ public class ResidentServer : IDisposable
 
     private void NotifyWatchRootChanged(int oldSlideCount)
     {
+        if (!WatchServer.IsWatching(_filePath)) return;
+
         if (_handler is OfficeCli.Handlers.WordHandler word)
         {
             var html = word.ViewAsHtml();
@@ -723,6 +736,8 @@ public class ResidentServer : IDisposable
 
     private void NotifyWatchFullRefresh()
     {
+        if (!WatchServer.IsWatching(_filePath)) return;
+
         string? fullHtml = null;
         if (_handler is OfficeCli.Handlers.PowerPointHandler ppt)
             fullHtml = ppt.ViewAsHtml();
@@ -763,7 +778,11 @@ public class ResidentServer : IDisposable
                 }
                 else
                 {
-                    var htmlPath = Path.Combine(Path.GetTempPath(), $"officecli_preview_{Path.GetFileNameWithoutExtension(_filePath)}_{DateTime.Now:HHmmss}.html");
+                    // SECURITY: include a random token so the preview path is not predictable.
+                    // Without it, a predictable path enables a symlink pre-placement attack that
+                    // causes File.WriteAllText to clobber an arbitrary victim file. See
+                    // CommandBuilder.View.cs for the same fix.
+                    var htmlPath = Path.Combine(Path.GetTempPath(), $"officecli_preview_{Path.GetFileNameWithoutExtension(_filePath)}_{DateTime.Now:HHmmss}_{Guid.NewGuid():N}.html");
                     File.WriteAllText(htmlPath, html);
                     Console.WriteLine(htmlPath);
                     try
@@ -889,6 +908,9 @@ public class ResidentServer : IDisposable
             Console.WriteLine($"No properties applied to {path}");
         if (unsupported.Count > 0)
             Console.Error.WriteLine($"UNSUPPORTED props (use raw-set instead): {string.Join(", ", unsupported)}");
+        var overflow = CommandBuilder.CheckTextOverflow(_handler, path);
+        if (overflow != null)
+            Console.Error.WriteLine($"  WARNING: {overflow}");
     }
 
     private void ExecuteAdd(ResidentRequest req)
@@ -908,6 +930,9 @@ public class ResidentServer : IDisposable
             var properties = req.GetProps();
             var resultPath = _handler.Add(parentPath, type, position, properties);
             Console.WriteLine($"Added {type} at {resultPath}");
+            var overflow = CommandBuilder.CheckTextOverflow(_handler, resultPath);
+            if (overflow != null)
+                Console.Error.WriteLine($"  WARNING: {overflow}");
         }
     }
 
@@ -1091,13 +1116,13 @@ public class ResidentServer : IDisposable
         {
             if (!ShutdownAsync().Wait(TimeSpan.FromMinutes(10)))
             {
-                Console.Error.WriteLine("Warning: shutdown timed out after 10 minutes, forcing exit.");
+                LogStderr("Warning: shutdown timed out after 10 minutes, forcing exit.");
                 Environment.Exit(1);
             }
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Warning: shutdown error: {ex.Message}");
+            LogStderr($"Warning: shutdown error: {ex.Message}");
         }
 
         try { _commandLock.Dispose(); } catch { }
@@ -1160,7 +1185,7 @@ public class ResidentServer : IDisposable
             }
             else
             {
-                Console.Error.WriteLine("Warning: timeout waiting for in-flight command to drain.");
+                LogStderr("Warning: timeout waiting for in-flight command to drain.");
             }
         }
         catch (ObjectDisposedException) { /* _commandLock already disposed */ }
@@ -1172,7 +1197,7 @@ public class ResidentServer : IDisposable
         try { _handler.Dispose(); }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Warning: handler dispose error: {ex.Message}");
+            LogStderr($"Warning: handler dispose error: {ex.Message}");
         }
 
         // 5. NOW cancel ping + idle. Clients observing the ping pipe from

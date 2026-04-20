@@ -25,6 +25,41 @@ public partial class PowerPointHandler
         var dataPathAttr = string.IsNullOrEmpty(dataPath) ? "" : $" data-path=\"{HtmlEncode(dataPath)}\"";
         var xfrm = shape.ShapeProperties?.Transform2D;
 
+        // Shape-level hyperlink → wrap rendered shape <div> in <a> for clickability in HTML preview.
+        // Only external URLs are wrapped; internal slide-jump links (ppaction://hlinksldjump) are
+        // skipped because there is no corresponding external href in this static HTML context.
+        string? shapeHrefUrl = null;
+        string? shapeHrefTooltip = null;
+        {
+            var nvHlink = shape.NonVisualShapeProperties?.NonVisualDrawingProperties
+                ?.GetFirstChild<Drawing.HyperlinkOnClick>();
+            if (nvHlink != null)
+            {
+                shapeHrefTooltip = nvHlink.Tooltip?.Value;
+                var action = nvHlink.Action?.Value;
+                var hlId = nvHlink.Id?.Value;
+                // Skip if this is a slide-jump action (no external URL target)
+                if (string.IsNullOrEmpty(action) || !action.Contains("hlink"))
+                {
+                    // Plain external: no action + r:id → look up external relationship
+                    if (!string.IsNullOrEmpty(hlId))
+                    {
+                        try
+                        {
+                            var rel = part.HyperlinkRelationships.FirstOrDefault(r => r.Id == hlId);
+                            if (rel?.Uri != null) shapeHrefUrl = rel.Uri.ToString();
+                        }
+                        catch { }
+                    }
+                }
+                else if (action.Contains("hlinksldjump"))
+                {
+                    // Internal slide-jump — deliberately not wrapped (no navigable href in static HTML)
+                    shapeHrefUrl = null;
+                }
+            }
+        }
+
         long x, y, cx, cy;
         if (overridePos != null)
         {
@@ -238,6 +273,14 @@ public partial class PowerPointHandler
             || shape.ShapeProperties?.GetFirstChild<Drawing.BlipFill>() != null;
         var shapeClass = hasFillBg ? "shape has-fill" : "shape";
 
+        // Open <a> wrapper for shape-level hyperlink (before the shape <div>)
+        if (!string.IsNullOrEmpty(shapeHrefUrl))
+        {
+            var tooltipAttr = !string.IsNullOrEmpty(shapeHrefTooltip)
+                ? $" title=\"{HtmlEncode(shapeHrefTooltip!)}\"" : "";
+            sb.Append($"    <a class=\"shape-link\" href=\"{HtmlEncode(shapeHrefUrl!)}\" rel=\"noopener\" target=\"_blank\"{tooltipAttr} style=\"display:contents;cursor:pointer\">");
+        }
+
         if (!string.IsNullOrEmpty(clipPathCss))
         {
             // For clip-path shapes: move fill to a clipped background layer, keep text unclipped
@@ -254,6 +297,8 @@ public partial class PowerPointHandler
                 else
                     outerStyles.Add(s);
             }
+            // When wrapped in a link, add cursor:pointer to the shape <div> itself
+            if (!string.IsNullOrEmpty(shapeHrefUrl)) outerStyles.Add("cursor:pointer");
             sb.Append($"    <div class=\"{shapeClass}\"{dataPathAttr} style=\"{string.Join(";", outerStyles)}\">");
             // Fill layer (clipped)
             if (fillStyles.Count > 0)
@@ -268,12 +313,13 @@ public partial class PowerPointHandler
                 var dashAttr = !string.IsNullOrEmpty(dashArr) ? $" stroke-dasharray=\"{dashArr}\"" : "";
                 var safeColor = CssSanitizeColor(bc);
                 sb.Append($"<svg style=\"position:absolute;inset:0;width:100%;height:100%;overflow:visible\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\">");
-                sb.Append($"<polygon points=\"{svgPoints}\" fill=\"none\" stroke=\"{safeColor}\" stroke-width=\"{bw:0.##}\" vector-effect=\"non-scaling-stroke\" stroke-linecap=\"round\"{dashAttr}/>");
+                sb.Append($"<polygon points=\"{svgPoints}\" fill=\"none\" stroke=\"{safeColor}\" stroke-width=\"{bw:0.##}pt\" vector-effect=\"non-scaling-stroke\" stroke-linecap=\"butt\"{dashAttr}/>");
                 sb.Append("</svg>");
             }
         }
         else
         {
+            if (!string.IsNullOrEmpty(shapeHrefUrl)) styles.Add("cursor:pointer");
             sb.Append($"    <div class=\"{shapeClass}\"{dataPathAttr} style=\"{string.Join(";", styles)}\">");
         }
 
@@ -314,7 +360,7 @@ public partial class PowerPointHandler
                 var polyStr = clipPathCss["clip-path:polygon(".Length..^1];
                 var svgPoints = polyStr.Replace("%", "");
                 sb.Append($"<svg style=\"position:absolute;inset:0;width:100%;height:100%;overflow:visible\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\">");
-                sb.Append($"<polygon points=\"{svgPoints}\" fill=\"none\" stroke=\"{safeColor}\" stroke-width=\"{bw:0.##}\" vector-effect=\"non-scaling-stroke\" stroke-linecap=\"round\"{dashAttr}/>");
+                sb.Append($"<polygon points=\"{svgPoints}\" fill=\"none\" stroke=\"{safeColor}\" stroke-width=\"{bw:0.##}pt\" vector-effect=\"non-scaling-stroke\" stroke-linecap=\"butt\"{dashAttr}/>");
                 sb.Append("</svg>");
             }
             else if (!string.IsNullOrEmpty(borderRadiusCss))
@@ -323,26 +369,33 @@ public partial class PowerPointHandler
                 var rxMatch = System.Text.RegularExpressions.Regex.Match(borderRadiusCss, @"border-radius:([\d.]+)");
                 var rx = rxMatch.Success ? rxMatch.Groups[1].Value : "0";
                 sb.Append($"<svg style=\"position:absolute;inset:0;width:100%;height:100%;overflow:visible\">");
-                sb.Append($"<rect x=\"{bw / 2:0.##}\" y=\"{bw / 2:0.##}\" width=\"calc(100% - {bw:0.##}pt)\" height=\"calc(100% - {bw:0.##}pt)\" rx=\"{rx}\" ry=\"{rx}\" fill=\"none\" stroke=\"{safeColor}\" stroke-width=\"{bw:0.##}pt\" stroke-linecap=\"round\"{dashAttr}/>");
+                sb.Append($"<rect x=\"{bw / 2:0.##}pt\" y=\"{bw / 2:0.##}pt\" width=\"calc(100% - {bw:0.##}pt)\" height=\"calc(100% - {bw:0.##}pt)\" rx=\"{rx}\" ry=\"{rx}\" fill=\"none\" stroke=\"{safeColor}\" stroke-width=\"{bw:0.##}pt\" stroke-linecap=\"butt\"{dashAttr}/>");
                 sb.Append("</svg>");
             }
             else if (presetGeom?.Preset?.InnerText == "ellipse")
             {
-                // Ellipse — use SVG ellipse
-                sb.Append($"<svg style=\"position:absolute;inset:0;width:100%;height:100%;overflow:visible\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\">");
-                sb.Append($"<ellipse cx=\"50\" cy=\"50\" rx=\"49\" ry=\"49\" fill=\"none\" stroke=\"{safeColor}\" stroke-width=\"{bw:0.##}\" vector-effect=\"non-scaling-stroke\" stroke-linecap=\"round\"{dashAttr}/>");
+                // Ellipse — size in pt so stroke-width matches CSS border path.
+                // CONSISTENCY(shape-stroke-unit): keep stroke-width in pt across solid/non-solid paths.
+                sb.Append($"<svg style=\"position:absolute;inset:0;width:100%;height:100%;overflow:visible\">");
+                sb.Append($"<ellipse cx=\"50%\" cy=\"50%\" rx=\"calc(50% - {bw / 2:0.##}pt)\" ry=\"calc(50% - {bw / 2:0.##}pt)\" fill=\"none\" stroke=\"{safeColor}\" stroke-width=\"{bw:0.##}pt\" stroke-linecap=\"butt\"{dashAttr}/>");
                 sb.Append("</svg>");
             }
             else
             {
-                // Plain rect — use SVG rect
-                sb.Append($"<svg style=\"position:absolute;inset:0;width:100%;height:100%;overflow:visible\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\">");
-                sb.Append($"<rect x=\"0\" y=\"0\" width=\"100\" height=\"100\" fill=\"none\" stroke=\"{safeColor}\" stroke-width=\"{bw:0.##}\" vector-effect=\"non-scaling-stroke\" stroke-linecap=\"round\"{dashAttr}/>");
+                // Plain rect — use SVG rect sized in pt so stroke-width matches the CSS
+                // `border:Npt solid` path (same visual weight). Inset by bw/2 so the stroke
+                // sits entirely inside the content box (box-sizing:border-box equivalent).
+                // CONSISTENCY(shape-stroke-unit): keep stroke-width in pt across solid/non-solid paths.
+                sb.Append($"<svg style=\"position:absolute;inset:0;width:100%;height:100%;overflow:visible\">");
+                sb.Append($"<rect x=\"{bw / 2:0.##}pt\" y=\"{bw / 2:0.##}pt\" width=\"calc(100% - {bw:0.##}pt)\" height=\"calc(100% - {bw:0.##}pt)\" fill=\"none\" stroke=\"{safeColor}\" stroke-width=\"{bw:0.##}pt\" stroke-linecap=\"butt\"{dashAttr}/>");
                 sb.Append("</svg>");
             }
         }
 
-        sb.AppendLine("</div>");
+        sb.Append("</div>");
+        if (!string.IsNullOrEmpty(shapeHrefUrl))
+            sb.Append("</a>");
+        sb.AppendLine();
     }
 
     // ==================== Placeholder Position Inheritance ====================
@@ -694,24 +747,42 @@ public partial class PowerPointHandler
                 var base64 = Convert.ToBase64String(ms.ToArray());
                 var contentType = SanitizeContentType(imgPart.ContentType ?? "image/png");
 
-                // Crop
+                // Crop — PowerPoint srcRect semantics: select a rectangular region of the
+                // source image, then scale that region to fill the container.
+                // CSS equivalent: render as a <div> with background-image, setting
+                // background-size = container / visibleFraction and background-position
+                // so the srcRect region aligns to the container edge.
                 var srcRect = blipFill?.GetFirstChild<Drawing.SourceRectangle>();
-                var imgStyles = new List<string>();
+                double srcL = 0, srcT = 0, srcR = 0, srcB = 0;
                 if (srcRect != null)
                 {
-                    var cl = (srcRect.Left?.Value ?? 0) / 1000.0;
-                    var ct = (srcRect.Top?.Value ?? 0) / 1000.0;
-                    var cr = (srcRect.Right?.Value ?? 0) / 1000.0;
-                    var cb = (srcRect.Bottom?.Value ?? 0) / 1000.0;
-                    if (cl != 0 || ct != 0 || cr != 0 || cb != 0)
-                    {
-                        // Use clip-path for cropping
-                        imgStyles.Add($"clip-path:inset({ct:0.##}% {cr:0.##}% {cb:0.##}% {cl:0.##}%)");
-                    }
+                    srcL = (srcRect.Left?.Value ?? 0) / 100000.0;
+                    srcT = (srcRect.Top?.Value ?? 0) / 100000.0;
+                    srcR = (srcRect.Right?.Value ?? 0) / 100000.0;
+                    srcB = (srcRect.Bottom?.Value ?? 0) / 100000.0;
                 }
-
-                var imgStyle = imgStyles.Count > 0 ? $" style=\"{string.Join(";", imgStyles)}\"" : "";
-                sb.Append($"<img src=\"data:{contentType};base64,{base64}\"{imgStyle} loading=\"lazy\">");
+                var hasCrop = srcL != 0 || srcT != 0 || srcR != 0 || srcB != 0;
+                if (hasCrop)
+                {
+                    var visibleW = Math.Max(1 - srcL - srcR, 0.0001);
+                    var visibleH = Math.Max(1 - srcT - srcB, 0.0001);
+                    var bgSizeW = 100.0 / visibleW;
+                    var bgSizeH = 100.0 / visibleH;
+                    // background-position percentage semantics: pos% aligns pos%-of-image with pos%-of-container.
+                    // To align srcRect (image region starting at fraction L) with container's left edge:
+                    //   pos_x% = L / (srcL + srcR) * 100   (denominator = 1 - visibleW)
+                    // Fallback to 0 when there's no crop on that axis (denominator == 0).
+                    var denomX = srcL + srcR;
+                    var denomY = srcT + srcB;
+                    var bgPosX = denomX > 0 ? (srcL / denomX) * 100.0 : 0.0;
+                    var bgPosY = denomY > 0 ? (srcT / denomY) * 100.0 : 0.0;
+                    var bgStyle = $"width:100%;height:100%;background-image:url(data:{contentType};base64,{base64});background-repeat:no-repeat;background-size:{bgSizeW:0.##}% {bgSizeH:0.##}%;background-position:{bgPosX:0.##}% {bgPosY:0.##}%";
+                    sb.Append($"<div style=\"{bgStyle}\"></div>");
+                }
+                else
+                {
+                    sb.Append($"<img src=\"data:{contentType};base64,{base64}\" loading=\"lazy\">");
+                }
             }
             catch
             {
@@ -825,27 +896,79 @@ public partial class PowerPointHandler
             var arrowSize = Math.Max(3, lineWidth * 3);
             var defs = new StringBuilder();
             defs.Append("<defs>");
+            // Both markers use a right-pointing triangle with tip at (arrowSize, arrowSize/2).
+            // For marker-start we use orient="auto-start-reverse" so SVG flips the right-pointing
+            // triangle to point outward (leftward) at the line's start. Authoring both markers
+            // with the same geometry avoids a past bug where the head marker was authored
+            // leftward-pointing and the reverse flipped it inward on straight connectors.
             if (hasHead)
             {
-                defs.Append($"<marker id=\"ah\" markerWidth=\"{arrowSize:0.#}\" markerHeight=\"{arrowSize:0.#}\" refX=\"{arrowSize:0.#}\" refY=\"{arrowSize / 2:0.#}\" orient=\"auto-start-reverse\"><polygon points=\"{arrowSize:0.#} 0,0 {arrowSize / 2:0.#},{arrowSize:0.#} {arrowSize:0.#}\" fill=\"{safeColor}\"/></marker>");
+                defs.Append($"<marker id=\"ah\" markerWidth=\"{arrowSize:0.#}\" markerHeight=\"{arrowSize:0.#}\" refX=\"{arrowSize:0.#}\" refY=\"{arrowSize / 2:0.#}\" orient=\"auto-start-reverse\"><polygon points=\"0 0,{arrowSize:0.#} {arrowSize / 2:0.#},0 {arrowSize:0.#}\" fill=\"{safeColor}\"/></marker>");
                 markerStartAttr = " marker-start=\"url(#ah)\"";
             }
             if (hasTail)
             {
-                defs.Append($"<marker id=\"at\" markerWidth=\"{arrowSize:0.#}\" markerHeight=\"{arrowSize:0.#}\" refX=\"0\" refY=\"{arrowSize / 2:0.#}\" orient=\"auto\"><polygon points=\"0 0,{arrowSize:0.#} {arrowSize / 2:0.#},0 {arrowSize:0.#}\" fill=\"{safeColor}\"/></marker>");
+                defs.Append($"<marker id=\"at\" markerWidth=\"{arrowSize:0.#}\" markerHeight=\"{arrowSize:0.#}\" refX=\"{arrowSize:0.#}\" refY=\"{arrowSize / 2:0.#}\" orient=\"auto\"><polygon points=\"0 0,{arrowSize:0.#} {arrowSize / 2:0.#},0 {arrowSize:0.#}\" fill=\"{safeColor}\"/></marker>");
                 markerEndAttr = " marker-end=\"url(#at)\"";
             }
             defs.Append("</defs>");
             markerDefs = defs.ToString();
         }
 
+        // Branch on preset geometry: straightConnectorN -> line; bentConnectorN -> polyline;
+        // curvedConnectorN -> cubic bezier path. Falls back to straight line for unknown presets.
+        var prstGeom = cxn.ShapeProperties?.GetFirstChild<Drawing.PresetGeometry>();
+        var preset = prstGeom?.Preset?.HasValue == true ? prstGeom.Preset.InnerText : "straightConnector1";
+
+        // CONSISTENCY(shape-stroke-unit): stroke-width in pt matches CSS border path (see R3 fix).
+        var strokeAttrs = $"stroke=\"{safeColor}\" stroke-width=\"{lineWidth:0.##}pt\" fill=\"none\"{dashAttr}{markerStartAttr}{markerEndAttr}";
+
         var dataPathAttr = string.IsNullOrEmpty(dataPath) ? "" : $" data-path=\"{HtmlEncode(dataPath)}\"";
         sb.AppendLine($"    <div class=\"connector\"{dataPathAttr} style=\"left:{Units.EmuToPt(renderX)}pt;top:{Units.EmuToPt(renderY)}pt;width:{widthPt}pt;height:{heightPt}pt\">");
-        sb.AppendLine($"      <svg width=\"100%\" height=\"100%\" preserveAspectRatio=\"none\" style=\"overflow:visible\">");
-        if (!string.IsNullOrEmpty(markerDefs))
-            sb.AppendLine($"        {markerDefs}");
-        sb.AppendLine($"        <line x1=\"{svgX1}\" y1=\"{svgY1}\" x2=\"{svgX2}\" y2=\"{svgY2}\" stroke=\"{safeColor}\" stroke-width=\"{lineWidth:0.##}\"{dashAttr}{markerStartAttr}{markerEndAttr}/>");
-        sb.AppendLine("      </svg>");
+
+        if (preset.StartsWith("bentConnector", StringComparison.Ordinal))
+        {
+            // Bent connectors: right-angle polyline. Use viewBox=0..100 so stretched
+            // preserveAspectRatio=none fills the container.
+            // bentConnector2: single 90-degree bend (2 segments, 3 points).
+            // bentConnector3 (default): 3 segments with mid bend — (0,0) -> (50,0) -> (50,100) -> (100,100).
+            // bentConnector4/5: approximate with 25/75 splits when no adjustments set.
+            string points = preset switch
+            {
+                "bentConnector2" => "0,0 100,0 100,100",
+                "bentConnector4" or "bentConnector5" => "0,0 25,0 25,50 75,50 75,100 100,100",
+                _ => "0,0 50,0 50,100 100,100", // bentConnector3
+            };
+            sb.AppendLine("      <svg width=\"100%\" height=\"100%\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\" style=\"overflow:visible\">");
+            if (!string.IsNullOrEmpty(markerDefs))
+                sb.AppendLine($"        {markerDefs}");
+            sb.AppendLine($"        <polyline points=\"{points}\" {strokeAttrs}/>");
+            sb.AppendLine("      </svg>");
+        }
+        else if (preset.StartsWith("curvedConnector", StringComparison.Ordinal))
+        {
+            // Curved connectors: cubic bezier S-curve. Author in 0..100 viewBox.
+            // curvedConnector3 default: M 0,0 C 50,0 50,100 100,100 (horizontal-entry S).
+            string d = preset switch
+            {
+                "curvedConnector2" => "M 0,0 Q 100,0 100,100",
+                "curvedConnector4" or "curvedConnector5" => "M 0,0 C 25,0 25,50 50,50 C 75,50 75,100 100,100",
+                _ => "M 0,0 C 50,0 50,100 100,100", // curvedConnector3
+            };
+            sb.AppendLine("      <svg width=\"100%\" height=\"100%\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\" style=\"overflow:visible\">");
+            if (!string.IsNullOrEmpty(markerDefs))
+                sb.AppendLine($"        {markerDefs}");
+            sb.AppendLine($"        <path d=\"{d}\" {strokeAttrs}/>");
+            sb.AppendLine("      </svg>");
+        }
+        else
+        {
+            sb.AppendLine("      <svg width=\"100%\" height=\"100%\" preserveAspectRatio=\"none\" style=\"overflow:visible\">");
+            if (!string.IsNullOrEmpty(markerDefs))
+                sb.AppendLine($"        {markerDefs}");
+            sb.AppendLine($"        <line x1=\"{svgX1}\" y1=\"{svgY1}\" x2=\"{svgX2}\" y2=\"{svgY2}\" {strokeAttrs}/>");
+            sb.AppendLine("      </svg>");
+        }
         sb.AppendLine("    </div>");
     }
 
@@ -874,7 +997,14 @@ public partial class PowerPointHandler
         // ResolveIdPath — clicks inside walk up via closest('[data-path]') and select
         // the group container.
         var dataPathAttr = string.IsNullOrEmpty(dataPath) ? "" : $" data-path=\"{HtmlEncode(dataPath)}\"";
-        sb.AppendLine($"    <div class=\"group\"{dataPathAttr} style=\"left:{Units.EmuToPt(x)}pt;top:{Units.EmuToPt(y)}pt;width:{Units.EmuToPt(cx)}pt;height:{Units.EmuToPt(cy)}pt\">");
+        // CONSISTENCY(group-rotation): match single-shape rotation idiom from RenderShape
+        // (transform:rotate(Ndeg)). OOXML group rotation rotates children as a composite
+        // around the group's bounding-box center; CSS default transform-origin (50% 50%)
+        // matches this.
+        var grpTransform = "";
+        if (grpXfrm?.Rotation != null && grpXfrm.Rotation.Value != 0)
+            grpTransform = $";transform:rotate({grpXfrm.Rotation.Value / 60000.0:0.##}deg)";
+        sb.AppendLine($"    <div class=\"group\"{dataPathAttr} style=\"left:{Units.EmuToPt(x)}pt;top:{Units.EmuToPt(y)}pt;width:{Units.EmuToPt(cx)}pt;height:{Units.EmuToPt(cy)}pt{grpTransform}\">");
 
         foreach (var child in grp.ChildElements)
         {
@@ -958,7 +1088,11 @@ public partial class PowerPointHandler
         var offX = childOff?.X?.Value ?? 0;
         var offY = childOff?.Y?.Value ?? 0;
 
-        sb.AppendLine($"    <div class=\"group\" style=\"left:{Units.EmuToPt(x)}pt;top:{Units.EmuToPt(y)}pt;width:{Units.EmuToPt(cx)}pt;height:{Units.EmuToPt(cy)}pt\">");
+        // CONSISTENCY(group-rotation): same idiom as RenderGroup
+        var grpTransform = "";
+        if (grpXfrm?.Rotation != null && grpXfrm.Rotation.Value != 0)
+            grpTransform = $";transform:rotate({grpXfrm.Rotation.Value / 60000.0:0.##}deg)";
+        sb.AppendLine($"    <div class=\"group\" style=\"left:{Units.EmuToPt(x)}pt;top:{Units.EmuToPt(y)}pt;width:{Units.EmuToPt(cx)}pt;height:{Units.EmuToPt(cy)}pt{grpTransform}\">");
 
         foreach (var child in grp.ChildElements)
         {

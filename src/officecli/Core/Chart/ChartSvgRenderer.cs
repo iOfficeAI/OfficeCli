@@ -1399,6 +1399,10 @@ internal partial class ChartSvgRenderer
         public string? PlotFillColor { get; set; }
         public string? ChartFillColor { get; set; }
         public bool HasLegend { get; set; }
+        /// <summary>#7f: OOXML c:legendPos InnerText — "b" (bottom, default),
+        /// "t" (top), "r" (right), "l" (left), "tr" (top-right). Rendering
+        /// adapts the wrapper layout to each position.</summary>
+        public string LegendPos { get; set; } = "b";
         public string LegendFontSize { get; set; } = "8pt";
         public string? LegendFontColor { get; set; }
         public int ValFontPx { get; set; } = 9;
@@ -1698,6 +1702,10 @@ internal partial class ChartSvgRenderer
             if (legendFontSize != null && int.TryParse(legendFontSize, out var lfs))
                 info.LegendFontSize = $"{lfs / 100.0:0.##}pt";
             info.LegendFontColor = ExtractFontColor(legendRPr);
+            // #7f: honor <c:legendPos w:val="r|l|t|b|tr"/>.
+            var posEl = legendEl.Elements().FirstOrDefault(e => e.LocalName == "legendPos");
+            var posVal = posEl?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
+            if (!string.IsNullOrEmpty(posVal)) info.LegendPos = posVal!;
         }
         else
         {
@@ -1922,7 +1930,14 @@ internal partial class ChartSvgRenderer
         if (container == null) return null;
         var solidFill = container.Elements().FirstOrDefault(e => e.LocalName == "solidFill");
         var srgb = solidFill?.Elements().FirstOrDefault(e => e.LocalName == "srgbClr");
-        return srgb?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
+        var v = srgb?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
+        // Reject non-hex values — the return flows into $"#{...}" inline SVG
+        // fill/style attributes. Same XSS class as w:color / w:shd / border.
+        if (v == null) return null;
+        if (v.Length is not (3 or 6 or 8)) return null;
+        foreach (var c in v)
+            if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f'))) return null;
+        return v;
     }
 
     /// <summary>Extract font color from RunProperties or DefaultRunProperties (solidFill > srgbClr).</summary>
@@ -1932,7 +1947,7 @@ internal partial class ChartSvgRenderer
         var solidFill = rPr.Elements().FirstOrDefault(e => e.LocalName == "solidFill");
         var srgb = solidFill?.Elements().FirstOrDefault(e => e.LocalName == "srgbClr");
         var val = srgb?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
-        return val != null ? $"#{val}" : null;
+        return HexOrNull(val);
     }
 
     /// <summary>Extract line/outline color from spPr (ln > solidFill > srgbClr).</summary>
@@ -1944,7 +1959,19 @@ internal partial class ChartSvgRenderer
         var solidFill = ln.Elements().FirstOrDefault(e => e.LocalName == "solidFill");
         var srgb = solidFill?.Elements().FirstOrDefault(e => e.LocalName == "srgbClr");
         var val = srgb?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
-        return val != null ? $"#{val}" : null;
+        return HexOrNull(val);
+    }
+
+    // Hex-only stripper: reject non-hex so these chart-color getters can't
+    // become XSS sinks when their return flows into SVG style/fill/stroke
+    // attributes downstream in Excel/PPTX/Word previews.
+    private static string? HexOrNull(string? v)
+    {
+        if (v == null) return null;
+        if (v.Length is not (3 or 6 or 8)) return null;
+        foreach (var c in v)
+            if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f'))) return null;
+        return v;
     }
 
     /// <summary>Render the chart SVG content (inside an already-opened svg tag) based on ChartInfo.</summary>
@@ -2073,7 +2100,18 @@ internal partial class ChartSvgRenderer
         if (!info.HasLegend) return;
         var legendColor = info.LegendFontColor ?? fontColor;
         var isPieType = info.ChartType.Contains("pie") || info.ChartType.Contains("doughnut");
-        sb.Append($"<div style=\"display:flex;justify-content:center;gap:16px;padding:4px 0;font-size:{info.LegendFontSize};color:{legendColor}\">");
+        // #7f: legendPos "r" / "l" / "tr" stack swatches vertically; "b" / "t"
+        // keep the horizontal row layout but the caller wraps with flex so
+        // they appear above / below the SVG.
+        var isVertical = info.LegendPos is "r" or "l" or "tr";
+        var layoutCss = isVertical
+            ? "display:flex;flex-direction:column;gap:6px;padding:4px 6px;align-items:flex-start"
+            : "display:flex;flex-wrap:wrap;justify-content:center;gap:16px;padding:4px 0";
+        // Whitelist legendPos: ST_LegendPos values are short tokens, so
+        // reject anything outside the schema to stop an adversarial
+        // <c:legendPos val='x" onclick=..."'/> from escaping the attr.
+        var safePos = info.LegendPos is "r" or "l" or "t" or "b" or "tr" or "ctr" ? info.LegendPos : "";
+        sb.Append($"<div class=\"chart-legend\" data-legend-pos=\"{safePos}\" style=\"{layoutCss};font-size:{info.LegendFontSize};color:{legendColor}\">");
         if (isPieType && info.Categories.Length > 0)
         {
             for (int i = 0; i < info.Categories.Length; i++)
@@ -2084,8 +2122,14 @@ internal partial class ChartSvgRenderer
         }
         else
         {
-            for (int i = 0; i < info.Series.Count; i++)
+            // Office convention: horizontal bar charts render legend in reverse of
+            // declaration order so stacking reads top-to-bottom matching legend order.
+            // CONSISTENCY(chart-legend-order): vertical bar/column, line, area keep
+            // declaration order.
+            var isHorizBarLegend = info.ChartType.Contains("bar") && !info.ChartType.Contains("column");
+            for (int k = 0; k < info.Series.Count; k++)
             {
+                int i = isHorizBarLegend ? info.Series.Count - 1 - k : k;
                 var color = i < info.Colors.Count ? info.Colors[i] : DefaultColors[i % DefaultColors.Length];
                 sb.Append($"<span style=\"display:inline-flex;align-items:center;gap:4px\"><span style=\"display:inline-block;width:12px;height:12px;background:{color};border-radius:1px\"></span>{HtmlEncode(info.Series[i].name)}</span>");
             }

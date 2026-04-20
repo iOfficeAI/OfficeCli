@@ -408,7 +408,8 @@ locked (true|false), formulahidden (true|false)
 name, freeze (A2|B3|none), zoom (75-200), tabcolor (#FF0000|none)
 autofilter (A1:F100|none), merge (A1:D1), protect (true|false), password
 printarea ($A$1:$D$10|none), orientation (landscape|portrait), papersize (1=Letter|9=A4)
-fittopage (1x2|true), header (&CPage &P), footer (&LConfidential), sort (A:asc,B:desc|none)
+fittopage (1x2|true), header (&CPage &P), footer (&LConfidential)
+sort (""Salary desc"" | ""Dept asc, Salary desc"" | none) — space between column and asc/desc, comma between keys; pair with sortHeader=true to keep row 1
 
 ## Run properties (Set /Sheet/A1/run[N])
 text, bold, italic, strike, underline, superscript, subscript, size, color, font

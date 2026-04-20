@@ -218,9 +218,13 @@ public partial class ExcelHandler
         if (!match.Success)
             throw new ArgumentException($"Invalid cell reference: '{cellRef}'. Expected format like 'A1', 'B2', 'XFD1048576'.");
         var col = match.Groups[1].Value.ToUpperInvariant();
-        var row = int.Parse(match.Groups[2].Value);
-        if (row < 1 || row > 1048576)
-            throw new ArgumentException($"Row {row} in cell reference '{cellRef}' is out of range. Valid range: 1-1048576.");
+        // Use long to avoid OverflowException when malformed files carry row numbers
+        // outside int range (e.g. uint.MaxValue). Surface a semantic ArgumentException
+        // (the same exception type used for other invalid refs below) instead.
+        if (!long.TryParse(match.Groups[2].Value, out var rowLong) || rowLong < 1 || rowLong > 1048576)
+            throw new ArgumentException(
+                $"Row {match.Groups[2].Value} in cell reference '{cellRef}' is out of valid range. Valid range: 1-1048576.");
+        var row = (int)rowLong;
         var colIdx = ColumnNameToIndex(col);
         if (colIdx < 1 || colIdx > 16384)
             throw new ArgumentException($"Column '{col}' in cell reference '{cellRef}' is out of range. Valid range: A-XFD (1-16384).");

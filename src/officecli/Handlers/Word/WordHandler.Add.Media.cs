@@ -154,10 +154,49 @@ public partial class WordHandler
         imgStream.Position = 0;
 
         var mainPart = _doc.MainDocumentPart!;
-        var imagePart = mainPart.AddImagePart(imgPartType);
-        imagePart.FeedData(imgStream);
-        imgStream.Position = 0;
-        var relId = mainPart.GetIdOfPart(imagePart);
+        string relId;
+        string? svgRelId = null;
+        Stream? fallbackDimStream = null;  // source for TryGetDimensions when raster is the fallback
+        if (imgPartType == ImagePartType.Svg)
+        {
+            // OOXML SVG embedding: main blip points to a PNG fallback, and
+            // a:blip/a:extLst carries an asvg:svgBlip referencing the SVG
+            // part. Modern Office picks up the SVG; older versions render
+            // the PNG. See SvgImageHelper for namespace/URI details.
+            var svgPart = mainPart.AddImagePart(ImagePartType.Svg);
+            svgPart.FeedData(imgStream);
+            imgStream.Position = 0;
+            svgRelId = mainPart.GetIdOfPart(svgPart);
+
+            MemoryStream pngStream;
+            if (properties.TryGetValue("fallback", out var fallbackPath) && !string.IsNullOrWhiteSpace(fallbackPath))
+            {
+                var (fbRaw, fbType) = OfficeCli.Core.ImageSource.Resolve(fallbackPath);
+                using var fbDispose = fbRaw;
+                pngStream = new MemoryStream();
+                fbRaw.CopyTo(pngStream);
+                pngStream.Position = 0;
+                var fbPart = mainPart.AddImagePart(fbType);
+                fbPart.FeedData(pngStream);
+                pngStream.Position = 0;
+                relId = mainPart.GetIdOfPart(fbPart);
+            }
+            else
+            {
+                var pngPart = mainPart.AddImagePart(ImagePartType.Png);
+                pngPart.FeedData(new MemoryStream(OfficeCli.Core.SvgImageHelper.TransparentPng1x1, writable: false));
+                relId = mainPart.GetIdOfPart(pngPart);
+                pngStream = new MemoryStream(OfficeCli.Core.SvgImageHelper.TransparentPng1x1, writable: false);
+            }
+            fallbackDimStream = pngStream;
+        }
+        else
+        {
+            var imagePart = mainPart.AddImagePart(imgPartType);
+            imagePart.FeedData(imgStream);
+            imgStream.Position = 0;
+            relId = mainPart.GetIdOfPart(imagePart);
+        }
 
         // Determine dimensions. When only one axis is supplied, compute the
         // other from the image's native pixel aspect ratio. When neither is
@@ -204,6 +243,16 @@ public partial class WordHandler
         else
         {
             imgRun = CreateImageRun(relId, cxEmu, cyEmu, altText, imgDocPropId);
+        }
+
+        // Wire the asvg:svgBlip extension after the run is built. Walking
+        // the Drawing to find the Blip keeps CreateImageRun /
+        // CreateAnchorImageRun signature-stable for non-SVG callers.
+        if (svgRelId != null)
+        {
+            var addedBlip = imgRun.Descendants<A.Blip>().FirstOrDefault();
+            if (addedBlip != null)
+                OfficeCli.Core.SvgImageHelper.AppendSvgExtension(addedBlip, svgRelId);
         }
 
         string resultPath;

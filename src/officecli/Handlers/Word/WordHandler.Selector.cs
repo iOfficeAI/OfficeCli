@@ -1,7 +1,6 @@
 // Copyright 2025 OfficeCli (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
-using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Wordprocessing;
 using OfficeCli.Core;
 
@@ -225,6 +224,14 @@ public partial class WordHandler
                      ?? (run.RunProperties != null ? GenericXmlQuery.GetAttributeValue(run.RunProperties, key) : null)
             };
 
+            // CONSISTENCY(color-input): align selector input with Add/Set — accept
+            // `#FF0000`, `FF0000`, or named colors. OOXML stores hex without `#`.
+            if (key.Equals("color", StringComparison.OrdinalIgnoreCase))
+            {
+                actual = NormalizeColorForCompare(actual);
+                val = NormalizeColorForCompare(val) ?? val;
+            }
+
             bool matches = string.Equals(actual, val, StringComparison.OrdinalIgnoreCase);
             if (negate ? matches : !matches) return false;
         }
@@ -235,6 +242,14 @@ public partial class WordHandler
         }
 
         return true;
+    }
+
+    private static string? NormalizeColorForCompare(string? raw)
+    {
+        if (string.IsNullOrEmpty(raw)) return raw;
+        var s = raw.Trim();
+        if (s.StartsWith("#")) s = s[1..];
+        return s.ToUpperInvariant();
     }
 
     private string GetHeaderRawXml(string partPath)

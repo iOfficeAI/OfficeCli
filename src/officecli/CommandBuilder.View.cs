@@ -85,7 +85,12 @@ static partial class CommandBuilder
                     if (browser)
                     {
                         // --browser: write to temp file and open in browser
-                        var htmlPath = Path.Combine(Path.GetTempPath(), $"officecli_preview_{Path.GetFileNameWithoutExtension(file.Name)}_{DateTime.Now:HHmmss}.html");
+                        // SECURITY: include a random token so the preview path is not predictable.
+                        // A predictable path (HHmmss only) lets a local attacker pre-place a symlink
+                        // at the expected location, causing File.WriteAllText to follow it and
+                        // overwrite an arbitrary victim file with preview HTML. It also caused
+                        // collisions between concurrent `view html` invocations of the same file.
+                        var htmlPath = Path.Combine(Path.GetTempPath(), $"officecli_preview_{Path.GetFileNameWithoutExtension(file.Name)}_{DateTime.Now:HHmmss}_{Guid.NewGuid():N}.html");
                         File.WriteAllText(htmlPath, html);
                         Console.WriteLine(htmlPath);
                         try

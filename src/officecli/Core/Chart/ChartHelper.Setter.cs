@@ -155,6 +155,7 @@ internal static partial class ChartHelper
                             "top" or "t" => C.LegendPositionValues.Top,
                             "left" or "l" => C.LegendPositionValues.Left,
                             "right" or "r" => C.LegendPositionValues.Right,
+                            "topright" or "tr" or "top-right" => C.LegendPositionValues.TopRight,
                             _ => C.LegendPositionValues.Bottom
                         };
                         var plotVisOnly = chart.GetFirstChild<C.PlotVisibleOnly>();
@@ -306,6 +307,42 @@ internal static partial class ChartHelper
                         ApplyAxisTextProperties(axis, value);
                     foreach (var axis in plotArea2.Elements<C.DateAxis>())
                         ApplyAxisTextProperties(axis, value);
+                    break;
+                }
+
+                // R15-4: tick-label rotation. Degrees (-90..90). Emits a
+                // <c:txPr> with <a:bodyPr rot="deg*60000"/> on the target
+                // axis so Excel rotates the tick labels on open.
+                case "labelrotation":
+                case "xaxis.labelrotation":
+                case "xaxislabelrotation":
+                case "valaxis.labelrotation":
+                case "valaxislabelrotation":
+                case "yaxis.labelrotation":
+                case "yaxislabelrotation":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    if (!double.TryParse(value, System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out var deg))
+                    { unsupported.Add(key); break; }
+                    var rotAttrVal = ((int)(deg * 60000)).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    var lowerKey = key.ToLowerInvariant();
+                    var targetCat = lowerKey is "labelrotation" or "xaxis.labelrotation" or "xaxislabelrotation";
+                    var targetVal = lowerKey is "labelrotation" or "valaxis.labelrotation" or "valaxislabelrotation"
+                        or "yaxis.labelrotation" or "yaxislabelrotation";
+                    if (targetCat)
+                    {
+                        foreach (var axis in plotArea2.Elements<C.CategoryAxis>())
+                            ApplyAxisLabelRotation(axis, rotAttrVal);
+                        foreach (var axis in plotArea2.Elements<C.DateAxis>())
+                            ApplyAxisLabelRotation(axis, rotAttrVal);
+                    }
+                    if (targetVal)
+                    {
+                        foreach (var axis in plotArea2.Elements<C.ValueAxis>())
+                            ApplyAxisLabelRotation(axis, rotAttrVal);
+                    }
                     break;
                 }
 
@@ -614,7 +651,11 @@ internal static partial class ChartHelper
                 }
 
                 // ---- #6 Gradient fill ----
-                case "gradient":
+                // CONSISTENCY(gradient-fill-alias): accept `gradientFill=` as an
+                // alias for `gradient=` so chart vocabulary matches shape/textbox
+                // (ExcelHandler.Add.cs line 1931 / Set.cs line 727 use
+                // BuildShapeGradientFill keyed on `gradientFill`).
+                case "gradient" or "gradientfill":
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
                     if (plotArea2 == null) { unsupported.Add(key); break; }
@@ -977,15 +1018,32 @@ internal static partial class ChartHelper
                     break;
                 }
 
-                case "logbase" or "logscale":
+                case "logbase" or "logscale" or "yaxisscale":
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
                     var valAx = plotArea2?.GetFirstChild<C.ValueAxis>();
                     var scaling = valAx?.GetFirstChild<C.Scaling>();
                     if (scaling == null) { unsupported.Add(key); break; }
                     scaling.RemoveAllChildren<C.LogBase>();
-                    if (!value.Equals("none", StringComparison.OrdinalIgnoreCase) &&
-                        !value.Equals("false", StringComparison.OrdinalIgnoreCase))
+                    // DEFERRED(xlsx/chart-logscale) CL23: accept `logScale=true`
+                    // as shorthand for logBase=10 (Excel's default log base).
+                    // `false`/`none` removes the log scale. `logBase=<n>` still
+                    // accepts an explicit numeric base via the same key.
+                    // R19-2: also accept `yAxisScale=log` / `yAxisScale=linear`
+                    // as a verb-style alias. `log` == shorthand for logBase=10,
+                    // `linear`/`none` removes the log scale.
+                    if (value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                        value.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
+                        value.Equals("log", StringComparison.OrdinalIgnoreCase) ||
+                        value == "1")
+                    {
+                        scaling.PrependChild(new C.LogBase { Val = 10d });
+                    }
+                    else if (!value.Equals("none", StringComparison.OrdinalIgnoreCase) &&
+                             !value.Equals("linear", StringComparison.OrdinalIgnoreCase) &&
+                             !value.Equals("false", StringComparison.OrdinalIgnoreCase) &&
+                             !value.Equals("no", StringComparison.OrdinalIgnoreCase) &&
+                             value != "0")
                     {
                         var logVal = ParseHelpers.SafeParseDouble(value, "logBase");
                         scaling.PrependChild(new C.LogBase { Val = logVal });
@@ -1212,6 +1270,78 @@ internal static partial class ChartHelper
                     break;
                 }
 
+                // CL23 — errBars.direction / errBarDirection controls <c:errBarType val="plus|minus|both"/>.
+                // Applied to any existing errBars on all series. If none exist yet, silently no-op
+                // (consistency with other per-series options that require the parent prop to be set first).
+                case "errbars.direction" or "errbardirection":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    var dirVal = value.Trim().ToLowerInvariant() switch
+                    {
+                        "plus" => C.ErrorBarValues.Plus,
+                        "minus" => C.ErrorBarValues.Minus,
+                        "both" or "" => C.ErrorBarValues.Both,
+                        _ => throw new ArgumentException(
+                            $"Invalid errBarDirection '{value}'. Use: plus, minus, both.")
+                    };
+                    foreach (var ser in plotArea2.Descendants<OpenXmlCompositeElement>().Where(e => e.LocalName == "ser"))
+                    {
+                        foreach (var eb in ser.Elements<C.ErrorBars>())
+                        {
+                            eb.RemoveAllChildren<C.ErrorBarType>();
+                            // Schema order in CT_ErrBars: errDir, errBarType, errValType, noEndCap, plus, minus, val, spPr
+                            var dir = eb.GetFirstChild<C.ErrorDirection>();
+                            var newType = new C.ErrorBarType { Val = dirVal };
+                            if (dir != null) dir.InsertAfterSelf(newType);
+                            else eb.PrependChild(newType);
+                        }
+                    }
+                    break;
+                }
+
+                // CL23 — chart-level trendline.* fan-out. Applies the sub-property to every
+                // series' existing trendline. Use `series{N}.trendline.{prop}` for per-series.
+                case "trendline.label" or "trendline.forecastforward" or "trendline.forecastbackward"
+                    or "trendline.order" or "trendline.period"
+                    or "trendline.intercept" or "trendline.displayequation" or "trendline.displayrsquared":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    var subKey = key.ToLowerInvariant()["trendline.".Length..] switch
+                    {
+                        "label" => "name",
+                        "forecastforward" => "forward",
+                        "forecastbackward" => "backward",
+                        "order" => "order",
+                        "period" => "period",
+                        "intercept" => "intercept",
+                        "displayequation" => "dispeq",
+                        "displayrsquared" => "disprsqr",
+                        var s => s
+                    };
+                    foreach (var ser in plotArea2.Descendants<OpenXmlCompositeElement>().Where(e => e.LocalName == "ser"))
+                    {
+                        foreach (var tl in ser.Elements<C.Trendline>())
+                            ApplyTrendlineOptions(tl, subKey, value);
+                    }
+                    break;
+                }
+
+                // CL15 — showLeaderLines on pie/doughnut. Alias of datalabels.showleaderlines.
+                case "showleaderlines":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    var show = ParseHelpers.IsTruthy(value);
+                    foreach (var dl in plotArea2.Descendants<C.DataLabels>())
+                    {
+                        dl.RemoveAllChildren<C.ShowLeaderLines>();
+                        dl.AppendChild(new C.ShowLeaderLines { Val = show });
+                    }
+                    break;
+                }
+
                 // ==================== DataLabel Enhancements ====================
 
                 case "datalabels.separator" or "labelseparator":
@@ -1260,6 +1390,74 @@ internal static partial class ChartHelper
                     {
                         dl.RemoveAllChildren<C.ShowBubbleSize>();
                         dl.AppendChild(new C.ShowBubbleSize { Val = ParseHelpers.IsTruthy(value) });
+                    }
+                    break;
+                }
+
+                // CleanupE1 — dotted subkeys for toggling individual show* flags on existing
+                // dataLabels. Useful for pie charts where `datalabels.showpercent=true` should
+                // emit `<c:showPercent val="1"/>` rather than raw values.
+                case "datalabels.showvalue" or "datalabels.showval":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    var show = ParseHelpers.IsTruthy(value);
+                    foreach (var dl in plotArea2.Descendants<C.DataLabels>())
+                    {
+                        dl.RemoveAllChildren<C.ShowValue>();
+                        dl.AppendChild(new C.ShowValue { Val = show });
+                    }
+                    break;
+                }
+
+                case "datalabels.showpercent" or "datalabels.showpct":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    var show = ParseHelpers.IsTruthy(value);
+                    foreach (var dl in plotArea2.Descendants<C.DataLabels>())
+                    {
+                        dl.RemoveAllChildren<C.ShowPercent>();
+                        dl.AppendChild(new C.ShowPercent { Val = show });
+                    }
+                    break;
+                }
+
+                case "datalabels.showcatname" or "datalabels.showcategoryname" or "datalabels.showcategory":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    var show = ParseHelpers.IsTruthy(value);
+                    foreach (var dl in plotArea2.Descendants<C.DataLabels>())
+                    {
+                        dl.RemoveAllChildren<C.ShowCategoryName>();
+                        dl.AppendChild(new C.ShowCategoryName { Val = show });
+                    }
+                    break;
+                }
+
+                case "datalabels.showsername" or "datalabels.showseriesname" or "datalabels.showseries":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    var show = ParseHelpers.IsTruthy(value);
+                    foreach (var dl in plotArea2.Descendants<C.DataLabels>())
+                    {
+                        dl.RemoveAllChildren<C.ShowSeriesName>();
+                        dl.AppendChild(new C.ShowSeriesName { Val = show });
+                    }
+                    break;
+                }
+
+                case "datalabels.showlegendkey":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    var show = ParseHelpers.IsTruthy(value);
+                    foreach (var dl in plotArea2.Descendants<C.DataLabels>())
+                    {
+                        dl.RemoveAllChildren<C.ShowLegendKey>();
+                        dl.AppendChild(new C.ShowLegendKey { Val = show });
                     }
                     break;
                 }
@@ -2137,6 +2335,16 @@ internal static partial class ChartHelper
         // Add secondary value axis (visible, on the right)
         var secValAxis = BuildValueAxis(secondaryValAxisId, secondaryCatAxisId, C.AxisPositionValues.Right);
         secValAxis.RemoveAllChildren<C.MajorGridlines>(); // secondary axis typically has no gridlines
+
+        // Bind secondary Y axis to the right edge by crossing the (hidden) secondary
+        // category axis at its maximum. Without this, Excel ignores axPos="r" and
+        // renders both Y axes on the left edge — BuildValueAxis defaults crosses to
+        // autoZero, which is correct for the primary axis but wrong here.
+        foreach (var c in secValAxis.Elements<C.Crosses>().ToList()) c.Remove();
+        foreach (var c in secValAxis.Elements<C.CrossesAt>().ToList()) c.Remove();
+        // Schema order: crosses comes after crossAx; append is safe as BuildValueAxis
+        // ends with Crosses and we already stripped the autoZero Crosses above.
+        secValAxis.AppendChild(new C.Crosses { Val = C.CrossesValues.Maximum });
 
         // Insert after the last existing axis to maintain schema order
         var lastAxis = plotArea.Elements<C.ValueAxis>().LastOrDefault() as OpenXmlElement

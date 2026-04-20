@@ -303,9 +303,15 @@ public partial class WordHandler
 
             if (current is Body body2 && (seg.Name.ToLowerInvariant() == "p" || seg.Name.ToLowerInvariant() == "tbl"))
             {
-                // Only count direct body-level paragraphs/tables, skip those inside SdtBlock containers
+                // Only count direct body-level paragraphs/tables, skip those inside SdtBlock containers.
+                // #6: paragraphs whose sole content is m:oMathPara are
+                // counted via the /body/oMathPara[N] path instead, so the
+                // /body/p[N] enumeration skips them to match HTML-preview
+                // data-path attribution (which also skips them).
                 children = seg.Name.ToLowerInvariant() == "p"
-                    ? body2.Elements<Paragraph>().Cast<OpenXmlElement>()
+                    ? body2.Elements<Paragraph>()
+                        .Where(p => !IsOMathParaWrapperParagraph(p))
+                        .Cast<OpenXmlElement>()
                     : body2.Elements<Table>().Cast<OpenXmlElement>();
             }
             else if (current is Body body3 && seg.Name == "oMathPara")
@@ -316,8 +322,12 @@ public partial class WordHandler
                 {
                     if (el.LocalName == "oMathPara" || el is M.Paragraph)
                         mathParas.Add(el);
-                    else if (el is Paragraph wp)
+                    else if (el is Paragraph wp && IsOMathParaWrapperParagraph(wp))
                     {
+                        // Only pure-wrapper paragraphs (pPr + single oMathPara child)
+                        // — otherwise /body/p[N] and /body/oMathPara[M] would both
+                        // address the same paragraph (mixed prose + inline math),
+                        // causing Get/Set/Remove to diverge by callsite.
                         var inner = wp.ChildElements.FirstOrDefault(c => c.LocalName == "oMathPara" || c is M.Paragraph);
                         if (inner != null) mathParas.Add(inner);
                     }

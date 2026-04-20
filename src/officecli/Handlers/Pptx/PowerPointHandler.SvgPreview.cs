@@ -1265,7 +1265,18 @@ public partial class PowerPointHandler
                     var font = rp?.GetFirstChild<Drawing.LatinFont>()?.Typeface?.Value
                         ?? rp?.GetFirstChild<Drawing.EastAsianFont>()?.Typeface?.Value;
                     if (font != null && !font.StartsWith("+", StringComparison.Ordinal))
-                        styles.Add($"font-family:'{HtmlEncode(font)}'");
+                    {
+                        // foreignObject renders this span as live HTML, so the
+                        // font-family value sits inside an inline CSS string.
+                        // HtmlEncode only protects the HTML attribute layer
+                        // (turns ' into &#39; which the parser unescapes back
+                        // into ' inside CSS), letting a crafted theme typeface
+                        // close the CSS string and inject rules. Use the same
+                        // allowlist CssSanitize as the HtmlPreview path.
+                        var safe = CssSanitize(font);
+                        if (!string.IsNullOrEmpty(safe))
+                            styles.Add($"font-family:'{safe}'");
+                    }
 
                     // Size — resolve per-paragraph from placeholder inheritance chain
                     int? paraDefaultFontSize = null;
@@ -1352,7 +1363,9 @@ public partial class PowerPointHandler
 
             // Stars — inner radius from adj (default varies by star type)
             "star4" => BuildStar(4, w, h, ReadAdjValue(presetGeom, 0, 50000) / 100000.0),
-            "star5" => BuildStar(5, w, h, ReadAdjValue(presetGeom, 0, 19098) / 100000.0),
+            // CONSISTENCY(star5-adj-scale): OOXML adj for star5 is fraction * 50000 (default 19098 → inner ratio ~0.382).
+            // Matches Star5Polygon in PowerPointHandler.HtmlPreview.Css.cs.
+            "star5" => BuildStar(5, w, h, ReadAdjValue(presetGeom, 0, 19098) / 50000.0),
             "star6" => BuildStar(6, w, h, ReadAdjValue(presetGeom, 0, 28868) / 100000.0),
             "star8" => BuildStar(8, w, h, ReadAdjValue(presetGeom, 0, 38268) / 100000.0),
             "star10" => BuildStar(10, w, h, ReadAdjValue(presetGeom, 0, 38268) / 100000.0),

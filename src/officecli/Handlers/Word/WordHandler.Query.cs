@@ -75,12 +75,17 @@ public partial class WordHandler
         if (!string.IsNullOrEmpty(destDir) && !Directory.Exists(destDir))
             Directory.CreateDirectory(destDir);
 
+        // CONSISTENCY(ole-cfb-wrap): unwrap CFB Ole10Native payload on read.
+        byte[] rawBytes;
         using (var src = part.GetStream())
-        using (var dst = File.Create(destPath))
+        using (var ms = new MemoryStream())
         {
-            src.CopyTo(dst);
-            byteCount = dst.Length;
+            src.CopyTo(ms);
+            rawBytes = ms.ToArray();
         }
+        var payload = OfficeCli.Core.OleHelper.UnwrapOle10NativeIfCfb(rawBytes);
+        File.WriteAllBytes(destPath, payload);
+        byteCount = payload.Length;
         contentType = part.ContentType;
         return true;
     }
@@ -1612,21 +1617,56 @@ public partial class WordHandler
                         }
                     }
                 }
+                else if (isRunSelector)
+                {
+                    // Scan inside table cells for runs. CONSISTENCY(word-ole-query):
+                    // mirrors the OLE/equation branches above. Without this, run
+                    // selectors like `run[color=#FF0000]` silently skip any run
+                    // inside a table cell. (issue #68)
+                    var tblIdx = body.Elements<DocumentFormat.OpenXml.Wordprocessing.Table>()
+                        .TakeWhile(t => t != tbl).Count();
+                    int rowIdx = 0;
+                    foreach (var row in tbl.Elements<TableRow>())
+                    {
+                        rowIdx++;
+                        int cellIdx = 0;
+                        foreach (var cell in row.Elements<TableCell>())
+                        {
+                            cellIdx++;
+                            int cellParaIdx = 0;
+                            foreach (var cellPara in cell.Elements<Paragraph>())
+                            {
+                                cellParaIdx++;
+                                int cellRunIdx = 0;
+                                foreach (var cellRun in GetAllRuns(cellPara))
+                                {
+                                    cellRunIdx++;
+                                    if (MatchesRunSelector(cellRun, cellPara, parsed))
+                                    {
+                                        results.Add(ElementToNode(cellRun,
+                                            $"/body/tbl[{tblIdx + 1}]/tr[{rowIdx}]/tc[{cellIdx}]/{BuildParaPathSegment(cellPara, cellParaIdx)}/r[{cellRunIdx}]", 0));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 continue;
             }
 
             if (element is Paragraph para)
             {
-                paraIdx++;
-
-                if (isEquationSelector)
+                // #6: a w:p whose sole content is m:oMathPara is addressed
+                // via /body/oMathPara[M], not /body/p[N]. Don't bump paraIdx
+                // for these wrappers so /body/p[N] indexes only real prose.
+                if (IsOMathParaWrapperParagraph(para))
                 {
-                    // Check for display equation (oMathPara inside w:p)
-                    var oMathParaInPara = para.ChildElements.FirstOrDefault(e => e.LocalName == "oMathPara" || e is M.Paragraph);
-                    if (oMathParaInPara != null)
+                    mathParaIdx++;
+                    if (isEquationSelector)
                     {
-                        mathParaIdx++;
-                        var latex = FormulaParser.ToLatex(oMathParaInPara);
+                        var oMathParaInPara = para.ChildElements.FirstOrDefault(
+                            e => e.LocalName == "oMathPara" || e is M.Paragraph);
+                        var latex = FormulaParser.ToLatex(oMathParaInPara!);
                         if (parsed.ContainsText == null || latex.Contains(parsed.ContainsText))
                         {
                             results.Add(new DocumentNode
@@ -1637,8 +1677,14 @@ public partial class WordHandler
                                 Format = { ["mode"] = "display" }
                             });
                         }
-                        continue;
                     }
+                    continue;
+                }
+
+                paraIdx++;
+
+                if (isEquationSelector)
+                {
 
                     // Find inline math in this paragraph
                     int mathIdx = 0;

@@ -275,6 +275,78 @@ public partial class PowerPointHandler
     }
 
 
+    // CONSISTENCY(add-dispatch-shape): mirrors AddGroup/AddShape resolution flow.
+    // Emits a <p:sp> with <p:ph type="..."/> that binds to the layout's matching
+    // placeholder. Leaves <p:spPr> empty so PowerPoint inherits geometry/font
+    // from the layout placeholder. Optional --prop text=... prepopulates text.
+    private string AddPlaceholder(string parentPath, int? index, Dictionary<string, string> properties)
+    {
+        var phSlideMatch = Regex.Match(parentPath, @"^/slide\[(\d+)\]$");
+        if (!phSlideMatch.Success)
+            throw new ArgumentException("Placeholders must be added to a slide: /slide[N]");
+
+        var phSlideIdx = int.Parse(phSlideMatch.Groups[1].Value);
+        var phSlideParts = GetSlideParts().ToList();
+        if (phSlideIdx < 1 || phSlideIdx > phSlideParts.Count)
+            throw new ArgumentException($"Slide {phSlideIdx} not found (total: {phSlideParts.Count})");
+
+        var phSlidePart = phSlideParts[phSlideIdx - 1];
+        var phShapeTree = GetSlide(phSlidePart).CommonSlideData?.ShapeTree
+            ?? throw new InvalidOperationException("Slide has no shape tree");
+
+        if (!properties.TryGetValue("phType", out var phTypeStr)
+            && !properties.TryGetValue("phtype", out phTypeStr)
+            && !properties.TryGetValue("type", out phTypeStr))
+            throw new ArgumentException("'phType' property required for placeholder type (e.g. phType=body|date|footer|slidenum|header|subtitle|title)");
+
+        var phTypeVal = ParsePlaceholderType(phTypeStr)
+            ?? throw new ArgumentException(
+                $"Invalid placeholder type: '{phTypeStr}'. Valid: title, body, subtitle, date, footer, slidenum, header, picture, chart, table, diagram, media, obj, clipart.");
+
+        var phId = GenerateUniqueShapeId(phShapeTree);
+        var phName = properties.GetValueOrDefault("name", $"{phTypeStr} Placeholder {phId}");
+
+        var shape = new Shape();
+        var appNvPr = new ApplicationNonVisualDrawingProperties();
+        appNvPr.AppendChild(new PlaceholderShape { Type = phTypeVal });
+        shape.NonVisualShapeProperties = new NonVisualShapeProperties(
+            new NonVisualDrawingProperties { Id = phId, Name = phName },
+            new NonVisualShapeDrawingProperties(),
+            appNvPr
+        );
+        // Leave ShapeProperties empty — PowerPoint pulls geometry from layout.
+        shape.ShapeProperties = new ShapeProperties();
+
+        // Optional text prepopulation. Build a minimal TextBody so PowerPoint
+        // still renders layout placeholder typography.
+        var textBody = new TextBody(
+            new Drawing.BodyProperties(),
+            new Drawing.ListStyle()
+        );
+        var para = new Drawing.Paragraph();
+        if (properties.TryGetValue("text", out var phText) && phText.Length > 0)
+        {
+            para.AppendChild(new Drawing.Run(
+                new Drawing.RunProperties { Language = "en-US" },
+                new Drawing.Text(phText)
+            ));
+        }
+        else
+        {
+            // Empty paragraph is valid — PowerPoint shows the layout prompt text.
+            para.AppendChild(new Drawing.EndParagraphRunProperties { Language = "en-US" });
+        }
+        textBody.AppendChild(para);
+        shape.TextBody = textBody;
+
+        InsertAtPosition(phShapeTree, shape, index);
+        GetSlide(phSlidePart).Save();
+
+        var shapeCount = phShapeTree.Elements<Shape>().Count();
+        return $"/slide[{phSlideIdx}]/shape[{shapeCount}]";
+    }
+
+
     private string AddAnimation(string parentPath, int? index, Dictionary<string, string> properties)
     {
                 // Add animation to a shape: parentPath must be /slide[N]/shape[M]

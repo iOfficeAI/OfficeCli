@@ -17,6 +17,56 @@
         if (typeof window._watchReapplyHook === 'function') window._watchReapplyHook();
     }
 
+    function _replaceDocumentBody(msg) {
+        fetch('/').then(function(r) { return r.text(); }).then(function(html) {
+            var doc = new DOMParser().parseFromString(html, 'text/html');
+            var oldStyles = document.querySelectorAll('head style');
+            var newStyles = doc.querySelectorAll('head style');
+            oldStyles.forEach(function(s) { s.remove(); });
+            newStyles.forEach(function(s) { document.head.appendChild(s.cloneNode(true)); });
+            var scripts = document.body.querySelectorAll('script');
+            var sseScript = null;
+            scripts.forEach(function(s) { if (s.textContent.indexOf('EventSource') >= 0) sseScript = s; });
+            var targetSheetIdx = -1;
+            if (msg.scrollTo && msg.scrollTo.indexOf('data-sheet') >= 0) {
+                var m = msg.scrollTo.match(/data-sheet="(\d+)"/);
+                if (m) targetSheetIdx = parseInt(m[1]);
+            }
+            // Preserve current active sheet if no explicit target
+            if (targetSheetIdx < 0) {
+                var curActive = document.querySelector('.sheet-tab.active');
+                if (curActive) targetSheetIdx = parseInt(curActive.getAttribute('data-sheet')) || 0;
+            }
+            if (targetSheetIdx >= 0) {
+                doc.querySelectorAll('.sheet-content').forEach(function(s) {
+                    var idx = parseInt(s.getAttribute('data-sheet'));
+                    if (idx === targetSheetIdx) s.classList.add('active');
+                    else s.classList.remove('active');
+                });
+                doc.querySelectorAll('.sheet-tab').forEach(function(t) {
+                    var idx = parseInt(t.getAttribute('data-sheet'));
+                    if (idx === targetSheetIdx) t.classList.add('active');
+                    else t.classList.remove('active');
+                });
+            }
+            var savedScrollY = window.scrollY;
+            document.body.innerHTML = doc.body.innerHTML;
+            if (sseScript) document.body.appendChild(sseScript);
+            window.scrollTo(0, savedScrollY);
+            doc.body.querySelectorAll('script').forEach(function(s) {
+                if (s.textContent.indexOf('EventSource') >= 0) return;
+                var ns = document.createElement('script');
+                ns.textContent = s.textContent;
+                document.body.appendChild(ns);
+            });
+            if (msg.scrollTo && targetSheetIdx < 0) {
+                window._pendingScrollTo = msg.scrollTo;
+            }
+            // Re-apply selection + marks after the body swap
+            _callReapplyHook();
+        });
+    }
+
     function scrollToSlide(num) {
         clearTimeout(_scrollTimer);
         _scrollTimer = setTimeout(function() {
@@ -323,53 +373,7 @@
                 return;
             }
             // Non-Word (PPT/Excel): full body replacement
-            fetch('/').then(function(r) { return r.text(); }).then(function(html) {
-                var doc = new DOMParser().parseFromString(html, 'text/html');
-                var oldStyles = document.querySelectorAll('head style');
-                var newStyles = doc.querySelectorAll('head style');
-                oldStyles.forEach(function(s) { s.remove(); });
-                newStyles.forEach(function(s) { document.head.appendChild(s.cloneNode(true)); });
-                var scripts = document.body.querySelectorAll('script');
-                var sseScript = null;
-                scripts.forEach(function(s) { if (s.textContent.indexOf('EventSource') >= 0) sseScript = s; });
-                var targetSheetIdx = -1;
-                if (msg.scrollTo && msg.scrollTo.indexOf('data-sheet') >= 0) {
-                    var m = msg.scrollTo.match(/data-sheet="(\d+)"/);
-                    if (m) targetSheetIdx = parseInt(m[1]);
-                }
-                // Preserve current active sheet if no explicit target
-                if (targetSheetIdx < 0) {
-                    var curActive = document.querySelector('.sheet-tab.active');
-                    if (curActive) targetSheetIdx = parseInt(curActive.getAttribute('data-sheet')) || 0;
-                }
-                if (targetSheetIdx >= 0) {
-                    doc.querySelectorAll('.sheet-content').forEach(function(s) {
-                        var idx = parseInt(s.getAttribute('data-sheet'));
-                        if (idx === targetSheetIdx) s.classList.add('active');
-                        else s.classList.remove('active');
-                    });
-                    doc.querySelectorAll('.sheet-tab').forEach(function(t) {
-                        var idx = parseInt(t.getAttribute('data-sheet'));
-                        if (idx === targetSheetIdx) t.classList.add('active');
-                        else t.classList.remove('active');
-                    });
-                }
-                var savedScrollY = window.scrollY;
-                document.body.innerHTML = doc.body.innerHTML;
-                if (sseScript) document.body.appendChild(sseScript);
-                window.scrollTo(0, savedScrollY);
-                doc.body.querySelectorAll('script').forEach(function(s) {
-                    if (s.textContent.indexOf('EventSource') >= 0) return;
-                    var ns = document.createElement('script');
-                    ns.textContent = s.textContent;
-                    document.body.appendChild(ns);
-                });
-                if (msg.scrollTo && targetSheetIdx < 0) {
-                    window._pendingScrollTo = msg.scrollTo;
-                }
-                // Re-apply selection + marks after the body swap
-                _callReapplyHook();
-            });
+            _replaceDocumentBody(msg);
             return;
         }
         var slideNum = msg.slide;

@@ -159,6 +159,13 @@ public partial class ExcelHandler
             var tabColor = ws.GetFirstChild<SheetProperties>()?.GetFirstChild<TabColor>();
             if (tabColor?.Rgb?.HasValue == true)
                 sheetNode.Format["tabColor"] = ParseHelpers.FormatHexColor(tabColor.Rgb.Value!);
+            else if (tabColor?.Theme?.HasValue == true)
+            {
+                // CONSISTENCY(scheme-color): echo back the symbolic name
+                // (e.g. "accent1") instead of the numeric theme index.
+                var schemeName = ParseHelpers.ExcelThemeIndexToName(tabColor.Theme.Value);
+                if (schemeName != null) sheetNode.Format["tabColor"] = schemeName;
+            }
 
             // Include autofilter info
             var autoFilter = ws.GetFirstChild<AutoFilter>();

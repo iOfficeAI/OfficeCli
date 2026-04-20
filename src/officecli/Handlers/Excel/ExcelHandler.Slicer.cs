@@ -526,14 +526,36 @@ public partial class ExcelHandler
         // anchor sits to the right of column D so a pivot at column A–B is
         // not covered. Width=3 cols × height=10 rows is Excel's rough
         // default slicer footprint.
-        var fromCol = properties.TryGetValue("x", out var xStr)
-            ? ParseHelpers.SafeParseInt(xStr, "x") : 5;
-        var fromRow = properties.TryGetValue("y", out var yStr)
-            ? ParseHelpers.SafeParseInt(yStr, "y") : 1;
-        var toCol = properties.TryGetValue("width", out var wStr)
-            ? fromCol + ParseHelpers.SafeParseInt(wStr, "width") : fromCol + 3;
-        var toRow = properties.TryGetValue("height", out var hStr)
-            ? fromRow + ParseHelpers.SafeParseInt(hStr, "height") : fromRow + 10;
+        int fromCol, fromRow, toCol, toRow;
+        // CONSISTENCY(ole-width-units): accept `anchor=B2:F7` as a cell
+        // range (same grammar as shape/picture/chart/OLE), alongside the
+        // legacy x/y/width/height form. When both are supplied, warn and
+        // let anchor= win.
+        if (properties.TryGetValue("anchor", out var slAnchorStr) && !string.IsNullOrWhiteSpace(slAnchorStr))
+        {
+            if (properties.ContainsKey("width") || properties.ContainsKey("height")
+                || properties.ContainsKey("x") || properties.ContainsKey("y"))
+                Console.Error.WriteLine(
+                    "Warning: 'x'/'y'/'width'/'height' are ignored when 'anchor' is provided (anchor defines the full rectangle).");
+            if (!TryParseCellRangeAnchor(slAnchorStr, out var sxFrom, out var syFrom, out var sxTo, out var syTo))
+                throw new ArgumentException($"Invalid anchor: '{slAnchorStr}'. Expected e.g. 'B2' or 'B2:F7'.");
+            fromCol = sxFrom;
+            fromRow = syFrom;
+            if (sxTo < 0) { sxTo = fromCol + 3; syTo = fromRow + 10; }
+            toCol = sxTo;
+            toRow = syTo;
+        }
+        else
+        {
+            fromCol = properties.TryGetValue("x", out var xStr)
+                ? ParseHelpers.SafeParseInt(xStr, "x") : 5;
+            fromRow = properties.TryGetValue("y", out var yStr)
+                ? ParseHelpers.SafeParseInt(yStr, "y") : 1;
+            toCol = properties.TryGetValue("width", out var wStr)
+                ? fromCol + ParseHelpers.SafeParseInt(wStr, "width") : fromCol + 3;
+            toRow = properties.TryGetValue("height", out var hStr)
+                ? fromRow + ParseHelpers.SafeParseInt(hStr, "height") : fromRow + 10;
+        }
 
         // Reference Excel files use editAs="oneCell" for slicers (they
         // resize with the top-left cell but don't stretch). Absolute

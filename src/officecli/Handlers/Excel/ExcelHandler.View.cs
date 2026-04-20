@@ -464,6 +464,21 @@ public partial class ExcelHandler
             }
         }
 
+        // CONSISTENCY(text-overflow-check): merged in from former `check` command.
+        // Emits wrapText-cells whose visible row-height budget can't fit the wrapped text.
+        foreach (var (path, msg) in CheckAllCellOverflow())
+        {
+            if (limit.HasValue && issues.Count >= limit.Value) break;
+            issues.Add(new DocumentIssue
+            {
+                Id = $"O{++issueNum}",
+                Type = IssueType.Format,
+                Severity = IssueSeverity.Warning,
+                Path = path,
+                Message = msg
+            });
+        }
+
         return issues;
     }
 }

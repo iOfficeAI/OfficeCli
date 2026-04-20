@@ -402,6 +402,10 @@ internal static partial class ChartHelper
                     if (valRef != null) seriesNode.Format["valuesRef"] = valRef;
                     var catRef = ReadFormulaRef(serEl.GetFirstChild<C.CategoryAxisData>());
                     if (catRef != null) seriesNode.Format["categoriesRef"] = catRef;
+                    var nameRefF = serEl.GetFirstChild<C.SeriesText>()
+                        ?.GetFirstChild<C.StringReference>()
+                        ?.GetFirstChild<C.Formula>()?.Text;
+                    if (!string.IsNullOrEmpty(nameRefF)) seriesNode.Format["nameRef"] = nameRefF;
                 }
 
                 var serSpPr = serEl?.GetFirstChild<C.ChartShapeProperties>();
@@ -724,7 +728,25 @@ internal static partial class ChartHelper
                 (e.Parent.LocalName.Contains("Chart") || e.Parent.LocalName.Contains("chart"))))
         {
             var serText = ser.GetFirstChild<C.SeriesText>();
-            var name = serText?.Descendants<C.NumericValue>().FirstOrDefault()?.Text ?? "?";
+            // c:tx may carry <c:strRef> (cached cell value) or <c:v> (literal).
+            // Prefer the cached value from strRef, fall back to the formula, then
+            // literal <c:v>, so users who set series{N}.name=Sheet1!A1 still get
+            // a meaningful name back from Get.
+            string name = "?";
+            var strRef = serText?.GetFirstChild<C.StringReference>();
+            if (strRef != null)
+            {
+                var cached = strRef.GetFirstChild<C.StringCache>()
+                    ?.GetFirstChild<C.StringPoint>()
+                    ?.GetFirstChild<C.NumericValue>()?.Text;
+                name = !string.IsNullOrEmpty(cached)
+                    ? cached
+                    : (strRef.GetFirstChild<C.Formula>()?.Text ?? "?");
+            }
+            else
+            {
+                name = serText?.Descendants<C.NumericValue>().FirstOrDefault()?.Text ?? "?";
+            }
 
             var values = ReadNumericData(ser.GetFirstChild<C.Values>())
                 ?? ReadNumericData(ser.Elements<OpenXmlCompositeElement>()

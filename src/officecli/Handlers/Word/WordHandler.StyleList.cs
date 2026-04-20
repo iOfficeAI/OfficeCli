@@ -135,6 +135,46 @@ public partial class WordHandler
         if (srcShd != null)
             target.Shading = srcShd.CloneNode(true) as Shading;
 
+        // Character spacing (w:spacing val in twips) — letter-spacing CSS equivalent
+        var srcSpacing = source.GetFirstChild<Spacing>();
+        if (srcSpacing != null)
+            target.Spacing = srcSpacing.CloneNode(true) as Spacing;
+
+        // Character scale (w:w horizontal stretch percentage)
+        var srcCharScale = source.GetFirstChild<CharacterScale>();
+        if (srcCharScale != null)
+            target.CharacterScale = srcCharScale.CloneNode(true) as CharacterScale;
+
+        // East Asian emphasis mark (w:em)
+        var srcEm = source.GetFirstChild<Emphasis>();
+        if (srcEm != null)
+            target.Emphasis = srcEm.CloneNode(true) as Emphasis;
+
+        // Rendering effects: outline, shadow, emboss, imprint
+        var srcOutline = source.GetFirstChild<Outline>();
+        if (srcOutline != null)
+            target.Outline = srcOutline.CloneNode(true) as Outline;
+
+        var srcShadow = source.GetFirstChild<Shadow>();
+        if (srcShadow != null)
+            target.Shadow = srcShadow.CloneNode(true) as Shadow;
+
+        var srcEmboss = source.GetFirstChild<Emboss>();
+        if (srcEmboss != null)
+            target.Emboss = srcEmboss.CloneNode(true) as Emboss;
+
+        var srcImprint = source.GetFirstChild<Imprint>();
+        if (srcImprint != null)
+            target.Imprint = srcImprint.CloneNode(true) as Imprint;
+
+        var srcVanish = source.GetFirstChild<Vanish>();
+        if (srcVanish != null)
+            target.Vanish = srcVanish.CloneNode(true) as Vanish;
+
+        var srcNoProof = source.GetFirstChild<NoProof>();
+        if (srcNoProof != null)
+            target.NoProof = srcNoProof.CloneNode(true) as NoProof;
+
         var srcBdr = source.GetFirstChild<Border>();
         if (srcBdr != null)
         {
@@ -332,6 +372,20 @@ public partial class WordHandler
     /// heading auto-numbering, which must honour style-defined numPr even
     /// when the paragraph itself has no NumberingProperties.
     /// </summary>
+    /// <summary>
+    /// True iff the paragraph explicitly suppresses numbering via a direct
+    /// <c>&lt;w:numPr&gt;&lt;w:numId w:val="0"/&gt;&lt;/w:numPr&gt;</c>.
+    /// This intentionally ignores the style chain — callers that want the
+    /// effective numPr use <see cref="ResolveNumPrFromStyle"/> separately.
+    /// </summary>
+    private static bool IsNumberingSuppressed(Paragraph para)
+    {
+        var numProps = para.ParagraphProperties?.NumberingProperties;
+        if (numProps == null) return false;
+        var nid = numProps.NumberingId?.Val?.Value;
+        return nid == 0;
+    }
+
     private (int NumId, int Ilvl)? ResolveNumPrFromStyle(Paragraph para)
     {
         // 1. Direct numPr on the paragraph wins.
@@ -408,23 +462,7 @@ public partial class WordHandler
 
     private string GetNumberingFormat(int numId, int ilvl)
     {
-        var numbering = _doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering;
-        if (numbering == null) return "bullet";
-
-        var numInstance = numbering.Elements<NumberingInstance>()
-            .FirstOrDefault(n => n.NumberID?.Value == numId);
-        if (numInstance == null) return "bullet";
-
-        var abstractNumId = numInstance.AbstractNumId?.Val?.Value;
-        if (abstractNumId == null) return "bullet";
-
-        var abstractNum = numbering.Elements<AbstractNum>()
-            .FirstOrDefault(a => a.AbstractNumberId?.Value == abstractNumId);
-        if (abstractNum == null) return "bullet";
-
-        var level = abstractNum.Elements<Level>()
-            .FirstOrDefault(l => l.LevelIndex?.Value == ilvl);
-
+        var level = GetLevel(numId, ilvl);
         var numFmt = level?.NumberingFormat?.Val;
         if (numFmt == null || !numFmt.HasValue) return "bullet";
         return numFmt.InnerText ?? "bullet";
@@ -482,19 +520,48 @@ public partial class WordHandler
     }
 
     private string? GetLevelText(int numId, int ilvl)
+        => GetLevel(numId, ilvl)?.LevelText?.Val?.Value;
+
+    /// <summary>Get the LevelSuffix (tab/space/nothing) for a numbering level. Defaults to "tab".</summary>
+    private string GetLevelSuffix(int numId, int ilvl)
+    {
+        var level = GetLevel(numId, ilvl);
+        var suff = level?.LevelSuffix?.Val;
+        if (suff?.HasValue != true) return "tab";
+        return suff.InnerText ?? "tab";
+    }
+
+    /// <summary>Get the LevelJustification (left/center/right) for a numbering level. Defaults to "left".</summary>
+    private string GetLevelJustification(int numId, int ilvl)
+    {
+        var level = GetLevel(numId, ilvl);
+        var jc = level?.LevelJustification?.Val;
+        if (jc?.HasValue != true) return "left";
+        return jc.InnerText ?? "left";
+    }
+
+    private Level? GetLevel(int numId, int ilvl)
     {
         var numbering = _doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering;
         if (numbering == null) return null;
         var numInstance = numbering.Elements<NumberingInstance>()
             .FirstOrDefault(n => n.NumberID?.Value == numId);
         if (numInstance == null) return null;
+
+        // A `<w:lvlOverride>` on the NumberingInstance can embed an entire
+        // `<w:lvl>` replacing the abstractNum's level definition (not just
+        // the startOverride number). Honor that before falling back.
+        var lvlOverride = numInstance.Elements<LevelOverride>()
+            .FirstOrDefault(o => o.LevelIndex?.Value == ilvl);
+        var overrideLevel = lvlOverride?.GetFirstChild<Level>();
+        if (overrideLevel != null) return overrideLevel;
+
         var abstractNumId = numInstance.AbstractNumId?.Val?.Value;
         if (abstractNumId == null) return null;
         var abstractNum = numbering.Elements<AbstractNum>()
             .FirstOrDefault(a => a.AbstractNumberId?.Value == abstractNumId);
-        var level = abstractNum?.Elements<Level>()
+        return abstractNum?.Elements<Level>()
             .FirstOrDefault(l => l.LevelIndex?.Value == ilvl);
-        return level?.LevelText?.Val?.Value;
     }
 
     private int? GetStartValue(int numId, int ilvl)

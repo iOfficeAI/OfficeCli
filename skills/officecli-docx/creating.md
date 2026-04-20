@@ -876,23 +876,20 @@ officecli add doc.docx "/body/p[10]" --type break --prop type=column
 ### Fields
 
 ```bash
-# Page number field
+# Zero-param: pagenum, numpages, date, time, author, title, subject, filename,
+#   createdate, savedate, printdate, edittime, lastsavedby, numwords, numchars,
+#   sectionpages, section, revnum, template, comments, keywords
 officecli add doc.docx "/body/p[1]" --type pagenum
-
-# Total pages field
-officecli add doc.docx "/body/p[1]" --type numpages
-
-# Date field
 officecli add doc.docx "/body/p[1]" --type date
 
-# Custom date format
-officecli add doc.docx "/body/p[1]" --type field --prop instruction=" DATE \\@ \"yyyy-MM-dd\" " --prop text="2026-01-01"
+# Parameterized fields
+officecli add doc.docx "/body/p[1]" --type mergefield --prop fieldName=CustomerName
+officecli add doc.docx "/body/p[1]" --type seq --prop identifier=Figure
+officecli add doc.docx "/body/p[1]" --type ref --prop bookmarkName=MyBookmark
+officecli add doc.docx "/body/p[1]" --type styleref --prop styleName="Heading 1"
 
-# Author field
-officecli add doc.docx "/body/p[1]" --type field --prop fieldType=author
-
-# Field at body level (creates paragraph)
-officecli add doc.docx /body --type pagenum --prop alignment=center
+# Custom instruction (any field code)
+officecli add doc.docx "/body/p[1]" --type field --prop instruction=" DATE \\@ \"yyyy-MM-dd\" "
 ```
 
 ### Comments

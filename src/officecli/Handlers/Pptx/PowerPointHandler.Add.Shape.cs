@@ -280,6 +280,12 @@ public partial class PowerPointHandler
                     ApplyGradientFill(newShape.ShapeProperties!, gradVal);
                 }
 
+                // Pattern fill (mutually exclusive with fill/gradient — last one wins, following fill/gradient convention)
+                if (properties.TryGetValue("pattern", out var patternVal))
+                {
+                    ApplyPatternFill(newShape.ShapeProperties!, patternVal);
+                }
+
                 // Opacity (alpha on fill) — like POI XSLFColor uses <a:alpha val="N"/>
                 // Must come after gradient so it can apply to gradient stops too
                 if (properties.TryGetValue("opacity", out var opacityVal))
@@ -345,12 +351,15 @@ public partial class PowerPointHandler
 
                 // Hyperlink on shape
                 if (properties.TryGetValue("link", out var linkVal))
-                    ApplyShapeHyperlink(slidePart, newShape, linkVal);
+                {
+                    var tooltipVal = properties.GetValueOrDefault("tooltip");
+                    ApplyShapeHyperlink(slidePart, newShape, linkVal, tooltipVal);
+                }
 
                 // lineDash, effects, 3D, flip — delegate to SetRunOrShapeProperties
                 var effectKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                     { "linedash", "line.dash", "shadow", "glow", "reflection",
-                      "softedge", "fliph", "flipv", "rot3d", "rotation3d",
+                      "softedge", "blur", "fliph", "flipv", "rot3d", "rotation3d",
                       "rotx", "roty", "rotz", "bevel", "beveltop", "bevelbottom",
                       "depth", "extrusion", "material", "lighting", "lightrig",
                       "spacing", "charspacing", "letterspacing",

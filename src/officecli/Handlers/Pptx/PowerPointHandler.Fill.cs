@@ -146,6 +146,109 @@ public partial class PowerPointHandler
     }
 
     /// <summary>
+    /// Apply pattern fill to ShapeProperties.
+    /// Format: "<preset>" or "<preset>:<fgColor>" or "<preset>:<fgColor>:<bgColor>"
+    ///   preset: e.g. pct25, ltHorz, dkCross, weave, zigZag (Drawing.PresetPatternValues)
+    ///   fgColor / bgColor: lenient hex/named/scheme color (defaults: fg=000000, bg=FFFFFF)
+    /// Examples: "pct25", "ltHorz:FF0000", "dkCross:red:white"
+    /// </summary>
+    private static void ApplyPatternFill(ShapeProperties spPr, string value)
+    {
+        // Build new fill BEFORE removing old one (atomic: no data loss on invalid input)
+        var newFill = BuildPatternFill(value);
+        spPr.RemoveAllChildren<Drawing.SolidFill>();
+        spPr.RemoveAllChildren<Drawing.NoFill>();
+        spPr.RemoveAllChildren<Drawing.GradientFill>();
+        spPr.RemoveAllChildren<Drawing.PatternFill>();
+        spPr.RemoveAllChildren<Drawing.BlipFill>();
+        InsertFillElement(spPr, newFill);
+    }
+
+    private static Drawing.PatternFill BuildPatternFill(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw new ArgumentException("pattern value cannot be empty.");
+
+        var parts = value.Split(':');
+        var presetName = parts[0].Trim();
+        var fg = parts.Length > 1 && !string.IsNullOrWhiteSpace(parts[1]) ? parts[1].Trim() : "000000";
+        var bg = parts.Length > 2 && !string.IsNullOrWhiteSpace(parts[2]) ? parts[2].Trim() : "FFFFFF";
+
+        var patternFill = new Drawing.PatternFill { Preset = ParsePresetPattern(presetName) };
+        // Schema order: fgClr → bgClr
+        var fgClr = new Drawing.ForegroundColor();
+        fgClr.Append(BuildColorElement(fg));
+        patternFill.Append(fgClr);
+        var bgClr = new Drawing.BackgroundColor();
+        bgClr.Append(BuildColorElement(bg));
+        patternFill.Append(bgClr);
+        return patternFill;
+    }
+
+    private static Drawing.PresetPatternValues ParsePresetPattern(string name)
+    {
+        return name.ToLowerInvariant() switch
+        {
+            "pct5" => Drawing.PresetPatternValues.Percent5,
+            "pct10" => Drawing.PresetPatternValues.Percent10,
+            "pct20" => Drawing.PresetPatternValues.Percent20,
+            "pct25" => Drawing.PresetPatternValues.Percent25,
+            "pct30" => Drawing.PresetPatternValues.Percent30,
+            "pct40" => Drawing.PresetPatternValues.Percent40,
+            "pct50" => Drawing.PresetPatternValues.Percent50,
+            "pct60" => Drawing.PresetPatternValues.Percent60,
+            "pct70" => Drawing.PresetPatternValues.Percent70,
+            "pct75" => Drawing.PresetPatternValues.Percent75,
+            "pct80" => Drawing.PresetPatternValues.Percent80,
+            "pct90" => Drawing.PresetPatternValues.Percent90,
+            "dkhorz" => Drawing.PresetPatternValues.DarkHorizontal,
+            "dkvert" => Drawing.PresetPatternValues.DarkVertical,
+            "dkdndiag" => Drawing.PresetPatternValues.DarkDownwardDiagonal,
+            "dkupdiag" => Drawing.PresetPatternValues.DarkUpwardDiagonal,
+            "lthorz" => Drawing.PresetPatternValues.LightHorizontal,
+            "ltvert" => Drawing.PresetPatternValues.LightVertical,
+            "ltdndiag" => Drawing.PresetPatternValues.LightDownwardDiagonal,
+            "ltupdiag" => Drawing.PresetPatternValues.LightUpwardDiagonal,
+            "narhorz" => Drawing.PresetPatternValues.NarrowHorizontal,
+            "narvert" => Drawing.PresetPatternValues.NarrowVertical,
+            "horz" or "horizontal" => Drawing.PresetPatternValues.Horizontal,
+            "vert" or "vertical" => Drawing.PresetPatternValues.Vertical,
+            "dndiag" or "downdiag" => Drawing.PresetPatternValues.DownwardDiagonal,
+            "updiag" => Drawing.PresetPatternValues.UpwardDiagonal,
+            "wdupdiag" => Drawing.PresetPatternValues.WideUpwardDiagonal,
+            "wddndiag" => Drawing.PresetPatternValues.WideDownwardDiagonal,
+            "dashhorz" => Drawing.PresetPatternValues.DashedHorizontal,
+            "dashvert" => Drawing.PresetPatternValues.DashedVertical,
+            "dashdndiag" => Drawing.PresetPatternValues.DashedDownwardDiagonal,
+            "dashupdiag" => Drawing.PresetPatternValues.DashedUpwardDiagonal,
+            "smconfetti" => Drawing.PresetPatternValues.SmallConfetti,
+            "lgconfetti" => Drawing.PresetPatternValues.LargeConfetti,
+            "zigzag" => Drawing.PresetPatternValues.ZigZag,
+            "wave" => Drawing.PresetPatternValues.Wave,
+            "diagbrick" => Drawing.PresetPatternValues.DiagonalBrick,
+            "horzbrick" => Drawing.PresetPatternValues.HorizontalBrick,
+            "weave" => Drawing.PresetPatternValues.Weave,
+            "plaid" => Drawing.PresetPatternValues.Plaid,
+            "divot" => Drawing.PresetPatternValues.Divot,
+            "dotgrid" => Drawing.PresetPatternValues.DotGrid,
+            "dotdiamond" => Drawing.PresetPatternValues.DottedDiamond,
+            "shingle" => Drawing.PresetPatternValues.Shingle,
+            "trellis" => Drawing.PresetPatternValues.Trellis,
+            "sphere" => Drawing.PresetPatternValues.Sphere,
+            "smgrid" => Drawing.PresetPatternValues.SmallGrid,
+            "lggrid" => Drawing.PresetPatternValues.LargeGrid,
+            "smcheck" => Drawing.PresetPatternValues.SmallCheck,
+            "lgcheck" => Drawing.PresetPatternValues.LargeCheck,
+            "openDmnd" or "opendmnd" => Drawing.PresetPatternValues.OpenDiamond,
+            "solidDmnd" or "soliddmnd" => Drawing.PresetPatternValues.SolidDiamond,
+            "cross" => Drawing.PresetPatternValues.Cross,
+            "diagcross" => Drawing.PresetPatternValues.DiagonalCross,
+            _ => throw new ArgumentException(
+                $"Unknown pattern preset: '{name}'. Examples: pct25, ltHorz, dkCross, weave, zigZag, wave, diagBrick, plaid.")
+        };
+    }
+
+    /// <summary>
     /// Apply image (blip) fill to a shape.
     /// Format: file path to image, e.g. "/tmp/bg.png"
     /// </summary>

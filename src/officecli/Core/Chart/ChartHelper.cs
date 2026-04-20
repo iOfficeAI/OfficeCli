@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using DocumentFormat.OpenXml;
-using DocumentFormat.OpenXml.Packaging;
-using Drawing = DocumentFormat.OpenXml.Drawing;
 using C = DocumentFormat.OpenXml.Drawing.Charts;
 
 namespace OfficeCli.Core;
@@ -43,7 +41,7 @@ internal static partial class ChartHelper
             _ => throw new ArgumentException(
                 $"Unknown chart type: '{chartType}'. Supported types: " +
                 "column, bar, line, pie, doughnut, area, scatter, bubble, radar, stock, combo, waterfall, " +
-                "funnel, treemap, sunburst, boxWhisker, histogram. " +
+                "funnel, treemap, sunburst, boxWhisker, histogram, pareto. " +
                 "Modifiers: 3d (e.g. column3d), stacked (e.g. stackedColumn), percentStacked (e.g. percentStackedBar).")
         };
 
@@ -71,6 +69,45 @@ internal static partial class ChartHelper
         // Match patterns like A1:B13, $A$1:$B$13, AA1:ZZ999
         return System.Text.RegularExpressions.Regex.IsMatch(value.Trim(),
             @"^\$?[A-Za-z]+\$?\d+:\$?[A-Za-z]+\$?\d+$");
+    }
+
+    /// <summary>
+    /// Returns true if the value looks like a single cell reference (A1, $A$1, Sheet1!A1,
+    /// Sheet1!$A$1) or a single-cell range (A1:A1, Sheet1!A1:A1). Used to detect when
+    /// a series.name parameter should be emitted as a c:strRef instead of literal c:v.
+    /// </summary>
+    internal static bool IsCellReference(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        var trimmed = value.Trim();
+        // Optional sheet prefix (Sheet1! or 'Sheet with spaces'!), single cell A1 or $A$1,
+        // optionally followed by :A1 range of size 1.
+        return System.Text.RegularExpressions.Regex.IsMatch(trimmed,
+            @"^(?:'[^']+'!|[A-Za-z_][\w\.]*!)?\$?[A-Za-z]+\$?\d+(?::\$?[A-Za-z]+\$?\d+)?$");
+    }
+
+    /// <summary>
+    /// Normalizes a single-cell reference for use inside a chart's c:strRef/c:f.
+    /// Ensures absolute ($col$row) form and preserves any sheet prefix. If the
+    /// input is a A1:A1 style single-cell range, the range form is kept so the
+    /// output matches what Excel writes when a user points the Name field at a
+    /// single cell via the dialog.
+    /// </summary>
+    internal static string NormalizeCellReference(string value)
+    {
+        var trimmed = value.Trim();
+        string sheetPart = "";
+        string cellPart = trimmed;
+        var bangIdx = trimmed.IndexOf('!');
+        if (bangIdx >= 0)
+        {
+            sheetPart = trimmed[..(bangIdx + 1)];
+            cellPart = trimmed[(bangIdx + 1)..];
+        }
+        var parts = cellPart.Split(':');
+        for (int i = 0; i < parts.Length; i++)
+            parts[i] = AddAbsoluteMarkers(parts[i]);
+        return sheetPart + string.Join(":", parts);
     }
 
     /// <summary>
@@ -280,9 +317,42 @@ internal static partial class ChartHelper
 
     internal static string[]? ParseSeriesColors(Dictionary<string, string> properties)
     {
+        // CONSISTENCY(chart-series-color): Add path accepts both the
+        // compact `colors=red,blue,green` form and per-series dotted
+        // `series{N}.color=<hex>` keys (same vocabulary that `set chart`
+        // already supports via ApplySeriesColor). When both are supplied,
+        // dotted keys override positions in the `colors` array.
+        string[]? arr = null;
         if (properties.TryGetValue("colors", out var colorsStr))
-            return colorsStr.Split(',').Select(c => c.Trim()).ToArray();
-        return null;
+            arr = colorsStr.Split(',').Select(c => c.Trim()).ToArray();
+
+        // Collect per-series dotted color keys
+        var dotted = new Dictionary<int, string>();
+        foreach (var kv in properties)
+        {
+            var k = kv.Key;
+            if (!k.StartsWith("series", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!k.EndsWith(".color", StringComparison.OrdinalIgnoreCase)) continue;
+            var mid = k.Substring(6, k.Length - 6 - ".color".Length);
+            if (!int.TryParse(mid, out var idx) || idx < 1) continue;
+            if (!string.IsNullOrWhiteSpace(kv.Value))
+                dotted[idx] = kv.Value.Trim();
+        }
+        if (dotted.Count == 0) return arr;
+
+        var maxIdx = dotted.Keys.Max();
+        var size = Math.Max(maxIdx, arr?.Length ?? 0);
+        var merged = new string[size];
+        for (int i = 0; i < size; i++)
+        {
+            if (dotted.TryGetValue(i + 1, out var c))
+                merged[i] = c;
+            else if (arr != null && i < arr.Length && !string.IsNullOrEmpty(arr[i]))
+                merged[i] = arr[i];
+            else
+                merged[i] = DefaultSeriesColors[i % DefaultSeriesColors.Length];
+        }
+        return merged;
     }
 
     // ==================== ManualLayout Helpers ====================

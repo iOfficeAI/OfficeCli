@@ -104,6 +104,8 @@ static partial class CommandBuilder
                     delimiter = '\t';
             }
 
+            // Release any running resident's file lock before direct-open (import bypasses resident)
+            ResidentClient.SendClose(file.FullName);
             using var handler = new OfficeCli.Handlers.ExcelHandler(file.FullName, editable: true);
             var msg = handler.Import(parentPath, csvContent, delimiter, header, startCell);
             if (json)
@@ -159,9 +161,13 @@ static partial class CommandBuilder
             // 12min) so a stray `create` with no follow-up exits quickly.
             // Failure here does NOT fail the command — the file is already
             // on disk and all other commands still work via direct open.
-            var residentStarted = TryStartResidentProcess(fullCreatedPath, idleSeconds: 60, out var residentErr);
+            var noAuto = Environment.GetEnvironmentVariable("OFFICECLI_NO_AUTO_RESIDENT");
+            string? residentErr = null;
+            var residentStarted = noAuto == "1" || string.Equals(noAuto, "true", StringComparison.OrdinalIgnoreCase)
+                ? false
+                : TryStartResidentProcess(fullCreatedPath, idleSeconds: 60, out residentErr);
             var residentSuffix = residentStarted
-                ? " (resident started, auto-close in 60s idle)"
+                ? " (kept open in background for faster subsequent commands)"
                 : "";
 
             if (json)

@@ -307,11 +307,13 @@ public partial class PowerPointHandler
 
             var targetRun = allRuns[runIdx - 1];
             var linkValRun = properties.GetValueOrDefault("link");
+            var tooltipValRun = properties.GetValueOrDefault("tooltip");
             var runOnlyProps = properties
-                .Where(kv => !kv.Key.Equals("link", StringComparison.OrdinalIgnoreCase))
+                .Where(kv => !kv.Key.Equals("link", StringComparison.OrdinalIgnoreCase)
+                          && !kv.Key.Equals("tooltip", StringComparison.OrdinalIgnoreCase))
                 .ToDictionary(kv => kv.Key, kv => kv.Value);
             var unsupported = SetRunOrShapeProperties(runOnlyProps, new List<Drawing.Run> { targetRun }, shape, slidePart);
-            if (linkValRun != null) ApplyRunHyperlink(slidePart, targetRun, linkValRun);
+            if (linkValRun != null) ApplyRunHyperlink(slidePart, targetRun, linkValRun, tooltipValRun);
             GetSlide(slidePart).Save();
             return unsupported;
         }
@@ -338,11 +340,13 @@ public partial class PowerPointHandler
 
             var targetRun = paraRuns[runIdx - 1];
             var linkVal = properties.GetValueOrDefault("link");
+            var tooltipVal = properties.GetValueOrDefault("tooltip");
             var runOnlyProps = properties
-                .Where(kv => !kv.Key.Equals("link", StringComparison.OrdinalIgnoreCase))
+                .Where(kv => !kv.Key.Equals("link", StringComparison.OrdinalIgnoreCase)
+                          && !kv.Key.Equals("tooltip", StringComparison.OrdinalIgnoreCase))
                 .ToDictionary(kv => kv.Key, kv => kv.Value);
             var unsupported = SetRunOrShapeProperties(runOnlyProps, new List<Drawing.Run> { targetRun }, shape, slidePart);
-            if (linkVal != null) ApplyRunHyperlink(slidePart, targetRun, linkVal);
+            if (linkVal != null) ApplyRunHyperlink(slidePart, targetRun, linkVal, tooltipVal);
             GetSlide(slidePart).Save();
             return unsupported;
         }
@@ -379,6 +383,14 @@ public partial class PowerPointHandler
                     {
                         var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
                         pProps.Indent = (int)ParseEmu(value);
+                        break;
+                    }
+                    case "level":
+                    {
+                        var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                        if (!int.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var lvl) || lvl < 0 || lvl > 8)
+                            throw new ArgumentException($"Invalid 'level' value: '{value}'. Expected an integer between 0 and 8 (OOXML a:pPr/@lvl).");
+                        pProps.Level = lvl;
                         break;
                     }
                     case "marginleft" or "marl":
@@ -421,8 +433,14 @@ public partial class PowerPointHandler
                         break;
                     }
                     case "link":
+                    {
+                        var paraTooltip = properties.GetValueOrDefault("tooltip");
                         foreach (var r in paraRuns)
-                            ApplyRunHyperlink(slidePart, r, value);
+                            ApplyRunHyperlink(slidePart, r, value, paraTooltip);
+                        break;
+                    }
+                    case "tooltip":
+                        // handled in tandem with "link"; standalone tooltip change is not supported here
                         break;
                     default:
                         // Apply run-level properties to all runs in this paragraph
@@ -1083,15 +1101,57 @@ public partial class PowerPointHandler
                         if (blip == null) { unsupported.Add(key); break; }
                         var (imgStream, imgType) = OfficeCli.Core.ImageSource.Resolve(value);
                         using var imgStreamDispose2 = imgStream;
-                        // Remove old image part to avoid storage bloat
+                        // Remove old image part(s) to avoid storage bloat,
+                        // including the asvg:svgBlip-referenced SVG part
+                        // when the previous image was SVG.
                         var oldEmbedId = blip.Embed?.Value;
                         if (oldEmbedId != null)
                         {
                             try { slidePart.DeletePart(oldEmbedId); } catch { }
                         }
-                        var newImgPart = slidePart.AddImagePart(imgType);
-                        newImgPart.FeedData(imgStream);
-                        blip.Embed = slidePart.GetIdOfPart(newImgPart);
+                        var oldPicSvgRelId = OfficeCli.Core.SvgImageHelper.GetSvgRelId(blip);
+                        if (oldPicSvgRelId != null)
+                        {
+                            try { slidePart.DeletePart(oldPicSvgRelId); } catch { }
+                        }
+
+                        if (imgType == ImagePartType.Svg)
+                        {
+                            using var newSvgBuf = new MemoryStream();
+                            imgStream.CopyTo(newSvgBuf);
+                            newSvgBuf.Position = 0;
+                            var newSvgPart = slidePart.AddImagePart(ImagePartType.Svg);
+                            newSvgPart.FeedData(newSvgBuf);
+                            var newPicSvgRelId = slidePart.GetIdOfPart(newSvgPart);
+
+                            var pngFb = slidePart.AddImagePart(ImagePartType.Png);
+                            pngFb.FeedData(new MemoryStream(
+                                OfficeCli.Core.SvgImageHelper.TransparentPng1x1, writable: false));
+                            blip.Embed = slidePart.GetIdOfPart(pngFb);
+                            OfficeCli.Core.SvgImageHelper.AppendSvgExtension(blip, newPicSvgRelId);
+                        }
+                        else
+                        {
+                            var newImgPart = slidePart.AddImagePart(imgType);
+                            newImgPart.FeedData(imgStream);
+                            blip.Embed = slidePart.GetIdOfPart(newImgPart);
+                            if (oldPicSvgRelId != null)
+                            {
+                                var extLst = blip.GetFirstChild<Drawing.BlipExtensionList>();
+                                if (extLst != null)
+                                {
+                                    foreach (var ext in extLst.Elements<Drawing.BlipExtension>().ToList())
+                                    {
+                                        if (string.Equals(ext.Uri?.Value,
+                                            OfficeCli.Core.SvgImageHelper.SvgExtensionUri,
+                                            StringComparison.OrdinalIgnoreCase))
+                                            ext.Remove();
+                                    }
+                                    if (!extLst.Elements<Drawing.BlipExtension>().Any())
+                                        extLst.Remove();
+                                }
+                            }
+                        }
                         break;
                     }
                     case "rotation" or "rotate":
@@ -1105,8 +1165,20 @@ public partial class PowerPointHandler
                     {
                         var blipFill = pic.BlipFill;
                         if (blipFill == null) { unsupported.Add(key); break; }
-                        var srcRect = blipFill.GetFirstChild<Drawing.SourceRectangle>()
-                            ?? blipFill.AppendChild(new Drawing.SourceRectangle());
+                        var srcRect = blipFill.GetFirstChild<Drawing.SourceRectangle>();
+                        if (srcRect == null)
+                        {
+                            srcRect = new Drawing.SourceRectangle();
+                            // CONSISTENCY(ooxml-element-order): in CT_BlipFillProperties
+                            // srcRect must precede the fill-mode element (stretch/tile).
+                            // PowerPoint silently ignores out-of-order srcRect.
+                            var fillMode = (OpenXmlElement?)blipFill.GetFirstChild<Drawing.Stretch>()
+                                ?? blipFill.GetFirstChild<Drawing.Tile>();
+                            if (fillMode != null)
+                                blipFill.InsertBefore(srcRect, fillMode);
+                            else
+                                blipFill.AppendChild(srcRect);
+                        }
 
                         if (key.Equals("crop", StringComparison.OrdinalIgnoreCase))
                         {
@@ -1165,6 +1237,14 @@ public partial class PowerPointHandler
                                 case "cropbottom": srcRect.Bottom = pct; break;
                             }
                         }
+                        // Reset semantics: if all four sides are zero (or unset),
+                        // drop the srcRect entirely so the XML is clean.
+                        int L = srcRect.Left?.Value ?? 0;
+                        int T = srcRect.Top?.Value ?? 0;
+                        int R = srcRect.Right?.Value ?? 0;
+                        int B = srcRect.Bottom?.Value ?? 0;
+                        if (L == 0 && T == 0 && R == 0 && B == 0)
+                            srcRect.Remove();
                         break;
                     }
                     case "opacity":
@@ -1252,6 +1332,32 @@ public partial class PowerPointHandler
                     }
                     case "targets":
                         break; // consumed by align/distribute
+                    case "showfooter":
+                    case "showslidenumber":
+                    case "showdate":
+                    case "showheader":
+                    {
+                        // Toggle header/footer visibility flags on the slide.
+                        // Emits <p:hf ftr="1" sldNum="0" dt="1" hdr="0"/> as a
+                        // direct child of <p:sld>. The OpenXml SDK models this
+                        // via DocumentFormat.OpenXml.Presentation.HeaderFooter
+                        // (local name "hf"). Although CT_Slide's published
+                        // schema does not list hf, PowerPoint itself writes it
+                        // on slides when the "Insert > Header & Footer" dialog
+                        // toggles per-slide overrides — we mirror that.
+                        var hf = slide2.GetFirstChild<HeaderFooter>() ?? new HeaderFooter();
+                        bool isNew = hf.Parent == null;
+                        bool flag = IsTruthy(value);
+                        switch (key.ToLowerInvariant())
+                        {
+                            case "showfooter": hf.Footer = flag; break;
+                            case "showslidenumber": hf.SlideNumber = flag; break;
+                            case "showdate": hf.DateTime = flag; break;
+                            case "showheader": hf.Header = flag; break;
+                        }
+                        if (isNew) slide2.AppendChild(hf);
+                        break;
+                    }
                     case "layout":
                     {
                         // Change slide layout
@@ -1279,7 +1385,7 @@ public partial class PowerPointHandler
                         if (!GenericXmlQuery.SetGenericAttribute(slide2, key, value))
                         {
                             if (unsupported.Count == 0)
-                                unsupported.Add($"{key} (valid slide props: background, layout, transition, name, align, distribute, targets)");
+                                unsupported.Add($"{key} (valid slide props: background, layout, transition, name, align, distribute, targets, showFooter, showSlideNumber, showDate, showHeader)");
                             else
                                 unsupported.Add(key);
                         }
@@ -1588,8 +1694,9 @@ public partial class PowerPointHandler
                 var motionPathValue = properties.GetValueOrDefault("motionpath")
                     ?? properties.GetValueOrDefault("motionPath");
                 var linkValue = properties.GetValueOrDefault("link");
+                var tooltipValue = properties.GetValueOrDefault("tooltip");
                 var excludeKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                    { "animation", "animate", "motionpath", "motionPath", "link", "zorder", "z-order", "order" };
+                    { "animation", "animate", "motionpath", "motionPath", "link", "tooltip", "zorder", "z-order", "order" };
                 var shapeProps = properties
                     .Where(kv => !excludeKeys.Contains(kv.Key))
                     .ToDictionary(kv => kv.Key, kv => kv.Value);
@@ -1607,7 +1714,7 @@ public partial class PowerPointHandler
                 if (motionPathValue != null)
                     ApplyMotionPathAnimation(slidePart, shape, motionPathValue);
                 if (linkValue != null)
-                    ApplyShapeHyperlink(slidePart, shape, linkValue);
+                    ApplyShapeHyperlink(slidePart, shape, linkValue, tooltipValue);
 
                 GetSlide(slidePart).Save();
                 return unsupported;
@@ -1860,9 +1967,25 @@ public partial class PowerPointHandler
                     {
                         var grpSpPr = grp.GroupShapeProperties ?? (grp.GroupShapeProperties = new GroupShapeProperties());
                         var xfrm = grpSpPr.TransformGroup ?? (grpSpPr.TransformGroup = new Drawing.TransformGroup());
-                        TryApplyPositionSize(key.ToLowerInvariant(), value,
-                            xfrm.Offset ?? (xfrm.Offset = new Drawing.Offset()),
-                            xfrm.Extents ?? (xfrm.Extents = new Drawing.Extents()));
+                        var off = xfrm.Offset ?? (xfrm.Offset = new Drawing.Offset());
+                        var ext = xfrm.Extents ?? (xfrm.Extents = new Drawing.Extents());
+                        var keyLower = key.ToLowerInvariant();
+                        // CONSISTENCY(group-scale-baseline): group scaling needs <a:chOff>/<a:chExt>
+                        // as a child-coordinate baseline. Before we mutate ext/off, snapshot the
+                        // current ext/off into chExt/chOff if they aren't already present — that
+                        // way the first Set of width/height captures the "before" as the logical
+                        // child coordinate space, so shrinking ext shrinks the rendered children.
+                        if (keyLower is "x" or "y")
+                        {
+                            if (xfrm.ChildOffset == null)
+                                xfrm.ChildOffset = new Drawing.ChildOffset { X = off.X ?? 0, Y = off.Y ?? 0 };
+                        }
+                        else // width or height
+                        {
+                            if (xfrm.ChildExtents == null)
+                                xfrm.ChildExtents = new Drawing.ChildExtents { Cx = ext.Cx ?? 0, Cy = ext.Cy ?? 0 };
+                        }
+                        TryApplyPositionSize(keyLower, value, off, ext);
                         break;
                     }
                     case "rotation" or "rotate":

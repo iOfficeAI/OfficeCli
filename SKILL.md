@@ -100,6 +100,7 @@ officecli view <file> <mode>          # outline | stats | issues | text | annota
 officecli get <file> <path> --depth N # Get a node and its children [--json]
 officecli query <file> <selector>     # CSS-like query
 officecli validate <file>             # Validate against OpenXML schema
+officecli view <file> issues          # Enumerate issues (text overflow, missing alt, formula errors, ...)
 ```
 
 ### view modes
@@ -161,7 +162,7 @@ officecli validate report.docx    # Check for schema errors
 officecli validate slides.pptx    # Must pass before delivery
 ```
 
-**For large documents**, ALWAYS use `--max-lines` or `--start`/`--end` to limit output.
+**For large documents**, ALWAYS use `--max-lines` to limit output.
 
 ---
 
@@ -322,9 +323,9 @@ officecli add <file> <parent> --from <path>                               # clon
 
 | Format | Types |
 |--------|-------|
-| **pptx** | slide, shape (textbox), picture (image/img), chart, table, row (tr), connector (connection/line), group, video (audio/media), equation (formula/math), notes, paragraph (para), run, zoom (slidezoom), ole (oleobject/object/embed) |
-| **docx** | paragraph (para), run, table, row (tr), cell (td), image (picture/img), header, footer, section, bookmark, comment, footnote, endnote, formfield (text/checkbox/dropdown), sdt (contentcontrol), chart, equation (formula/math), field, hyperlink, style, toc, watermark, break (pagebreak/columnbreak), ole (oleobject/object/embed). Document protection: `set / --prop protection=forms\|readOnly\|comments\|trackedChanges\|none` |
-| **xlsx** | sheet, row, cell, chart, image (picture), comment, table (listobject), namedrange (definedname), pivottable (pivot), sparkline, validation (datavalidation), autofilter, shape, textbox, databar/colorscale/iconset/formulacf (conditional formatting), ole (oleobject/object/embed — no Remove yet), csv (tsv). `value="=SUM(...)"` auto-detects as formula. Formulas auto-evaluated on write (150+ functions including VLOOKUP, SUMIF, IF, DATE, PMT, etc.) |
+| **pptx** | slide, shape (textbox), picture (image/img — SVG supported, auto-dual-representation), chart, table, row (tr), connector (connection/line), group, video (audio/media), equation (formula/math), notes, paragraph (para, supports level/lineSpacing/spaceBefore/spaceAfter), run, zoom (slidezoom), ole (oleobject/object/embed), placeholder (phType=title/body/subtitle/footer/...) |
+| **docx** | paragraph (para), run, table, row (tr), cell (td), image (picture/img — SVG supported), header, footer, section, bookmark, comment, footnote, endnote, formfield (text/checkbox/dropdown), sdt (contentcontrol), chart, equation (formula/math), field (22 zero-param types: pagenum/date/author/...; 6 parameterized: mergefield/ref/pageref/seq/styleref/docproperty/if), hyperlink, style, toc, watermark, break (pagebreak/columnbreak), ole (oleobject/object/embed). Document protection: `set / --prop protection=forms\|readOnly\|comments\|trackedChanges\|none` |
+| **xlsx** | sheet, row, cell, chart (includes pareto with auto-sort + cumulative-%), image (picture — SVG supported), comment, table (listobject), namedrange (definedname), pivottable (pivot, supports calculatedField), sparkline, validation (datavalidation), autofilter, shape, textbox, databar/colorscale/iconset/formulacf/cellIs/topN/aboveAverage (conditional formatting), ole (oleobject/object/embed — no Remove yet), csv (tsv). `value="=SUM(...)"` auto-detects as formula. Formulas auto-evaluated on write (150+ functions including VLOOKUP, SUMIF, IF, DATE, PMT, etc.). Chart/picture/shape/slicer accept `anchor=A1:E10` cell-range. |
 
 ### Pivot tables (xlsx)
 
@@ -347,6 +348,18 @@ officecli set slides.pptx / --prop defaultFont=Arial --prop show.loop=true --pro
 ```
 
 Run `officecli <format> set /` for all available document-level properties (docDefaults, docGrid, CJK spacing, calc, print, show, theme, extended).
+
+### Sort (xlsx)
+
+```bash
+# Sheet-level: sort entire used range by column C descending
+officecli set data.xlsx /Sheet1 --prop sort="C desc" --prop sortHeader=true
+
+# Range-level: sort a specific range by column A
+officecli set data.xlsx '/Sheet1/A1:D100' --prop sort="A asc" --prop sortHeader=true
+```
+
+Sort key format: `COL DIR[, COL DIR ...]` (column letter + `asc`/`desc`). Rejects ranges with merged cells or formulas. Sidecar metadata (hyperlinks, comments, conditional formatting, drawings) follows rows automatically.
 
 **Text-anchored insert** (`--after find:X` / `--before find:X`):
 

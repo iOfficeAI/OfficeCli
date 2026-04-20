@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using DocumentFormat.OpenXml;
-using DocumentFormat.OpenXml.Packaging;
 using Drawing = DocumentFormat.OpenXml.Drawing;
 using C = DocumentFormat.OpenXml.Drawing.Charts;
 
@@ -271,6 +270,7 @@ internal static partial class ChartHelper
                 "left" or "l" => C.LegendPositionValues.Left,
                 "right" or "r" => C.LegendPositionValues.Right,
                 "bottom" or "b" => C.LegendPositionValues.Bottom,
+                "topright" or "tr" or "top-right" => C.LegendPositionValues.TopRight,
                 _ => C.LegendPositionValues.Bottom
             };
             chart.AppendChild(new C.Legend(
@@ -297,8 +297,21 @@ internal static partial class ChartHelper
     private static void ApplySeriesReferences(C.PlotArea plotArea, Dictionary<string, string> properties)
     {
         var extSeries = ParseSeriesDataExtended(properties);
-        if (extSeries == null || extSeries.Count == 0) return;
-        if (!extSeries.Any(s => s.ValuesRef != null || s.CategoriesRef != null))
+        // Also detect name-only cell references (series{N}.name=Sheet1!A1) so
+        // legend text resolves to the cell value instead of a literal string.
+        bool hasNameRef = false;
+        if (extSeries != null)
+        {
+            for (int i = 0; i < extSeries.Count; i++)
+            {
+                if (IsCellReference(extSeries[i].Name)) { hasNameRef = true; break; }
+            }
+        }
+        if (extSeries == null || extSeries.Count == 0)
+        {
+            if (!hasNameRef) return;
+        }
+        if (extSeries != null && !extSeries.Any(s => s.ValuesRef != null || s.CategoriesRef != null) && !hasNameRef)
         {
             // Also check top-level categories ref
             var topCatRef = ParseCategoriesRef(properties);
@@ -311,10 +324,18 @@ internal static partial class ChartHelper
         // Top-level categories reference applies to all series
         var topCategoriesRef = ParseCategoriesRef(properties);
 
-        for (int i = 0; i < Math.Min(extSeries.Count, allSer.Count); i++)
+        for (int i = 0; i < Math.Min(extSeries!.Count, allSer.Count); i++)
         {
             var info = extSeries[i];
             var ser = allSer[i];
+
+            // Rewrite SeriesText as strRef when the name is a cell reference
+            // (e.g. series1.name=Sheet1!A1). Cache is left absent; Excel will
+            // resolve the cell on open. See RewriteSeriesTextAsRef for details.
+            if (!string.IsNullOrEmpty(info.Name) && IsCellReference(info.Name))
+            {
+                RewriteSeriesTextAsRef(ser, NormalizeCellReference(info.Name), cachedValue: null);
+            }
 
             // Replace Values with NumberReference (preserving literal data as cache)
             if (!string.IsNullOrEmpty(info.ValuesRef))
@@ -375,7 +396,7 @@ internal static partial class ChartHelper
         "linewidth", "linedash", "dash", "marker", "markers", "markersize",
         "style", "styleid",
         "transparency", "opacity", "alpha",
-        "gradient", "gradients",
+        "gradient", "gradients", "gradientfill",
         "trendline",
         "secondaryaxis", "secondary",
         "referenceline", "refline", "targetline",
@@ -401,15 +422,29 @@ internal static partial class ChartHelper
         "bubblescale", "shownegbubbles", "sizerepresents",
         "gapdepth", "shape", "barshape",
         "droplines", "hilowlines", "updownbars", "serlines", "serieslines",
-        "axisorientation", "axisreverse", "logbase", "logscale",
+        "axisorientation", "axisreverse", "logbase", "logscale", "yaxisscale",
         "dispunits", "displayunits", "labeloffset", "ticklabelskip", "tickskip",
         "axisposition", "axispos", "crosses", "crossesat", "crossbetween",
         "plotvisonly", "plotvisibleonly", "autotitledeleted",
         "datalabels.separator", "labelseparator",
         "datalabels.numfmt", "labelnumfmt",
-        "datalabels.showleaderlines", "leaderlines",
+        "datalabels.showleaderlines", "leaderlines", "showleaderlines",
+        // CL23 — chart-level trendline.* fan-out
+        "trendline.label", "trendline.forecastforward", "trendline.forecastbackward",
+        "trendline.order", "trendline.period", "trendline.intercept",
+        "trendline.displayequation", "trendline.displayrsquared",
+        "errbars.direction", "errbardirection",
         "datalabels.showbubblesize",
+        // CleanupE1 — per-flag dotted subkeys for DataLabels on Add.
+        "datalabels.showvalue", "datalabels.showval",
+        "datalabels.showpercent", "datalabels.showpct",
+        "datalabels.showcatname", "datalabels.showcategoryname", "datalabels.showcategory",
+        "datalabels.showsername", "datalabels.showseriesname", "datalabels.showseries",
+        "datalabels.showlegendkey",
         "axisfont", "axis.font", "legendfont", "legend.font",
+        // R15-4: rotate tick labels on cat/val axis. Degrees (e.g. -45).
+        "labelrotation", "xaxis.labelrotation", "xaxislabelrotation",
+        "valaxis.labelrotation", "valaxislabelrotation", "yaxis.labelrotation", "yaxislabelrotation",
         // Title styling
         "title.font", "titlefont", "title.size", "titlesize",
         "title.color", "titlecolor", "title.bold", "titlebold",
@@ -438,8 +473,31 @@ internal static partial class ChartHelper
         var lower = key.ToLowerInvariant();
         foreach (var prefix in DeferredPrefixes)
             if (lower.StartsWith(prefix)) return true;
+        // CONSISTENCY(chart-series-color): select per-series dotted keys
+        // route through HandleSeriesDottedProperty at SetChartProperties
+        // time. Only visual-effect subkeys are deferred here; `.name`,
+        // `.values`, `.categories`, `.ref`, `.valuesRef`, `.categoriesRef`,
+        // `.color` are consumed at build time by ParseSeriesData /
+        // ParseSeriesColors and must NOT be deferred (double-apply /
+        // literal-expansion regressions).
+        if (TryParseSeriesDottedKey(key, out _, out var sProp)
+            && DeferredSeriesSubkeys.Contains(sProp)) return true;
         return false;
     }
+
+    // Per-series dotted subkeys that route through HandleSeriesDottedProperty
+    // during SetChartProperties (post-build). See IsDeferredKey.
+    private static readonly HashSet<string> DeferredSeriesSubkeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "gradient", "gradientfill",
+        "smooth", "trendline", "marker", "markersize",
+        "invertifneg", "invertifnegative",
+        "errbars", "errorbars",
+        "explosion", "explode",
+        "linewidth", "linedash", "dash",
+        "shadow", "outline",
+        "alpha", "transparency",
+    };
 
     // ==================== Chart Type Builders ====================
 
@@ -951,6 +1009,40 @@ internal static partial class ChartHelper
     }
 
     /// <summary>
+    /// R15-4: set tick-label rotation on a category/value/date axis. Reuses
+    /// the existing c:txPr subtree if any (preserves axisfont) and sets
+    /// a:bodyPr/@rot. Creates a minimal c:txPr otherwise.
+    /// </summary>
+    internal static void ApplyAxisLabelRotation(OpenXmlCompositeElement axis, string rotAttrVal)
+    {
+        var tp = axis.GetFirstChild<C.TextProperties>();
+        if (tp == null)
+        {
+            tp = new C.TextProperties(
+                new Drawing.BodyProperties { Rotation = int.Parse(rotAttrVal) },
+                new Drawing.ListStyle(),
+                new Drawing.Paragraph(new Drawing.ParagraphProperties(new Drawing.EndParagraphRunProperties { Language = "en-US" }))
+            );
+            var crossAxis = axis.GetFirstChild<C.CrossingAxis>();
+            if (crossAxis != null)
+                axis.InsertBefore(tp, crossAxis);
+            else
+                axis.AppendChild(tp);
+            return;
+        }
+        var bodyPr = tp.GetFirstChild<Drawing.BodyProperties>();
+        if (bodyPr == null)
+        {
+            bodyPr = new Drawing.BodyProperties { Rotation = int.Parse(rotAttrVal) };
+            tp.PrependChild(bodyPr);
+        }
+        else
+        {
+            bodyPr.Rotation = int.Parse(rotAttrVal);
+        }
+    }
+
+    /// <summary>
     /// Build a color element supporting both hex RGB and scheme color names.
     /// </summary>
     private static OpenXmlElement BuildChartColorElement(string value)
@@ -1082,6 +1174,34 @@ internal static partial class ChartHelper
     }
 
     /// <summary>
+    /// Rewrite the SeriesText (c:tx) on a series so its content is a
+    /// <c:strRef><c:f>formula</c:f>[<c:strCache>...]</c:strRef> referencing a
+    /// single cell, instead of a literal <c:v>string</c:v>. Used when users pass
+    /// series{N}.name=Sheet1!A1 — the legend/tooltip should resolve to the cell's
+    /// current value, not show "Sheet1!A1" as literal text.
+    ///
+    /// If cachedValue is non-null, a minimal c:strCache with one c:pt idx="0" is
+    /// attached so first-open viewers (before Excel recalculates) still see the
+    /// resolved text. When null, Excel fills the cache on open.
+    /// </summary>
+    internal static void RewriteSeriesTextAsRef(
+        OpenXmlCompositeElement series, string formula, string? cachedValue)
+    {
+        var serText = series.GetFirstChild<C.SeriesText>();
+        if (serText == null) return;
+        serText.RemoveAllChildren();
+        var strRef = new C.StringReference(new C.Formula(formula));
+        if (cachedValue != null)
+        {
+            var cache = new C.StringCache(
+                new C.PointCount { Val = 1U },
+                new C.StringPoint(new C.NumericValue(cachedValue)) { Index = 0U });
+            strRef.AppendChild(cache);
+        }
+        serText.AppendChild(strRef);
+    }
+
+    /// <summary>
     /// Build a Values element with a NumberReference (cell range formula, no cache).
     /// </summary>
     internal static C.Values BuildValuesRef(string formula)
@@ -1179,6 +1299,21 @@ internal static partial class ChartHelper
 
     internal static C.Title BuildChartTitle(string titleText)
     {
+        // CONSISTENCY(chart-cell-ref): if titleText looks like a single-cell
+        // reference (e.g. "Sheet1!A1"), emit <c:tx><c:strRef> so Excel resolves
+        // the cell on open. Same fix family as R17-B1 (series name strRef).
+        // Applies to chart title and cat/val axis titles (R18-B1/B2).
+        if (IsCellReference(titleText))
+        {
+            var formula = NormalizeCellReference(titleText);
+            return new C.Title(
+                new C.ChartText(
+                    new C.StringReference(new C.Formula(formula))
+                ),
+                new C.Overlay { Val = false }
+            );
+        }
+
         return new C.Title(
             new C.ChartText(
                 new C.RichText(

@@ -20,6 +20,7 @@ public partial class WordHandler : IDocumentHandler
     {
         _filePath = filePath;
         _doc = WordprocessingDocument.Open(filePath, editable);
+        WordStrictAttributeSanitizer.Sanitize(_doc);
         if (editable)
         {
             EnsureAllParaIds();

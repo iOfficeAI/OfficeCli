@@ -3,6 +3,7 @@
 
 using System.CommandLine;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 using OfficeCli.Core;
 using OfficeCli.Handlers;
@@ -124,7 +125,6 @@ static partial class CommandBuilder
         rootCommand.Add(BuildRawSetCommand(jsonOption));
         rootCommand.Add(BuildAddPartCommand(jsonOption));
         rootCommand.Add(BuildValidateCommand(jsonOption));
-        rootCommand.Add(BuildCheckCommand(jsonOption));
         rootCommand.Add(BuildBatchCommand(jsonOption));
         rootCommand.Add(BuildImportCommand(jsonOption));
         rootCommand.Add(BuildCreateCommand(jsonOption));
@@ -160,6 +160,23 @@ static partial class CommandBuilder
             return false;
         }
 
+        // On Windows, .NET's UseShellExecute=false always calls CreateProcess
+        // with bInheritHandles=TRUE (even without explicit redirects), which
+        // leaks the caller's pipe handles into the resident child.  When the
+        // caller's stdout is a pipe ($(), | cat, CI, SDK), the pipe never
+        // gets EOF until the resident exits (~60s idle), blocking the caller.
+        //
+        // Fix: temporarily mark our own std handles as non-inheritable before
+        // spawning, then restore.  This prevents the shell's pipe handles
+        // from leaking into the resident while still allowing .NET's internal
+        // handle plumbing to work.
+        //
+        // On macOS/Linux, posix_spawn inherits fds unless the child's
+        // stdout/stderr are explicitly redirected.  RedirectStandardOutput /
+        // RedirectStandardError = true makes .NET plumb a fresh pipe from
+        // parent to child, so the caller's shell pipe (e.g. `| tail -1`,
+        // $(...)) is NOT inherited and EOFs promptly when the client exits.
+        // See ResidentStdoutInheritanceTests for the regression lock-in.
         var startInfo = new ProcessStartInfo
         {
             FileName = exePath,
@@ -173,7 +190,31 @@ static partial class CommandBuilder
         if (idleSeconds.HasValue)
             startInfo.Environment["OFFICECLI_RESIDENT_IDLE_SECONDS"] = idleSeconds.Value.ToString();
 
-        var process = Process.Start(startInfo);
+        // Prevent the shell's pipe handles from leaking into the resident.
+        bool isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+        nint hStdOut = 0, hStdErr = 0, hStdIn = 0;
+        if (isWindows)
+        {
+            hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+            hStdErr = GetStdHandle(STD_ERROR_HANDLE);
+            hStdIn  = GetStdHandle(STD_INPUT_HANDLE);
+            SetHandleInformation(hStdOut, HANDLE_FLAG_INHERIT, 0);
+            SetHandleInformation(hStdErr, HANDLE_FLAG_INHERIT, 0);
+            SetHandleInformation(hStdIn,  HANDLE_FLAG_INHERIT, 0);
+        }
+
+        Process? process;
+        try { process = Process.Start(startInfo); }
+        finally
+        {
+            if (isWindows)
+            {
+                SetHandleInformation(hStdOut, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+                SetHandleInformation(hStdErr, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+                SetHandleInformation(hStdIn,  HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+            }
+        }
+
         if (process == null)
         {
             error = "Failed to start resident process.";
@@ -185,18 +226,37 @@ static partial class CommandBuilder
         {
             Thread.Sleep(100);
             if (ResidentClient.TryConnect(filePath, out _))
+            {
+                process.Dispose();
                 return true;
+            }
             if (process.HasExited)
             {
                 var stderr = process.StandardError.ReadToEnd();
                 error = $"Resident process exited. {stderr}";
+                process.Dispose();
                 return false;
             }
         }
 
         error = "Resident process started but not responding.";
+        process.Dispose();
         return false;
     }
+
+    // ==================== Win32 P/Invoke for handle inheritance control ==========
+
+    private const int STD_INPUT_HANDLE  = -10;
+    private const int STD_OUTPUT_HANDLE = -11;
+    private const int STD_ERROR_HANDLE  = -12;
+    private const uint HANDLE_FLAG_INHERIT = 0x00000001;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern nint GetStdHandle(int nStdHandle);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetHandleInformation(nint hObject, uint dwMask, uint dwFlags);
 
     // ==================== Helper: try forwarding to resident ====================
     //
@@ -239,6 +299,14 @@ static partial class CommandBuilder
                 if (!ResidentClient.TryConnect(filePath, out _))
                     return null; // truly no resident → caller falls back to direct file access
             }
+            // Intentionally no user-facing hint here. UX testing with an AI
+            // agent showed a standalone "background process" hint on a random
+            // mid-batch command (e.g. `get`) creates low-grade anxiety without
+            // giving the caller a concrete action — auto-close in 60s already
+            // handles the cleanup, and other officecli commands work normally
+            // through the resident regardless. The `create` command keeps a
+            // small inline suffix on its success line because it's contextual
+            // to a freshly-created file, not a nag fired from anywhere.
         }
 
         var request = new ResidentRequest();
@@ -1009,12 +1077,16 @@ static partial class CommandBuilder
     /// Check if a shape's text overflows its bounds using CJK-aware character measurement.
     /// Returns a warning message or null.
     /// </summary>
-    private static string? CheckTextOverflow(IDocumentHandler handler, string path)
+    internal static string? CheckTextOverflow(IDocumentHandler handler, string path)
     {
-        if (handler is not OfficeCli.Handlers.PowerPointHandler pptHandler) return null;
         try
         {
-            return pptHandler.CheckShapeTextOverflow(path);
+            return handler switch
+            {
+                OfficeCli.Handlers.PowerPointHandler ppt => ppt.CheckShapeTextOverflow(path),
+                OfficeCli.Handlers.ExcelHandler xl => xl.CheckCellOverflow(path),
+                _ => null
+            };
         }
         catch { return null; }
     }
@@ -1025,6 +1097,8 @@ static partial class CommandBuilder
     /// </summary>
     private static void NotifyWatch(IDocumentHandler handler, string filePath, string? changedPath)
     {
+        if (!WatchServer.IsWatching(filePath)) return;
+
         if (handler is OfficeCli.Handlers.ExcelHandler excel)
         {
             string? scrollTo = null;
@@ -1062,6 +1136,8 @@ static partial class CommandBuilder
 
     private static void NotifyWatchRoot(IDocumentHandler handler, string filePath, int oldSlideCount)
     {
+        if (!WatchServer.IsWatching(filePath)) return;
+
         if (handler is OfficeCli.Handlers.ExcelHandler excel)
         {
             WatchNotifier.NotifyIfWatching(filePath, new WatchMessage { Action = "full", FullHtml = excel.ViewAsHtml() });

@@ -54,6 +54,7 @@ public partial class PowerPointHandler
             "video" or "audio" or "media" => AddMedia(parentPath, index, properties, type),
             "connector" or "connection" => AddConnector(parentPath, index, properties),
             "group" => AddGroup(parentPath, index, properties),
+            "placeholder" or "ph" => AddPlaceholder(parentPath, index, properties),
             "row" or "tr" => AddRow(parentPath, index, properties),
             "col" or "column" => AddColumn(parentPath, index, properties),
             "cell" or "tc" => AddCell(parentPath, index, properties),

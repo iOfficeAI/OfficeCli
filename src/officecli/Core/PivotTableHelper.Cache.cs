@@ -361,7 +361,8 @@ internal static partial class PivotTableHelper
             string sourceSheetName, string sourceRef,
             string[] headers, List<string[]> columnData,
             HashSet<int>? axisFieldIndices = null,
-            List<DateGroupSpec>? dateGroups = null)
+            List<DateGroupSpec>? dateGroups = null,
+            uint?[]? columnNumFmtIds = null)
     {
         var recordCount = columnData.Count > 0 ? columnData[0].Length : 0;
 
@@ -430,11 +431,20 @@ internal static partial class PivotTableHelper
             var fieldName = string.IsNullOrEmpty(headers[i]) ? $"Column{i + 1}" : headers[i];
             var values = i < columnData.Count ? columnData[i] : Array.Empty<string>();
 
+            // R19-1: per-column source numFmtId (date/currency/etc.) to stamp
+            // on the cacheField so the pivot renders values with the same
+            // formatting as the source column. Null means "General" and we
+            // leave the default in place.
+            uint? srcNumFmtId = (columnNumFmtIds != null && i < columnNumFmtIds.Length)
+                ? columnNumFmtIds[i] : null;
+
             if (derivedByIdx.TryGetValue(i, out var spec))
             {
                 // Derived date group field — synthesized, no records entries.
-                cacheFields.AppendChild(BuildDateGroupDerivedCacheField(fieldName, spec,
-                    out fieldValueIndex[i]));
+                var derived = BuildDateGroupDerivedCacheField(fieldName, spec,
+                    out fieldValueIndex[i]);
+                if (srcNumFmtId.HasValue) derived.NumberFormatId = srcNumFmtId.Value;
+                cacheFields.AppendChild(derived);
                 fieldNumeric[i] = false; // records should skip this field
                 continue;
             }
@@ -448,8 +458,12 @@ internal static partial class PivotTableHelper
                 int parIdx = derivedByIdx
                     .Where(kv => kv.Value.BaseFieldIdx == i)
                     .Min(kv => kv.Key);
-                cacheFields.AppendChild(BuildDateGroupBaseCacheField(fieldName, values, parIdx,
-                    out fieldValueIndex[i]));
+                var baseField = BuildDateGroupBaseCacheField(fieldName, values, parIdx,
+                    out fieldValueIndex[i]);
+                // Prefer the source column's numFmtId when present; else keep
+                // the builder's 164u default (yyyy-mm-dd).
+                if (srcNumFmtId.HasValue) baseField.NumberFormatId = srcNumFmtId.Value;
+                cacheFields.AppendChild(baseField);
                 fieldNumeric[i] = false;
                 continue;
             }
@@ -458,8 +472,10 @@ internal static partial class PivotTableHelper
             // even when their values parse as numeric, so pivotField items
             // indices and cache record references stay in sync.
             bool forceStringIndexed = axisFieldIndices?.Contains(i) == true;
-            cacheFields.AppendChild(BuildCacheField(
-                fieldName, values, out fieldNumeric[i], out fieldValueIndex[i], forceStringIndexed));
+            var plainField = BuildCacheField(
+                fieldName, values, out fieldNumeric[i], out fieldValueIndex[i], forceStringIndexed);
+            if (srcNumFmtId.HasValue) plainField.NumberFormatId = srcNumFmtId.Value;
+            cacheFields.AppendChild(plainField);
         }
         cacheDef.AppendChild(cacheFields);
 

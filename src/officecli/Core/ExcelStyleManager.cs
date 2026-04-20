@@ -179,6 +179,10 @@ internal class ExcelStyleManager
             alignProps["indent"] = indVal;
         if (styleProps.TryGetValue("shrinktofit", out var shrinkVal))
             alignProps["shrinktofit"] = shrinkVal;
+        // DEFERRED(xlsx/cell-reading-order) CE10: accept top-level `readingOrder`
+        // as shorthand for `alignment.readingOrder`.
+        if (styleProps.TryGetValue("readingorder", out var roVal))
+            alignProps["readingorder"] = roVal;
         if (alignProps.Count > 0)
         {
             alignment ??= new Alignment();
@@ -204,6 +208,11 @@ internal class ExcelStyleManager
                     case "shrinktofit" or "shrink":
                         alignment.ShrinkToFit = IsTruthy(value);
                         break;
+                    case "readingorder":
+                        // DEFERRED(xlsx/cell-reading-order) CE10: OOXML values
+                        // 0=context, 1=ltr, 2=rtl. Accept numeric or string forms.
+                        alignment.ReadingOrder = ParseReadingOrder(value);
+                        break;
                 }
             }
             applyAlignment = true;
@@ -228,8 +237,132 @@ internal class ExcelStyleManager
             numFmtId, fontId, fillId, borderId, alignment, protection,
             applyNumFmt, applyFont, applyFill, applyBorder, applyAlignment, applyProtection);
 
-        stylesheet.Save();
+        // Caller (ExcelHandler) is responsible for saving via _dirtyStylesheet flag.
         return xfIndex;
+    }
+
+    /// <summary>
+    /// Ensure the workbook has the built-in "Hyperlink" cellStyle (builtinId=8)
+    /// wired up with a blue underlined font, and return the cellXfs index that
+    /// hyperlink cells should reference via `c/@s`.
+    ///
+    /// Creates (idempotently):
+    ///   - a Font with color 0563C1 + underline
+    ///   - a CellStyleFormats xf referencing that font (applyFont=true)
+    ///   - a CellFormats xf inheriting from the cellStyleXf (xfId, applyFont=true)
+    ///   - a CellStyles entry Name="Hyperlink" BuiltinId=8 pointing at the cellStyleXf
+    ///
+    /// Returns the cellXfs index to assign to the cell's StyleIndex.
+    /// </summary>
+    public uint EnsureHyperlinkCellStyle()
+    {
+        var stylesheet = EnsureStylesheet();
+
+        // 1. Reuse existing "Hyperlink" cellStyle if already present.
+        var cellStyles = stylesheet.CellStyles;
+        if (cellStyles != null)
+        {
+            var existing = cellStyles.Elements<CellStyle>()
+                .FirstOrDefault(cs => cs.BuiltinId?.Value == 8u);
+            if (existing?.FormatId?.Value != null)
+            {
+                // FormatId is the cellStyleXfs index. Find a cellXfs that
+                // references that cellStyleXf via xfId; if none, create one.
+                uint styleXfId = existing.FormatId.Value;
+                var cellFormats = EnsureCellFormats(stylesheet);
+                int cIdx = 0;
+                foreach (var xf in cellFormats.Elements<CellFormat>())
+                {
+                    if (xf.FormatId?.Value == styleXfId
+                        && (xf.ApplyFont?.Value ?? false))
+                        return (uint)cIdx;
+                    cIdx++;
+                }
+                // Create a mirror cellXf pointing at the style xf.
+                var styleXfs = stylesheet.CellStyleFormats!;
+                var styleXf = (CellFormat)styleXfs.Elements<CellFormat>().ElementAt((int)styleXfId);
+                var newXf = new CellFormat
+                {
+                    NumberFormatId = styleXf.NumberFormatId?.Value ?? 0,
+                    FontId = styleXf.FontId?.Value ?? 0,
+                    FillId = styleXf.FillId?.Value ?? 0,
+                    BorderId = styleXf.BorderId?.Value ?? 0,
+                    FormatId = styleXfId,
+                    ApplyFont = true,
+                };
+                cellFormats.Append(newXf);
+                cellFormats.Count = (uint)cellFormats.Elements<CellFormat>().Count();
+                return (uint)(cellFormats.Elements<CellFormat>().Count() - 1);
+            }
+        }
+
+        // 2. Create the hyperlink font (blue + underline), dedup by match.
+        // Microsoft's canonical hyperlink color is 0563C1 (theme hyperlink).
+        var hlFontProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["color"] = "0563C1",
+            ["underline"] = "single",
+        };
+        uint hlFontId = GetOrCreateFont(stylesheet, 0, hlFontProps);
+
+        // 3. Ensure CellStyleFormats exists and append a xf for the Hyperlink style.
+        var cellStyleFormats = stylesheet.CellStyleFormats;
+        if (cellStyleFormats == null)
+        {
+            cellStyleFormats = new CellStyleFormats(
+                new CellFormat { NumberFormatId = 0, FontId = 0, FillId = 0, BorderId = 0 }
+            ) { Count = 1 };
+            // Insert before CellFormats if possible.
+            var cf = stylesheet.CellFormats;
+            if (cf != null)
+                cf.InsertBeforeSelf(cellStyleFormats);
+            else
+                stylesheet.Append(cellStyleFormats);
+        }
+        var hlStyleXf = new CellFormat
+        {
+            NumberFormatId = 0,
+            FontId = hlFontId,
+            FillId = 0,
+            BorderId = 0,
+            ApplyFont = true,
+        };
+        cellStyleFormats.Append(hlStyleXf);
+        cellStyleFormats.Count = (uint)cellStyleFormats.Elements<CellFormat>().Count();
+        uint hlStyleXfId = (uint)(cellStyleFormats.Elements<CellFormat>().Count() - 1);
+
+        // 4. Add a CellFormats (cellXfs) entry that inherits from the style xf.
+        var cellFormats2 = EnsureCellFormats(stylesheet);
+        var hlCellXf = new CellFormat
+        {
+            NumberFormatId = 0,
+            FontId = hlFontId,
+            FillId = 0,
+            BorderId = 0,
+            FormatId = hlStyleXfId,
+            ApplyFont = true,
+        };
+        cellFormats2.Append(hlCellXf);
+        cellFormats2.Count = (uint)cellFormats2.Elements<CellFormat>().Count();
+        uint hlCellXfIndex = (uint)(cellFormats2.Elements<CellFormat>().Count() - 1);
+
+        // 5. Register the CellStyle name="Hyperlink" builtinId=8.
+        if (cellStyles == null)
+        {
+            cellStyles = new CellStyles(
+                new CellStyle { Name = "Normal", FormatId = 0, BuiltinId = 0 }
+            ) { Count = 1 };
+            stylesheet.Append(cellStyles);
+        }
+        cellStyles.Append(new CellStyle
+        {
+            Name = "Hyperlink",
+            FormatId = hlStyleXfId,
+            BuiltinId = 8,
+        });
+        cellStyles.Count = (uint)cellStyles.Elements<CellStyle>().Count();
+
+        return hlCellXfIndex;
     }
 
     /// <summary>
@@ -244,9 +377,25 @@ internal class ExcelStyleManager
             or "wrap" or "wraptext" or "numberformat" or "format" or "halign" or "valign"
             or "rotation" or "indent" or "shrinktofit"
             or "locked" or "formulahidden"
+            || lower == "readingorder"
             || lower.StartsWith("font.")
             || lower.StartsWith("alignment.")
             || lower.StartsWith("border.");
+    }
+
+    // DEFERRED(xlsx/cell-reading-order) CE10: Parse readingOrder values.
+    // Accepts numeric (0/1/2) or string (context/contextDependent, ltr/leftToRight,
+    // rtl/rightToLeft). Returns OOXML val to stamp as readingOrder="N".
+    private static uint ParseReadingOrder(string value)
+    {
+        var v = value.Trim().ToLowerInvariant();
+        return v switch
+        {
+            "0" or "context" or "contextdependent" => 0u,
+            "1" or "ltr" or "lefttoright" => 1u,
+            "2" or "rtl" or "righttoleft" => 2u,
+            _ => throw new ArgumentException($"Invalid 'readingOrder' value: '{value}'. Expected 0/context, 1/ltr, or 2/rtl.")
+        };
     }
 
     // ==================== NumberFormat ====================
@@ -605,10 +754,16 @@ internal class ExcelStyleManager
             leftStyle = rightStyle = topStyle = bottomStyle = parsed;
         }
 
-        // Apply "color" shorthand
+        // Apply "color" shorthand (border.color) and "all.color" (border.all.color)
+        // Both fan out to all four sides. Per-side colors below can still override.
         if (borderProps.TryGetValue("color", out var allColor))
         {
             var normalized = NormalizeColor(allColor);
+            leftColor = rightColor = topColor = bottomColor = normalized;
+        }
+        if (borderProps.TryGetValue("all.color", out var allColor2))
+        {
+            var normalized = NormalizeColor(allColor2);
             leftColor = rightColor = topColor = bottomColor = normalized;
         }
 
@@ -788,7 +943,8 @@ internal class ExcelStyleManager
                (a.WrapText?.Value ?? false) == (b.WrapText?.Value ?? false) &&
                (a.TextRotation?.Value ?? 0) == (b.TextRotation?.Value ?? 0) &&
                (a.Indent?.Value ?? 0) == (b.Indent?.Value ?? 0) &&
-               (a.ShrinkToFit?.Value ?? false) == (b.ShrinkToFit?.Value ?? false);
+               (a.ShrinkToFit?.Value ?? false) == (b.ShrinkToFit?.Value ?? false) &&
+               (a.ReadingOrder?.Value ?? 0) == (b.ReadingOrder?.Value ?? 0);
     }
 
     // ==================== Helpers ====================

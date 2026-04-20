@@ -219,6 +219,13 @@ internal static class ImageSource
             if (header[0] == 0xFF && header[1] == 0xD8)
                 return TryGetJpegDimensions(stream);
 
+            // SVG: XML text — sniff for <?xml or <svg in the header and
+            // delegate to the SVG parser. Handled after the binary
+            // signatures above so SVG files with stray leading whitespace
+            // don't get mis-sniffed as PNG/BMP/GIF/JPEG.
+            if (LooksLikeSvgHeader(header, read))
+                return SvgImageHelper.TryGetSvgDimensions(stream);
+
             return null;
         }
         catch (IOException)
@@ -229,6 +236,19 @@ internal static class ImageSource
         {
             try { stream.Position = startPos; } catch (IOException) { /* best effort */ }
         }
+    }
+
+    private static bool LooksLikeSvgHeader(byte[] header, int read)
+    {
+        if (header is null || read < 4) return false;
+        int i = 0;
+        // UTF-8 BOM
+        if (read >= 3 && header[0] == 0xEF && header[1] == 0xBB && header[2] == 0xBF) i = 3;
+        while (i < read && (header[i] == ' ' || header[i] == '\t'
+            || header[i] == '\r' || header[i] == '\n')) i++;
+        if (i >= read || header[i] != (byte)'<') return false;
+        var text = System.Text.Encoding.UTF8.GetString(header, i, read - i).ToLowerInvariant();
+        return text.StartsWith("<svg") || text.StartsWith("<?xml") || text.StartsWith("<!doctype svg");
     }
 
     private static int ReadBE32(byte[] buf, int offset) =>

@@ -42,6 +42,7 @@ public partial class WordHandler
     private void RenderParagraphContentHtml(StringBuilder sb, Paragraph para)
     {
         OnHtmlParagraphBegin(para);
+        _ctx.CurrentParagraphTabIndex = 0;
 
         // Render bookmark anchors for internal hyperlink targets
         foreach (var bm in para.Elements<BookmarkStart>())
@@ -92,66 +93,68 @@ public partial class WordHandler
             }
             else if (child.LocalName is "ins" or "moveTo")
             {
-                // Tracked insertions — render their child runs
-                foreach (var insRun in child.Elements<Run>())
+                // Tracked insertions — underline to match Word's default revision mark style
+                var author = child.GetAttributes().FirstOrDefault(a => a.LocalName == "author").Value;
+                var authorAttr = string.IsNullOrEmpty(author) ? "" : $" title=\"Inserted by {HtmlEncodeAttr(author)}\"";
+                sb.Append($"<span class=\"track-ins\" style=\"text-decoration:underline;color:#2E7D32\"{authorAttr}>");
+                // Walk all nested runs so a <w:del> or <w:hyperlink> nested
+                // inside <w:ins> doesn't drop its content (Descendants<Run>
+                // picks up runs at any depth).
+                foreach (var insRun in child.Descendants<Run>())
                     RenderRunHtml(sb, insRun, para);
+                // Also render nested deletion text (ins-of-del revision) so
+                // the reader sees what was removed within the insertion.
+                var nestedDelText = string.Concat(child.Descendants()
+                    .Where(e => e.LocalName is "del" or "moveFrom")
+                    .SelectMany(d => d.Descendants())
+                    .Where(e => e.LocalName is "delText" or "t")
+                    .Select(e => e.InnerText));
+                if (!string.IsNullOrEmpty(nestedDelText))
+                    sb.Append($"<span class=\"track-del\" style=\"text-decoration:line-through;color:#C62828\">{HtmlEncode(nestedDelText)}</span>");
+                sb.Append("</span>");
             }
             else if (child.LocalName is "del" or "moveFrom")
             {
-                // Tracked deletions — skip (deleted content should not be displayed)
+                // Tracked deletions — strikethrough with color, preserving the deleted text
+                // The delText inside del runs carries the actual deleted content; we render it so
+                // a reader of the preview can see what was removed.
+                var author = child.GetAttributes().FirstOrDefault(a => a.LocalName == "author").Value;
+                var authorAttr = string.IsNullOrEmpty(author) ? "" : $" title=\"Deleted by {HtmlEncodeAttr(author)}\"";
+                var delText = string.Concat(child.Descendants()
+                    .Where(e => e.LocalName == "delText" || e.LocalName == "t")
+                    .Select(e => e.InnerText));
+                if (!string.IsNullOrEmpty(delText))
+                    sb.Append($"<span class=\"track-del\" style=\"text-decoration:line-through;color:#C62828\"{authorAttr}>{HtmlEncode(delText)}</span>");
             }
             else if (child is Hyperlink hyperlink)
             {
-                var relId = hyperlink.Id?.Value;
-                string? url = null;
-                if (relId != null)
-                {
-                    try
-                    {
-                        url = _doc.MainDocumentPart?.HyperlinkRelationships
-                            .FirstOrDefault(r => r.Id == relId)?.Uri?.ToString();
-                    }
-                    catch { }
-                    if (url == null)
-                    {
-                        try
-                        {
-                            url = _doc.MainDocumentPart?.ExternalRelationships
-                                .FirstOrDefault(r => r.Id == relId)?.Uri?.ToString();
-                        }
-                        catch { }
-                    }
-                }
-
-                // Also check for internal bookmark links (Anchor property)
-                if (url == null && hyperlink.Anchor?.Value != null)
-                    url = $"#{hyperlink.Anchor.Value}";
-
-                if (url != null)
-                    sb.Append($"<a href=\"{HtmlEncodeAttr(url)}\"{(url.StartsWith("#") ? "" : " target=\"_blank\"")}>");
-
-                foreach (var hRun in hyperlink.Elements<Run>())
-                    RenderRunHtml(sb, hRun, para);
-
-                if (url != null)
-                    sb.Append("</a>");
+                RenderHyperlinkHtml(sb, hyperlink, para);
             }
             else if (child.LocalName == "oMath" || child is M.OfficeMath)
             {
                 var latex = FormulaParser.ToLatex(child);
                 sb.Append($"<span class=\"katex-formula\" data-formula=\"{HtmlEncodeAttr(latex)}\"></span>");
             }
-            else if (child.LocalName is "sdt" or "smartTag" or "customXml")
+            else if (child.LocalName is "sdt" or "smartTag" or "customXml" or "fldSimple")
             {
-                // Content controls, smart tags, custom XML — render their child runs
+                // Content controls, smart tags, custom XML, simple fields —
+                // render hyperlinks with href + their own runs (TOC entries
+                // are authored as <w:fldSimple> wrapping <w:hyperlink>),
+                // then render bare runs. Runs nested inside a hyperlink are
+                // emitted by the hyperlink branch so skip them at the
+                // outer Run pass.
+                var emittedRuns = new HashSet<OpenXmlElement>();
+                foreach (var innerHyp in child.Descendants<Hyperlink>())
+                {
+                    RenderHyperlinkHtml(sb, innerHyp, para);
+                    foreach (var r in innerHyp.Descendants<Run>())
+                        emittedRuns.Add(r);
+                }
                 foreach (var innerRun in child.Descendants<Run>())
+                {
+                    if (emittedRuns.Contains(innerRun)) continue;
                     RenderRunHtml(sb, innerRun, para);
-            }
-            else if (child.LocalName == "fldSimple")
-            {
-                // Simple field codes (page numbers, cross-refs) — render cached display text
-                foreach (var fldRun in child.Elements<Run>())
-                    RenderRunHtml(sb, fldRun, para);
+                }
             }
         }
 
@@ -171,6 +174,25 @@ public partial class WordHandler
             return;
         }
 
+        // VML legacy picture (<w:pict>). The full geometry rendering is
+        // deferred (see KNOWN_ISSUES #7e); as a safety net, extract any
+        // text content so WordArt strings and textbox text don't vanish
+        // from the preview entirely.
+        var vmlPict = run.ChildElements.FirstOrDefault(c => c.LocalName == "pict");
+        if (vmlPict != null)
+        {
+            // v:textbox → w:txbxContent → w:t
+            var txbxTexts = vmlPict.Descendants().Where(e => e.LocalName == "t").Select(e => e.InnerText);
+            // v:textpath string="..." (WordArt / classic watermark)
+            var textpathStrings = vmlPict.Descendants()
+                .Where(e => e.LocalName == "textpath")
+                .Select(e => e.GetAttributes().FirstOrDefault(a => a.LocalName == "string").Value ?? "");
+            var text = string.Join(" ", txbxTexts.Concat(textpathStrings).Where(s => !string.IsNullOrWhiteSpace(s)));
+            if (!string.IsNullOrWhiteSpace(text))
+                sb.Append($"<span class=\"vml-fallback\" style=\"color:#666;font-style:italic\">{HtmlEncode(text)}</span>");
+            return;
+        }
+
         // OLE embedded objects (Visio, Excel, etc.) carry a v:imagedata
         // preview image that we can render for a read-only snapshot.
         var oleObject = run.GetFirstChild<EmbeddedObject>();
@@ -180,14 +202,43 @@ public partial class WordHandler
             return;
         }
 
+        // Form field checkbox: fldChar begin with ffData/ffCheckBox — emit ☑ / ☐ glyph
+        var fldChar = run.GetFirstChild<FieldChar>();
+        if (fldChar?.FieldCharType?.Value == FieldCharValues.Begin)
+        {
+            var ffData = fldChar.GetFirstChild<FormFieldData>();
+            var checkBox = ffData?.GetFirstChild<CheckBox>();
+            if (checkBox != null)
+            {
+                var defaultChecked = checkBox.GetFirstChild<DefaultCheckBoxFormFieldState>()?.Val?.Value == true;
+                var currentChecked = checkBox.GetFirstChild<Checked>()?.Val?.Value == true;
+                var isChecked = currentChecked || defaultChecked;
+                sb.Append(isChecked ? "☑" : "☐");
+                return;
+            }
+        }
+
         // Footnote/endnote reference — render superscript number (don't return, run may also have text)
         var fnRef = run.GetFirstChild<FootnoteReference>();
         if (fnRef?.Id?.HasValue == true && fnRef.Id.Value > 0)
         {
             var fnId = (int)fnRef.Id.Value;
             _ctx.FootnoteRefs.Add(fnId);
-            var fnNum = _ctx.FootnoteRefs.Count;
-            var fnLabel = FormatNoteNumber(fnNum, GetFootnoteNumFmt());
+            // #8a: when the current section has numRestart=eachSect, the
+            // displayed number counts from 1 within that section; otherwise
+            // it's the document-wide running total.
+            int displayNum;
+            if (_ctx.FnRestartEachSection)
+            {
+                _ctx.FnCountInSection++;
+                displayNum = _ctx.FnCountInSection;
+            }
+            else
+            {
+                displayNum = _ctx.FootnoteRefs.Count;
+            }
+            var fnLabel = FormatNoteNumber(displayNum, GetFootnoteNumFmt());
+            _ctx.FnLabels[fnId] = fnLabel;
             sb.Append($"<sup class=\"fn-ref\"><a href=\"#fn{fnId}\" id=\"fnref{fnId}\">{fnLabel}</a></sup>");
         }
         var enRef = run.GetFirstChild<EndnoteReference>();
@@ -202,6 +253,21 @@ public partial class WordHandler
         // FootnoteReferenceMark / EndnoteReferenceMark: don't skip the run, just ignore the mark element
         // (the run may also contain text that should be rendered)
 
+        // Ruby (furigana) annotation — emit <ruby>base<rt>annotation</rt></ruby>
+        var ruby = run.ChildElements.FirstOrDefault(c => c.LocalName == "ruby");
+        if (ruby != null)
+        {
+            var rubyBase = ruby.ChildElements.FirstOrDefault(c => c.LocalName == "rubyBase");
+            var rt = ruby.ChildElements.FirstOrDefault(c => c.LocalName == "rt");
+            var baseText = string.Concat(rubyBase?.Descendants<Text>().Select(t => t.Text) ?? []);
+            var rtText = string.Concat(rt?.Descendants<Text>().Select(t => t.Text) ?? []);
+            if (!string.IsNullOrEmpty(baseText))
+            {
+                sb.Append($"<ruby>{HtmlEncode(baseText)}<rt>{HtmlEncode(rtText)}</rt></ruby>");
+                return;
+            }
+        }
+
         var hasContent = run.ChildElements.Any(c =>
             c is Break || c is TabChar || c is SymbolChar || c is CarriageReturn
             || c.LocalName is "noBreakHyphen" or "softHyphen"
@@ -210,6 +276,12 @@ public partial class WordHandler
         if (!hasContent) return;
 
         var rProps = ResolveEffectiveRunProperties(run, para);
+        // w:vanish / w:specVanish — hidden text should be omitted from the
+        // visual preview, matching native Word's default view behavior.
+        if (rProps.Vanish != null && (rProps.Vanish.Val == null || rProps.Vanish.Val.Value))
+            return;
+        if (rProps.SpecVanish != null && (rProps.SpecVanish.Val == null || rProps.SpecVanish.Val.Value))
+            return;
         var style = GetRunInlineCss(rProps);
         var needsSpan = !string.IsNullOrEmpty(style);
 
@@ -236,24 +308,76 @@ public partial class WordHandler
             }
             else if (child is TabChar)
             {
-                // Check for right-aligned tab with dot leader (common in TOC)
+                // Resolve tab stops: direct on paragraph, or via its style
                 var tabs = para.ParagraphProperties?.Tabs?.Elements<TabStop>();
                 if (tabs == null || !tabs.Any())
                 {
                     var tsId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
                     if (tsId != null) tabs = ResolveTabStopsFromStyle(tsId);
                 }
-                var rightDotTab = tabs?.FirstOrDefault(t =>
-                    t.Val?.Value == TabStopValues.Right &&
-                    t.Leader?.Value == TabStopLeaderCharValues.Dot);
-                if (rightDotTab != null)
+                // TOC-style special case: right-aligned tab with any leader.
+                // Dot/hyphen/underscore/middleDot all fill the gap between
+                // the current inline position and the right edge of the
+                // content box via a flex-grow spacer.
+                var rightLeaderTab = tabs?.FirstOrDefault(t =>
+                    t.Val?.InnerText == "right"
+                    && t.Leader?.InnerText is "dot" or "hyphen" or "underscore" or "middleDot" or "dash" or "heavy");
+                if (rightLeaderTab != null)
                 {
-                    // Close current span, insert dot leader, then page number follows
                     if (needsSpan) { sb.Append("</span>"); needsSpan = false; }
-                    sb.Append("<span class=\"dot-leader\"></span>");
+                    var leaderClass = rightLeaderTab.Leader?.InnerText switch
+                    {
+                        "hyphen" or "dash" => "hyphen-leader",
+                        "underscore" or "heavy" => "underscore-leader",
+                        "middleDot" => "middledot-leader",
+                        _ => "dot-leader",
+                    };
+                    sb.Append($"<span class=\"{leaderClass}\"></span>");
                 }
                 else
-                    sb.Append("&emsp;");
+                {
+                    // General tab: emit inline-block with width = distance to Nth tab stop
+                    // (or default 36pt = 0.5in fallback when no custom stops defined)
+                    var orderedStops = tabs?
+                        .Where(t => t.Val?.InnerText != "clear" && t.Position?.HasValue == true)
+                        .OrderBy(t => t.Position!.Value).ToList();
+                    double widthPt;
+                    int tabIdx = _ctx.CurrentParagraphTabIndex;
+                    if (orderedStops != null && tabIdx < orderedStops.Count)
+                    {
+                        var curPos = orderedStops[tabIdx].Position!.Value / 20.0; // twips → pt
+                        var prevPos = tabIdx > 0 ? orderedStops[tabIdx - 1].Position!.Value / 20.0 : 0;
+                        widthPt = curPos - prevPos;
+                        // Handle tab leader for positional tabs. OOXML values:
+                        //   none, dot, hyphen, underscore, heavy, middleDot (spec)
+                        //   some authors also emit "dash" as a hyphen alias.
+                        var leader = orderedStops[tabIdx].Leader?.InnerText;
+                        var cssLeader = leader switch
+                        {
+                            "dot" => "border-bottom:1px dotted #000;",
+                            // middleDot is centered dot between stops — best CSS equivalent is a
+                            // thicker dotted border with larger spacing; browsers render dotted
+                            // borders with square dots which read as middle dots at 2px width.
+                            "middleDot" => "border-bottom:2px dotted #555;",
+                            "hyphen" or "dash" => "border-bottom:1px dashed #000;",
+                            "underscore" or "heavy" => "border-bottom:1px solid #000;",
+                            _ => "",
+                        };
+                        sb.Append($"<span style=\"display:inline-block;width:{widthPt:0.##}pt;{cssLeader}\"></span>");
+                    }
+                    else
+                    {
+                        // No explicit tab stop: use document-level defaultTabStop
+                        // from settings.xml (twips → pt); fallback to 36pt (0.5in)
+                        // when settings are missing.
+                        var dts = _doc.MainDocumentPart?.DocumentSettingsPart?.Settings?.GetFirstChild<DefaultTabStop>();
+                        double defTabPt = 36.0;
+                        if (dts?.Val?.HasValue == true && dts.Val.Value > 0)
+                            defTabPt = dts.Val.Value / 20.0;
+                        sb.Append($"<span style=\"display:inline-block;width:{defTabPt:0.##}pt\"></span>");
+                    }
+                    _ctx.CurrentParagraphTabIndex++;
+                }
             }
             else if (child is CarriageReturn)
                 sb.Append("<br>");
@@ -405,17 +529,85 @@ public partial class WordHandler
             var fn = fnPart.Footnotes.Elements<Footnote>().FirstOrDefault(f => f.Id?.Value == fnId);
             if (fn == null) continue;
 
-            var fnLabel = FormatNoteNumber(num, fnFmt);
+            // #8a: reuse the label that was stored at ref-emit time so the
+            // bottom list matches the superscript. Falls back to the flat
+            // running number when the ref emitter didn't cache a label
+            // (e.g. footnote referenced from header/footer).
+            var fnLabel = _ctx.FnLabels.TryGetValue(fnId, out var cached)
+                ? cached
+                : FormatNoteNumber(num, fnFmt);
             sb.Append($"<div id=\"fn{fnId}\" style=\"margin:0.3em 0\"><sup>{fnLabel}</sup> ");
-            var fnParas = fn.Elements<Paragraph>().ToList();
-            for (int pi = 0; pi < fnParas.Count; pi++)
-            {
-                RenderParagraphContentHtml(sb, fnParas[pi]);
-                if (pi < fnParas.Count - 1) sb.Append("<br>");
-            }
+            RenderFootnoteChildren(sb, fn);
             sb.AppendLine($" <a href=\"#fnref{fnId}\" style=\"text-decoration:none\">\u21A9</a></div>");
         }
         sb.AppendLine("</div>");
+    }
+
+    // Render paragraphs AND tables inside a footnote/endnote. The previous
+    // implementation only iterated Elements<Paragraph>() so a footnote with
+    // a nested table silently dropped the table (and when a footnote
+    // contained only a table, the whole footnote rendered empty).
+    private IEnumerable<OpenXmlPart> CollectHyperlinkHostParts()
+    {
+        var main = _doc.MainDocumentPart;
+        if (main == null) yield break;
+        yield return main;
+        foreach (var hp in main.HeaderParts) yield return hp;
+        foreach (var fp in main.FooterParts) yield return fp;
+        if (main.FootnotesPart != null) yield return main.FootnotesPart;
+        if (main.EndnotesPart != null) yield return main.EndnotesPart;
+    }
+
+    private void RenderHyperlinkHtml(StringBuilder sb, Hyperlink hyperlink, Paragraph para)
+    {
+        var relId = hyperlink.Id?.Value;
+        string? url = null;
+        if (relId != null)
+        {
+            // Hyperlink rels can live on the enclosing HeaderPart/FooterPart/
+            // FootnotesPart/EndnotesPart, not just MainDocumentPart. Falling
+            // back to a full-part sweep keeps header/footer links clickable.
+            try
+            {
+                var parts = CollectHyperlinkHostParts();
+                foreach (var part in parts)
+                {
+                    url = part.HyperlinkRelationships.FirstOrDefault(r => r.Id == relId)?.Uri?.ToString();
+                    if (url != null) break;
+                    url = part.ExternalRelationships.FirstOrDefault(r => r.Id == relId)?.Uri?.ToString();
+                    if (url != null) break;
+                }
+            }
+            catch { }
+        }
+        if (url == null && hyperlink.Anchor?.Value != null)
+            url = $"#{hyperlink.Anchor.Value}";
+        var urlSafe = url != null && IsSafeLinkUrl(url);
+        if (urlSafe)
+            sb.Append($"<a href=\"{HtmlEncodeAttr(url!)}\"{(url!.StartsWith("#") ? "" : " target=\"_blank\"")}>");
+        foreach (var descendant in hyperlink.Descendants<Run>())
+            RenderRunHtml(sb, descendant, para);
+        if (urlSafe)
+            sb.Append("</a>");
+    }
+
+    private void RenderFootnoteChildren(StringBuilder sb, OpenXmlElement note)
+    {
+        bool first = true;
+        foreach (var child in note.ChildElements)
+        {
+            if (child is Paragraph p)
+            {
+                if (!first) sb.Append("<br>");
+                RenderParagraphContentHtml(sb, p);
+                first = false;
+            }
+            else if (child is Table tbl)
+            {
+                RenderTableHtml(sb, tbl);
+                first = false;
+            }
+        }
     }
 
     private void RenderEndnotesHtml(StringBuilder sb)
@@ -440,12 +632,7 @@ public partial class WordHandler
             var enIndent = ResolveStyleIndent("EndnoteText");
             var enIndentCss = enIndent != null ? $"text-indent:{enIndent}" : "";
             sb.Append($"<div id=\"en{enId}\" style=\"margin:0.3em 0;{enIndentCss}\"><sup>{enLabel}</sup> ");
-            var enParas = en.Elements<Paragraph>().ToList();
-            for (int pi = 0; pi < enParas.Count; pi++)
-            {
-                RenderParagraphContentHtml(sb, enParas[pi]);
-                if (pi < enParas.Count - 1) sb.Append("<br>");
-            }
+            RenderFootnoteChildren(sb, en);
             sb.AppendLine("</div>");
         }
         sb.AppendLine("</div>");

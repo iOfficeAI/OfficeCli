@@ -279,16 +279,88 @@ public partial class WordHandler
                   ?? properties.GetValueOrDefault("type");
             if (ft != null) effectiveType = ft.ToLowerInvariant();
         }
+        // Extract named parameters for field types that require them
+        string? mergeFieldName = null;
+        string? refBookmarkName = null;
+        string? seqIdentifier = null;
+
+        if (effectiveType == "mergefield")
+        {
+            mergeFieldName = properties.GetValueOrDefault("fieldName")
+                          ?? properties.GetValueOrDefault("fieldname")
+                          ?? properties.GetValueOrDefault("name");
+            if (string.IsNullOrWhiteSpace(mergeFieldName))
+                throw new ArgumentException("MERGEFIELD requires a 'fieldName' property (e.g. --prop fieldName=CustomerName).");
+        }
+        else if (effectiveType is "ref" or "pageref" or "noteref")
+        {
+            refBookmarkName = properties.GetValueOrDefault("bookmarkName")
+                           ?? properties.GetValueOrDefault("bookmarkname")
+                           ?? properties.GetValueOrDefault("bookmark")
+                           ?? properties.GetValueOrDefault("name");
+            if (string.IsNullOrWhiteSpace(refBookmarkName))
+                throw new ArgumentException($"{effectiveType.ToUpperInvariant()} requires a 'bookmarkName' property (e.g. --prop bookmarkName=MyBookmark).");
+        }
+        else if (effectiveType == "seq")
+        {
+            seqIdentifier = properties.GetValueOrDefault("identifier")
+                         ?? properties.GetValueOrDefault("name")
+                         ?? properties.GetValueOrDefault("id");
+            if (string.IsNullOrWhiteSpace(seqIdentifier))
+                throw new ArgumentException("SEQ requires an 'identifier' property (e.g. --prop identifier=Figure).");
+        }
+
+        // For STYLEREF and DOCPROPERTY, extract the required name parameter
+        string? styleRefName = null;
+        if (effectiveType == "styleref")
+        {
+            styleRefName = properties.GetValueOrDefault("styleName")
+                        ?? properties.GetValueOrDefault("stylename")
+                        ?? properties.GetValueOrDefault("name");
+            if (string.IsNullOrWhiteSpace(styleRefName))
+                throw new ArgumentException("STYLEREF requires a 'styleName' property (e.g. --prop styleName=\"Heading 1\").");
+        }
+        string? docPropertyName = null;
+        if (effectiveType == "docproperty")
+        {
+            docPropertyName = properties.GetValueOrDefault("propertyName")
+                           ?? properties.GetValueOrDefault("propertyname")
+                           ?? properties.GetValueOrDefault("name");
+            if (string.IsNullOrWhiteSpace(docPropertyName))
+                throw new ArgumentException("DOCPROPERTY requires a 'propertyName' property (e.g. --prop propertyName=Department).");
+        }
+
         var fieldInstr = effectiveType switch
         {
             "pagenum" or "pagenumber" or "page" => " PAGE ",
             "numpages" => " NUMPAGES ",
+            "sectionpages" => " SECTIONPAGES ",
+            "section" => " SECTION ",
             "date" => " DATE \\@ \"yyyy-MM-dd\" ",
+            "createdate" => " CREATEDATE \\@ \"yyyy-MM-dd\" ",
+            "savedate" => " SAVEDATE \\@ \"yyyy-MM-dd\" ",
+            "printdate" => " PRINTDATE \\@ \"yyyy-MM-dd\" ",
+            "edittime" => " EDITTIME ",
             "author" => " AUTHOR ",
+            "lastsavedby" => " LASTSAVEDBY ",
             "title" => " TITLE ",
             "subject" => " SUBJECT ",
             "filename" => " FILENAME ",
             "time" => " TIME ",
+            "numwords" => " NUMWORDS ",
+            "numchars" => " NUMCHARS ",
+            "revnum" => " REVNUM ",
+            "template" => " TEMPLATE ",
+            "comments" or "doccomments" => " COMMENTS ",
+            "keywords" => " KEYWORDS ",
+            "mergefield" => $" MERGEFIELD {mergeFieldName} ",
+            "ref" => $" REF {refBookmarkName}{(IsTruthy(properties.GetValueOrDefault("hyperlink")) ? " \\h" : "")} ",
+            "pageref" => $" PAGEREF {refBookmarkName}{(IsTruthy(properties.GetValueOrDefault("hyperlink")) ? " \\h" : "")} ",
+            "noteref" => $" NOTEREF {refBookmarkName}{(IsTruthy(properties.GetValueOrDefault("hyperlink")) ? " \\h" : "")} ",
+            "seq" => $" SEQ {seqIdentifier} ",
+            "styleref" => $" STYLEREF \"{styleRefName}\" ",
+            "docproperty" => $" DOCPROPERTY \"{docPropertyName}\" ",
+            "if" => BuildIfFieldInstruction(properties),
             _ => properties.ContainsKey("instruction")
                 ? properties["instruction"]
                 : throw new ArgumentException($"Unknown field type '{effectiveType}'. Provide a known type or an 'instruction' property.")
@@ -297,7 +369,17 @@ public partial class WordHandler
         if (properties.TryGetValue("instruction", out var instr))
             fieldInstr = instr.StartsWith(" ") ? instr : $" {instr} ";
 
-        var fieldPlaceholder = properties.GetValueOrDefault("text", "1");
+        var fieldPlaceholder = properties.ContainsKey("text")
+            ? properties["text"]
+            : effectiveType switch
+            {
+                "mergefield" => $"\u00AB{mergeFieldName}\u00BB",
+                "ref" or "noteref" => $"\u00AB{refBookmarkName}\u00BB",
+                "styleref" => $"\u00AB{styleRefName}\u00BB",
+                "docproperty" => $"\u00AB{docPropertyName}\u00BB",
+                "if" => properties.GetValueOrDefault("trueText", ""),
+                _ => "1"
+            };
 
         // Build complex field: fldChar(begin) + instrText + fldChar(separate) + result + fldChar(end)
         var fieldRunBegin = new Run(new FieldChar { FieldCharType = FieldCharValues.Begin });
@@ -361,6 +443,17 @@ public partial class WordHandler
             resultPath = $"/body/{BuildParaPathSegment(fNewPara, fIdx2 + 1)}";
         }
         return resultPath;
+    }
+
+    private static string BuildIfFieldInstruction(Dictionary<string, string> properties)
+    {
+        var expression = properties.GetValueOrDefault("expression")
+                      ?? properties.GetValueOrDefault("condition");
+        if (string.IsNullOrWhiteSpace(expression))
+            throw new ArgumentException("IF requires an 'expression' property (e.g. --prop expression=\"MERGEFIELD Gender = \\\"Male\\\"\").");
+        var trueText = properties.GetValueOrDefault("trueText", properties.GetValueOrDefault("truetext", ""));
+        var falseText = properties.GetValueOrDefault("falseText", properties.GetValueOrDefault("falsetext", ""));
+        return $" IF {expression} \"{trueText}\" \"{falseText}\" ";
     }
 
     private string AddBreak(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties, string type)

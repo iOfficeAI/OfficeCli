@@ -188,7 +188,20 @@ public partial class WordHandler
         var blip = drawing.Descendants<A.Blip>().FirstOrDefault();
         if (blip?.Embed?.Value == null) return;
 
-        var dataUri = LoadImageAsDataUri(blip.Embed.Value);
+        // Prefer the SVG extension rel if present (Office 2019+ keeps a PNG
+        // raster in Embed plus an SVG via a:extLst/asvg:svgBlip). PNG fallback
+        // is often a 1×1 transparent pixel that renders as a blank, so SVG
+        // wins for modern documents that embed vector art.
+        string blipRelId = blip.Embed.Value;
+        var svgBlip = blip.Descendants().FirstOrDefault(e => e.LocalName == "svgBlip");
+        if (svgBlip != null)
+        {
+            var svgRel = svgBlip.GetAttributes()
+                .FirstOrDefault(a => a.LocalName == "embed" || a.LocalName == "link").Value;
+            if (!string.IsNullOrEmpty(svgRel))
+                blipRelId = svgRel;
+        }
+        var dataUri = LoadImageAsDataUri(blipRelId);
         if (dataUri == null) return;
 
         try
@@ -247,9 +260,26 @@ public partial class WordHandler
                             isRight = offsetEmu > halfPageEmu;
                         }
                     }
+                    // #7b: use the anchor's distT/distB/distL/distR for the
+                    // float margin instead of a hardcoded 8px. The emu→pt
+                    // conversion keeps spacing in line with what Word paints.
+                    var distT = (long)(anchor.DistanceFromTop?.Value ?? 0) / 12700.0;
+                    var distB = (long)(anchor.DistanceFromBottom?.Value ?? 0) / 12700.0;
+                    var distL = (long)(anchor.DistanceFromLeft?.Value ?? 0) / 12700.0;
+                    var distR = (long)(anchor.DistanceFromRight?.Value ?? 0) / 12700.0;
+                    // Floor the "inside" margin (right for float:left, left for
+                    // float:right) so text always has breathing room.
+                    if (isRight)
+                    {
+                        if (distL < 6) distL = 6;
+                    }
+                    else
+                    {
+                        if (distR < 6) distR = 6;
+                    }
                     floatCss = isRight
-                        ? "float:right;margin:0 0 8px 8px"
-                        : "float:left;margin:0 8px 8px 0";
+                        ? $"float:right;margin:{distT:0.#}pt {distR:0.#}pt {distB:0.#}pt {distL:0.#}pt"
+                        : $"float:left;margin:{distT:0.#}pt {distR:0.#}pt {distB:0.#}pt {distL:0.#}pt";
 
                     // Anchored at top of margin — emit marker for relocation to page start
                     var vPos = anchor.GetFirstChild<DW.VerticalPosition>();
@@ -274,12 +304,28 @@ public partial class WordHandler
 
             // Crop support: container-based cropping
             var crop = GetCropPercents(drawing);
-            var styleParts = new List<string> { "max-width:100%", "height:auto" };
+            // #7a001: when the image's native width exceeds the page body's
+            // content width, drop `max-width:100%` so the image paints at
+            // native size and overflows the margin the way Word does.
+            // Otherwise `max-width:100%` + explicit width + flex-column parent
+            // can collapse the layout slot to zero.
+            var pgLayout = GetPageLayout();
+            var contentWidthPt = pgLayout.WidthPt - pgLayout.MarginLeftPt - pgLayout.MarginRightPt;
+            var imgWidthPt = widthPx * 72.0 / 96.0; // 96 DPI → pt
+            var overflows = widthPx > 0 && imgWidthPt > contentWidthPt;
+            var styleParts = overflows
+                ? new List<string> { $"width:{imgWidthPt:0.#}pt", "height:auto" }
+                : new List<string> { "max-width:100%", "height:auto" };
             if (!string.IsNullOrEmpty(floatCss)) styleParts.Add(floatCss);
+
+            // Picture effects from pic:spPr — rotation, flip, border, shadow
+            var spPr = drawing.Descendants().FirstOrDefault(e => e.LocalName == "spPr");
+            var effectCss = spPr != null ? GetPictureEffectsCss(spPr) : "";
+            if (!string.IsNullOrEmpty(effectCss)) styleParts.Add(effectCss);
 
             if (crop.HasValue)
             {
-                RenderCroppedImage(sb, dataUri, widthPx, heightPx, crop.Value.l, crop.Value.t, crop.Value.r, crop.Value.b, HtmlEncodeAttr(alt), floatCss);
+                RenderCroppedImage(sb, dataUri, widthPx, heightPx, crop.Value.l, crop.Value.t, crop.Value.r, crop.Value.b, HtmlEncodeAttr(alt), floatCss + (string.IsNullOrEmpty(effectCss) ? "" : ";" + effectCss));
             }
             else
             {
@@ -290,6 +336,72 @@ public partial class WordHandler
         {
             sb.Append("<span class=\"img-error\">[Image]</span>");
         }
+    }
+
+    /// <summary>
+    /// Extract CSS for picture visual effects from a:xfrm (rotation, flip),
+    /// a:ln (border), and a:effectLst (shadow/glow). All live under pic:spPr.
+    /// </summary>
+    private static string GetPictureEffectsCss(OpenXmlElement spPr)
+    {
+        var parts = new List<string>();
+
+        // Rotation + flip from a:xfrm
+        var xfrm = spPr.Elements().FirstOrDefault(e => e.LocalName == "xfrm");
+        if (xfrm != null)
+        {
+            var rot = xfrm.GetAttributes().FirstOrDefault(a => a.LocalName == "rot").Value;
+            var flipH = xfrm.GetAttributes().FirstOrDefault(a => a.LocalName == "flipH").Value;
+            var flipV = xfrm.GetAttributes().FirstOrDefault(a => a.LocalName == "flipV").Value;
+
+            var transforms = new List<string>();
+            if (long.TryParse(rot, out var rotVal) && rotVal != 0)
+            {
+                // OOXML rotation is in 60000ths of a degree
+                var deg = rotVal / 60000.0;
+                transforms.Add($"rotate({deg:0.##}deg)");
+            }
+            if (flipH == "1" || flipH == "true") transforms.Add("scaleX(-1)");
+            if (flipV == "1" || flipV == "true") transforms.Add("scaleY(-1)");
+            if (transforms.Count > 0)
+                parts.Add($"transform:{string.Join(" ", transforms)}");
+        }
+
+        // Border from a:ln
+        var ln = spPr.Elements().FirstOrDefault(e => e.LocalName == "ln");
+        if (ln != null)
+        {
+            var wAttr = ln.GetAttributes().FirstOrDefault(a => a.LocalName == "w").Value;
+            double borderPx = 1;
+            if (long.TryParse(wAttr, out var wEmu) && wEmu > 0)
+                borderPx = Math.Max(1, wEmu / 9525.0); // EMU → px
+            var solidFill = ln.Elements().FirstOrDefault(e => e.LocalName == "solidFill");
+            var srgb = solidFill?.Elements().FirstOrDefault(e => e.LocalName == "srgbClr");
+            var colorHex = srgb?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
+            var borderColor = !string.IsNullOrEmpty(colorHex) ? $"#{colorHex}" : "#000";
+            parts.Add($"border:{borderPx:0.##}px solid {borderColor}");
+        }
+
+        // Outer shadow from a:effectLst/a:outerShdw — map to box-shadow
+        var effectLst = spPr.Elements().FirstOrDefault(e => e.LocalName == "effectLst");
+        var outerShdw = effectLst?.Elements().FirstOrDefault(e => e.LocalName == "outerShdw");
+        if (outerShdw != null)
+        {
+            // blurRad, dist, dir (60000ths of a degree) — simplified offset projection
+            var blurAttr = outerShdw.GetAttributes().FirstOrDefault(a => a.LocalName == "blurRad").Value;
+            var distAttr = outerShdw.GetAttributes().FirstOrDefault(a => a.LocalName == "dist").Value;
+            var dirAttr = outerShdw.GetAttributes().FirstOrDefault(a => a.LocalName == "dir").Value;
+            double blurPx = long.TryParse(blurAttr, out var blurEmu) ? blurEmu / 9525.0 : 4;
+            double distPx = long.TryParse(distAttr, out var distEmu) ? distEmu / 9525.0 : 4;
+            double dirDeg = long.TryParse(dirAttr, out var dirVal) ? dirVal / 60000.0 : 45;
+            var offX = distPx * Math.Cos(dirDeg * Math.PI / 180);
+            var offY = distPx * Math.Sin(dirDeg * Math.PI / 180);
+            var shdwFill = outerShdw.Elements().FirstOrDefault(e => e.LocalName == "srgbClr");
+            var shdwHex = shdwFill?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value ?? "000000";
+            parts.Add($"box-shadow:{offX:0.#}px {offY:0.#}px {blurPx:0.#}px #{shdwHex}");
+        }
+
+        return string.Join(";", parts);
     }
 
     /// <summary>
@@ -436,6 +548,11 @@ public partial class WordHandler
             var widthPx = extCx / 9525;
             var heightPx = extCy / 9525;
             style = $"display:inline-block;width:{widthPx}px;min-height:{heightPx}px;vertical-align:top";
+
+            // Rotation on standalone shapes too (was only applied inside groups)
+            var sXfrm = spPr?.Elements().FirstOrDefault(e => e.LocalName == "xfrm");
+            var sRot = GetLongAttr(sXfrm, "rot");
+            if (sRot != 0) style += $";transform:rotate({sRot / 60000.0:0.##}deg)";
         }
         else
         {
@@ -451,17 +568,37 @@ public partial class WordHandler
             if (rot != 0) style += $";transform:rotate({rot / 60000.0:0.##}deg)";
         }
 
-        if (!string.IsNullOrEmpty(fillCss)) style += $";{fillCss}";
-        if (!string.IsNullOrEmpty(borderCss)) style += $";{borderCss}";
+        // prstGeom → border-radius for ellipse, round rect, etc.
+        var prstGeom = spPr?.Elements().FirstOrDefault(e => e.LocalName == "prstGeom");
+        var prst = prstGeom?.GetAttributes().FirstOrDefault(a => a.LocalName == "prst").Value;
+        if (prst == "ellipse" || prst == "oval")
+            style += ";border-radius:50%";
+        else if (prst == "roundRect")
+            style += ";border-radius:12px";
+
+        // #7a: for complex preset geometries (line, arrows, callouts) the
+        // background/border approach collapses to a plain rect. Render
+        // those as inline SVG overlays using the shape's fill/border colors.
+        var svgPrst = prst is "line" or "straightConnector1"
+            or "rightArrow" or "leftArrow" or "upArrow" or "downArrow"
+            or "wedgeRoundRectCallout";
+        if (svgPrst)
+        {
+            // Defer fill/border to the SVG so the host div stays transparent.
+            style += ";overflow:visible";
+        }
+        else
+        {
+            if (!string.IsNullOrEmpty(fillCss)) style += $";{fillCss}";
+            if (!string.IsNullOrEmpty(borderCss)) style += $";{borderCss}";
+        }
 
         // Body properties: text layout + padding
         var bodyPr = shape.Elements().FirstOrDefault(e => e.LocalName == "bodyPr");
-        if (!standalone)
-        {
-            var vAnchor = bodyPr?.GetAttributes().FirstOrDefault(a => a.LocalName == "anchor").Value;
-            if (vAnchor == "ctr") style += ";display:flex;align-items:center";
-            else if (vAnchor == "b") style += ";display:flex;align-items:flex-end";
-        }
+        // Vertical text anchor applies to both standalone and positioned shapes
+        var vAnchor = bodyPr?.GetAttributes().FirstOrDefault(a => a.LocalName == "anchor").Value;
+        if (vAnchor == "ctr") style += ";display:flex;align-items:center";
+        else if (vAnchor == "b") style += ";display:flex;align-items:flex-end";
 
         var lIns = GetLongAttr(bodyPr, "lIns", 91440);
         var tIns = GetLongAttr(bodyPr, "tIns", 45720);
@@ -470,6 +607,17 @@ public partial class WordHandler
         style += $";padding:{tIns / 9525}px {rIns / 9525}px {bIns / 9525}px {lIns / 9525}px";
 
         sb.Append($"<div style=\"{style}\">");
+
+        // #7a: paint the geometry via inline SVG overlay when the preset
+        // needs real polygon/path geometry (line, arrows, callouts).
+        if (svgPrst)
+        {
+            var svgFill = ExtractCssColor(fillCss, "background-color")
+                ?? ExtractFirstGradientColor(fillCss)
+                ?? "transparent";
+            var (borderColor, borderWidth) = ExtractBorderParts(borderCss);
+            RenderPrstGeomSvg(sb, prst!, svgFill, borderColor ?? "#000", borderWidth ?? 1);
+        }
 
         if (txbx != null)
         {
@@ -545,6 +693,95 @@ public partial class WordHandler
         }
 
         sb.Append("</div>");
+    }
+
+    // ==================== #7a prstGeom SVG helpers ====================
+
+    /// <summary>
+    /// Pull a CSS property's color value out of strings like
+    /// <c>background-color:#FF0000</c> or
+    /// <c>background:linear-gradient(...)</c>. Returns null if not present.
+    /// </summary>
+    private static string? ExtractCssColor(string css, string prop)
+    {
+        if (string.IsNullOrEmpty(css)) return null;
+        var m = System.Text.RegularExpressions.Regex.Match(
+            css, $@"{prop}\s*:\s*(#[0-9A-Fa-f]{{3,8}}|[a-zA-Z]+)");
+        return m.Success ? m.Groups[1].Value : null;
+    }
+
+    // Pull the first hex color out of a `background:linear-gradient(...)`
+    // / `background-image:linear-gradient(...)` rule so SVG prstGeom shapes
+    // don't degrade to transparent when only a gradient fill is available.
+    private static string? ExtractFirstGradientColor(string css)
+    {
+        if (string.IsNullOrEmpty(css)) return null;
+        if (css.IndexOf("gradient", StringComparison.OrdinalIgnoreCase) < 0) return null;
+        var m = System.Text.RegularExpressions.Regex.Match(
+            css, @"#[0-9A-Fa-f]{3,8}");
+        return m.Success ? m.Value : null;
+    }
+
+    private static (string? color, double? width) ExtractBorderParts(string css)
+    {
+        if (string.IsNullOrEmpty(css)) return (null, null);
+        // e.g. "border:1.5px solid #336699"
+        var m = System.Text.RegularExpressions.Regex.Match(
+            css, @"border\s*:\s*([\d.]+)px\s+\w+\s+(#[0-9A-Fa-f]{3,8}|[a-zA-Z]+)");
+        if (!m.Success) return (null, null);
+        return (m.Groups[2].Value,
+            double.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var w) ? w : 1);
+    }
+
+    /// <summary>
+    /// Emit an inline SVG overlay rendering the given preset geometry.
+    /// The SVG uses viewBox="0 0 100 100" and preserveAspectRatio="none"
+    /// so it stretches to the host div's full size.
+    /// </summary>
+    private static void RenderPrstGeomSvg(
+        StringBuilder sb, string prst, string fill, string stroke, double strokeW)
+    {
+        // Normalize stroke width to viewBox coordinates: at 100-unit viewBox
+        // and typical host size ~150px, 1px ≈ 0.67 units. Keep as-is since
+        // preserveAspectRatio=none scales X/Y differently anyway; ok for
+        // approximation.
+        // Display:block + width/height:100% makes the SVG fill the host
+        // <div> without needing position:absolute (which would anchor to
+        // the nearest positioned ancestor and cause all shapes on a page
+        // to stack on top of each other).
+        sb.Append(
+            "<svg style=\"display:block;width:100%;height:100%;overflow:visible\" " +
+            "viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\" xmlns=\"http://www.w3.org/2000/svg\">");
+        var sw = strokeW.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+        switch (prst)
+        {
+            case "line":
+            case "straightConnector1":
+                // Diagonal from top-left to bottom-right.
+                sb.Append($"<line x1=\"0\" y1=\"0\" x2=\"100\" y2=\"100\" stroke=\"{stroke}\" stroke-width=\"{sw}\" vector-effect=\"non-scaling-stroke\"/>");
+                break;
+            case "rightArrow":
+                // Classic block arrow pointing right: body 0..70, head 70..100.
+                sb.Append($"<polygon points=\"0,30 70,30 70,10 100,50 70,90 70,70 0,70\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{sw}\" vector-effect=\"non-scaling-stroke\"/>");
+                break;
+            case "leftArrow":
+                sb.Append($"<polygon points=\"100,30 30,30 30,10 0,50 30,90 30,70 100,70\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{sw}\" vector-effect=\"non-scaling-stroke\"/>");
+                break;
+            case "downArrow":
+                sb.Append($"<polygon points=\"30,0 70,0 70,70 90,70 50,100 10,70 30,70\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{sw}\" vector-effect=\"non-scaling-stroke\"/>");
+                break;
+            case "upArrow":
+                sb.Append($"<polygon points=\"30,100 70,100 70,30 90,30 50,0 10,30 30,30\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{sw}\" vector-effect=\"non-scaling-stroke\"/>");
+                break;
+            case "wedgeRoundRectCallout":
+                // Rounded rect (80% height) + triangular pointer down-left.
+                // Rect corners rounded at 10 units; pointer tip at (15, 95).
+                sb.Append($"<path d=\"M 10,0 L 90,0 Q 100,0 100,10 L 100,70 Q 100,80 90,80 L 45,80 L 15,95 L 30,80 L 10,80 Q 0,80 0,70 L 0,10 Q 0,0 10,0 Z\" " +
+                          $"fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{sw}\" vector-effect=\"non-scaling-stroke\"/>");
+                break;
+        }
+        sb.Append("</svg>");
     }
 
 }

@@ -1,6 +1,7 @@
 // Copyright 2025 OfficeCli (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Reflection;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
@@ -14,6 +15,485 @@ namespace OfficeCli.Handlers;
 
 public partial class ExcelHandler
 {
+    /// <summary>
+    /// Build an XDR BlipFill with an optional asvg:svgBlip extension when
+    /// the caller wires in an SVG image part. Keeps Add/Set picture paths
+    /// free of inline extension boilerplate.
+    /// </summary>
+    private static XDR.BlipFill BuildPictureBlipFill(string pngRelId, string? svgRelId)
+        => BuildPictureBlipFill(pngRelId, svgRelId, null);
+
+    private static XDR.BlipFill BuildPictureBlipFill(
+        string pngRelId, string? svgRelId, Dictionary<string, string>? properties)
+    {
+        var blip = new Drawing.Blip { Embed = pngRelId };
+        // P6: opacity → <a:alphaModFix amt="N"/> (0..100000 scale).
+        // Accept percent (50, "50%") or fraction (0.5). 100/100%/1.0 → opaque (no node).
+        if (properties != null
+            && properties.TryGetValue("opacity", out var opRaw)
+            && !string.IsNullOrWhiteSpace(opRaw))
+        {
+            var amt = ParseOpacityAmt(opRaw);
+            if (amt.HasValue && amt.Value < 100000)
+                blip.AppendChild(new Drawing.AlphaModulationFixed { Amount = amt.Value });
+        }
+        if (!string.IsNullOrEmpty(svgRelId))
+            OfficeCli.Core.SvgImageHelper.AppendSvgExtension(blip, svgRelId);
+        var blipFill = new XDR.BlipFill(blip);
+        // P7: crop.l/r/t/b or srcRect=l=..,r=..,t=..,b=.. → <a:srcRect .../>
+        // Values are percent (10 → 10000 in 1/1000 pct units). Emitted before <a:stretch>.
+        var srcRect = ParseSrcRect(properties);
+        if (srcRect != null)
+            blipFill.AppendChild(srcRect);
+        blipFill.AppendChild(new Drawing.Stretch(new Drawing.FillRectangle()));
+        return blipFill;
+    }
+
+    // Parse crop.l/r/t/b (percent, 10 → 10000) and compound srcRect="l=10,r=10,..."
+    // alias. Returns null when no crop props are present.
+    internal static Drawing.SourceRectangle? ParseSrcRect(Dictionary<string, string>? properties)
+    {
+        if (properties == null) return null;
+        int? l = null, r = null, t = null, b = null;
+        if (properties.TryGetValue("srcRect", out var compound) && !string.IsNullOrWhiteSpace(compound))
+        {
+            foreach (var piece in compound.Split(',', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var kv = piece.Split('=', 2);
+                if (kv.Length != 2) continue;
+                var key = kv[0].Trim().ToLowerInvariant();
+                var val = ParseCropPercent(kv[1]);
+                if (!val.HasValue) continue;
+                switch (key) { case "l": l = val; break; case "r": r = val; break; case "t": t = val; break; case "b": b = val; break; }
+            }
+        }
+        foreach (var (key, fld) in new[] { ("crop.l", "l"), ("crop.r", "r"), ("crop.t", "t"), ("crop.b", "b") })
+        {
+            if (properties.TryGetValue(key, out var vs) && !string.IsNullOrWhiteSpace(vs))
+            {
+                var v = ParseCropPercent(vs);
+                if (!v.HasValue) continue;
+                switch (fld) { case "l": l = v; break; case "r": r = v; break; case "t": t = v; break; case "b": b = v; break; }
+            }
+        }
+        // CONSISTENCY(picture-crop): Office-API-style `cropLeft`/`cropRight`
+        // /`cropTop`/`cropBottom` aliases. Accept fraction (<=1 → *100%) or
+        // percent (>1 → as-is); e.g. `cropLeft=0.1` and `cropLeft=10` both
+        // mean 10% crop from left.
+        foreach (var (key, fld) in new[] { ("cropLeft", "l"), ("cropRight", "r"), ("cropTop", "t"), ("cropBottom", "b") })
+        {
+            if (properties.TryGetValue(key, out var vs) && !string.IsNullOrWhiteSpace(vs))
+            {
+                var v = ParseCropFractionOrPercent(vs);
+                if (!v.HasValue) continue;
+                switch (fld) { case "l": l = v; break; case "r": r = v; break; case "t": t = v; break; case "b": b = v; break; }
+            }
+        }
+        if (l == null && r == null && t == null && b == null) return null;
+        var sr = new Drawing.SourceRectangle();
+        if (l.HasValue) sr.Left = l.Value;
+        if (r.HasValue) sr.Right = r.Value;
+        if (t.HasValue) sr.Top = t.Value;
+        if (b.HasValue) sr.Bottom = b.Value;
+        return sr;
+    }
+
+    private static int? ParseCropPercent(string raw)
+    {
+        var t = raw.Trim();
+        if (t.EndsWith("%")) t = t[..^1].Trim();
+        if (!double.TryParse(t, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var v))
+            return null;
+        if (double.IsNaN(v) || double.IsInfinity(v)) return null;
+        return (int)Math.Round(v * 1000.0);
+    }
+
+    // CONSISTENCY(picture-crop): For `cropLeft`/`cropRight`/`cropTop`/
+    // `cropBottom` keys we treat input ambiguously: <=1 is a fraction
+    // (0.1 → 10%), >1 is percent (10 → 10%). Trailing `%` is still
+    // honored explicitly. Returns 1/1000 pct units, same as OOXML.
+    private static int? ParseCropFractionOrPercent(string raw)
+    {
+        var t = raw.Trim();
+        bool explicitPct = t.EndsWith("%");
+        if (explicitPct) t = t[..^1].Trim();
+        if (!double.TryParse(t, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var v))
+            return null;
+        if (double.IsNaN(v) || double.IsInfinity(v)) return null;
+        double pct = (!explicitPct && v > 0 && v <= 1.0) ? v * 100.0 : v;
+        return (int)Math.Round(pct * 1000.0);
+    }
+
+    // Parse opacity percent/fraction to OOXML alphaModFix amt scale (0..100000).
+    // Returns null if the input is not parseable; 100000 (fully opaque) is returned
+    // as-is so the caller can decide to omit the node.
+    internal static int? ParseOpacityAmt(string raw)
+    {
+        var t = raw.Trim();
+        if (t.EndsWith("%")) t = t[..^1].Trim();
+        if (!double.TryParse(t, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var v))
+            return null;
+        if (double.IsNaN(v) || double.IsInfinity(v)) return null;
+        // Fraction form (0..1) → treat as 0..100%; else percent.
+        double pct = v <= 1.0 && v > 0 ? v * 100.0 : v;
+        if (pct < 0) pct = 0; if (pct > 100) pct = 100;
+        return (int)Math.Round(pct * 1000.0);
+    }
+
+    // Build an <xdr:pic> element with an initial Transform2D, applying any
+    // user-supplied rotation/flip props. Keeps the Add.cs path readable.
+    // CONSISTENCY(scheme-color): Map a scheme-color name
+    // ("accent1"-"accent6", "lt1"/"dk1", "lt2"/"dk2", "bg1"/"tx1", "bg2"/"tx2",
+    // "hlink", "folHlink") to the OOXML theme index used by TabColor.Theme,
+    // color.Theme on fonts, etc. Returns null for non-scheme inputs — callers
+    // then fall back to srgbClr (hex) handling.
+    internal static uint? ExcelSchemeColorNameToThemeIndex(string s) =>
+        s?.Trim().ToLowerInvariant() switch
+        {
+            "lt1" or "bg1" => 0u,
+            "dk1" or "tx1" => 1u,
+            "lt2" or "bg2" => 2u,
+            "dk2" or "tx2" => 3u,
+            "accent1" => 4u,
+            "accent2" => 5u,
+            "accent3" => 6u,
+            "accent4" => 7u,
+            "accent5" => 8u,
+            "accent6" => 9u,
+            "hlink" => 10u,
+            "folhlink" => 11u,
+            _ => null
+        };
+
+    // CONSISTENCY(rc-units): Row height is in points in OOXML; this helper
+    // accepts bare numbers (treated as points, backward compat) as well as
+    // unit-qualified "40pt", "40px", "1cm", "0.5in" and returns points.
+    internal static double ParseRowHeightPoints(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw new ArgumentException("Row height cannot be empty.");
+        var trimmed = value.Trim();
+        double pts;
+        // Bare number → points (legacy behavior)
+        if (double.TryParse(trimmed, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var bare)
+            && !char.IsLetter(trimmed[^1]))
+        {
+            if (double.IsNaN(bare) || double.IsInfinity(bare))
+                throw new ArgumentException($"Invalid 'height' value: '{value}'. Expected a finite number (row height in points, e.g. 15.75).");
+            pts = bare;
+        }
+        else
+        {
+            // Unit-qualified: convert via EMU then back to points.
+            try
+            {
+                var emu = OfficeCli.Core.EmuConverter.ParseEmu(trimmed);
+                pts = emu / 12700.0;
+            }
+            catch (Exception ex)
+            {
+                throw new ArgumentException($"Invalid 'height' value: '{value}'. Expected a finite number or unit-qualified value (e.g. 15.75, 40pt, 40px, 1cm, 0.5in).", ex);
+            }
+        }
+        // DEFERRED(xlsx/row-height-validation) RC2: Excel row height is bounded
+        // [0, 409.5] points. Values outside this range are rejected by Excel at
+        // open time (file silently repaired), so validate at Set time.
+        if (pts < 0 || pts > 409.5)
+            throw new ArgumentException($"Invalid 'height' value: '{value}'. Row height must be between 0 and 409.5 points.");
+        return pts;
+    }
+
+    // CONSISTENCY(rc-units): Column width is in "maximum digit width" char
+    // units (Calibri 11pt ≈ 7px per char). Accepts bare number (char units,
+    // legacy) or unit-qualified px/cm/in/pt — physical sizes converted via
+    // the 7-px-per-char approximation Excel uses internally.
+    internal static double ParseColWidthChars(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw new ArgumentException("Column width cannot be empty.");
+        var trimmed = value.Trim();
+        double chars;
+        if (double.TryParse(trimmed, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var bare)
+            && !char.IsLetter(trimmed[^1]))
+        {
+            if (double.IsNaN(bare) || double.IsInfinity(bare))
+                throw new ArgumentException($"Invalid 'width' value: '{value}'. Expected a finite number (column width in char units, e.g. 8.43).");
+            chars = bare;
+        }
+        else
+        {
+            try
+            {
+                var emu = OfficeCli.Core.EmuConverter.ParseEmu(trimmed);
+                // 9525 EMU = 1 px; 7 px ≈ 1 char unit (Calibri 11pt MDW baseline)
+                var px = emu / 9525.0;
+                chars = px / 7.0;
+            }
+            catch (Exception ex)
+            {
+                throw new ArgumentException($"Invalid 'width' value: '{value}'. Expected a finite number or unit-qualified value (e.g. 8.43, 20px, 2cm, 1in, 60pt).", ex);
+            }
+        }
+        // DEFERRED(xlsx/row-height-validation) RC2: Excel column width is bounded
+        // [0, 255] character units. Validate at Set time.
+        if (chars < 0 || chars > 255)
+            throw new ArgumentException($"Invalid 'width' value: '{value}'. Column width must be between 0 and 255 character units.");
+        return chars;
+    }
+
+    internal static XDR.Picture BuildPictureElementWithTransform(
+        uint picId, string alt, string imgRelId, string? svgRelId,
+        Dictionary<string, string> properties)
+    {
+        var xfrm = new Drawing.Transform2D(
+            new Drawing.Offset { X = 0, Y = 0 },
+            new Drawing.Extents { Cx = 0, Cy = 0 });
+        ApplyTransform2DRotationFlip(xfrm, properties);
+        // P13: accept user-supplied `name=` to override the auto-generated
+        // "Picture {id}" label stamped into xdr:cNvPr @name.
+        // P9: `altText=` alias for `alt=` (Description attribute).
+        // P11: `title=` populates the OOXML @title attribute (distinct from alt).
+        var picName = properties.GetValueOrDefault("name");
+        if (string.IsNullOrWhiteSpace(picName))
+            picName = $"Picture {picId}";
+        var picTitle = properties.GetValueOrDefault("title");
+        var cNvPr = new XDR.NonVisualDrawingProperties { Id = picId, Name = picName, Description = alt };
+        if (!string.IsNullOrWhiteSpace(picTitle))
+            cNvPr.Title = picTitle;
+        return new XDR.Picture(
+            new XDR.NonVisualPictureProperties(
+                cNvPr,
+                new XDR.NonVisualPictureDrawingProperties(new Drawing.PictureLocks { NoChangeAspect = true })
+            ),
+            BuildPictureBlipFill(imgRelId, svgRelId, properties),
+            new XDR.ShapeProperties(
+                xfrm,
+                new Drawing.PresetGeometry(new Drawing.AdjustValueList()) { Preset = Drawing.ShapeTypeValues.Rectangle }
+            )
+        );
+    }
+
+    // Map a table-column totals-row function token to its OOXML enum and the
+    // SUBTOTAL function code Excel uses. Unknown tokens fall back to SUM (109)
+    // — previously all non-"sum" tokens silently became SUM; this keeps the
+    // same fallback for unknown tokens but routes known ones to the right
+    // enum + SUBTOTAL code.
+    internal static (TotalsRowFunctionValues, int) MapTotalsRowFunction(string tok) => tok switch
+    {
+        "sum" => (TotalsRowFunctionValues.Sum, 109),
+        "average" or "avg" => (TotalsRowFunctionValues.Average, 101),
+        "count" => (TotalsRowFunctionValues.Count, 103),
+        "countnums" or "countnumbers" => (TotalsRowFunctionValues.CountNumbers, 102),
+        "max" or "maximum" => (TotalsRowFunctionValues.Maximum, 104),
+        "min" or "minimum" => (TotalsRowFunctionValues.Minimum, 105),
+        "stddev" or "stdev" => (TotalsRowFunctionValues.StandardDeviation, 107),
+        "var" or "variance" => (TotalsRowFunctionValues.Variance, 110),
+        "none" or "label" or "" => (TotalsRowFunctionValues.None, 0),
+        "custom" => (TotalsRowFunctionValues.Custom, 109),
+        _ => (TotalsRowFunctionValues.Sum, 109)
+    };
+
+    // Apply `rotation=<deg>` / `flip=h|v|both|hv|vh` from the user properties
+    // dict to a Drawing.Transform2D node. Silently no-op on missing props.
+    // Mirrors PowerPointHandler's shape rotation semantics: angles are in
+    // degrees (positive = clockwise), OOXML stores them as 60000ths of a
+    // degree in the `rot` attribute. Values are normalized modulo 360.
+    internal static void ApplyTransform2DRotationFlip(
+        Drawing.Transform2D xfrm, Dictionary<string, string> properties)
+    {
+        if (xfrm == null) return;
+        if (properties.TryGetValue("rotation", out var rotStr) && !string.IsNullOrWhiteSpace(rotStr))
+        {
+            if (double.TryParse(rotStr, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var deg))
+            {
+                var normalized = ((deg % 360) + 360) % 360;
+                xfrm.Rotation = (int)Math.Round(normalized * 60000);
+            }
+        }
+        if (properties.TryGetValue("flip", out var flipStr) && !string.IsNullOrWhiteSpace(flipStr))
+        {
+            var f = flipStr.Trim().ToLowerInvariant();
+            bool flipH = f == "h" || f == "horizontal" || f == "both" || f == "hv" || f == "vh";
+            bool flipV = f == "v" || f == "vertical" || f == "both" || f == "hv" || f == "vh";
+            if (flipH) xfrm.HorizontalFlip = true;
+            if (flipV) xfrm.VerticalFlip = true;
+        }
+        // CONSISTENCY(shape-flip): accept Office-API-style `flipH=true`,
+        // `flipV=true`, `flipBoth=true` aliases in addition to the compact
+        // `flip=h|v|both`. Boolean semantics follow IsTruthy (true/1/yes).
+        if (properties.TryGetValue("flipH", out var flipHStr) && IsTruthy(flipHStr))
+            xfrm.HorizontalFlip = true;
+        if (properties.TryGetValue("flipV", out var flipVStr) && IsTruthy(flipVStr))
+            xfrm.VerticalFlip = true;
+        if (properties.TryGetValue("flipBoth", out var flipBothStr) && IsTruthy(flipBothStr))
+        {
+            xfrm.HorizontalFlip = true;
+            xfrm.VerticalFlip = true;
+        }
+    }
+
+    // SH6 — build a two/three-stop linear gradient fill for shape/textbox from
+    // a "C1-C2[-C3][:angle]" spec. Mirrors the chart gradient parser used by
+    // Core/Chart/ChartHelper.Builder.cs:BuildFillElement so chart and shape
+    // gradient syntax stay consistent.
+    internal static Drawing.GradientFill BuildShapeGradientFill(string spec)
+    {
+        var colonIdx = spec.LastIndexOf(':');
+        var anglePart = 0;
+        string colorsPart;
+        if (colonIdx > 6 && int.TryParse(spec[(colonIdx + 1)..],
+            System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture, out var ang))
+        {
+            anglePart = ang;
+            colorsPart = spec[..colonIdx];
+        }
+        else
+        {
+            colorsPart = spec;
+        }
+        var colors = colorsPart.Split('-').Select(c => c.Trim()).Where(c => c.Length > 0).ToArray();
+        if (colors.Length < 2)
+            throw new ArgumentException(
+                $"gradientFill requires at least two '-' separated colors; got '{spec}'.");
+        var gradFill = new Drawing.GradientFill { RotateWithShape = true };
+        var gsLst = new Drawing.GradientStopList();
+        for (int i = 0; i < colors.Length; i++)
+        {
+            var pos = (int)(i * 100000.0 / (colors.Length - 1));
+            var (rgb, _) = ParseHelpers.SanitizeColorForOoxml(colors[i]);
+            var gs = new Drawing.GradientStop { Position = pos };
+            gs.AppendChild(new Drawing.RgbColorModelHex { Val = rgb });
+            gsLst.AppendChild(gs);
+        }
+        gradFill.AppendChild(gsLst);
+        gradFill.AppendChild(new Drawing.LinearGradientFill
+        {
+            Angle = anglePart * 60000,
+            Scaled = true
+        });
+        return gradFill;
+    }
+
+    // Normalize user-supplied data-validation formula values so Excel accepts
+    // them. `type=list` auto-quotes bare lists. `type=time` accepts HH:MM /
+    // HH:MM:SS and converts to the Excel time serial fraction. `type=date`
+    // accepts YYYY-MM-DD and converts to the Excel date serial. `type=custom`
+    // strips a leading '=' since OOXML `<x:formula1>` expects the formula body
+    // without one.
+    internal static string NormalizeValidationFormula(string value, DataValidationValues? type)
+    {
+        if (string.IsNullOrEmpty(value)) return value;
+        if (type == DataValidationValues.List)
+        {
+            // list: wrap bare "a,b,c" in quotes; leave cell/range refs and
+            // already-quoted literals alone. V1: a leading `=` signals a
+            // formula-ref (e.g. `=VOpts`, `=$Z$1:$Z$5`) — strip the `=`
+            // (OOXML `<x:formula1>` expects the body without one) and
+            // pass through without quoting.
+            if (value.StartsWith("="))
+                return value.Substring(1);
+            if (value.StartsWith("\"") || value.Contains("!") || value.Contains(":"))
+                return value;
+            if (value.Contains(','))
+                return $"\"{value}\"";
+            return value;
+        }
+        if (type == DataValidationValues.Time)
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(value.Trim(), @"^(\d{1,2}):(\d{2})(?::(\d{2}))?$");
+            if (m.Success)
+            {
+                var h = int.Parse(m.Groups[1].Value);
+                var mn = int.Parse(m.Groups[2].Value);
+                var s = m.Groups[3].Success ? int.Parse(m.Groups[3].Value) : 0;
+                var frac = (h * 3600 + mn * 60 + s) / 86400.0;
+                return frac.ToString("0.###############", System.Globalization.CultureInfo.InvariantCulture);
+            }
+        }
+        if (type == DataValidationValues.Date)
+        {
+            if (System.DateTime.TryParseExact(value.Trim(), "yyyy-MM-dd",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var dt))
+            {
+                // Excel date serial: days since 1899-12-30 (accounts for the
+                // 1900 leap bug baseline).
+                var epoch = new System.DateTime(1899, 12, 30);
+                return ((int)(dt - epoch).TotalDays).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+        }
+        if (type == DataValidationValues.Custom)
+        {
+            if (value.StartsWith("="))
+                return value.Substring(1);
+        }
+        return value;
+    }
+
+    // Returns true if `s` would parse as a valid cell reference (e.g. A1,
+    // TBL1, XFD1048576). Excel refuses to open files whose table names match
+    // this pattern — the name is ambiguous with a cell address.
+    internal static bool LooksLikeCellReference(string? s)
+    {
+        if (string.IsNullOrEmpty(s)) return false;
+        var m = System.Text.RegularExpressions.Regex.Match(s, @"^\$?([A-Za-z]{1,3})\$?([0-9]+)$");
+        if (!m.Success) return false;
+        var col = m.Groups[1].Value.ToUpperInvariant();
+        var colIdx = 0;
+        foreach (var ch in col) colIdx = colIdx * 26 + (ch - 'A' + 1);
+        if (colIdx < 1 || colIdx > 16384) return false;
+        if (!long.TryParse(m.Groups[2].Value, out var row) || row < 1 || row > 1048576) return false;
+        return true;
+    }
+
+    // R7-3: heuristic — is `s` a formula body (SUM(...), A1+B1, IF(...)),
+    // as opposed to a pure range-ref body (Sheet1!$A$1:$A$5, A1:A5, A1)?
+    // Used to decide whether to flip <calcPr fullCalcOnLoad="1"/> so Excel
+    // evaluates the defined name on first open. Range-only bodies don't
+    // need forced recalc; function calls and operator expressions do.
+    internal static bool LooksLikeFormulaBody(string? s)
+    {
+        if (string.IsNullOrEmpty(s)) return false;
+        var t = s.Trim();
+        if (t.Length == 0) return false;
+        // A function call or arithmetic expression contains '(' or an
+        // operator outside a sheet-qualified range.
+        if (t.Contains('(')) return true;
+        if (t.IndexOfAny(new[] { '+', '-', '*', '/', '^', '&', '<', '>', '=', '%' }) >= 0)
+            return true;
+        return false;
+    }
+
+    // Make a string safe to use as an Excel table name, displayName, or
+    // tableColumn name. Excel refuses to open files where these identifiers
+    // look like a cell reference ("tbl1" → column TBL row 1) or are purely
+    // numeric ("30").
+    //
+    // When `userProvided` is true (user explicitly passed --prop name=T1),
+    // honor the name verbatim — callers who type `name=T1` expect a table
+    // named `T1`, not `T1_`. Excel itself accepts these table identifiers
+    // (the cell-reference ambiguity rule applies to defined names, not to
+    // tables), so silently rewriting loses fidelity with no gain.
+    //
+    // When `userProvided` is false (auto-derived default such as
+    // `Table{id}`, or tableColumn name read from a header cell) we suffix
+    // "_" on cell-reference-shaped names to keep defaults safe.
+    internal static string SanitizeTableIdentifier(string? name, bool userProvided = false)
+    {
+        if (string.IsNullOrEmpty(name)) return "_";
+        if (userProvided) return name;
+        var looksLikeRef = LooksLikeCellReference(name)
+            || System.Text.RegularExpressions.Regex.IsMatch(name, @"^[0-9]+$");
+        return looksLikeRef ? name + "_" : name;
+    }
+
     // ==================== Path Normalization ====================
 
     /// <summary>
@@ -107,14 +587,137 @@ public partial class ExcelHandler
         return max + 1;
     }
 
-    /// <summary>
-    /// Save worksheet with automatic schema-order reorder.
-    /// Must be used instead of ws.Save() to prevent element ordering violations.
-    /// </summary>
-    private static void SaveWorksheet(WorksheetPart part)
+    // T6 — built-in Excel table style names. Unknown names are rejected at
+    // Add time rather than silently passed through to Excel.
+    private static readonly HashSet<string> _builtInTableStyles = BuildBuiltInTableStyles();
+    private static HashSet<string> BuildBuiltInTableStyles()
     {
-        ReorderWorksheetChildren(GetSheet(part));
-        GetSheet(part).Save();
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var tier in new[] { "Light", "Medium", "Dark" })
+            for (int i = 1; i <= 28; i++)
+                set.Add($"TableStyle{tier}{i}");
+        // Pivot styles — users may apply a pivot style to a plain table.
+        foreach (var tier in new[] { "Light", "Medium", "Dark" })
+            for (int i = 1; i <= 28; i++)
+                set.Add($"PivotStyle{tier}{i}");
+        set.Add("TableStyleNone");
+        return set;
+    }
+
+    internal void ValidateTableStyleName(string? styleName)
+    {
+        if (string.IsNullOrEmpty(styleName)) return;
+        if (_builtInTableStyles.Contains(styleName)) return;
+        // Workbook-level customStyles live under <x:tableStyles> on the stylesheet.
+        var styles = _doc.WorkbookPart?.WorkbookStylesPart?.Stylesheet;
+        var tableStyles = styles?.GetFirstChild<TableStyles>();
+        if (tableStyles != null)
+        {
+            foreach (var ts in tableStyles.Elements<TableStyle>())
+                if (ts.Name?.Value == styleName) return;
+        }
+        throw new ArgumentException(
+            $"Unknown table style: '{styleName}'. Use a built-in name like " +
+            $"'TableStyleMedium2', or register a custom style on the workbook first.");
+    }
+
+    /// <summary>
+    /// CF2: stamp the stopIfTrue attribute onto a CF rule when the user
+    /// passed `stopIfTrue=true`. Centralized so every `add cf` branch
+    /// (databar / colorscale / iconset / formulacf / cellIs / topN / ...)
+    /// honors the same flag.
+    /// </summary>
+    internal static void ApplyStopIfTrue(ConditionalFormattingRule rule, Dictionary<string, string> properties)
+    {
+        if (properties.TryGetValue("stopIfTrue", out var v) && ParseHelpers.IsTruthy(v))
+            rule.StopIfTrue = true;
+    }
+
+    /// <summary>
+    /// Ensure the worksheet root declares `xmlns:x14` + `mc:Ignorable="x14"`.
+    /// Without both, Excel silently drops the x14 extension block where
+    /// sparklines, dataBar 2010+ extensions, and other Office2010 features
+    /// live. CONSISTENCY(x14-ignorable): same pattern the sparkline branch
+    /// uses inline.
+    /// </summary>
+    internal static void EnsureWorksheetX14Ignorable(Worksheet ws)
+    {
+        const string mcNs = "http://schemas.openxmlformats.org/markup-compatibility/2006";
+        const string x14Ns = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
+        if (ws.LookupNamespace("mc") == null)
+            ws.AddNamespaceDeclaration("mc", mcNs);
+        if (ws.LookupNamespace("x14") == null)
+            ws.AddNamespaceDeclaration("x14", x14Ns);
+        var ignorable = ws.MCAttributes?.Ignorable?.Value ?? "";
+        if (!ignorable.Split(' ').Contains("x14"))
+        {
+            ws.MCAttributes ??= new MarkupCompatibilityAttributes();
+            ws.MCAttributes.Ignorable = string.IsNullOrEmpty(ignorable) ? "x14" : $"{ignorable} x14";
+        }
+    }
+
+    /// <summary>
+    /// Append an x14:conditionalFormatting block to the worksheet's extLst under
+    /// ext URI `{78C0D931-6437-407d-A8EE-F0AAD7539E65}`. Creates the extension
+    /// on first call, appends to the existing x14:conditionalFormattings
+    /// container on subsequent calls. Also ensures mc:Ignorable="x14" is set.
+    /// </summary>
+    internal static void EnsureWorksheetX14ConditionalFormatting(Worksheet ws, X14.ConditionalFormatting x14Cf)
+    {
+        const string cfExtUri = "{78C0D931-6437-407d-A8EE-F0AAD7539E65}";
+        const string x14Ns = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
+
+        EnsureWorksheetX14Ignorable(ws);
+
+        var extList = ws.GetFirstChild<WorksheetExtensionList>() ?? ws.AppendChild(new WorksheetExtensionList());
+        var ext = extList.Elements<WorksheetExtension>().FirstOrDefault(e => e.Uri == cfExtUri);
+        X14.ConditionalFormattings cfContainer;
+        if (ext != null)
+        {
+            cfContainer = ext.GetFirstChild<X14.ConditionalFormattings>()
+                ?? ext.AppendChild(new X14.ConditionalFormattings());
+        }
+        else
+        {
+            ext = new WorksheetExtension { Uri = cfExtUri };
+            ext.AddNamespaceDeclaration("x14", x14Ns);
+            cfContainer = new X14.ConditionalFormattings();
+            ext.Append(cfContainer);
+            extList.Append(ext);
+        }
+        cfContainer.Append(x14Cf);
+    }
+
+    /// <summary>
+    /// Mark a worksheet as dirty. The actual save (with schema-order reorder) is
+    /// deferred to <see cref="FlushDirtyParts"/> which runs in Dispose().
+    /// This replaces per-mutation Save() calls — batch operations over many cells
+    /// previously triggered one disk write per cell (O(n) saves); now they all
+    /// flush in a single pass at the end.
+    /// </summary>
+    private void SaveWorksheet(WorksheetPart part)
+    {
+        _dirtyWorksheets.Add(part);
+    }
+
+    /// <summary>
+    /// Flush all pending worksheet and stylesheet saves. Called from Dispose().
+    /// Each dirty WorksheetPart is reordered and saved exactly once regardless
+    /// of how many mutations targeted it.
+    /// </summary>
+    private void FlushDirtyParts()
+    {
+        foreach (var part in _dirtyWorksheets)
+        {
+            ReorderWorksheetChildren(GetSheet(part));
+            GetSheet(part).Save();
+        }
+        _dirtyWorksheets.Clear();
+        if (_dirtyStylesheet)
+        {
+            _doc.WorkbookPart?.WorkbookStylesPart?.Stylesheet?.Save();
+            _dirtyStylesheet = false;
+        }
     }
 
     /// <summary>
@@ -355,7 +958,21 @@ public partial class ExcelHandler
                 if (evalResult != null && !evalResult.IsError)
                     return evalResult.ToCellValueText();
             }
-            return "=" + cell.CellFormula.Text;
+            return "=" + Core.ModernFunctionQualifier.Unqualify(cell.CellFormula.Text);
+        }
+
+        // Apply number format to numeric cells (dates, percentages, etc.)
+        // Mirrors POI DataFormatter: raw double + format code → display string
+        if (cell.DataType == null && double.TryParse(value,
+                System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var numVal))
+        {
+            var (numFmtId, formatCode) = ExcelDataFormatter.GetCellFormat(cell, _doc.WorkbookPart);
+            if (numFmtId > 0)
+            {
+                var formatted = ExcelDataFormatter.TryFormat(numVal, numFmtId, formatCode);
+                if (formatted != null) return formatted;
+            }
         }
 
         return value;
@@ -442,10 +1059,26 @@ public partial class ExcelHandler
     private DocumentNode CellToNode(string sheetName, Cell cell, WorksheetPart? part = null, Core.FormulaEvaluator? evaluator = null)
     {
         var cellRef = cell.CellReference?.Value ?? "?";
-        var formula = cell.CellFormula?.Text;
+        var formula = cell.CellFormula?.Text is { } fText
+            ? Core.ModernFunctionQualifier.Unqualify(fText)
+            : null;
         string type;
         if (cell.DataType?.HasValue != true)
-            type = "Number";
+        {
+            // R12-F2: a formula whose cached value is a non-numeric string
+            // should report type=String, not the Number default. Excel itself
+            // writes t="str" on such cells; external tools or our own writer
+            // occasionally leave the attribute off, so infer from the cached
+            // value content.
+            var raw = cell.CellValue?.Text;
+            if (formula != null
+                && !string.IsNullOrEmpty(raw)
+                && !double.TryParse(raw, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out _))
+                type = "String";
+            else
+                type = "Number";
+        }
         else if (cell.DataType.Value == CellValues.String)
             type = "String";
         else if (cell.DataType.Value == CellValues.SharedString)
@@ -487,8 +1120,17 @@ public partial class ExcelHandler
             var rawCached = cell.CellValue?.Text;
             if (!string.IsNullOrEmpty(rawCached))
                 node.Format["cachedValue"] = rawCached;
-            else if (displayText != null && !displayText.StartsWith("="))
+            else if (displayText != null && !displayText.StartsWith("=") &&
+                     !FormulaReferencesMissingSheet(formula))
+            {
+                // R9-1: do NOT fall back to an evaluated cachedValue when the
+                // formula references a sheet that no longer exists in the
+                // workbook. Otherwise cross-sheet refs whose target sheet
+                // was removed silently evaluate to "0" (see
+                // FormulaEvaluator.ResolveSheetCellResult), reporting a
+                // stale/fake cached value where Excel would show #REF!.
                 node.Format["cachedValue"] = displayText;
+            }
         }
         // Array formula readback — keys match Set input
         if (cell.CellFormula?.FormulaType?.Value == CellFormulaValues.Array)
@@ -664,6 +1306,17 @@ public partial class ExcelHandler
                             node.Format["alignment.indent"] = alignment.Indent.Value.ToString();
                         if (alignment.ShrinkToFit?.Value == true)
                             node.Format["alignment.shrinkToFit"] = true;
+                        // DEFERRED(xlsx/cell-reading-order) CE10 — canonical
+                        // readback as string form (context/ltr/rtl).
+                        if (alignment.ReadingOrder?.HasValue == true && alignment.ReadingOrder.Value != 0)
+                        {
+                            node.Format["alignment.readingOrder"] = alignment.ReadingOrder.Value switch
+                            {
+                                1u => "ltr",
+                                2u => "rtl",
+                                _ => "context"
+                            };
+                        }
                     }
 
                     // Number format readback
@@ -808,6 +1461,34 @@ public partial class ExcelHandler
             && cellColIdx >= ColumnNameToIndex(startCol) && cellColIdx <= ColumnNameToIndex(endCol);
     }
 
+    // T4 — rectangle intersection over A1:B2 style ranges (case-insensitive).
+    // Returns true if two inclusive cell ranges share at least one cell.
+    private static bool RangesOverlap(string rangeA, string rangeB)
+    {
+        if (string.IsNullOrEmpty(rangeA) || string.IsNullOrEmpty(rangeB)) return false;
+        var (a1, a2) = SplitRange(rangeA);
+        var (b1, b2) = SplitRange(rangeB);
+        var (aSc, aSr) = ParseCellReference(a1);
+        var (aEc, aEr) = ParseCellReference(a2);
+        var (bSc, bSr) = ParseCellReference(b1);
+        var (bEc, bEr) = ParseCellReference(b2);
+        int aSci = ColumnNameToIndex(aSc), aEci = ColumnNameToIndex(aEc);
+        int bSci = ColumnNameToIndex(bSc), bEci = ColumnNameToIndex(bEc);
+        // Normalize (callers may pass B2:A1 theoretically)
+        if (aSci > aEci) (aSci, aEci) = (aEci, aSci);
+        if (bSci > bEci) (bSci, bEci) = (bEci, bSci);
+        if (aSr > aEr) (aSr, aEr) = (aEr, aSr);
+        if (bSr > bEr) (bSr, bEr) = (bEr, bSr);
+        return aSci <= bEci && bSci <= aEci && aSr <= bEr && bSr <= aEr;
+    }
+
+    private static (string, string) SplitRange(string range)
+    {
+        if (!range.Contains(':')) return (range, range);
+        var p = range.Split(':');
+        return (p[0], p[1]);
+    }
+
     private DocumentNode GetCellRange(string sheetName, SheetData sheetData, string range, int depth, WorksheetPart? part = null)
     {
         var parts = range.Split(':');
@@ -873,9 +1554,22 @@ public partial class ExcelHandler
     private static (int Rank, double NumVal, string StrVal) ParseSortValue(string value)
     {
         if (string.IsNullOrEmpty(value)) return (2, 0.0, "");
+        // Excel treats NaN / Infinity / -Infinity as text, not numbers. double.TryParse
+        // happily accepts them though, which would make sort order dependent on whether
+        // the exact casing matched double.TryParse's spec vs not — classify explicitly.
+        if (value.Equals("NaN", StringComparison.Ordinal)
+            || value.Equals("Infinity", StringComparison.Ordinal)
+            || value.Equals("-Infinity", StringComparison.Ordinal)
+            || value.Equals("+Infinity", StringComparison.Ordinal))
+            return (1, 0.0, value);
         if (double.TryParse(value, System.Globalization.NumberStyles.Any,
             System.Globalization.CultureInfo.InvariantCulture, out var num))
+        {
+            // Defensive: even non-literal inputs can produce non-finite doubles
+            // (e.g. "1e999" overflows to +Infinity). Keep those in the string bucket.
+            if (!double.IsFinite(num)) return (1, 0.0, value);
             return (0, num, "");
+        }
         return (1, 0.0, value);
     }
 
@@ -892,24 +1586,63 @@ public partial class ExcelHandler
         return null;
     }
 
-    private static Cell FindOrCreateCell(SheetData sheetData, string cellRef)
+    /// <summary>
+    /// Find or create the Row for the given 1-based row index, using the per-SheetData
+    /// row index cache to avoid O(n) linear scans. New rows are inserted in sorted order
+    /// via binary search on the cache (O(log n)).
+    /// </summary>
+    private Row FindOrCreateRow(SheetData sheetData, uint rowIdx)
+    {
+        _rowIndex ??= new();
+        if (!_rowIndex.TryGetValue(sheetData, out var rowMap))
+        {
+            rowMap = new SortedList<uint, Row>();
+            foreach (var existingRow in sheetData.Elements<Row>())
+                if (existingRow.RowIndex?.HasValue == true)
+                    rowMap[existingRow.RowIndex.Value] = existingRow;
+            _rowIndex[sheetData] = rowMap;
+        }
+
+        if (rowMap.TryGetValue(rowIdx, out var row))
+            return row;
+
+        row = new Row { RowIndex = rowIdx };
+        // Binary search for predecessor in O(log n)
+        var keys = rowMap.Keys;
+        int lo = 0, hi = keys.Count - 1, predPos = -1;
+        while (lo <= hi)
+        {
+            int mid = (lo + hi) / 2;
+            if (keys[mid] < rowIdx) { predPos = mid; lo = mid + 1; }
+            else hi = mid - 1;
+        }
+        if (predPos >= 0)
+            rowMap.Values[predPos].InsertAfterSelf(row);
+        else
+            sheetData.InsertAt(row, 0);
+        rowMap[rowIdx] = row;
+        return row;
+    }
+
+    /// <summary>
+    /// Invalidate the row index cache for a specific SheetData (or all sheets if null).
+    /// Must be called whenever rows are structurally modified (removed, shifted).
+    /// </summary>
+    private void InvalidateRowIndex(SheetData? sheetData = null)
+    {
+        if (sheetData != null)
+            _rowIndex?.Remove(sheetData);
+        else
+            _rowIndex = null;
+    }
+
+    private Cell FindOrCreateCell(SheetData sheetData, string cellRef)
     {
         var (colName, rowIdx) = ParseCellReference(cellRef);
 
-        // Find or create row
-        var row = sheetData.Elements<Row>().FirstOrDefault(r => r.RowIndex?.Value == rowIdx);
-        if (row == null)
-        {
-            row = new Row { RowIndex = (uint)rowIdx };
-            // Insert in order
-            var after = sheetData.Elements<Row>().LastOrDefault(r => (r.RowIndex?.Value ?? 0) < rowIdx);
-            if (after != null)
-                after.InsertAfterSelf(row);
-            else
-                sheetData.InsertAt(row, 0);
-        }
+        var row = FindOrCreateRow(sheetData, (uint)rowIdx);
 
-        // Find or create cell
+        // Cell lookup within row — O(m) where m = cols per row (typically small)
         var cell = row.Elements<Cell>().FirstOrDefault(c =>
             c.CellReference?.Value?.Equals(cellRef, StringComparison.OrdinalIgnoreCase) == true);
         if (cell == null)
@@ -934,6 +1667,54 @@ public partial class ExcelHandler
 
     private static bool IsTruthy(string? value) =>
         ParseHelpers.IsTruthy(value);
+
+    // CONSISTENCY(xlsx/comment-font): C8 — build the <x:rPr> for comment runs.
+    // When no font.* properties are supplied, keep the legacy Tahoma 9 /
+    // indexed-81 default for back-compat. When any font.* is present, honor
+    // them and fall back to the defaults only for unspecified facets.
+    // Input vocabulary mirrors the cell-level font handling: font.bold,
+    // font.italic, font.underline (single|double), font.size (pt-qualified
+    // or bare), font.color (#FF0000 / FF0000 / rgb() / named), font.name.
+    internal static RunProperties BuildCommentRunProperties(Dictionary<string, string> properties)
+    {
+        bool hasAnyFont = properties.Keys.Any(k =>
+            k.StartsWith("font.", StringComparison.OrdinalIgnoreCase));
+        if (!hasAnyFont)
+        {
+            return new RunProperties(
+                new FontSize { Val = 9 },
+                new Color { Indexed = 81 },
+                new RunFont { Val = "Tahoma" });
+        }
+
+        var rPr = new RunProperties();
+        if (properties.TryGetValue("font.bold", out var fb) && IsTruthy(fb))
+            rPr.AppendChild(new Bold());
+        if (properties.TryGetValue("font.italic", out var fi) && IsTruthy(fi))
+            rPr.AppendChild(new Italic());
+        if (properties.TryGetValue("font.underline", out var fu) && !string.IsNullOrEmpty(fu)
+            && !string.Equals(fu, "none", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(fu, "false", StringComparison.OrdinalIgnoreCase))
+        {
+            var uVal = string.Equals(fu, "double", StringComparison.OrdinalIgnoreCase)
+                ? UnderlineValues.Double : UnderlineValues.Single;
+            rPr.AppendChild(new Underline { Val = uVal });
+        }
+        // Size default 9pt
+        var sizePt = properties.TryGetValue("font.size", out var fs)
+            ? ParseHelpers.ParseFontSize(fs) : 9.0;
+        rPr.AppendChild(new FontSize { Val = sizePt });
+        // Color: explicit overrides default indexed=81
+        if (properties.TryGetValue("font.color", out var fc) && !string.IsNullOrWhiteSpace(fc))
+            rPr.AppendChild(new Color { Rgb = ParseHelpers.NormalizeArgbColor(fc) });
+        else
+            rPr.AppendChild(new Color { Indexed = 81 });
+        // Name default Tahoma
+        var fontName = properties.TryGetValue("font.name", out var fn) && !string.IsNullOrWhiteSpace(fn)
+            ? fn : "Tahoma";
+        rPr.AppendChild(new RunFont { Val = fontName });
+        return rPr;
+    }
 
     private static bool IsValidBooleanString(string? value) =>
         ParseHelpers.IsValidBooleanString(value);
@@ -1041,6 +1822,29 @@ public partial class ExcelHandler
         node.Format["author"] = authorName;
         node.Format["anchoredTo"] = $"/{sheetName}/{reference}";
 
+        // CONSISTENCY(xlsx/comment-font): C8 — surface font.* from first run's
+        // rPr so Query/Get round-trips the Add-time formatting. Only report
+        // non-default facets so Tahoma-9-indexed-81 comments stay unadorned.
+        var firstRun = comment.CommentText?.Elements<Run>().FirstOrDefault();
+        var rProps = firstRun?.RunProperties;
+        if (rProps != null)
+        {
+            if (rProps.Elements<Bold>().Any()) node.Format["font.bold"] = true;
+            if (rProps.Elements<Italic>().Any()) node.Format["font.italic"] = true;
+            var u = rProps.Elements<Underline>().FirstOrDefault();
+            if (u != null)
+                node.Format["font.underline"] = u.Val?.InnerText == "double" ? "double" : "single";
+            var clr = rProps.Elements<Color>().FirstOrDefault();
+            if (clr?.Rgb?.HasValue == true)
+                node.Format["font.color"] = ParseHelpers.FormatHexColor(clr.Rgb.Value!);
+            var sz = rProps.Elements<FontSize>().FirstOrDefault();
+            if (sz?.Val?.HasValue == true && sz.Val.Value != 9.0)
+                node.Format["font.size"] = $"{sz.Val.Value:0.##}pt";
+            var rf = rProps.Elements<RunFont>().FirstOrDefault();
+            if (rf?.Val?.HasValue == true && rf.Val.Value != "Tahoma")
+                node.Format["font.name"] = rf.Val.Value;
+        }
+
         return node;
     }
 
@@ -1064,10 +1868,11 @@ public partial class ExcelHandler
 
         if (dv.Formula1 != null)
         {
-            var f1 = dv.Formula1.Text ?? "";
-            if (f1.StartsWith("\"") && f1.EndsWith("\""))
-                f1 = f1[1..^1];
-            node.Format["formula1"] = f1;
+            // Preserve formula1 exactly as stored in XML so query→set round-trips:
+            // list-type validations wrap literal options in "..." at Add time, and
+            // stripping those quotes here made set(formula1=<stripped>) treat the
+            // whole list as a single item. See DEFERRED(xlsx/validation-list-formula-roundtrip).
+            node.Format["formula1"] = dv.Formula1.Text ?? "";
         }
 
         if (dv.Formula2 != null)
@@ -1154,10 +1959,17 @@ public partial class ExcelHandler
         if (nvProps?.Name?.Value != null)
             node.Format["name"] = nvProps.Name.Value;
 
-        // Text
+        // Text — shape TextBody has one <a:p> per paragraph, each with
+        // zero-or-more <a:r>/<a:t> runs. Concatenate runs within a
+        // paragraph, then join paragraphs with '\n' so multi-line shape
+        // text round-trips through Get.
+        var paragraphs = shape.TextBody?.Elements<Drawing.Paragraph>().ToList();
+        if (paragraphs != null && paragraphs.Count > 0)
+        {
+            node.Text = string.Join("\n", paragraphs.Select(p =>
+                string.Join("", p.Elements<Drawing.Run>().Select(r => r.Text?.Text ?? ""))));
+        }
         var textRuns = shape.TextBody?.Descendants<Drawing.Run>().ToList();
-        if (textRuns != null && textRuns.Count > 0)
-            node.Text = string.Join("", textRuns.Select(r => r.Text?.Text ?? ""));
 
         // Position/size
         ReadAnchorPosition(anchor, node);
@@ -1187,6 +1999,26 @@ public partial class ExcelHandler
             var latin = rPr.GetFirstChild<Drawing.LatinFont>();
             if (latin?.Typeface?.Value != null)
                 node.Format["font"] = latin.Typeface.Value;
+        }
+
+        // Rotation / flip readback from <a:xfrm rot="..." flipH="..." flipV="...">
+        var xfrm = shape.ShapeProperties?.Transform2D;
+        if (xfrm != null)
+        {
+            if (xfrm.Rotation?.HasValue == true && xfrm.Rotation.Value != 0)
+            {
+                // OOXML stores rotation in 60000ths of a degree; Add normalizes
+                // into [0,360). Round-trip the same canonical form.
+                var deg = xfrm.Rotation.Value / 60000.0;
+                node.Format["rotation"] = Math.Round(deg, 2);
+            }
+            if (xfrm.HorizontalFlip?.HasValue == true && xfrm.VerticalFlip?.HasValue == true
+                && xfrm.HorizontalFlip.Value && xfrm.VerticalFlip.Value)
+                node.Format["flip"] = "both";
+            else if (xfrm.HorizontalFlip?.HasValue == true && xfrm.HorizontalFlip.Value)
+                node.Format["flip"] = "h";
+            else if (xfrm.VerticalFlip?.HasValue == true && xfrm.VerticalFlip.Value)
+                node.Format["flip"] = "v";
         }
 
         // Fill
@@ -1325,6 +2157,87 @@ public partial class ExcelHandler
     }
 
     /// <summary>
+    /// Set horizontal / vertical flip on a shape's Transform2D. Accepts "h", "v", "both",
+    /// or "none" to clear both. Returns true if the key was handled.
+    /// </summary>
+    private static bool TrySetShapeFlip(XDR.ShapeProperties? spPr, string key, string value)
+    {
+        if (key != "flip") return false;
+        if (spPr == null) return true;
+        var xfrm = spPr.GetFirstChild<Drawing.Transform2D>();
+        if (xfrm == null)
+        {
+            xfrm = new Drawing.Transform2D(
+                new Drawing.Offset { X = 0, Y = 0 },
+                new Drawing.Extents { Cx = 0, Cy = 0 });
+            spPr.InsertAt(xfrm, 0);
+        }
+        var f = value.Trim().ToLowerInvariant();
+        bool none = f is "none" or "false" or "";
+        bool flipH = !none && (f is "h" or "horizontal" or "both" or "hv" or "vh");
+        bool flipV = !none && (f is "v" or "vertical" or "both" or "hv" or "vh");
+        xfrm.HorizontalFlip = flipH ? true : (bool?)null;
+        xfrm.VerticalFlip = flipV ? true : (bool?)null;
+        return true;
+    }
+
+    /// <summary>
+    /// Apply a dotted-form font property (`font.bold`, `font.italic`, `font.color`,
+    /// `font.size`, `font.name`, `font.underline`) to every run in the shape's text body.
+    /// Returns true if the key was handled.
+    /// </summary>
+    private static bool TrySetShapeFontProp(XDR.Shape shape, string key, string value)
+    {
+        if (!key.StartsWith("font.", StringComparison.Ordinal)) return false;
+        var sub = key.Substring(5);
+        foreach (var run in shape.Descendants<Drawing.Run>())
+        {
+            var rPr = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
+            switch (sub)
+            {
+                case "bold":
+                    rPr.Bold = IsTruthy(value);
+                    break;
+                case "italic":
+                    rPr.Italic = IsTruthy(value);
+                    break;
+                case "size":
+                    rPr.FontSize = (int)Math.Round(ParseHelpers.ParseFontSize(value) * 100);
+                    break;
+                case "name":
+                    rPr.RemoveAllChildren<Drawing.LatinFont>();
+                    rPr.RemoveAllChildren<Drawing.EastAsianFont>();
+                    rPr.AppendChild(new Drawing.LatinFont { Typeface = value });
+                    rPr.AppendChild(new Drawing.EastAsianFont { Typeface = value });
+                    break;
+                case "color":
+                {
+                    rPr.RemoveAllChildren<Drawing.SolidFill>();
+                    var (cRgb, _) = ParseHelpers.SanitizeColorForOoxml(value);
+                    OfficeCli.Core.DrawingEffectsHelper.InsertFillInRunProperties(rPr,
+                        new Drawing.SolidFill(new Drawing.RgbColorModelHex { Val = cRgb }));
+                    break;
+                }
+                case "underline":
+                {
+                    var uv = value.ToLowerInvariant();
+                    rPr.Underline = uv switch
+                    {
+                        "true" or "single" or "sng" => Drawing.TextUnderlineValues.Single,
+                        "double" or "dbl" => Drawing.TextUnderlineValues.Double,
+                        "none" or "false" => Drawing.TextUnderlineValues.None,
+                        _ => Drawing.TextUnderlineValues.Single
+                    };
+                    break;
+                }
+                default:
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    /// <summary>
     /// Apply shape-level effects (shadow, glow, reflection, softedge) on a ShapeProperties element.
     /// Returns true if the key was handled.
     /// </summary>
@@ -1355,32 +2268,136 @@ public partial class ExcelHandler
         else
         {
             if (effectList == null) { effectList = new Drawing.EffectList(); spPr.AppendChild(effectList); }
+            // CONSISTENCY(effect-list-schema-order): CT_EffectList order is
+            // blur → fillOverlay → glow → innerShdw → outerShdw → prstShdw → reflection → softEdge.
+            // Excel (and PPT) silently drops out-of-order children, so we must
+            // InsertBefore the next-in-order sibling rather than AppendChild.
+            OpenXmlElement newEffect;
             switch (key)
             {
                 case "shadow":
                     effectList.RemoveAllChildren<Drawing.OuterShadow>();
-                    effectList.AppendChild(OfficeCli.Core.DrawingEffectsHelper.BuildOuterShadow(normalizedVal, OfficeCli.Core.DrawingEffectsHelper.BuildRgbColor));
+                    newEffect = OfficeCli.Core.DrawingEffectsHelper.BuildOuterShadow(normalizedVal, OfficeCli.Core.DrawingEffectsHelper.BuildRgbColor);
                     break;
                 case "glow":
                     effectList.RemoveAllChildren<Drawing.Glow>();
-                    effectList.AppendChild(OfficeCli.Core.DrawingEffectsHelper.BuildGlow(normalizedVal, OfficeCli.Core.DrawingEffectsHelper.BuildRgbColor));
+                    newEffect = OfficeCli.Core.DrawingEffectsHelper.BuildGlow(normalizedVal, OfficeCli.Core.DrawingEffectsHelper.BuildRgbColor);
                     break;
                 case "reflection":
                     effectList.RemoveAllChildren<Drawing.Reflection>();
-                    effectList.AppendChild(OfficeCli.Core.DrawingEffectsHelper.BuildReflection(normalizedVal));
+                    newEffect = OfficeCli.Core.DrawingEffectsHelper.BuildReflection(normalizedVal);
                     break;
                 case "softedge":
                     effectList.RemoveAllChildren<Drawing.SoftEdge>();
-                    effectList.AppendChild(OfficeCli.Core.DrawingEffectsHelper.BuildSoftEdge(normalizedVal));
+                    newEffect = OfficeCli.Core.DrawingEffectsHelper.BuildSoftEdge(normalizedVal);
                     break;
+                default: return true;
             }
+            InsertEffectInSchemaOrder(effectList, newEffect);
         }
         return true;
     }
 
     /// <summary>
+    /// Insert an effectLst child at the correct DrawingML CT_EffectList schema position:
+    /// blur → fillOverlay → glow → innerShdw → outerShdw → prstShdw → reflection → softEdge.
+    /// </summary>
+    private static void InsertEffectInSchemaOrder(Drawing.EffectList effectList, OpenXmlElement newEffect)
+    {
+        // Determine all types that must come AFTER newEffect per schema order.
+        OpenXmlElement? insertBefore = newEffect switch
+        {
+            Drawing.Blur => (OpenXmlElement?)effectList.GetFirstChild<Drawing.FillOverlay>()
+                ?? effectList.GetFirstChild<Drawing.Glow>()
+                ?? effectList.GetFirstChild<Drawing.InnerShadow>()
+                ?? effectList.GetFirstChild<Drawing.OuterShadow>()
+                ?? effectList.GetFirstChild<Drawing.PresetShadow>()
+                ?? (OpenXmlElement?)effectList.GetFirstChild<Drawing.Reflection>()
+                ?? effectList.GetFirstChild<Drawing.SoftEdge>(),
+            Drawing.FillOverlay => (OpenXmlElement?)effectList.GetFirstChild<Drawing.Glow>()
+                ?? effectList.GetFirstChild<Drawing.InnerShadow>()
+                ?? effectList.GetFirstChild<Drawing.OuterShadow>()
+                ?? effectList.GetFirstChild<Drawing.PresetShadow>()
+                ?? (OpenXmlElement?)effectList.GetFirstChild<Drawing.Reflection>()
+                ?? effectList.GetFirstChild<Drawing.SoftEdge>(),
+            Drawing.Glow => (OpenXmlElement?)effectList.GetFirstChild<Drawing.InnerShadow>()
+                ?? effectList.GetFirstChild<Drawing.OuterShadow>()
+                ?? effectList.GetFirstChild<Drawing.PresetShadow>()
+                ?? (OpenXmlElement?)effectList.GetFirstChild<Drawing.Reflection>()
+                ?? effectList.GetFirstChild<Drawing.SoftEdge>(),
+            Drawing.InnerShadow => (OpenXmlElement?)effectList.GetFirstChild<Drawing.OuterShadow>()
+                ?? effectList.GetFirstChild<Drawing.PresetShadow>()
+                ?? (OpenXmlElement?)effectList.GetFirstChild<Drawing.Reflection>()
+                ?? effectList.GetFirstChild<Drawing.SoftEdge>(),
+            Drawing.OuterShadow => (OpenXmlElement?)effectList.GetFirstChild<Drawing.PresetShadow>()
+                ?? (OpenXmlElement?)effectList.GetFirstChild<Drawing.Reflection>()
+                ?? effectList.GetFirstChild<Drawing.SoftEdge>(),
+            Drawing.PresetShadow => (OpenXmlElement?)effectList.GetFirstChild<Drawing.Reflection>()
+                ?? effectList.GetFirstChild<Drawing.SoftEdge>(),
+            Drawing.Reflection => (OpenXmlElement?)effectList.GetFirstChild<Drawing.SoftEdge>(),
+            _ => null,
+        };
+        if (insertBefore != null) effectList.InsertBefore(newEffect, insertBefore);
+        else effectList.AppendChild(newEffect);
+    }
+
+    /// <summary>
     /// Parse x, y, width, height from properties with given defaults. Used by both picture Add and shape Add.
     /// </summary>
+    // CONSISTENCY(shape-preset): mirror PowerPointHandler.ParsePresetShape token
+    // set so Excel `add shape preset=X` accepts the same vocabulary as PPT.
+    //
+    // Exhaustive map covering every OOXML preset token. Built once via
+    // reflection over `Drawing.ShapeTypeValues` static properties — each
+    // property's default `ToString()` (== OpenXml IEnumValue.Value) is the
+    // OOXML token such as "smileyFace", "flowChartProcess", "lightningBolt".
+    // We then overlay friendly aliases (oval, cylinder, rarrow, …).
+    private static readonly Dictionary<string, Drawing.ShapeTypeValues> _shapePresetMap =
+        BuildShapePresetMap();
+
+    private static Dictionary<string, Drawing.ShapeTypeValues> BuildShapePresetMap()
+    {
+        var map = new Dictionary<string, Drawing.ShapeTypeValues>(StringComparer.Ordinal);
+        foreach (var p in typeof(Drawing.ShapeTypeValues)
+            .GetProperties(BindingFlags.Public | BindingFlags.Static)
+            .Where(p => p.PropertyType == typeof(Drawing.ShapeTypeValues)))
+        {
+            if (p.GetValue(null) is not Drawing.ShapeTypeValues val) continue;
+            // IEnumValue.Value is the OOXML token, e.g. "smileyFace". Do not
+            // use ToString() — on OpenXml SDK 3.x record-struct wrappers it
+            // returns "ShapeTypeValues { }" instead of the token.
+            var token = (val as IEnumValue)?.Value;
+            if (string.IsNullOrEmpty(token)) continue;
+            map[token.ToLowerInvariant()] = val;
+        }
+
+        // Friendly aliases layered on top (key must be lowercase).
+        void Alias(string alias, Drawing.ShapeTypeValues v) => map[alias] = v;
+        Alias("rectangle", Drawing.ShapeTypeValues.Rectangle);
+        Alias("roundedrectangle", Drawing.ShapeTypeValues.RoundRectangle);
+        Alias("oval", Drawing.ShapeTypeValues.Ellipse);
+        Alias("righttriangle", Drawing.ShapeTypeValues.RightTriangle);
+        Alias("rtriangle", Drawing.ShapeTypeValues.RightTriangle);
+        Alias("rarrow", Drawing.ShapeTypeValues.RightArrow);
+        Alias("larrow", Drawing.ShapeTypeValues.LeftArrow);
+        Alias("cross", Drawing.ShapeTypeValues.Plus);
+        Alias("cylinder", Drawing.ShapeTypeValues.Can);
+        return map;
+    }
+
+    private static Drawing.ShapeTypeValues ParseExcelShapePreset(string name)
+    {
+        var key = (name ?? string.Empty).Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(key))
+            return Drawing.ShapeTypeValues.Rectangle;
+        if (_shapePresetMap.TryGetValue(key, out var val))
+            return val;
+        // Unknown preset: fall back to rectangle (legacy behavior — no throw,
+        // keeps Add lenient). Callers that care can compare with the returned
+        // value.
+        return Drawing.ShapeTypeValues.Rectangle;
+    }
+
     private static (int x, int y, int width, int height) ParseAnchorBounds(
         Dictionary<string, string> properties, string defX, string defY, string defW, string defH)
     {
@@ -1441,10 +2458,20 @@ public partial class ExcelHandler
     /// </summary>
     private static long ParseAnchorDimensionEmu(string value, string name)
     {
-        if (int.TryParse(value, out var plainInt))
+        if (long.TryParse(value, out var plainInt))
         {
+            // Bare integers are interpreted as cell counts (original grammar),
+            // but values that exceed the sheet's column/row max are obviously
+            // meant as EMU — the cell-count interpretation would overflow the
+            // ToMarker coordinate and make Excel reject the file. Excel's hard
+            // limits: 16384 columns, 1048576 rows. Anything bigger is EMU.
+            const int MaxCols = 16384;
+            const int MaxRows = 1048576;
+            long boundary = (name == "height") ? MaxRows : MaxCols;
+            if (plainInt >= boundary)
+                return Math.Max(0, plainInt);
             long perCell = (name == "height") ? EmuPerRowApprox : EmuPerColApprox;
-            return Math.Max(0, (long)plainInt) * perCell;
+            return Math.Max(0, plainInt) * perCell;
         }
 
         try
@@ -1455,6 +2482,53 @@ public partial class ExcelHandler
         {
             throw new ArgumentException($"Expected an integer cell count or a unit-qualified size (e.g. '6cm', '2in') for {name}, got '{value}'.");
         }
+    }
+
+    /// <summary>
+    /// Parse an <c>anchor=</c> prop value as a cell-reference or cell-range
+    /// (e.g. <c>"B2"</c> or <c>"B2:F7"</c>) into 0-based XDR column/row
+    /// coordinates. Returns <c>false</c> for anchor-mode strings like
+    /// <c>oneCell</c>/<c>twoCell</c>/<c>absolute</c>, which the caller should
+    /// route to the anchorMode path instead. Throws <see cref="ArgumentException"/>
+    /// for syntactically invalid range strings.
+    ///
+    /// When only a single cell is supplied, <c>toCol</c>/<c>toRow</c> are set
+    /// to <c>-1</c> so callers can fall back to a size-derived extent (e.g.
+    /// width/height × EMU-per-cell). The regex mirrors the OLE branch grammar.
+    ///
+    /// CONSISTENCY(xdr-coords): XDR ColumnId/RowId are 0-based; ColumnNameToIndex
+    /// returns 1-based, so this helper subtracts 1 on the way out.
+    /// </summary>
+    internal static bool TryParseCellRangeAnchor(
+        string? value, out int fromCol, out int fromRow, out int toCol, out int toRow)
+    {
+        fromCol = fromRow = 0;
+        toCol = toRow = -1;
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        var m = System.Text.RegularExpressions.Regex.Match(
+            value, @"^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (!m.Success) return false;
+        fromCol = ColumnNameToIndex(m.Groups[1].Value) - 1;
+        fromRow = int.Parse(m.Groups[2].Value) - 1;
+        if (m.Groups[3].Success)
+        {
+            toCol = ColumnNameToIndex(m.Groups[3].Value) - 1;
+            toRow = int.Parse(m.Groups[4].Value) - 1;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Return true if the given anchor= value is one of the recognized
+    /// anchorMode tokens (oneCell/twoCell/absolute). Used by the picture
+    /// branch to disambiguate mode-strings from cell-range strings.
+    /// </summary>
+    internal static bool IsAnchorModeToken(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        var v = value.Trim().ToLowerInvariant();
+        return v is "onecell" or "twocell" or "absolute";
     }
 
     /// <summary>
@@ -1863,7 +2937,7 @@ public partial class ExcelHandler
                 }
             }
 
-            wsPart.Worksheet!.Save();
+            SaveWorksheet(wsPart);
         }
 
         return totalCount;
@@ -2015,12 +3089,19 @@ public partial class ExcelHandler
         if (!string.IsNullOrEmpty(destDir) && !Directory.Exists(destDir))
             Directory.CreateDirectory(destDir);
 
+        // CONSISTENCY(ole-cfb-wrap): non-Office OLE payloads are stored as
+        // CFB containers with \x01Ole10Native; unwrap on read so the caller
+        // gets back the bytes they fed in via `add ole src=...`.
+        byte[] rawBytes;
         using (var src = part.GetStream())
-        using (var dst = File.Create(destPath))
+        using (var ms = new MemoryStream())
         {
-            src.CopyTo(dst);
-            byteCount = dst.Length;
+            src.CopyTo(ms);
+            rawBytes = ms.ToArray();
         }
+        var payload = OfficeCli.Core.OleHelper.UnwrapOle10NativeIfCfb(rawBytes);
+        File.WriteAllBytes(destPath, payload);
+        byteCount = payload.Length;
         contentType = part.ContentType;
         return true;
     }
@@ -2215,5 +3296,244 @@ public partial class ExcelHandler
         }
 
         return nodes;
+    }
+
+    // CONSISTENCY(xlsx/table-autoexpand): custom namespace marker stored on
+    // the <x:table> root so `autoExpand=true` survives open/close cycles.
+    // Real Excel ignores unknown-namespace attributes, so the file is still
+    // opened cleanly on Windows — the flag only affects officecli's own
+    // cell-write auto-grow behavior.
+    private const string AutoExpandNamespaceUri = "https://officecli.ai/2025/autoexpand";
+    private const string AutoExpandNamespacePrefix = "ae";
+    private const string AutoExpandAttrName = "autoExpand";
+
+    private static void SetTableAutoExpandMarker(Table table, bool enabled)
+    {
+        if (enabled)
+        {
+            table.AddNamespaceDeclaration(AutoExpandNamespacePrefix, AutoExpandNamespaceUri);
+            table.SetAttribute(new OpenXmlAttribute(
+                AutoExpandNamespacePrefix, AutoExpandAttrName, AutoExpandNamespaceUri, "1"));
+        }
+    }
+
+    private static bool TableHasAutoExpand(Table? table)
+    {
+        if (table == null) return false;
+        foreach (var attr in table.GetAttributes())
+        {
+            if (attr.NamespaceUri == AutoExpandNamespaceUri
+                && attr.LocalName == AutoExpandAttrName
+                && (attr.Value == "1" || string.Equals(attr.Value, "true", StringComparison.OrdinalIgnoreCase)))
+                return true;
+        }
+        return false;
+    }
+
+    // Eager auto-grow on cell Add/Set. Called after writing `cellRef` on
+    // `worksheet`. For each table on the sheet flagged with autoExpand:
+    //   - if cell is in the row immediately below the table AND its column
+    //     is within the table's column span → grow endRow by 1.
+    //   - else if cell is in the column immediately right of the table AND
+    //     its row is within the table's row span → grow endCol by 1 and
+    //     append a blank tableColumn.
+    // Both extensions are never applied at once (conservative).
+    private void MaybeExpandTablesForCell(WorksheetPart worksheet, string cellRef)
+    {
+        var (cellCol, cellRow) = ParseCellReference(cellRef.ToUpperInvariant());
+        var cellColIdx = ColumnNameToIndex(cellCol);
+
+        foreach (var tdp in worksheet.TableDefinitionParts.ToList())
+        {
+            var table = tdp.Table;
+            if (table == null) continue;
+            if (!TableHasAutoExpand(table)) continue;
+            if (table.Reference?.Value is not string rangeRef) continue;
+            if (!rangeRef.Contains(':')) continue;
+
+            var parts = rangeRef.Split(':');
+            var (startColName, startRow) = ParseCellReference(parts[0]);
+            var (endColName, endRow) = ParseCellReference(parts[1]);
+            var startColIdx = ColumnNameToIndex(startColName);
+            var endColIdx = ColumnNameToIndex(endColName);
+
+            // Row below? (cell row == endRow + 1, within column span).
+            if (cellRow == endRow + 1 && cellColIdx >= startColIdx && cellColIdx <= endColIdx)
+            {
+                endRow += 1;
+                var newRef = $"{startColName}{startRow}:{endColName}{endRow}";
+                table.Reference = newRef;
+                var af = table.GetFirstChild<AutoFilter>();
+                if (af != null) af.Reference = newRef;
+                table.Save();
+                continue;
+            }
+
+            // Column right? (cell col == endCol + 1, within row span).
+            if (cellColIdx == endColIdx + 1 && cellRow >= startRow && cellRow <= endRow)
+            {
+                endColIdx += 1;
+                var newEndColName = IndexToColumnName(endColIdx);
+                var newRef = $"{startColName}{startRow}:{newEndColName}{endRow}";
+                table.Reference = newRef;
+                var af = table.GetFirstChild<AutoFilter>();
+                if (af != null) af.Reference = newRef;
+
+                var tableColumns = table.GetFirstChild<TableColumns>();
+                if (tableColumns != null)
+                {
+                    var existing = tableColumns.Elements<TableColumn>().ToList();
+                    var nextId = existing.Count == 0
+                        ? 1u
+                        : existing.Max(tc => tc.Id?.Value ?? 0u) + 1u;
+                    var used = new HashSet<string>(
+                        existing.Select(tc => tc.Name?.Value ?? "")
+                                .Where(n => !string.IsNullOrEmpty(n)),
+                        StringComparer.OrdinalIgnoreCase);
+                    var baseName = $"Column{existing.Count + 1}";
+                    var colName = baseName;
+                    int dedupeIdx = 2;
+                    while (!used.Add(colName))
+                        colName = $"{baseName}{dedupeIdx++}";
+                    tableColumns.AppendChild(new TableColumn
+                    {
+                        Id = nextId,
+                        Name = colName
+                    });
+                    tableColumns.Count = (uint)tableColumns.Elements<TableColumn>().Count();
+                }
+
+                table.Save();
+            }
+        }
+    }
+
+    /// <summary>
+    /// R9-1: scan a formula body for Sheet-qualified refs (bare `Sheet1!A1`
+    /// or quoted `'My Data'!A1`) and return true if any referenced sheet
+    /// name does not exist in the current workbook. Used to suppress the
+    /// evaluator-based cachedValue fallback when cross-sheet refs point at
+    /// a removed sheet — Real Excel shows `#REF!` there; we should not
+    /// invent a "0".
+    /// </summary>
+    private bool FormulaReferencesMissingSheet(string formula)
+    {
+        if (string.IsNullOrEmpty(formula)) return false;
+        var wb = _doc.WorkbookPart?.Workbook;
+        if (wb == null) return false;
+        var names = new HashSet<string>(
+            wb.Descendants<Sheet>().Select(s => s.Name?.Value ?? "").Where(n => n.Length > 0),
+            StringComparer.OrdinalIgnoreCase);
+
+        // Quoted form: '...'! — inner single quotes escaped as ''
+        foreach (System.Text.RegularExpressions.Match m in
+                 System.Text.RegularExpressions.Regex.Matches(formula, @"'((?:[^']|'')+)'!"))
+        {
+            var name = m.Groups[1].Value.Replace("''", "'");
+            if (!names.Contains(name)) return true;
+        }
+        // Bare form: Name! — letters/digits/underscore/period (Excel allows these unquoted)
+        foreach (System.Text.RegularExpressions.Match m in
+                 System.Text.RegularExpressions.Regex.Matches(formula, @"(?<![A-Za-z0-9_'.])([A-Za-z_][A-Za-z0-9_.]*)!"))
+        {
+            if (!names.Contains(m.Groups[1].Value)) return true;
+        }
+        return false;
+    }
+
+    // R13-1: Excel rejects cell values longer than 32767 chars (2^15 - 1) with
+    // 0x800A03EC on save/open. Reject at write time with a clear error rather
+    // than silently writing a file Excel will refuse to open.
+    internal const int MaxCellTextLength = 32767;
+
+    internal static void EnsureCellValueLength(string? value, string? cellRef = null)
+    {
+        if (value == null) return;
+        if (value.Length > MaxCellTextLength)
+        {
+            var where = string.IsNullOrEmpty(cellRef) ? "" : $" at {cellRef}";
+            throw new ArgumentException(
+                $"Cell value{where} exceeds Excel's {MaxCellTextLength}-character limit (got {value.Length})");
+        }
+    }
+
+    // R13-2: central ISO date parser accepting date-only, date+time, and the
+    // common `T`-separator variants. Used by Add/Set cell value paths so
+    // `2024-03-15T10:30:00` is converted to an OADate serial instead of being
+    // written as a literal string (which Excel renders as text, not a date).
+    internal static readonly string[] IsoDateFormats =
+    {
+        "yyyy-MM-dd",
+        "yyyy/MM/dd",
+        "yyyy-MM-dd HH:mm",
+        "yyyy-MM-dd HH:mm:ss",
+        "yyyy-MM-ddTHH:mm",
+        "yyyy-MM-ddTHH:mm:ss",
+        "yyyy-MM-ddTHH:mm:ssZ",
+        "yyyy-MM-ddTHH:mm:ss.fff",
+        "yyyy-MM-ddTHH:mm:ss.fffZ",
+    };
+
+    internal static bool TryParseIsoDateFlexible(string value, out System.DateTime result)
+        => System.DateTime.TryParseExact(
+            value,
+            IsoDateFormats,
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.None,
+            out result);
+
+    /// <summary>
+    /// Build a <x:font> child for a dxf (differentialFormat) from font.* sub-props.
+    /// Supports bold, italic, underline (single/double), strike, size, name, color.
+    /// Returns null if no font sub-props were supplied.
+    /// </summary>
+    internal static Font? BuildFormulaCfFont(Dictionary<string, string> properties)
+    {
+        bool any = false;
+        var font = new Font();
+        if (properties.TryGetValue("font.bold", out var fBold) && ParseHelpers.IsTruthy(fBold))
+        { font.Append(new Bold()); any = true; }
+        if (properties.TryGetValue("font.italic", out var fItalic) && ParseHelpers.IsTruthy(fItalic))
+        { font.Append(new Italic()); any = true; }
+        if (properties.TryGetValue("font.strike", out var fStrike) && ParseHelpers.IsTruthy(fStrike))
+        { font.Append(new Strike()); any = true; }
+        if (properties.TryGetValue("font.underline", out var fUnder))
+        {
+            var ul = new Underline();
+            var lv = fUnder.Trim().ToLowerInvariant();
+            ul.Val = lv switch
+            {
+                "double" or "dbl" => UnderlineValues.Double,
+                "singleaccounting" or "singleacct" => UnderlineValues.SingleAccounting,
+                "doubleaccounting" or "doubleacct" => UnderlineValues.DoubleAccounting,
+                "none" or "false" => UnderlineValues.None,
+                _ => UnderlineValues.Single
+            };
+            font.Append(ul);
+            any = true;
+        }
+        if (properties.TryGetValue("font.size", out var fSize))
+        {
+            // Accept "12", "12pt", "10.5pt" — strip trailing "pt" if present.
+            var cleaned = fSize.Trim().TrimEnd('p', 't', 'P', 'T', ' ');
+            if (double.TryParse(cleaned, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var sz))
+            {
+                font.Append(new FontSize { Val = sz });
+                any = true;
+            }
+        }
+        if (properties.TryGetValue("font.name", out var fName) && !string.IsNullOrWhiteSpace(fName))
+        {
+            font.Append(new FontName { Val = fName });
+            any = true;
+        }
+        if (properties.TryGetValue("font.color", out var fColor))
+        {
+            var norm = ParseHelpers.NormalizeArgbColor(fColor);
+            font.Append(new DocumentFormat.OpenXml.Spreadsheet.Color { Rgb = norm });
+            any = true;
+        }
+        return any ? font : null;
     }
 }

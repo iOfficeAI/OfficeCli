@@ -1,7 +1,6 @@
 // Copyright 2025 OfficeCli (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
-using System.Text;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Presentation;
@@ -226,7 +225,11 @@ public partial class PowerPointHandler
         // Radial or linear?
         var pathGrad = gradFill.GetFirstChild<Drawing.PathGradientFill>();
         if (pathGrad != null)
-            return $"radial-gradient(circle, {string.Join(", ", cssStops)})";
+            // OOXML <a:path path="circle"> with default fill rectangle fills to the shape
+            // bounds (last stop at the edge). CSS default is `farthest-corner`, which overshoots
+            // for square-ish shapes. `closest-side` lands the final stop at the nearer edge,
+            // matching Office's rendering for rectangular shapes.
+            return $"radial-gradient(circle closest-side, {string.Join(", ", cssStops)})";
 
         var linear = gradFill.GetFirstChild<Drawing.LinearGradientFill>();
         var angleDeg = linear?.Angle?.HasValue == true ? linear.Angle.Value / 60000.0 : 90.0;
@@ -284,16 +287,20 @@ public partial class PowerPointHandler
         var w = strokeWidth;
         return dashType switch
         {
+            // Dot is a visible short segment (length = stroke width) with linecap=butt
+            // so the dot renders as a square of side w. Prior implementation used "0.1"
+            // as a zero-length segment relying on stroke-linecap=round to paint a cap;
+            // that collapses when linecap=butt or when stroke-width rounds down.
             "solid" => "",
-            "dot" or "sysDot" => $"0.1 {w * 2.5:0.##}",
+            "dot" or "sysDot" => $"{w:0.##} {w * 2:0.##}",
             "dash" => $"{w * 4:0.##} {w * 3:0.##}",
             "lgDash" => $"{w * 8:0.##} {w * 3:0.##}",
             "sysDash" => $"{w * 3:0.##} {w * 1:0.##}",
-            "dashDot" => $"{w * 4:0.##} {w * 2:0.##} 0.1 {w * 2:0.##}",
-            "lgDashDot" => $"{w * 8:0.##} {w * 2:0.##} 0.1 {w * 2:0.##}",
-            "sysDashDot" => $"{w * 3:0.##} {w * 1.5:0.##} 0.1 {w * 1.5:0.##}",
-            "sysDashDotDot" => $"{w * 3:0.##} {w * 1.5:0.##} 0.1 {w * 1.5:0.##} 0.1 {w * 1.5:0.##}",
-            "lgDashDotDot" => $"{w * 8:0.##} {w * 2:0.##} 0.1 {w * 2:0.##} 0.1 {w * 2:0.##}",
+            "dashDot" => $"{w * 4:0.##} {w * 2:0.##} {w:0.##} {w * 2:0.##}",
+            "lgDashDot" => $"{w * 8:0.##} {w * 2:0.##} {w:0.##} {w * 2:0.##}",
+            "sysDashDot" => $"{w * 3:0.##} {w * 1.5:0.##} {w:0.##} {w * 1.5:0.##}",
+            "sysDashDotDot" => $"{w * 3:0.##} {w * 1.5:0.##} {w:0.##} {w * 1.5:0.##} {w:0.##} {w * 1.5:0.##}",
+            "lgDashDotDot" => $"{w * 8:0.##} {w * 2:0.##} {w:0.##} {w * 2:0.##} {w:0.##} {w * 2:0.##}",
             _ => ""
         };
     }
@@ -423,17 +430,17 @@ public partial class PowerPointHandler
         // EndAlpha: final opacity (thousandths of a percent)
         var endOpacity = refl.EndAlpha?.HasValue == true ? refl.EndAlpha.Value / 100000.0 : 0.0;
 
-        // EndPosition: how much of the shape height is reflected (thousandths of a percent → CSS percentage)
-        // This controls where the gradient reaches full transparency.
-        var endPos = refl.EndPosition?.HasValue == true ? refl.EndPosition.Value / 1000.0 : 90.0;
+        // EndPosition: how much of the shape height is reflected (thousandths of a percent → CSS percentage).
+        // In -webkit-box-reflect, 0% is the top of the reflection (closest to the source shape) and
+        // 100% is the far edge. The reflection should be most opaque at the top (startOpacity) and
+        // fade to endOpacity at endPos%, then fully transparent beyond endPos.
+        var endPos = refl.EndPosition?.HasValue == true ? Math.Clamp(refl.EndPosition.Value / 1000.0, 0, 100) : 90.0;
 
-        // Map endPos to the gradient: the transparent region starts at (100 - endPos)% of the reflected image
-        // For endPos=55 (tight): fade starts early → reflection visible ~55%
-        // For endPos=90 (half): fade occupies most → reflection visible ~90%
-        // For endPos=100 (full): full height reflection
-        var fadeStartPct = Math.Max(0, 100.0 - endPos);
+        var startStop = $"rgba(255,255,255,{startOpacity:0.###}) 0%";
+        var endStop = $"rgba(255,255,255,{endOpacity:0.###}) {endPos:0.#}%";
+        var tailStop = endPos < 100 ? $",transparent 100%" : "";
 
-        return $"-webkit-box-reflect:below {distPt:0.##}pt linear-gradient(transparent {fadeStartPct:0.#}%,rgba(255,255,255,{startOpacity:0.##}) {100:0.#}%)";
+        return $"-webkit-box-reflect:below {distPt:0.##}pt linear-gradient({startStop},{endStop}{tailStop})";
     }
 
     // ==================== CSS Helper: Preset Geometry ====================
@@ -454,9 +461,93 @@ public partial class PowerPointHandler
     private static string PresetGeometryToCss(string preset) =>
         PresetGeometryToCss(preset, 0, 0, null);
 
+    /// <summary>
+    /// Read an adjustment value from PresetGeometry's AdjustValueList (OOXML "val NNNNN" formula).
+    /// </summary>
+    private static long ReadAdjValueCss(Drawing.PresetGeometry? presetGeom, int index, long defaultValue)
+    {
+        var avList = presetGeom?.GetFirstChild<Drawing.AdjustValueList>();
+        if (avList == null) return defaultValue;
+        var guides = avList.Elements<Drawing.ShapeGuide>().ToList();
+        if (index >= guides.Count) return defaultValue;
+        var formula = guides[index].Formula?.Value;
+        if (formula != null && formula.StartsWith("val "))
+        {
+            if (long.TryParse(formula.AsSpan(4), out var parsed))
+                return parsed;
+        }
+        return defaultValue;
+    }
+
+    /// <summary>
+    /// Build a clip-path polygon for rightArrow honoring OOXML avLst.
+    /// adj1 = tail height relative to shape height (0..100000, default 50000 = 50%)
+    /// adj2 = head width relative to min(w,h) (0..100000, default 50000)
+    /// </summary>
+    private static string RightArrowPolygon(long widthEmu, long heightEmu, Drawing.PresetGeometry? presetGeom)
+    {
+        var adj1 = ReadAdjValueCss(presetGeom, 0, 50000);
+        var adj2 = ReadAdjValueCss(presetGeom, 1, 50000);
+        // Clamp avLst values to sane range
+        if (adj1 < 0) adj1 = 0; if (adj1 > 100000) adj1 = 100000;
+        if (adj2 < 0) adj2 = 0; if (adj2 > 100000) adj2 = 100000;
+
+        // Tail vertical extent (centered on midline): adj1 fraction of height
+        var tailTop = (100000.0 - adj1) / 2000.0;   // e.g. 25%
+        var tailBot = 100.0 - tailTop;              // e.g. 75%
+
+        // Head width measured from the right edge. Fallback to square assumption if dims missing.
+        double headStartX;
+        if (widthEmu > 0 && heightEmu > 0)
+        {
+            var minSide = Math.Min(widthEmu, heightEmu);
+            var headWidthEmu = minSide * adj2 / 100000.0;
+            if (headWidthEmu > widthEmu) headWidthEmu = widthEmu;
+            headStartX = (widthEmu - headWidthEmu) / (double)widthEmu * 100.0;
+        }
+        else
+        {
+            headStartX = 100.0 - adj2 / 1000.0; // fallback: treat adj2 as % of width
+        }
+
+        return $"clip-path:polygon(0 {tailTop:0.##}%,{headStartX:0.##}% {tailTop:0.##}%,{headStartX:0.##}% 0,100% 50%,{headStartX:0.##}% 100%,{headStartX:0.##}% {tailBot:0.##}%,0 {tailBot:0.##}%)";
+    }
+
+    /// <summary>
+    /// Build a clip-path polygon for a 5-point star honoring OOXML adj value.
+    /// adj = inner radius fraction * 50000 (default 19098, giving inner ratio ~0.382).
+    /// Star is stretched to fill bounding box (outer radius = min(w,h)/2 scaled independently to w,h).
+    /// </summary>
+    private static string Star5Polygon(Drawing.PresetGeometry? presetGeom)
+    {
+        var adj = ReadAdjValueCss(presetGeom, 0, 19098);
+        if (adj < 0) adj = 0; if (adj > 50000) adj = 50000;
+        var innerRatio = adj / 50000.0;
+
+        var pts = new List<string>();
+        // 10 points around the center, alternating outer (radius=0.5) and inner (radius=0.5*innerRatio).
+        // Start at top (angle = -90°), step = 36° = PI/5. Scale x,y to 0..100%.
+        for (int i = 0; i < 10; i++)
+        {
+            var angle = -Math.PI / 2 + Math.PI * i / 5;
+            var r = (i % 2 == 0) ? 0.5 : 0.5 * innerRatio;
+            var x = 50.0 + r * Math.Cos(angle) * 100.0;
+            var y = 50.0 + r * Math.Sin(angle) * 100.0;
+            pts.Add($"{x:0.##}% {y:0.##}%");
+        }
+        return $"clip-path:polygon({string.Join(",", pts)})";
+    }
+
     private static string PresetGeometryToCss(string preset, long widthEmu, long heightEmu,
         Drawing.PresetGeometry? presetGeom)
     {
+        // Parametric rightArrow honoring avLst
+        if (preset == "rightArrow")
+            return RightArrowPolygon(widthEmu, heightEmu, presetGeom);
+        // Parametric star5 honoring avLst
+        if (preset == "star5")
+            return Star5Polygon(presetGeom);
+
         // Calculate roundRect corner radius from avLst or default (16.667% of shorter side)
         if (preset is "roundRect" or "round1Rect" or "round2SameRect" or "round2DiagRect")
         {

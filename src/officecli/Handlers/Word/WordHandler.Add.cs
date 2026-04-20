@@ -82,7 +82,12 @@ public partial class WordHandler
             "style" => AddStyle(parent, parentPath, index, properties),
             "header" => AddHeader(parent, parentPath, index, properties),
             "footer" => AddFooter(parent, parentPath, index, properties),
-            "field" or "pagenum" or "pagenumber" or "page" or "numpages" or "date" or "author" => AddField(parent, parentPath, index, properties, type),
+            "field" or "pagenum" or "pagenumber" or "page" or "numpages" or "sectionpages" or "section"
+                or "date" or "createdate" or "savedate" or "printdate" or "edittime" or "time"
+                or "author" or "lastsavedby" or "title" or "subject" or "filename"
+                or "numwords" or "numchars" or "revnum" or "template" or "comments" or "doccomments" or "keywords"
+                or "mergefield" or "ref" or "pageref" or "noteref" or "seq" or "styleref" or "docproperty" or "if"
+                => AddField(parent, parentPath, index, properties, type),
             "pagebreak" or "columnbreak" or "break" => AddBreak(parent, parentPath, index, properties, type),
             "sdt" or "contentcontrol" => AddSdt(parent, parentPath, index, properties),
             "watermark" => AddWatermark(parent, parentPath, index, properties),

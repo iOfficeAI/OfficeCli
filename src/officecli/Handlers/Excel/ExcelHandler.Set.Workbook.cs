@@ -147,6 +147,62 @@ public partial class ExcelHandler
                 return true;
             }
 
+            // ==================== BookViews / WorkbookView ====================
+            case "activetab" or "workbook.activetab":
+            {
+                var bv = EnsureFirstWorkbookView();
+                // Accept 0-based numeric index or sheet name.
+                uint idx;
+                if (uint.TryParse(value, System.Globalization.NumberStyles.Integer,
+                        System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+                {
+                    idx = parsed;
+                }
+                else
+                {
+                    var sheets = _doc.WorkbookPart?.Workbook?.GetFirstChild<Sheets>()
+                        ?.Elements<Sheet>().ToList();
+                    if (sheets == null || sheets.Count == 0)
+                        throw new ArgumentException($"Invalid activeTab: no sheets in workbook");
+                    var match = sheets.FindIndex(s =>
+                        string.Equals(s.Name?.Value, value, StringComparison.OrdinalIgnoreCase));
+                    if (match < 0)
+                        throw new ArgumentException(
+                            $"Invalid activeTab: '{value}' is not a 0-based index or sheet name. " +
+                            $"Valid sheets: {string.Join(", ", sheets.Select(s => s.Name?.Value))}");
+                    idx = (uint)match;
+                }
+                bv.ActiveTab = idx == 0 ? null : new UInt32Value(idx);
+                SaveWorkbook();
+                return true;
+            }
+            case "firstsheet" or "workbook.firstsheet":
+            {
+                var bv = EnsureFirstWorkbookView();
+                uint idx;
+                if (uint.TryParse(value, System.Globalization.NumberStyles.Integer,
+                        System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+                {
+                    idx = parsed;
+                }
+                else
+                {
+                    var sheets = _doc.WorkbookPart?.Workbook?.GetFirstChild<Sheets>()
+                        ?.Elements<Sheet>().ToList();
+                    if (sheets == null || sheets.Count == 0)
+                        throw new ArgumentException($"Invalid firstSheet: no sheets in workbook");
+                    var match = sheets.FindIndex(s =>
+                        string.Equals(s.Name?.Value, value, StringComparison.OrdinalIgnoreCase));
+                    if (match < 0)
+                        throw new ArgumentException(
+                            $"Invalid firstSheet: '{value}' is not a 0-based index or sheet name.");
+                    idx = (uint)match;
+                }
+                bv.FirstSheet = idx == 0 ? null : new UInt32Value(idx);
+                SaveWorkbook();
+                return true;
+            }
+
             // ==================== WorkbookProtection ====================
             case "workbook.protection" or "workbookprotection":
             {
@@ -247,6 +303,31 @@ public partial class ExcelHandler
         return prot;
     }
 
+    private WorkbookView EnsureFirstWorkbookView()
+    {
+        var workbook = _doc.WorkbookPart!.Workbook!;
+        var bookViews = workbook.GetFirstChild<BookViews>();
+        if (bookViews == null)
+        {
+            bookViews = new BookViews();
+            // Schema order: bookViews sits between workbookProtection/workbookPr
+            // and sheets. Insert before Sheets when present.
+            var anchor = (DocumentFormat.OpenXml.OpenXmlElement?)workbook.GetFirstChild<Sheets>()
+                ?? workbook.GetFirstChild<CalculationProperties>();
+            if (anchor != null)
+                anchor.InsertBeforeSelf(bookViews);
+            else
+                workbook.AppendChild(bookViews);
+        }
+        var view = bookViews.GetFirstChild<WorkbookView>();
+        if (view == null)
+        {
+            view = new WorkbookView();
+            bookViews.AppendChild(view);
+        }
+        return view;
+    }
+
     private void CleanupEmptyWorkbookProperties()
     {
         var props = _doc.WorkbookPart?.Workbook?.GetFirstChild<WorkbookProperties>();
@@ -297,6 +378,17 @@ public partial class ExcelHandler
             if (calc.FullPrecision?.Value == true) node.Format["calc.fullPrecision"] = true;
             if (calc.FullCalculationOnLoad?.Value == true) node.Format["calc.fullCalcOnLoad"] = true;
             if (calc.ReferenceMode?.Value != null) node.Format["calc.refMode"] = calc.ReferenceMode.InnerText;
+        }
+
+        // BookViews / first WorkbookView
+        var bookViews = workbook.GetFirstChild<BookViews>();
+        var firstView = bookViews?.GetFirstChild<WorkbookView>();
+        if (firstView != null)
+        {
+            if (firstView.ActiveTab?.Value is uint activeTab && activeTab != 0)
+                node.Format["activeTab"] = (int)activeTab;
+            if (firstView.FirstSheet?.Value is uint firstSheet && firstSheet != 0)
+                node.Format["firstSheet"] = (int)firstSheet;
         }
 
         // WorkbookProtection

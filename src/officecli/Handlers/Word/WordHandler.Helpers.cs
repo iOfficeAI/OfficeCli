@@ -30,6 +30,38 @@ public partial class WordHandler
     private static bool IsTruthy(string? value) =>
         ParseHelpers.IsTruthy(value);
 
+    /// <summary>
+    /// Normalize a user-provided underline token to a valid Word OOXML UnderlineValues enum string.
+    /// Accepts common aliases (wavy → wave, dashdot → dotDash, etc.) plus truthy/none.
+    /// </summary>
+    internal static string NormalizeUnderlineValue(string value)
+    {
+        var v = (value ?? "").Trim();
+        return v.ToLowerInvariant() switch
+        {
+            "true" or "single" or "1" => "single",
+            "false" or "none" or "0" or "" => "none",
+            "double" => "double",
+            "thick" => "thick",
+            "dotted" => "dotted",
+            "dottedheavy" or "dotted-heavy" or "dotted_heavy" => "dottedHeavy",
+            "dash" or "dashed" => "dash",
+            "dashedheavy" or "dashheavy" => "dashedHeavy",
+            "dashlong" or "longdash" => "dashLong",
+            "dashlongheavy" or "longdashheavy" => "dashLongHeavy",
+            // Word uses "dotDash" and "dashDotHeavy" (note asymmetric casing in OOXML spec).
+            "dotdash" or "dashdot" => "dotDash",
+            "dotdashheavy" or "dashdotheavy" => "dashDotHeavy",
+            "dotdotdash" or "dashdotdot" => "dotDotDash",
+            "dotdotdashheavy" or "dashdotdotheavy" => "dashDotDotHeavy",
+            "wave" or "wavy" => "wave",
+            "waveheavy" or "wavyheavy" => "wavyHeavy",
+            "wavedouble" or "wavydouble" or "doublewave" => "wavyDouble",
+            "words" or "word" => "words",
+            _ => v  // pass-through for already-valid OOXML tokens
+        };
+    }
+
     private static JustificationValues ParseJustification(string value) =>
         value.ToLowerInvariant() switch
         {
@@ -157,16 +189,30 @@ public partial class WordHandler
     /// </summary>
     private static IEnumerable<OpenXmlElement> GetBodyElements(Body body)
     {
-        foreach (var element in body.ChildElements)
+        foreach (var element in FlattenWrappers(body.ChildElements))
+            yield return element;
+    }
+
+    // Descend into SDT (structured document tag) and customXml transparent
+    // wrappers so their wrapped paragraphs/tables participate in the body
+    // element axis. Without this, docs emitted by e.g. Pages/Google Docs
+    // that wrap entire sections in <w:customXml> produce an empty preview.
+    private static IEnumerable<OpenXmlElement> FlattenWrappers(IEnumerable<OpenXmlElement> elements)
+    {
+        foreach (var element in elements)
         {
             if (element is SdtBlock sdt)
             {
                 var content = sdt.SdtContentBlock;
                 if (content != null)
-                {
-                    foreach (var child in content.ChildElements)
+                    foreach (var child in FlattenWrappers(content.ChildElements))
                         yield return child;
-                }
+            }
+            else if (element.LocalName == "customXml"
+                && element.NamespaceUri == "http://schemas.openxmlformats.org/wordprocessingml/2006/main")
+            {
+                foreach (var child in FlattenWrappers(element.ChildElements))
+                    yield return child;
             }
             else
             {
@@ -494,12 +540,12 @@ public partial class WordHandler
             case "size":
                 var existingFs = props.GetFirstChild<FontSize>();
                 if (existingFs != null) existingFs.Val = ((int)Math.Round(ParseFontSize(value) * 2, MidpointRounding.AwayFromZero)).ToString();
-                else props.AppendChild(new FontSize { Val = ((int)Math.Round(ParseFontSize(value) * 2, MidpointRounding.AwayFromZero)).ToString() });
+                else InsertRunPropInSchemaOrder(props, new FontSize { Val = ((int)Math.Round(ParseFontSize(value) * 2, MidpointRounding.AwayFromZero)).ToString() });
                 break;
             case "font":
                 var existingRf = props.GetFirstChild<RunFonts>();
                 if (existingRf != null) { existingRf.Ascii = value; existingRf.HighAnsi = value; existingRf.EastAsia = value; }
-                else props.AppendChild(new RunFonts { Ascii = value, HighAnsi = value, EastAsia = value });
+                else InsertRunPropInSchemaOrder(props, new RunFonts { Ascii = value, HighAnsi = value, EastAsia = value });
                 break;
             case "bold":
                 props.RemoveAllChildren<Bold>();
@@ -519,7 +565,7 @@ public partial class WordHandler
                 break;
             case "underline":
                 props.RemoveAllChildren<Underline>();
-                var ulMapped = value.ToLowerInvariant() switch { "true" => "single", "false" or "none" => "none", _ => value };
+                var ulMapped = NormalizeUnderlineValue(value);
                 InsertRunPropInSchemaOrder(props, new Underline { Val = new UnderlineValues(ulMapped) });
                 break;
             case "strike":
@@ -537,23 +583,23 @@ public partial class WordHandler
                 props.RemoveAllChildren<Shading>();
                 var shdParts = value.Split(';');
                 if (shdParts.Length == 1)
-                    props.AppendChild(new Shading { Val = ShadingPatternValues.Clear, Fill = SanitizeHex(shdParts[0]) });
+                    InsertRunPropInSchemaOrder(props, new Shading { Val = ShadingPatternValues.Clear, Fill = SanitizeHex(shdParts[0]) });
                 else
                 {
                     var shd = new Shading { Val = new ShadingPatternValues(shdParts[0]), Fill = SanitizeHex(shdParts[1]) };
                     if (shdParts.Length >= 3) shd.Color = SanitizeHex(shdParts[2]);
-                    props.AppendChild(shd);
+                    InsertRunPropInSchemaOrder(props, shd);
                 }
                 break;
             case "superscript":
                 props.RemoveAllChildren<VerticalTextAlignment>();
                 if (IsTruthy(value))
-                    props.AppendChild(new VerticalTextAlignment { Val = VerticalPositionValues.Superscript });
+                    InsertRunPropInSchemaOrder(props, new VerticalTextAlignment { Val = VerticalPositionValues.Superscript });
                 break;
             case "subscript":
                 props.RemoveAllChildren<VerticalTextAlignment>();
                 if (IsTruthy(value))
-                    props.AppendChild(new VerticalTextAlignment { Val = VerticalPositionValues.Subscript });
+                    InsertRunPropInSchemaOrder(props, new VerticalTextAlignment { Val = VerticalPositionValues.Subscript });
                 break;
             case "caps":
                 props.RemoveAllChildren<Caps>();
@@ -600,7 +646,11 @@ public partial class WordHandler
             FontSizeComplexScript => 22,
             Highlight => 23,
             Underline => 24,
-            // effect, ...
+            // effect = 25, bdr = 26
+            Shading => 27,
+            // fitText = 28
+            VerticalTextAlignment => 29,
+            // rtl, cs, em, lang, ...
             _ => 100,
         };
 
@@ -979,7 +1029,11 @@ public partial class WordHandler
     private static readonly HashSet<string> InlineTypes = new(StringComparer.OrdinalIgnoreCase)
     {
         "run", "r", "picture", "image", "img", "hyperlink", "link",
-        "field", "pagenum", "pagenumber", "page", "numpages", "date", "author",
+        "field", "pagenum", "pagenumber", "page", "numpages", "sectionpages", "section",
+        "date", "createdate", "savedate", "printdate", "edittime", "time",
+        "author", "lastsavedby", "title", "subject", "filename",
+        "numwords", "numchars", "revnum", "template", "comments", "doccomments", "keywords",
+        "mergefield", "ref", "pageref", "noteref", "seq", "styleref", "docproperty", "if",
         "pagebreak", "columnbreak", "break", "footnote", "endnote",
         "equation", "formula", "math", "bookmark", "formfield"
     };

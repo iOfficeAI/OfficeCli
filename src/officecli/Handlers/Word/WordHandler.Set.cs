@@ -47,7 +47,8 @@ public partial class WordHandler
                 if (k is "style" or "alignment" or "align" or "firstlineindent" or "leftindent" or "indentleft"
                     or "indent" or "rightindent" or "indentright" or "hangingindent" or "spacebefore"
                     or "spaceafter" or "linespacing" or "keepnext" or "keeplines" or "pagebreakbefore"
-                    or "widowcontrol" or "liststyle" or "start" or "text" or "formula")
+                    or "widowcontrol" or "liststyle" or "start" or "text" or "formula"
+                    or "contextualspacing")
                     paraProps[key] = value;
                 else
                     formatProps[key] = value;
@@ -457,11 +458,13 @@ public partial class WordHandler
             return unsupported;
         }
 
-        // Section paths: /section[N]
-        var secSetMatch = System.Text.RegularExpressions.Regex.Match(path, @"^/section\[(\d+)\]$");
+        // Section paths: /section[N] or /body/sectPr[N] (canonical form returned by Get/Query)
+        var secSetMatch = System.Text.RegularExpressions.Regex.Match(path, @"^(?:/section\[(\d+)\]|/body/sectPr(?:\[(\d+)\])?)$");
         if (secSetMatch.Success)
         {
-            var secIdx = int.Parse(secSetMatch.Groups[1].Value);
+            var secIdxStr = secSetMatch.Groups[1].Success ? secSetMatch.Groups[1].Value
+                : (secSetMatch.Groups[2].Success ? secSetMatch.Groups[2].Value : "1");
+            var secIdx = int.Parse(secIdxStr);
             var sectionProps = FindSectionProperties();
 
             // If no section properties exist and requesting section 1, create one
@@ -679,13 +682,7 @@ public partial class WordHandler
                     case "underline":
                     {
                         var rPrU = style.StyleRunProperties ?? style.AppendChild(new StyleRunProperties());
-                        var ulVal = value.ToLowerInvariant() switch
-                        {
-                            "true" or "single" => "single",
-                            "double" => "double",
-                            "false" or "none" => "none",
-                            _ => value
-                        };
+                        var ulVal = NormalizeUnderlineValue(value);
                         rPrU.Underline = new Underline { Val = new UnderlineValues(ulVal) };
                         break;
                     }
@@ -716,6 +713,15 @@ public partial class WordHandler
                         sp4.LineRule = isMultiplier
                             ? new DocumentFormat.OpenXml.EnumValue<LineSpacingRuleValues>(LineSpacingRuleValues.Auto)
                             : new DocumentFormat.OpenXml.EnumValue<LineSpacingRuleValues>(LineSpacingRuleValues.Exact);
+                        break;
+                    }
+                    case "contextualspacing" or "contextualSpacing":
+                    {
+                        var pPrCs = style.StyleParagraphProperties ?? EnsureStyleParagraphProperties(style);
+                        if (IsTruthy(value))
+                            pPrCs.ContextualSpacing ??= new ContextualSpacing();
+                        else
+                            pPrCs.ContextualSpacing = null;
                         break;
                     }
                     case "pbdr.top" or "pbdr.bottom" or "pbdr.left" or "pbdr.right" or "pbdr.between" or "pbdr.bar" or "pbdr.all" or "pbdr":
@@ -971,12 +977,7 @@ public partial class WordHandler
                         break;
                     case "underline":
                     {
-                        var ulVal = value.ToLowerInvariant() switch
-                        {
-                            "true" => "single",
-                            "false" or "none" => "none",
-                            _ => value
-                        };
+                        var ulVal = NormalizeUnderlineValue(value);
                         EnsureRunProperties(run).Underline = new Underline
                         {
                             Val = new UnderlineValues(ulVal)
@@ -1106,16 +1107,64 @@ public partial class WordHandler
                             var (wordImgStream, imgType) = OfficeCli.Core.ImageSource.Resolve(value);
                             using var wordImgDispose = wordImgStream;
 
-                            // Remove old image part to avoid storage bloat
+                            // Remove old image part(s) to avoid storage bloat —
+                            // include the asvg:svgBlip extension part if the
+                            // previous image was SVG, otherwise it would be
+                            // orphaned in word/media/.
                             var oldEmbedId = blip.Embed?.Value;
                             if (oldEmbedId != null)
                             {
                                 try { mainPartImg.DeletePart(oldEmbedId); } catch { }
                             }
+                            var oldSvgRelId = OfficeCli.Core.SvgImageHelper.GetSvgRelId(blip);
+                            if (oldSvgRelId != null)
+                            {
+                                try { mainPartImg.DeletePart(oldSvgRelId); } catch { }
+                            }
 
-                            var newImgPart = mainPartImg.AddImagePart(imgType);
-                            newImgPart.FeedData(wordImgStream);
-                            blip.Embed = mainPartImg.GetIdOfPart(newImgPart);
+                            if (imgType == ImagePartType.Svg)
+                            {
+                                // Match AddPicture: SVG part referenced via
+                                // extension, raster fallback at r:embed.
+                                using var svgBytes = new MemoryStream();
+                                wordImgStream.CopyTo(svgBytes);
+                                svgBytes.Position = 0;
+
+                                var svgPart = mainPartImg.AddImagePart(ImagePartType.Svg);
+                                svgPart.FeedData(svgBytes);
+                                var newSvgRelId = mainPartImg.GetIdOfPart(svgPart);
+
+                                var pngPart = mainPartImg.AddImagePart(ImagePartType.Png);
+                                pngPart.FeedData(new MemoryStream(
+                                    OfficeCli.Core.SvgImageHelper.TransparentPng1x1, writable: false));
+                                blip.Embed = mainPartImg.GetIdOfPart(pngPart);
+                                OfficeCli.Core.SvgImageHelper.AppendSvgExtension(blip, newSvgRelId);
+                            }
+                            else
+                            {
+                                var newImgPart = mainPartImg.AddImagePart(imgType);
+                                newImgPart.FeedData(wordImgStream);
+                                blip.Embed = mainPartImg.GetIdOfPart(newImgPart);
+                                // Drop the SVG extension if we replaced an SVG
+                                // with a raster image; otherwise Word would
+                                // keep rendering the stale SVG reference.
+                                if (oldSvgRelId != null)
+                                {
+                                    var extLst = blip.GetFirstChild<A.BlipExtensionList>();
+                                    if (extLst != null)
+                                    {
+                                        foreach (var ext in extLst.Elements<A.BlipExtension>().ToList())
+                                        {
+                                            if (string.Equals(ext.Uri?.Value,
+                                                OfficeCli.Core.SvgImageHelper.SvgExtensionUri,
+                                                StringComparison.OrdinalIgnoreCase))
+                                                ext.Remove();
+                                        }
+                                        if (!extLst.Elements<A.BlipExtension>().Any())
+                                            extLst.Remove();
+                                    }
+                                }
+                            }
                             break;
                         }
 
@@ -1591,7 +1640,7 @@ public partial class WordHandler
                                         break;
                                     case "underline":
                                     {
-                                        var ulVal = value.ToLowerInvariant() switch { "true" => "single", "false" or "none" => "none", _ => value };
+                                        var ulVal = NormalizeUnderlineValue(value);
                                         rPr.Underline = new Underline { Val = new UnderlineValues(ulVal) };
                                         break;
                                     }
@@ -1612,11 +1661,11 @@ public partial class WordHandler
                             {
                                 case "font":
                                     pmrp.RemoveAllChildren<RunFonts>();
-                                    pmrp.AppendChild(new RunFonts { Ascii = value, HighAnsi = value, EastAsia = value });
+                                    InsertRunPropInSchemaOrder(pmrp, new RunFonts { Ascii = value, HighAnsi = value, EastAsia = value });
                                     break;
                                 case "size":
                                     pmrp.RemoveAllChildren<FontSize>();
-                                    pmrp.AppendChild(new FontSize { Val = ((int)Math.Round(ParseFontSize(value) * 2, MidpointRounding.AwayFromZero)).ToString() });
+                                    InsertRunPropInSchemaOrder(pmrp, new FontSize { Val = ((int)Math.Round(ParseFontSize(value) * 2, MidpointRounding.AwayFromZero)).ToString() });
                                     break;
                                 case "bold":
                                     pmrp.RemoveAllChildren<Bold>();
@@ -1636,7 +1685,7 @@ public partial class WordHandler
                                     break;
                                 case "underline":
                                 {
-                                    var ulVal = value.ToLowerInvariant() switch { "true" => "single", "false" or "none" => "none", _ => value };
+                                    var ulVal = NormalizeUnderlineValue(value);
                                     pmrp.RemoveAllChildren<Underline>();
                                     InsertRunPropInSchemaOrder(pmrp, new Underline { Val = new UnderlineValues(ulVal) });
                                     break;
@@ -2378,7 +2427,8 @@ public partial class WordHandler
                 return true;
             case "firstlineindent":
                 var indent = pProps.Indentation ?? (pProps.Indentation = new Indentation());
-                indent.FirstLine = value; // raw twips, consistent with Get and other indent properties
+                // Lenient input: accept "2cm", "0.5in", "18pt", or bare twips.
+                indent.FirstLine = SpacingConverter.ParseWordSpacing(value).ToString();
                 indent.Hanging = null;
                 return true;
             case "leftindent" or "indentleft" or "indent":
@@ -2409,6 +2459,10 @@ public partial class WordHandler
             case "widowcontrol" or "widoworphan":
                 if (IsTruthy(value)) pProps.WidowControl ??= new WidowControl();
                 else pProps.WidowControl = new WidowControl { Val = false };
+                return true;
+            case "contextualspacing" or "contextualSpacing":
+                if (IsTruthy(value)) pProps.ContextualSpacing ??= new ContextualSpacing();
+                else pProps.ContextualSpacing = null;
                 return true;
             case "shading" or "shd":
                 var shdParts = value.Split(';');

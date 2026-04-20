@@ -40,21 +40,29 @@ public partial class ExcelHandler
         if (rows.Count == 0)
             return "No data to import";
 
+        // Import writes rows sequentially — bypass FindOrCreateCell (which is O(n) per row,
+        // causing O(n²) total for large imports) and directly append Row/Cell nodes in order.
         int maxCols = 0;
         for (int r = 0; r < rows.Count; r++)
         {
             var fields = rows[r];
             if (fields.Count > maxCols) maxCols = fields.Count;
-            var rowIdx = startRow + r;
+            var rowIdx = (uint)(startRow + r);
+
+            var row = new Row { RowIndex = rowIdx };
+            sheetData.Append(row);
 
             for (int c = 0; c < fields.Count; c++)
             {
                 var colIdx = startColIdx + c;
                 var cellRef = $"{IndexToColumnName(colIdx)}{rowIdx}";
-                var cell = FindOrCreateCell(sheetData, cellRef);
+                var cell = new Cell { CellReference = cellRef.ToUpperInvariant() };
+                row.Append(cell);
                 SetCellValueWithTypeDetection(cell, fields[c]);
             }
         }
+
+        InvalidateRowIndex(sheetData);
 
         // --header: set AutoFilter on data range and freeze pane below first row
         if (hasHeader && rows.Count > 0)
@@ -126,10 +134,15 @@ public partial class ExcelHandler
             return;
         }
 
+        // R13-1: enforce Excel's 32767-char per-cell limit at the CSV/TSV
+        // import path too, so bulk imports fail fast instead of producing a
+        // file Excel refuses to open.
+        EnsureCellValueLength(value, cell.CellReference?.Value);
+
         // Formula: starts with =
         if (value.StartsWith('='))
         {
-            cell.CellFormula = new CellFormula(value[1..]);
+            cell.CellFormula = new CellFormula(OfficeCli.Core.ModernFunctionQualifier.Qualify(value[1..]));
             cell.CellValue = null;
             cell.DataType = null;
             return;

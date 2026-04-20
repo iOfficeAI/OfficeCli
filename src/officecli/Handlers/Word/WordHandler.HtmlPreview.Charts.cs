@@ -50,31 +50,56 @@ public partial class WordHandler
             var renderer = new ChartSvgRenderer
             {
                 ThemeAccentColors = ChartSvgRenderer.BuildThemeAccentColors(GetThemeColors()),
-                CatColor = info.CatFontColor != null ? $"#{info.CatFontColor}" : "#333333",
-                AxisColor = info.ValFontColor != null ? $"#{info.ValFontColor}" : "#555555",
-                ValueColor = info.ValFontColor != null ? $"#{info.ValFontColor}" : "#444444",
-                GridColor = info.GridlineColor != null ? $"#{info.GridlineColor}" : "#ddd",
-                AxisLineColor = info.AxisLineColor != null ? $"#{info.AxisLineColor}" : "#999",
+                CatColor = (info.CatFontColor != null && IsHexColor(info.CatFontColor)) ? $"#{info.CatFontColor}" : "#333333",
+                AxisColor = (info.ValFontColor != null && IsHexColor(info.ValFontColor)) ? $"#{info.ValFontColor}" : "#555555",
+                ValueColor = (info.ValFontColor != null && IsHexColor(info.ValFontColor)) ? $"#{info.ValFontColor}" : "#444444",
+                GridColor = (info.GridlineColor != null && IsHexColor(info.GridlineColor)) ? $"#{info.GridlineColor}" : "#ddd",
+                AxisLineColor = (info.AxisLineColor != null && IsHexColor(info.AxisLineColor)) ? $"#{info.AxisLineColor}" : "#999",
                 ValFontPx = info.ValFontPx,
                 CatFontPx = info.CatFontPx
             };
 
             var titleH = string.IsNullOrEmpty(info.Title) ? 0 : 24;
-            var legendH = info.HasLegend ? 24 : 0;
+            // #7f: only reserve vertical room for the legend when it sits
+            // above or below the plot area. Right/left legends share the
+            // full SVG height.
+            var legendAbove = info.LegendPos == "t";
+            var legendSide  = info.LegendPos is "r" or "l" or "tr";
+            // Any remaining value (including "ctr" overlay and unknown) or
+            // empty string → below, so HasLegend=true + ctr doesn't vanish.
+            var legendBelow = !legendAbove && !legendSide;
+            var legendH = info.HasLegend && (legendAbove || legendBelow) ? 24 : 0;
             var chartSvgH = svgH - titleH - legendH;
 
             sb.Append($"<div style=\"margin:0.5em 0;text-align:center\">");
             if (!string.IsNullOrEmpty(info.Title))
                 sb.Append($"<div style=\"font-weight:bold;margin-bottom:4px;font-size:{info.TitleFontSize}\">{HtmlEncode(info.Title)}</div>");
 
+            // Top legend prints above the SVG, side legends share a flex row.
+            if (info.HasLegend && legendAbove)
+                renderer.RenderLegendHtml(sb, info, "#333");
+
             var bgStyle = info.ChartFillColor != null ? $"background:#{info.ChartFillColor};" : "background:white;";
+            if (info.HasLegend && legendSide)
+            {
+                var flexDir = info.LegendPos == "l" ? "row-reverse" : "row";
+                sb.Append($"<div style=\"display:flex;flex-direction:{flexDir};align-items:{(info.LegendPos == "tr" ? "flex-start" : "center")};justify-content:center;gap:8px\">");
+            }
             sb.Append($"<svg width=\"{svgW}\" height=\"{chartSvgH}\" xmlns=\"http://www.w3.org/2000/svg\" style=\"{bgStyle}\">");
 
             renderer.RenderChartSvgContent(sb, info, svgW, chartSvgH);
 
             sb.Append("</svg>");
 
-            renderer.RenderLegendHtml(sb, info, "#333");
+            if (info.HasLegend && legendSide)
+            {
+                renderer.RenderLegendHtml(sb, info, "#333");
+                sb.Append("</div>");
+            }
+            else if (info.HasLegend && legendBelow)
+            {
+                renderer.RenderLegendHtml(sb, info, "#333");
+            }
 
             sb.Append("</div>");
         }
@@ -110,11 +135,11 @@ public partial class WordHandler
             var renderer = new ChartSvgRenderer
             {
                 ThemeAccentColors = ChartSvgRenderer.BuildThemeAccentColors(GetThemeColors()),
-                CatColor = info.CatFontColor != null ? $"#{info.CatFontColor}" : "#333333",
-                AxisColor = info.ValFontColor != null ? $"#{info.ValFontColor}" : "#555555",
-                ValueColor = info.ValFontColor != null ? $"#{info.ValFontColor}" : "#444444",
-                GridColor = info.GridlineColor != null ? $"#{info.GridlineColor}" : "#ddd",
-                AxisLineColor = info.AxisLineColor != null ? $"#{info.AxisLineColor}" : "#999",
+                CatColor = (info.CatFontColor != null && IsHexColor(info.CatFontColor)) ? $"#{info.CatFontColor}" : "#333333",
+                AxisColor = (info.ValFontColor != null && IsHexColor(info.ValFontColor)) ? $"#{info.ValFontColor}" : "#555555",
+                ValueColor = (info.ValFontColor != null && IsHexColor(info.ValFontColor)) ? $"#{info.ValFontColor}" : "#444444",
+                GridColor = (info.GridlineColor != null && IsHexColor(info.GridlineColor)) ? $"#{info.GridlineColor}" : "#ddd",
+                AxisLineColor = (info.AxisLineColor != null && IsHexColor(info.AxisLineColor)) ? $"#{info.AxisLineColor}" : "#999",
                 ValFontPx = info.ValFontPx,
                 CatFontPx = info.CatFontPx,
             };

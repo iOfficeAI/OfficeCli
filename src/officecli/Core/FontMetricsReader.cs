@@ -4,18 +4,17 @@
 namespace OfficeCli.Core;
 
 /// <summary>
-/// Lightweight TTF/TTC font metrics reader. Reads only the OS/2 and head tables
-/// to extract usWinAscent, usWinDescent, and unitsPerEm — enough to calculate
-/// the line-height ratio that Word uses for line spacing.
+/// Lightweight TTF/TTC font metrics reader. Reads OS/2, hhea, and head tables
+/// to extract usWinAscent, usWinDescent, hheaLineGap, and unitsPerEm —
+/// enough to calculate the line-height ratio for CSS rendering.
 ///
-/// Word line spacing formula: actualLineHeight = (winAscent + winDescent) / UPM × fontSize × multiplier
-/// CSS line-height is relative to fontSize, so: cssLineHeight = wordMultiplier × ratio
-/// where ratio = (winAscent + winDescent) / UPM
+/// ratio = (winAscent + winDescent + hheaLineGap) / UPM
+/// CSS line-height = lineSpacingMultiplier × ratio
 /// </summary>
 internal static class FontMetricsReader
 {
     /// <summary>
-    /// Line-height ratio = (usWinAscent + usWinDescent) / unitsPerEm.
+    /// Line-height ratio = (usWinAscent + usWinDescent + hheaLineGap) / unitsPerEm.
     /// Returns 1.0 if the font file cannot be read.
     /// </summary>
     public static double GetLineHeightRatio(string fontFilePath, int fontIndex = 0)
@@ -41,19 +40,15 @@ internal static class FontMetricsReader
             var winDescent = ReadUInt16BE(reader);
             var winTotal = (double)(winAscent + winDescent);
 
-            // hhea table: ascent at offset 4, descent at offset 6 (int16), lineGap at offset 8 (int16)
-            // Chrome uses: max(winAscent+winDescent, hheaAscent+|hheaDescent|+hheaLineGap) / UPM
-            double hheaTotal = 0;
+            // Include hhea lineGap in the ratio for accurate line height.
+            int hheaLineGap = 0;
             if (hheaOffset >= 0)
             {
-                fs.Position = hheaOffset + 4;
-                var hheaAscent = ReadInt16BE(reader);
-                var hheaDescent = ReadInt16BE(reader);
-                var hheaLineGap = ReadInt16BE(reader);
-                hheaTotal = hheaAscent + Math.Abs(hheaDescent) + Math.Max(0, (int)hheaLineGap);
+                fs.Position = hheaOffset + 8; // lineGap at hhea offset 8 (int16)
+                hheaLineGap = Math.Max(0, (int)ReadInt16BE(reader));
             }
 
-            return Math.Max(winTotal, hheaTotal) / upm;
+            return (winTotal + hheaLineGap) / upm;
         }
         catch
         {
@@ -199,8 +194,8 @@ internal static class FontMetricsReader
     /// <summary>
     /// Get CSS ascent-override and descent-override percentages for a font.
     /// These tell the browser to distribute line-height space according to
-    /// the font's ascent/descent ratio (matching Word's behavior) instead of
-    /// the CSS default half-leading model.
+    /// the font's OS/2 ascent/descent ratio instead of the CSS default
+    /// half-leading model.
     /// Returns (0, 0) if the font cannot be found.
     /// </summary>
     public static (double ascentPct, double descentPct) GetAscentDescentOverride(string fontFamily)

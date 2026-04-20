@@ -28,12 +28,14 @@ public partial class WordHandler
             pProps.Justification = new Justification { Val = ParseJustification(alignment) };
         if (properties.TryGetValue("firstlineindent", out var indent) || properties.TryGetValue("firstLineIndent", out indent))
         {
-            // Validate range — OOXML stores as StringValue but must fit within reasonable twip range
-            if (long.TryParse(indent, out var indentLong) && (indentLong < 0 || indentLong > 31680))
+            // Lenient input: accept "2cm", "0.5in", "18pt", or bare twips (backward compat).
+            // SpacingConverter.ParseWordSpacing treats bare numbers as twips.
+            var indentTwips = SpacingConverter.ParseWordSpacing(indent);
+            if (indentTwips > 31680)
                 throw new OverflowException($"First line indent value out of range (0-31680 twips): {indent}");
             pProps.Indentation = new Indentation
             {
-                FirstLine = indent  // raw twips, consistent with Set and Get
+                FirstLine = indentTwips.ToString()  // raw twips, consistent with Set and Get
             };
         }
         if (properties.TryGetValue("spacebefore", out var sb4) || properties.TryGetValue("spaceBefore", out sb4))
@@ -163,7 +165,7 @@ public partial class WordHandler
                 rProps.Color = new Color { Val = SanitizeHex(pColor) };
             if (properties.TryGetValue("underline", out var pUnderline))
             {
-                var ulVal = pUnderline.ToLowerInvariant() switch { "true" => "single", "false" or "none" => "none", _ => pUnderline };
+                var ulVal = NormalizeUnderlineValue(pUnderline);
                 rProps.Underline = new Underline { Val = new UnderlineValues(ulVal) };
             }
             if ((properties.TryGetValue("strike", out var pStrike) || properties.TryGetValue("strikethrough", out pStrike)) && IsTruthy(pStrike))
@@ -178,6 +180,20 @@ public partial class WordHandler
             }
             if (properties.TryGetValue("dstrike", out var pDstrike) && IsTruthy(pDstrike))
                 rProps.DoubleStrike = new DoubleStrike();
+            if (properties.TryGetValue("vanish", out var pVanish) && IsTruthy(pVanish))
+                rProps.Vanish = new Vanish();
+            if (properties.TryGetValue("outline", out var pOutline) && IsTruthy(pOutline))
+                rProps.Outline = new Outline();
+            if (properties.TryGetValue("shadow", out var pShadow) && IsTruthy(pShadow))
+                rProps.Shadow = new Shadow();
+            if (properties.TryGetValue("emboss", out var pEmboss) && IsTruthy(pEmboss))
+                rProps.Emboss = new Emboss();
+            if (properties.TryGetValue("imprint", out var pImprint) && IsTruthy(pImprint))
+                rProps.Imprint = new Imprint();
+            if (properties.TryGetValue("noproof", out var pNoProof) && IsTruthy(pNoProof))
+                rProps.NoProof = new NoProof();
+            if (properties.TryGetValue("rtl", out var pRtl) && IsTruthy(pRtl))
+                rProps.RightToLeftText = new RightToLeftText();
             if (properties.TryGetValue("vertAlign", out var pVertAlign) || properties.TryGetValue("vertalign", out pVertAlign))
             {
                 rProps.VerticalTextAlignment = new VerticalTextAlignment
@@ -355,7 +371,7 @@ public partial class WordHandler
             newRProps.Color = new Color { Val = SanitizeHex(rColor) };
         if (properties.TryGetValue("underline", out var rUnderline))
         {
-            var ulVal = rUnderline.ToLowerInvariant() switch { "true" => "single", "false" or "none" => "none", _ => rUnderline };
+            var ulVal = NormalizeUnderlineValue(rUnderline);
             newRProps.Underline = new Underline { Val = new UnderlineValues(ulVal) };
         }
         if ((properties.TryGetValue("strike", out var rStrike) || properties.TryGetValue("strikethrough", out rStrike)) && IsTruthy(rStrike))

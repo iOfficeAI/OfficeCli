@@ -17,6 +17,11 @@ public partial class PowerPointHandler
     private static void RenderTextBody(StringBuilder sb, OpenXmlElement textBody, Dictionary<string, string> themeColors,
         Shape? placeholderShape = null, OpenXmlPart? placeholderPart = null)
     {
+        // Per-textbody auto-number counters, keyed by scheme type + paragraph level.
+        // Resets when switching type/level. Paragraphs aren't wrapped in <ol>, so
+        // we count manually and emit the numeric glyph inline.
+        var autoNumCounters = new Dictionary<string, int>();
+        string? lastAutoKey = null;
         foreach (var para in textBody.Elements<Drawing.Paragraph>())
         {
             // Resolve per-paragraph font size based on paragraph level
@@ -65,11 +70,33 @@ public partial class PowerPointHandler
             var bulletAuto = pProps?.GetFirstChild<Drawing.AutoNumberedBullet>();
             var hasBullet = bulletChar != null || bulletAuto != null;
 
+            // Resolve auto-numbered glyph (e.g. "1.", "a.", "iv.") and track per-scheme counter.
+            string? autoNumGlyph = null;
+            if (bulletAuto != null)
+            {
+                int paraLevel = pProps?.Level?.Value ?? 0;
+                string schemeKey = (bulletAuto.Type?.HasValue == true ? bulletAuto.Type.Value.ToString() : "arabicPeriod") + "@" + paraLevel;
+                if (lastAutoKey != schemeKey)
+                {
+                    autoNumCounters[schemeKey] = 0;
+                    lastAutoKey = schemeKey;
+                }
+                int startAt = bulletAuto.StartAt?.Value ?? 1;
+                int n = autoNumCounters.TryGetValue(schemeKey, out var c) ? c : 0;
+                int index = (n == 0 ? startAt : startAt + n);
+                autoNumCounters[schemeKey] = n + 1;
+                autoNumGlyph = FormatAutoNumberGlyph(bulletAuto.Type?.HasValue == true ? bulletAuto.Type.Value : Drawing.TextAutoNumberSchemeValues.ArabicPeriod, index);
+            }
+            else
+            {
+                lastAutoKey = null;
+            }
+
             sb.Append($"<div class=\"para\" style=\"{string.Join(";", paraStyles)}\">");
 
             if (hasBullet)
             {
-                var bullet = bulletChar ?? "\u2022";
+                var bullet = autoNumGlyph ?? bulletChar ?? "\u2022";
                 var buStyles = new List<string>();
 
                 // Bullet color: explicit buClr > first run color > default (inherit)
@@ -104,8 +131,20 @@ public partial class PowerPointHandler
                     }
                 }
 
+                // Hanging-indent tab gap: size bullet span to match the negative
+                // indent so text starts at marL regardless of bullet glyph width.
+                // OOXML marL (e.g. 457200 EMU = 0.5in = 36pt) paired with indent
+                // = -marL creates the hanging layout; we mirror it in CSS by
+                // making the bullet an inline-block of width |indent|.
+                long indentEmu = pProps?.Indent?.Value ?? 0;
+                if (indentEmu < 0)
+                {
+                    var gapPt = Units.EmuToPt(-indentEmu);
+                    buStyles.Add($"display:inline-block");
+                    buStyles.Add($"width:{gapPt}pt");
+                }
                 var buStyle = buStyles.Count > 0 ? $" style=\"{string.Join(";", buStyles)}\"" : "";
-                sb.Append($"<span class=\"bullet\"{buStyle}>{HtmlEncode(bullet)} </span>");
+                sb.Append($"<span class=\"bullet\"{buStyle}>{HtmlEncode(bullet)}</span>");
             }
 
             // Check for OfficeMath (a14:m inside mc:AlternateContent) in paragraph XML
@@ -145,7 +184,7 @@ public partial class PowerPointHandler
             {
                 foreach (var run in runs)
                 {
-                    RenderRun(sb, run, themeColors, defaultFontSizeHundredths);
+                    RenderRun(sb, run, themeColors, defaultFontSizeHundredths, placeholderPart);
                 }
             }
 
@@ -158,13 +197,30 @@ public partial class PowerPointHandler
     }
 
     private static void RenderRun(StringBuilder sb, Drawing.Run run, Dictionary<string, string> themeColors,
-        int? defaultFontSizeHundredths = null)
+        int? defaultFontSizeHundredths = null, OpenXmlPart? part = null)
     {
         var text = run.Text?.Text ?? "";
         if (string.IsNullOrEmpty(text)) return;
 
         var styles = new List<string>();
         var rp = run.RunProperties;
+
+        // Hyperlink resolution (RUN-level only; shape-level deferred).
+        // Read <a:hlinkClick> from run.RunProperties, resolve relationship ID
+        // via containing part's HyperlinkRelationships to an external URI.
+        string? hyperlinkUrl = null;
+        bool hasExplicitColor = rp?.GetFirstChild<Drawing.SolidFill>() != null;
+        bool hasExplicitUnderline = rp?.Underline?.HasValue == true;
+        var hlinkClick = rp?.GetFirstChild<Drawing.HyperlinkOnClick>();
+        if (hlinkClick?.Id?.Value is string relId && part != null)
+        {
+            try
+            {
+                var rel = part.HyperlinkRelationships.FirstOrDefault(r => r.Id == relId);
+                if (rel?.Uri != null) hyperlinkUrl = rel.Uri.ToString();
+            }
+            catch { }
+        }
 
         if (rp != null)
         {
@@ -190,11 +246,93 @@ public partial class PowerPointHandler
 
             // Underline
             if (rp.Underline?.HasValue == true && rp.Underline.Value != Drawing.TextUnderlineValues.None)
-                styles.Add("text-decoration:underline");
+            {
+                var u = rp.Underline.Value;
+                if (u == Drawing.TextUnderlineValues.Double)
+                {
+                    // CONSISTENCY(underline-variants): mirrors WordHandler's
+                    // emitter. Chromium renders this as two distinct lines at
+                    // common font sizes (verified via Word HTML preview at 18pt).
+                    // Earlier R6 polyfill removed — see git history if the
+                    // PPTX-specific cascade breaks this in the future.
+                    styles.Add("text-decoration:underline");
+                    styles.Add("text-decoration-style:double");
+                }
+                else if (u == Drawing.TextUnderlineValues.Wavy)
+                {
+                    styles.Add("text-decoration:underline wavy");
+                }
+                else if (u == Drawing.TextUnderlineValues.WavyHeavy)
+                {
+                    styles.Add("text-decoration:underline wavy");
+                    styles.Add("text-decoration-thickness:2px");
+                }
+                else if (u == Drawing.TextUnderlineValues.WavyDouble)
+                {
+                    // best-effort: CSS has no wavy+double; emit wavy thicker.
+                    styles.Add("text-decoration:underline wavy");
+                    styles.Add("text-decoration-thickness:2px");
+                }
+                else if (u == Drawing.TextUnderlineValues.Dotted)
+                {
+                    styles.Add("text-decoration:underline dotted");
+                }
+                else if (u == Drawing.TextUnderlineValues.HeavyDotted)
+                {
+                    styles.Add("text-decoration:underline dotted");
+                    styles.Add("text-decoration-thickness:2px");
+                }
+                else if (u == Drawing.TextUnderlineValues.Dash
+                    || u == Drawing.TextUnderlineValues.DashLong)
+                {
+                    styles.Add("text-decoration:underline dashed");
+                }
+                else if (u == Drawing.TextUnderlineValues.DashHeavy
+                    || u == Drawing.TextUnderlineValues.DashLongHeavy
+                    || u == Drawing.TextUnderlineValues.DotDashHeavy
+                    || u == Drawing.TextUnderlineValues.DotDotDashHeavy)
+                {
+                    styles.Add("text-decoration:underline dashed");
+                    styles.Add("text-decoration-thickness:2px");
+                }
+                else if (u == Drawing.TextUnderlineValues.DotDash
+                    || u == Drawing.TextUnderlineValues.DotDotDash)
+                {
+                    // TODO CONSISTENCY(underline-variants): CSS has no dot-dash
+                    // pattern; approximate with dashed.
+                    styles.Add("text-decoration:underline dashed");
+                }
+                else if (u == Drawing.TextUnderlineValues.Heavy)
+                {
+                    styles.Add("text-decoration:underline solid");
+                    styles.Add("text-decoration-thickness:2px");
+                }
+                else
+                {
+                    // TODO CONSISTENCY(underline-variants): exotic combos
+                    // (Words, HeavyWords, etc.) fall back to plain underline.
+                    styles.Add("text-decoration:underline");
+                }
+            }
 
             // Strikethrough
             if (rp.Strike?.HasValue == true && rp.Strike.Value != Drawing.TextStrikeValues.NoStrike)
-                styles.Add("text-decoration:line-through");
+            {
+                if (rp.Strike.Value == Drawing.TextStrikeValues.DoubleStrike)
+                {
+                    // CONSISTENCY(underline-variants): like `text-decoration:underline
+                    // double`, `line-through double` may render visually identical
+                    // to single at typical font sizes in Chromium. Unlike underline
+                    // we don't polyfill: line-through sits through the glyph, so
+                    // a background-image trick would either be occluded or misplaced.
+                    // Known limitation; kept for forward-compat once engines improve.
+                    styles.Add("text-decoration:line-through double");
+                }
+                else
+                {
+                    styles.Add("text-decoration:line-through");
+                }
+            }
 
             // Color
             var solidFill = rp.GetFirstChild<Drawing.SolidFill>();
@@ -230,18 +368,80 @@ public partial class PowerPointHandler
             }
         }
 
-        // Hyperlink
-        var hlinkClick = run.Parent?.Elements<Drawing.Run>()
-            .Where(r => r == run)
-            .Select(_ => run.Parent)
-            .FirstOrDefault()
-            ?.GetFirstChild<Drawing.HyperlinkOnClick>();
-        // Actually check run's parent paragraph for hyperlinks on this run
-        // Not critical for preview, skip for simplicity
+        // Auto-style hyperlink runs that lack explicit color/underline. Uses
+        // theme-less fallback #0563C1 (PowerPoint default hyperlink color).
+        // Shape-level hyperlinks are deferred (R14-supplemental).
+        if (hlinkClick != null)
+        {
+            if (!hasExplicitColor) styles.Add("color:#0563C1");
+            if (!hasExplicitUnderline) styles.Add("text-decoration:underline");
+        }
 
-        if (styles.Count > 0)
-            sb.Append($"<span style=\"{string.Join(";", styles)}\">{HtmlEncode(text)}</span>");
+        string inner = styles.Count > 0
+            ? $"<span style=\"{string.Join(";", styles)}\">{HtmlEncode(text)}</span>"
+            : HtmlEncode(text);
+
+        if (!string.IsNullOrEmpty(hyperlinkUrl))
+        {
+            sb.Append($"<a href=\"{HtmlEncode(hyperlinkUrl)}\" rel=\"noopener\">{inner}</a>");
+        }
         else
-            sb.Append(HtmlEncode(text));
+        {
+            sb.Append(inner);
+        }
+    }
+
+    // Format an auto-numbered bullet glyph (e.g. "1.", "(a)", "iv)") for a given
+    // OOXML scheme and 1-based index. Covers the common schemes emitted by
+    // ApplyListStyle; unsupported schemes fall back to "N." arabic-period.
+    private static string FormatAutoNumberGlyph(Drawing.TextAutoNumberSchemeValues scheme, int n)
+    {
+        string key = scheme.ToString();
+        // Decompose the scheme name — it's of form "{alpha|AlphaUc|romanLc|RomanUc|arabic|...}{Period|ParenBoth|ParenR|Plain|Minus}"
+        // Use InnerText style match when possible
+        string body;
+        if (key.StartsWith("alphaLc", StringComparison.OrdinalIgnoreCase) || key.StartsWith("AlphaLc", StringComparison.OrdinalIgnoreCase))
+            body = ToAlpha(n, upper: false);
+        else if (key.StartsWith("alphaUc", StringComparison.OrdinalIgnoreCase) || key.StartsWith("AlphaUc", StringComparison.OrdinalIgnoreCase))
+            body = ToAlpha(n, upper: true);
+        else if (key.StartsWith("romanLc", StringComparison.OrdinalIgnoreCase) || key.StartsWith("RomanLc", StringComparison.OrdinalIgnoreCase))
+            body = ToRoman(n).ToLowerInvariant();
+        else if (key.StartsWith("romanUc", StringComparison.OrdinalIgnoreCase) || key.StartsWith("RomanUc", StringComparison.OrdinalIgnoreCase))
+            body = ToRoman(n);
+        else
+            body = n.ToString();
+
+        if (key.EndsWith("Period", StringComparison.OrdinalIgnoreCase)) return body + ".";
+        if (key.EndsWith("ParenBoth", StringComparison.OrdinalIgnoreCase)) return "(" + body + ")";
+        if (key.EndsWith("ParenR", StringComparison.OrdinalIgnoreCase)) return body + ")";
+        if (key.EndsWith("Minus", StringComparison.OrdinalIgnoreCase)) return "- " + body + " -";
+        if (key.EndsWith("Plain", StringComparison.OrdinalIgnoreCase)) return body;
+        return body + ".";
+    }
+
+    private static string ToAlpha(int n, bool upper)
+    {
+        if (n <= 0) n = 1;
+        var sb = new StringBuilder();
+        while (n > 0)
+        {
+            n--;
+            sb.Insert(0, (char)((upper ? 'A' : 'a') + (n % 26)));
+            n /= 26;
+        }
+        return sb.ToString();
+    }
+
+    private static string ToRoman(int n)
+    {
+        if (n <= 0) return n.ToString();
+        int[] values = { 1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1 };
+        string[] numerals = { "M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I" };
+        var sb = new StringBuilder();
+        for (int i = 0; i < values.Length; i++)
+        {
+            while (n >= values[i]) { sb.Append(numerals[i]); n -= values[i]; }
+        }
+        return sb.ToString();
     }
 }

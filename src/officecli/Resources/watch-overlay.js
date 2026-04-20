@@ -34,11 +34,65 @@
             cells.push({ col: cn, row: c.row, path: paths[i] });
         }
         if (cells.length !== (maxC - minC + 1) * (maxR - minR + 1)) return null;
-        if (cells.length < 2) return null; // single cell uses individual styling
         return { sheet: sheet, minC: minC, maxC: maxC, minR: minR, maxR: maxR, cells: cells };
     }
 
     var _SEL_CLASSES = ['officecli-selected', 'officecli-sel-range', 'officecli-sel-rowcol', 'officecli-sel-handle'];
+
+    // Selection perimeter is drawn via a single absolutely-positioned overlay
+    // div sized to the union rect of selected cells (computed with
+    // getBoundingClientRect). This avoids the known border-collapse + inset
+    // box-shadow / outline-offset misalignment quirk: with collapsed borders,
+    // adjacent cells share a 1px edge and per-cell frame decorations render
+    // offset from the cell's visual edge. The overlay lives in the scrollable
+    // sheet container so natural scrolling keeps it aligned; explicit
+    // reposition on scroll/resize handles remaining cases.
+    var _selOverlay = null;
+    function _getSelOverlayEl() {
+        if (_selOverlay && _selOverlay.isConnected) return _selOverlay;
+        _selOverlay = document.createElement('div');
+        _selOverlay.className = 'officecli-sel-overlay';
+        _selOverlay.style.cssText =
+            'position:absolute;pointer-events:none;box-sizing:border-box;' +
+            'border:2px solid #217346;display:none;z-index:1000;';
+        var handle = document.createElement('div');
+        handle.style.cssText =
+            'position:absolute;right:-5px;bottom:-5px;width:7px;height:7px;' +
+            'background:#217346;border:1px solid #fff;';
+        _selOverlay.appendChild(handle);
+        return _selOverlay;
+    }
+    function _hideSelOverlay() {
+        if (_selOverlay) _selOverlay.style.display = 'none';
+    }
+    function _positionSelOverlay(cellEls) {
+        if (!cellEls || !cellEls.length) { _hideSelOverlay(); return; }
+        // Attach to the nearest <table>. Anchoring inside the scrolling content
+        // (not the scroll container) means absolute positioning stays aligned
+        // automatically as the user scrolls the sheet.
+        var container = cellEls[0].closest('table') || cellEls[0].offsetParent || document.body;
+        var ov = _getSelOverlayEl();
+        if (ov.parentNode !== container) container.appendChild(ov);
+        // Ensure container is a positioning context for absolute overlay
+        var cs = getComputedStyle(container);
+        if (cs.position === 'static') container.style.position = 'relative';
+        var cRect = container.getBoundingClientRect();
+        var minL = Infinity, minT = Infinity, maxR = -Infinity, maxB = -Infinity;
+        for (var i = 0; i < cellEls.length; i++) {
+            var r = cellEls[i].getBoundingClientRect();
+            if (r.width === 0 && r.height === 0) continue;
+            if (r.left < minL) minL = r.left;
+            if (r.top < minT) minT = r.top;
+            if (r.right > maxR) maxR = r.right;
+            if (r.bottom > maxB) maxB = r.bottom;
+        }
+        if (minL === Infinity) { _hideSelOverlay(); return; }
+        ov.style.left = (minL - cRect.left + container.scrollLeft) + 'px';
+        ov.style.top = (minT - cRect.top + container.scrollTop) + 'px';
+        ov.style.width = (maxR - minL) + 'px';
+        ov.style.height = (maxB - minT) + 'px';
+        ov.style.display = 'block';
+    }
 
     function applySelectionToDom() {
         // Clear all selection classes + inline box-shadow from previous range
@@ -47,6 +101,7 @@
             _SEL_CLASSES.forEach(function(c) { el.classList.remove(c); });
             el.style.boxShadow = '';
         });
+        _hideSelOverlay();
         if (_selection.length === 0) return;
 
         // Try rectangular range styling (Excel-native look)
@@ -55,36 +110,29 @@
             // Highlight row/col headers (crosshair for entire range)
             for (var r = rect.minR; r <= rect.maxR; r++) {
                 try {
-                    var rs = '[data-path="' + (rect.sheet + '/row[' + r + ']').replace(/"/g, '\\"') + '"]';
+                    var rs = '[data-path="' + (rect.sheet + '/row[' + r + ']').replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]';
                     document.querySelectorAll(rs).forEach(function(th) { th.classList.add('officecli-selected'); });
                 } catch(e) {}
             }
             for (var c = rect.minC; c <= rect.maxC; c++) {
                 try {
-                    var cs = '[data-path="' + (rect.sheet + '/col[' + _numToCol(c) + ']').replace(/"/g, '\\"') + '"]';
+                    var cs = '[data-path="' + (rect.sheet + '/col[' + _numToCol(c) + ']').replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]';
                     document.querySelectorAll(cs).forEach(function(th) { th.classList.add('officecli-selected'); });
                 } catch(e) {}
             }
-            // Apply range fill + inset box-shadow for perimeter (no layout shift)
-            var B = '#217346', W = 2; // border color and width
+            // Apply range fill class; perimeter frame is drawn by the overlay div
+            var rangeCellEls = [];
             for (var i = 0; i < rect.cells.length; i++) {
                 var cell = rect.cells[i];
                 try {
                     var sel = '[data-path="' + cell.path.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]';
                     document.querySelectorAll(sel).forEach(function(el) {
                         el.classList.add('officecli-sel-range');
-                        // Build inset box-shadow for edge borders
-                        var shadows = [];
-                        if (cell.row === rect.minR) shadows.push('inset 0 '+W+'px 0 '+B);
-                        if (cell.row === rect.maxR) shadows.push('inset 0 -'+W+'px 0 '+B);
-                        if (cell.col === rect.minC) shadows.push('inset '+W+'px 0 0 '+B);
-                        if (cell.col === rect.maxC) shadows.push('inset -'+W+'px 0 0 '+B);
-                        if (shadows.length > 0) el.style.boxShadow = shadows.join(',');
-                        if (cell.row === rect.maxR && cell.col === rect.maxC)
-                            el.classList.add('officecli-sel-handle');
+                        rangeCellEls.push(el);
                     });
                 } catch(e) {}
             }
+            _positionSelOverlay(rangeCellEls);
             return;
         }
 
@@ -116,9 +164,9 @@
                     var cellMatch = _parseCellPath(path);
                     if (cellMatch && el.tagName === 'TD') {
                         try {
-                            var rSel = '[data-path="' + (cellMatch.sheet + '/row[' + cellMatch.row + ']').replace(/"/g, '\\"') + '"]';
+                            var rSel = '[data-path="' + (cellMatch.sheet + '/row[' + cellMatch.row + ']').replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]';
                             document.querySelectorAll(rSel).forEach(function(th) { th.classList.add('officecli-selected'); });
-                            var cSel = '[data-path="' + (cellMatch.sheet + '/col[' + cellMatch.col + ']').replace(/"/g, '\\"') + '"]';
+                            var cSel = '[data-path="' + (cellMatch.sheet + '/col[' + cellMatch.col + ']').replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]';
                             document.querySelectorAll(cSel).forEach(function(th) { th.classList.add('officecli-selected'); });
                         } catch(e2) {}
                     }
@@ -223,6 +271,16 @@
             '.officecli-mark-stale{background:#e0e0e0 !important;opacity:0.55;text-decoration:line-through;}';
         document.head.appendChild(style);
     })();
+
+    // Reposition the selection overlay when the sheet container scrolls or
+    // the viewport resizes. Capture-phase scroll listener catches scrolls in
+    // any scrollable ancestor (sheet-content, window, etc.).
+    document.addEventListener('scroll', function() {
+        if (_selection.length > 0) applySelectionToDom();
+    }, true);
+    window.addEventListener('resize', function() {
+        if (_selection.length > 0) applySelectionToDom();
+    });
 
     // ===== Marks =====
     // Server is the source of truth. The browser mirrors _marks via SSE

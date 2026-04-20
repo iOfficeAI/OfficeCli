@@ -1,8 +1,6 @@
 // Copyright 2025 OfficeCli (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
-using System.Text;
-using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 
@@ -313,6 +311,13 @@ internal static partial class PivotTableHelper
             // total, so we suppress the duplicate trailing 总计 column.
             if (ActiveRowGrandTotals && !rowsOnly)
                 colLabelRow.AppendChild(MakeStringCell(anchorColIdx + 1 + uniqueCols.Count, colLabelRowIdx, totalColLabel));
+        }
+        else if (rowsOnly)
+        {
+            // R4-2: rows-only multi-data pivot has a synthetic "__total__"
+            // col bucket and its K data cells ARE the grand totals, so we
+            // skip the col-label row entirely (no sentinel, no "Total Sum").
+            // Data field names are emitted on a dedicated row below.
         }
         else
         {

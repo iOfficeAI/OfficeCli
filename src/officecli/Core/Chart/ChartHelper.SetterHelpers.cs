@@ -79,27 +79,55 @@ internal static partial class ChartHelper
     {
         switch (optionKey)
         {
-            case "name":
+            case "name" or "label":
                 trendline.RemoveAllChildren<C.TrendlineName>();
                 trendline.PrependChild(new C.TrendlineName { Text = value });
+                // Also emit a <c:trendlineLbl> with rich-text so Excel actually
+                // paints the label next to the trendline (a <c:name> alone is
+                // used by older tooling as a legend-entry override).
+                trendline.RemoveAllChildren<C.TrendlineLabel>();
+                var tlLbl = new C.TrendlineLabel(
+                    new C.Layout(),
+                    new C.ChartText(
+                        new C.RichText(
+                            new Drawing.BodyProperties(),
+                            new Drawing.ListStyle(),
+                            new Drawing.Paragraph(
+                                new Drawing.Run(
+                                    new Drawing.RunProperties { Language = "en-US" },
+                                    new Drawing.Text(value))))));
+                // Schema order under CT_Trendline: name, trendlineLbl, trendlineType, ...
+                var trendlineType = trendline.GetFirstChild<C.TrendlineType>();
+                if (trendlineType != null)
+                    trendline.InsertBefore(tlLbl, trendlineType);
+                else
+                    trendline.AppendChild(tlLbl);
                 break;
-            case "forward":
+            case "forward" or "forecastforward":
                 trendline.RemoveAllChildren<C.Forward>();
                 trendline.AppendChild(new C.Forward { Val = ParseHelpers.SafeParseDouble(value, "trendline.forward") });
                 break;
-            case "backward":
+            case "backward" or "forecastbackward":
                 trendline.RemoveAllChildren<C.Backward>();
                 trendline.AppendChild(new C.Backward { Val = ParseHelpers.SafeParseDouble(value, "trendline.backward") });
+                break;
+            case "order":
+                trendline.RemoveAllChildren<C.PolynomialOrder>();
+                trendline.AppendChild(new C.PolynomialOrder { Val = (byte)Math.Clamp(ParseHelpers.SafeParseInt(value, "trendline.order"), 2, 6) });
+                break;
+            case "period":
+                trendline.RemoveAllChildren<C.Period>();
+                trendline.AppendChild(new C.Period { Val = (uint)Math.Max(2, ParseHelpers.SafeParseInt(value, "trendline.period")) });
                 break;
             case "intercept":
                 trendline.RemoveAllChildren<C.Intercept>();
                 trendline.AppendChild(new C.Intercept { Val = ParseHelpers.SafeParseDouble(value, "trendline.intercept") });
                 break;
-            case "disprsqr" or "rsquared" or "r2":
+            case "disprsqr" or "rsquared" or "r2" or "displayrsquared":
                 trendline.RemoveAllChildren<C.DisplayRSquaredValue>();
                 trendline.AppendChild(new C.DisplayRSquaredValue { Val = ParseHelpers.IsTruthy(value) });
                 break;
-            case "dispeq" or "equation":
+            case "dispeq" or "equation" or "displayequation":
                 trendline.RemoveAllChildren<C.DisplayEquation>();
                 trendline.AppendChild(new C.DisplayEquation { Val = ParseHelpers.IsTruthy(value) });
                 break;
@@ -302,9 +330,31 @@ internal static partial class ChartHelper
                 break;
 
             case "trendline":
-                ser.RemoveAllChildren<C.Trendline>();
-                if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
-                    InsertSeriesChildInOrder(ser, BuildTrendline(value));
+                // CL20: `Set trendline=X` APPENDS a trendline (Excel allows
+                // multiple trendlines per series). Pass `none` to clear.
+                // If the requested trendline type already exists on the
+                // series, replace it in place so repeated identical sets
+                // stay idempotent; otherwise append a new one.
+                if (value.Equals("none", StringComparison.OrdinalIgnoreCase))
+                {
+                    ser.RemoveAllChildren<C.Trendline>();
+                }
+                else
+                {
+                    var newTl = BuildTrendline(value);
+                    var newType = newTl.GetFirstChild<C.TrendlineType>()?.Val?.Value;
+                    var dupeTl = ser.Elements<C.Trendline>()
+                        .FirstOrDefault(t => t.GetFirstChild<C.TrendlineType>()?.Val?.Value == newType);
+                    if (dupeTl != null)
+                    {
+                        dupeTl.InsertAfterSelf(newTl);
+                        dupeTl.Remove();
+                    }
+                    else
+                    {
+                        InsertSeriesChildInOrder(ser, newTl);
+                    }
+                }
                 break;
 
             case "marker":
@@ -329,8 +379,18 @@ internal static partial class ChartHelper
                 var serText = ser.GetFirstChild<C.SeriesText>();
                 if (serText != null)
                 {
-                    serText.RemoveAllChildren();
-                    serText.AppendChild(new C.NumericValue(value));
+                    // If the value looks like a cell reference, rewrite c:tx as a
+                    // c:strRef so Excel resolves it to the cell's value (matches
+                    // Add-path behavior for series{N}.name=Sheet1!A1).
+                    if (IsCellReference(value))
+                    {
+                        RewriteSeriesTextAsRef(ser, NormalizeCellReference(value), cachedValue: null);
+                    }
+                    else
+                    {
+                        serText.RemoveAllChildren();
+                        serText.AppendChild(new C.NumericValue(value));
+                    }
                 }
                 break;
             }
@@ -415,7 +475,7 @@ internal static partial class ChartHelper
                 break;
             }
 
-            case "gradient":
+            case "gradient" or "gradientfill":
                 ApplySeriesGradient(ser, value);
                 break;
 
@@ -490,8 +550,8 @@ internal static partial class ChartHelper
     internal static void HandleDataLabelDottedProperty(OpenXmlCompositeElement firstSer, int pointIndex, string prop, string value)
     {
         var dLbls = firstSer.GetFirstChild<C.DataLabels>();
-        // For "text", auto-create a minimal DataLabels container on the series if not present
-        if (dLbls == null && prop == "text")
+        // Auto-create a minimal DataLabels container if not present and we're about to add per-point data.
+        if (dLbls == null && (prop == "text" || prop == "delete"))
         {
             dLbls = new C.DataLabels();
             dLbls.AppendChild(new C.ShowLegendKey { Val = false });
@@ -504,34 +564,51 @@ internal static partial class ChartHelper
         if (dLbls == null) return;
 
         var ooxmlIdx = (uint)(pointIndex - 1);
+        // Coalesce by idx: schema requires at most one <c:dLbl idx="N"> per series.
+        // Find-or-create once, then merge subsequent settings into the same element.
         var dLbl = dLbls.Elements<C.DataLabel>()
             .FirstOrDefault(dl => dl.Index?.Val?.Value == ooxmlIdx);
+        if (dLbl == null && (prop == "text" || prop == "delete"))
+        {
+            dLbl = new C.DataLabel();
+            dLbl.AppendChild(new C.Index { Val = ooxmlIdx });
+            var insertBefore = dLbls.GetFirstChild<C.ShowLegendKey>() as OpenXmlElement
+                ?? dLbls.GetFirstChild<C.ShowValue>()
+                ?? dLbls.FirstChild;
+            if (insertBefore != null) dLbls.InsertBefore(dLbl, insertBefore);
+            else dLbls.AppendChild(dLbl);
+        }
 
         switch (prop)
         {
             case "delete":
             {
-                if (dLbl == null)
+                if (dLbl == null) return;
+                var del = ParseHelpers.IsTruthy(value);
+                dLbl.RemoveAllChildren<C.Delete>();
+                dLbl.AppendChild(new C.Delete { Val = del });
+                // "delete wins" semantics: a deleted label renders nothing, so strip
+                // any previously-set visible siblings (tx, numFmt, dLblPos, show*).
+                if (del)
                 {
-                    dLbl = new C.DataLabel();
-                    dLbl.Index = new C.Index { Val = ooxmlIdx };
-                    dLbl.AppendChild(new C.Delete { Val = ParseHelpers.IsTruthy(value) });
-                    var insertBefore = dLbls.GetFirstChild<C.ShowLegendKey>() as OpenXmlElement
-                        ?? dLbls.GetFirstChild<C.ShowValue>()
-                        ?? dLbls.FirstChild;
-                    if (insertBefore != null) dLbls.InsertBefore(dLbl, insertBefore);
-                    else dLbls.AppendChild(dLbl);
-                }
-                else
-                {
-                    dLbl.RemoveAllChildren<C.Delete>();
-                    dLbl.AppendChild(new C.Delete { Val = ParseHelpers.IsTruthy(value) });
+                    dLbl.RemoveAllChildren<C.ChartText>();
+                    dLbl.RemoveAllChildren<C.NumberingFormat>();
+                    dLbl.RemoveAllChildren<C.DataLabelPosition>();
+                    dLbl.RemoveAllChildren<C.ShowLegendKey>();
+                    dLbl.RemoveAllChildren<C.ShowValue>();
+                    dLbl.RemoveAllChildren<C.ShowCategoryName>();
+                    dLbl.RemoveAllChildren<C.ShowSeriesName>();
+                    dLbl.RemoveAllChildren<C.ShowPercent>();
+                    dLbl.RemoveAllChildren<C.ShowBubbleSize>();
+                    dLbl.RemoveAllChildren<C.Separator>();
                 }
                 break;
             }
             case "pos" or "position":
             {
                 if (dLbl == null) return;
+                // Skip if this dLbl is already marked deleted — delete wins.
+                if (dLbl.GetFirstChild<C.Delete>() is { Val.Value: true }) return;
                 dLbl.RemoveAllChildren<C.DataLabelPosition>();
                 var dlPos = value.ToLowerInvariant() switch
                 {
@@ -547,23 +624,16 @@ internal static partial class ChartHelper
             case "numfmt":
             {
                 if (dLbl == null) return;
+                if (dLbl.GetFirstChild<C.Delete>() is { Val.Value: true }) return;
                 dLbl.RemoveAllChildren<C.NumberingFormat>();
                 dLbl.AppendChild(new C.NumberingFormat { FormatCode = value, SourceLinked = false });
                 break;
             }
             case "text":
             {
-                // Create or find dLbl, then set custom text via c:tx > c:rich
-                if (dLbl == null)
-                {
-                    dLbl = new C.DataLabel();
-                    dLbl.Index = new C.Index { Val = ooxmlIdx };
-                    var insertBefore = dLbls.GetFirstChild<C.ShowLegendKey>() as OpenXmlElement
-                        ?? dLbls.GetFirstChild<C.ShowValue>()
-                        ?? dLbls.FirstChild;
-                    if (insertBefore != null) dLbls.InsertBefore(dLbl, insertBefore);
-                    else dLbls.AppendChild(dLbl);
-                }
+                if (dLbl == null) return;
+                // Delete wins: if this dLbl is already deleted, ignore a later text= set.
+                if (dLbl.GetFirstChild<C.Delete>() is { Val.Value: true }) return;
                 dLbl.RemoveAllChildren<C.ChartText>();
                 var richText = new C.ChartText();
                 var rich = new C.RichText(
@@ -574,14 +644,7 @@ internal static partial class ChartHelper
                             new Drawing.RunProperties { Language = "en-US" },
                             new Drawing.Text(value))));
                 richText.AppendChild(rich);
-                // Insert tx after idx (schema order: idx, delete, layout, tx, ...)
-                var afterIdx = dLbl.GetFirstChild<C.Index>() as OpenXmlElement;
-                var afterLayout = dLbl.GetFirstChild<C.Layout>() as OpenXmlElement;
-                var insertAfter = afterLayout ?? afterIdx;
-                if (insertAfter != null)
-                    insertAfter.InsertAfterSelf(richText);
-                else
-                    dLbl.PrependChild(richText);
+                dLbl.AppendChild(richText);
                 // Ensure show flags are present so the custom text renders
                 if (dLbl.GetFirstChild<C.ShowValue>() == null)
                     dLbl.AppendChild(new C.ShowValue { Val = true });
@@ -592,6 +655,48 @@ internal static partial class ChartHelper
                 break;
             }
         }
+
+        // Final pass: enforce CT_DLbl schema order. Excel rejects the file silently
+        // if children are out of order (Sch_UnexpectedElementContentExpectingComplex).
+        // Order: idx, delete, layout, tx, numFmt, spPr, txPr, dLblPos,
+        //        showLegendKey, showVal, showCatName, showSerName, showPercent,
+        //        showBubbleSize, separator, extLst.
+        if (dLbl != null) ReorderDLblChildren(dLbl);
+    }
+
+    private static readonly Type[] s_dLblChildOrder =
+    {
+        typeof(C.Index),
+        typeof(C.Delete),
+        typeof(C.Layout),
+        typeof(C.ChartText),
+        typeof(C.NumberingFormat),
+        typeof(C.ChartShapeProperties),
+        typeof(C.TextProperties),
+        typeof(C.DataLabelPosition),
+        typeof(C.ShowLegendKey),
+        typeof(C.ShowValue),
+        typeof(C.ShowCategoryName),
+        typeof(C.ShowSeriesName),
+        typeof(C.ShowPercent),
+        typeof(C.ShowBubbleSize),
+        typeof(C.Separator),
+        typeof(C.ExtensionList),
+    };
+
+    private static void ReorderDLblChildren(C.DataLabel dLbl)
+    {
+        var kept = new List<OpenXmlElement>();
+        foreach (var t in s_dLblChildOrder)
+        {
+            foreach (var child in dLbl.ChildElements.Where(c => c.GetType() == t).ToList())
+            {
+                child.Remove();
+                kept.Add(child);
+            }
+        }
+        // Re-append in schema order. Any unknown children (shouldn't happen) are dropped.
+        foreach (var c in kept) dLbl.AppendChild(c);
     }
 
     /// <summary>

@@ -229,6 +229,14 @@ public partial class PowerPointHandler
                     break;
                 }
 
+                case "pattern":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    ApplyPatternFill(spPr, value);
+                    break;
+                }
+
                 case "liststyle" or "list":
                 {
                     foreach (var para in shape.TextBody?.Elements<Drawing.Paragraph>() ?? Enumerable.Empty<Drawing.Paragraph>())
@@ -663,6 +671,14 @@ public partial class PowerPointHandler
                         foreach (var run in runs) ApplyTextSoftEdge(run, value);
                     else
                         ApplySoftEdge(spPr, value);
+                    break;
+                }
+
+                case "blur":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    ApplyBlur(spPr, value);
                     break;
                 }
 

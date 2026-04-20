@@ -457,8 +457,25 @@ public partial class PowerPointHandler
             int shapeIdx = 0;
             foreach (var shape in shapes)
             {
+                shapeIdx++;
+                var shapePath = $"/slide[{slideNum}]/{BuildElementPathSegment("shape", shape, shapeIdx)}";
+
+                // CONSISTENCY(text-overflow-check): merged in from former `check` command.
+                var overflow = CheckTextOverflow(shape);
+                if (overflow != null)
+                {
+                    issues.Add(new DocumentIssue
+                    {
+                        Id = $"O{++issueNum}",
+                        Type = IssueType.Format,
+                        Severity = IssueSeverity.Warning,
+                        Path = shapePath,
+                        Message = overflow
+                    });
+                }
+
                 var runs = shape.Descendants<Drawing.Run>().ToList();
-                if (runs.Count <= 1) { shapeIdx++; continue; }
+                if (runs.Count <= 1) continue;
 
                 var fonts = runs.Select(r =>
                     r.RunProperties?.GetFirstChild<Drawing.LatinFont>()?.Typeface
@@ -472,11 +489,10 @@ public partial class PowerPointHandler
                         Id = $"F{++issueNum}",
                         Type = IssueType.Format,
                         Severity = IssueSeverity.Info,
-                        Path = $"/slide[{slideNum}]/{BuildElementPathSegment("shape", shape, shapeIdx + 1)}",
+                        Path = shapePath,
                         Message = $"Inconsistent fonts in text box: {string.Join(", ", fonts)}"
                     });
                 }
-                shapeIdx++;
             }
 
             foreach (var pic in shapeTree.Elements<Picture>())

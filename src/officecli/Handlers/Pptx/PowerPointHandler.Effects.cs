@@ -153,6 +153,30 @@ public partial class PowerPointHandler
         InsertEffectInOrder(effectList, new Drawing.SoftEdge { Radius = (long)(radiusPt * 12700) });
     }
 
+    /// <summary>
+    /// Apply blur effect to ShapeProperties.
+    /// Value: radius in points (e.g. "4" or "4pt") or "none" to remove.
+    /// Converts pt → EMU (1pt = 12700 EMU). Sets GrowBounds = true.
+    /// </summary>
+    private static void ApplyBlur(ShapeProperties spPr, string value)
+    {
+        var effectList = EnsureEffectList(spPr);
+        effectList.RemoveAllChildren<Drawing.Blur>();
+
+        if (value.Equals("none", StringComparison.OrdinalIgnoreCase) || value.Equals("false", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!effectList.HasChildren) spPr.RemoveChild(effectList);
+            return;
+        }
+
+        var numStr = value.EndsWith("pt", StringComparison.OrdinalIgnoreCase) ? value[..^2].Trim() : value;
+        if (!double.TryParse(numStr, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var radiusPt)
+            || double.IsNaN(radiusPt) || double.IsInfinity(radiusPt) || radiusPt < 0)
+            throw new ArgumentException($"Invalid 'blur' value '{value}'. Expected a finite non-negative numeric radius in points.");
+
+        InsertEffectInOrder(effectList, new Drawing.Blur { Radius = (long)(radiusPt * 12700), Grow = true });
+    }
+
     private static void ApplyTextReflection(Drawing.Run run, string value)
         => OfficeCli.Core.DrawingEffectsHelper.ApplyTextEffect<Drawing.Reflection>(run, value,
             () => OfficeCli.Core.DrawingEffectsHelper.BuildReflection(value));

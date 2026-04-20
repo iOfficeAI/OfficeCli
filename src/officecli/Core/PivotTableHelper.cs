@@ -1,7 +1,6 @@
 // Copyright 2025 OfficeCli (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
-using System.Text;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
@@ -131,6 +130,12 @@ internal static partial class PivotTableHelper
             // key. Add-path warning suppression relies on this rewrite.
             ["showcolumnstripes"] = "showcolstripes",
             ["showcolumnheaders"] = "showcolheaders",
+            // PV7: bandedRows/bandedCols are Excel Ribbon labels for the
+            // same knobs that OOXML calls showRowStripes/showColStripes.
+            // Accept the user-facing spelling too.
+            ["bandedrows"]        = "showrowstripes",
+            ["bandedcols"]        = "showcolstripes",
+            ["bandedcolumns"]     = "showcolstripes",
             // repeatItemLabels aliases
             ["repeatitemlabels"]  = "repeatlabels",
             ["repeatalllabels"]   = "repeatlabels",
@@ -208,6 +213,18 @@ internal static partial class PivotTableHelper
             "showrowstripes", "showcolstripes",
             "showrowheaders", "showcolheaders",
             "showlastcolumn",
+            // PV7: showDrill toggles the expand/collapse (+/-) buttons on
+            // every pivotField. mergeLabels emits <pivotTableDefinition
+            // mergeItem="1"/> which tells Excel to merge+center repeated
+            // outer axis item cells.
+            "showdrill", "mergelabels",
+            // PV7: labelFilter=field:type:value — row-level pre-cache filter
+            // (see ApplyLabelFilter).
+            "labelfilter",
+            // R4-3: calculatedField[N]=Name:=Formula — numbered variants are
+            // also accepted; CollectUnknownPivotKeys normalizes trailing
+            // digits before the known-set check.
+            "calculatedfield", "calculatedfields",
         };
 
     /// <summary>
@@ -227,10 +244,26 @@ internal static partial class PivotTableHelper
         {
             if (string.IsNullOrEmpty(key)) continue;
             var canonical = NormalizePivotPropKey(key);
-            if (!_knownPivotKeys.Contains(canonical))
+            // R4-3: strip trailing digits before lookup so `calculatedField1`,
+            // `calculatedField2`, etc. match the canonical `calculatedfield`.
+            var stripped = System.Text.RegularExpressions.Regex.Replace(canonical, @"\d+$", "");
+            if (!_knownPivotKeys.Contains(canonical)
+                && !_knownPivotKeys.Contains(stripped))
                 unknown.Add(key);
         }
         return unknown;
+    }
+
+    /// <summary>
+    /// Public wrapper around <see cref="_knownPivotKeys"/> + alias/digit
+    /// normalization for tests and external callers.
+    /// </summary>
+    public static bool IsKnownPivotProperty(string key)
+    {
+        if (string.IsNullOrEmpty(key)) return false;
+        var canonical = NormalizePivotPropKey(key);
+        var stripped = System.Text.RegularExpressions.Regex.Replace(canonical, @"\d+$", "");
+        return _knownPivotKeys.Contains(canonical) || _knownPivotKeys.Contains(stripped);
     }
 
     /// <summary>
@@ -757,6 +790,69 @@ internal static partial class PivotTableHelper
         }
     }
 
+    // PV7 / DEFERRED(xlsx/pivot-advanced-props): row-level pre-cache label
+    // filter. Colon-separated scalar form: `labelFilter=field:type:value`
+    // where `type` is one of contains, beginsWith, endsWith, equals,
+    // notEquals, doesNotContain. Filtering happens BEFORE the cache is
+    // built so the cache, rendered cells, and totals all stay consistent
+    // (same trick the topN filter uses — the alternative, emitting
+    // <x:filters> in the pivotField, would require the cache and the
+    // filter predicate to agree at runtime and Excel is strict about it).
+    // Known limitation vs native Excel: only row-axis labels are filterable
+    // (column-axis labels are not yet addressable).
+    private static void ApplyLabelFilter(
+        string[] headers,
+        List<string[]> columnData,
+        Dictionary<string, string> properties)
+    {
+        if (!properties.TryGetValue("labelFilter", out var spec) || string.IsNullOrEmpty(spec))
+            return;
+        var parts = spec.Split(':', 3);
+        if (parts.Length != 3)
+            throw new ArgumentException(
+                $"labelFilter must be 'field:type:value', got: '{spec}'");
+        var fieldName = parts[0].Trim();
+        var opType = parts[1].Trim().ToLowerInvariant();
+        var needle = parts[2];
+
+        int fieldIdx = Array.FindIndex(headers, h => string.Equals(h, fieldName, StringComparison.Ordinal));
+        if (fieldIdx < 0)
+            throw new ArgumentException($"labelFilter field '{fieldName}' not found in source headers");
+        if (columnData.Count == 0 || fieldIdx >= columnData.Count) return;
+        var col = columnData[fieldIdx];
+        var rowCount = col.Length;
+        if (rowCount == 0) return;
+
+        Func<string, bool> match = opType switch
+        {
+            "contains" => v => v != null && v.IndexOf(needle, StringComparison.Ordinal) >= 0,
+            "doesnotcontain" => v => v == null || v.IndexOf(needle, StringComparison.Ordinal) < 0,
+            "beginswith" => v => v != null && v.StartsWith(needle, StringComparison.Ordinal),
+            "endswith" => v => v != null && v.EndsWith(needle, StringComparison.Ordinal),
+            "equals" => v => string.Equals(v, needle, StringComparison.Ordinal),
+            "notequals" => v => !string.Equals(v, needle, StringComparison.Ordinal),
+            _ => throw new ArgumentException(
+                $"labelFilter type must be one of contains/doesNotContain/beginsWith/endsWith/equals/notEquals, got: '{opType}'"),
+        };
+
+        var keep = new bool[rowCount];
+        int keepCount = 0;
+        for (int r = 0; r < rowCount; r++)
+        {
+            if (match(col[r])) { keep[r] = true; keepCount++; }
+        }
+        if (keepCount == rowCount) return;
+        for (int c = 0; c < columnData.Count; c++)
+        {
+            var src = columnData[c];
+            var dst = new string[keepCount];
+            int w = 0;
+            for (int r = 0; r < rowCount && r < src.Length; r++)
+                if (keep[r]) dst[w++] = src[r];
+            columnData[c] = dst;
+        }
+    }
+
     /// <summary>
     /// Create a pivot table on the target worksheet.
     /// </summary>
@@ -894,6 +990,10 @@ internal static partial class PivotTableHelper
             }
         }
 
+        // 2a. Apply label filter (row-level, pre-cache). Mirrors topN's
+        // filter-before-cache approach so definition/cache stay consistent.
+        ApplyLabelFilter(headers, columnData, properties);
+
         // 2b. Apply Top-N filter to the source rows (ranked by the first value
         // field's aggregate on the outermost row field). Runs BEFORE cache
         // build so the cache, rendered cells, and grand totals all reflect
@@ -949,8 +1049,13 @@ internal static partial class PivotTableHelper
         foreach (var r in rowFields) axisFieldSet.Add(r);
         foreach (var c in colFields) axisFieldSet.Add(c);
         foreach (var f in filterFields) axisFieldSet.Add(f);
+        // R19-1: resolve numFmtIds BEFORE building the cache so date/number
+        // formats on the source column propagate onto the cacheField's
+        // numFmtId attribute. Without this, a column styled as "yyyy-mm-dd"
+        // renders in the pivot as the raw OADate serial (45306, ...).
+        var columnNumFmtIds = ResolveColumnNumFmtIds(workbookPart, columnStyleIds);
         var (cacheDef, fieldNumeric, fieldValueIndex) =
-            BuildCacheDefinition(sourceSheetName, sourceRef, headers, columnData, axisFieldSet, dateGroups);
+            BuildCacheDefinition(sourceSheetName, sourceRef, headers, columnData, axisFieldSet, dateGroups, columnNumFmtIds);
         cachePart.PivotCacheDefinition = cacheDef;
         cachePart.PivotCacheDefinition.Save();
 
@@ -1029,13 +1134,12 @@ internal static partial class PivotTableHelper
         }
         var style = properties.GetValueOrDefault("style", "PivotStyleLight16");
 
-        // Resolve per-column numFmtId from the source StyleIndex so we can stamp
+        // columnNumFmtIds was resolved above (R19-1) and reused here to stamp
         // it onto DataField elements below. Excel uses DataField.NumberFormatId
         // as the PRIMARY display driver for pivot values — the cell-level
         // StyleIndex alone is not enough; without this, Excel renders pivot
         // values as plain General-format numbers even though the rendered cells
         // carry the correct style.
-        var columnNumFmtIds = ResolveColumnNumFmtIds(workbookPart, columnStyleIds);
 
         // Page filters occupy rows ABOVE the pivot body. Ensure position leaves
         // enough headroom for filterCount filter rows + 1 blank separator row.
@@ -1056,8 +1160,36 @@ internal static partial class PivotTableHelper
         // just created with defaults. Shared helper with the Set path so
         // Add and Set accept the same vocabulary / validation.
         ApplyPivotStyleInfoProps(EnsurePivotTableStyle(pivotDef), properties);
+        // PV7: mergeLabels → <pivotTableDefinition mergeItem="1"/>. This
+        // tells Excel to merge+center repeated outer axis item cells.
+        if (properties.TryGetValue("mergelabels", out var mergeLabelsVal)
+            && ParseHelpers.IsTruthy(mergeLabelsVal))
+            pivotDef.MergeItem = true;
+        // PV7: showDrill (inverted sense) → every pivotField's
+        // showDropDowns attribute. Excel's "Show expand/collapse buttons"
+        // toggle. showDropDowns defaults to true; we only write false
+        // when user sets showDrill=false.
+        if (properties.TryGetValue("showdrill", out var showDrillVal))
+        {
+            bool showDrill = ParseHelpers.IsTruthy(showDrillVal);
+            if (!showDrill && pivotDef.PivotFields != null)
+            {
+                foreach (var pf in pivotDef.PivotFields.Elements<PivotField>())
+                    pf.ShowDropDowns = false;
+            }
+        }
+        // PV7: calculatedField — parses `calculatedField="Name:=Formula"` (or
+        // numbered variants `calculatedField1=...`, `calculatedField2=...`)
+        // and appends the matching cacheField / pivotField / dataField trio
+        // plus an <x:calculatedFields> marker on the pivotTableDefinition.
+        // The underlying column is NOT rendered into sheetData; Excel
+        // computes calculated fields live at display time from the formula
+        // stored on the cacheField.
+        ApplyCalculatedFields(cachePart.PivotCacheDefinition, pivotDef, properties);
+
         pivotPart.PivotTableDefinition = pivotDef;
         pivotPart.PivotTableDefinition.Save();
+        cachePart.PivotCacheDefinition.Save();
 
         // 6. RENDER the pivot output into the target sheet's <sheetData>.
         //

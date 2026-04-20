@@ -8,7 +8,6 @@ using DocumentFormat.OpenXml.Presentation;
 using OfficeCli.Core;
 using Drawing = DocumentFormat.OpenXml.Drawing;
 using C = DocumentFormat.OpenXml.Drawing.Charts;
-using M = DocumentFormat.OpenXml.Math;
 
 namespace OfficeCli.Handlers;
 
@@ -41,11 +40,41 @@ public partial class PowerPointHandler
                 rawImgStream.CopyTo(imgStream);
                 imgStream.Position = 0;
 
-                // Embed image into slide part
-                var imagePart = imgSlidePart.AddImagePart(imgPartType);
-                imagePart.FeedData(imgStream);
-                imgStream.Position = 0;
-                var imgRelId = imgSlidePart.GetIdOfPart(imagePart);
+                // Embed image into slide part. For SVG, emit the dual
+                // representation Office requires: PNG fallback at r:embed,
+                // SVG referenced via a:blip/a:extLst asvg:svgBlip.
+                string imgRelId;
+                string? picSvgRelId = null;
+                if (imgPartType == ImagePartType.Svg)
+                {
+                    var svgPart = imgSlidePart.AddImagePart(ImagePartType.Svg);
+                    svgPart.FeedData(imgStream);
+                    imgStream.Position = 0;
+                    picSvgRelId = imgSlidePart.GetIdOfPart(svgPart);
+
+                    if (properties.TryGetValue("fallback", out var picFallback) && !string.IsNullOrWhiteSpace(picFallback))
+                    {
+                        var (fbRaw, fbType) = OfficeCli.Core.ImageSource.Resolve(picFallback);
+                        using var fbDispose = fbRaw;
+                        var fbPart = imgSlidePart.AddImagePart(fbType);
+                        fbPart.FeedData(fbRaw);
+                        imgRelId = imgSlidePart.GetIdOfPart(fbPart);
+                    }
+                    else
+                    {
+                        var pngPart = imgSlidePart.AddImagePart(ImagePartType.Png);
+                        pngPart.FeedData(new MemoryStream(
+                            OfficeCli.Core.SvgImageHelper.TransparentPng1x1, writable: false));
+                        imgRelId = imgSlidePart.GetIdOfPart(pngPart);
+                    }
+                }
+                else
+                {
+                    var imagePart = imgSlidePart.AddImagePart(imgPartType);
+                    imagePart.FeedData(imgStream);
+                    imgStream.Position = 0;
+                    imgRelId = imgSlidePart.GetIdOfPart(imagePart);
+                }
 
                 // Dimensions (default: 6in x 4in, with auto aspect-ratio)
                 // CONSISTENCY(picture-aspect): when only one dimension is
@@ -97,7 +126,176 @@ public partial class PowerPointHandler
 
                 picture.BlipFill = new BlipFill();
                 picture.BlipFill.Blip = new Drawing.Blip { Embed = imgRelId };
-                picture.BlipFill.AppendChild(new Drawing.Stretch(new Drawing.FillRectangle()));
+                if (picSvgRelId != null)
+                    OfficeCli.Core.SvgImageHelper.AppendSvgExtension(picture.BlipFill.Blip, picSvgRelId);
+
+                // Crop support (mirrors Set's crop emitter — keep keys/semantics
+                // identical per CLAUDE.md Feature Implementation Checklist).
+                // CONSISTENCY(ooxml-element-order): in CT_BlipFillProperties
+                // srcRect must precede the fill-mode element (stretch/tile);
+                // PowerPoint silently ignores an out-of-order srcRect.
+                int? cropL = null, cropT = null, cropR = null, cropB = null;
+                if (properties.TryGetValue("crop", out var cropAll))
+                {
+                    var parts = cropAll.Split(',');
+                    double Parse1(string s)
+                    {
+                        var v = ParseHelpers.SafeParseDouble(s.Trim(), "crop");
+                        if (v < 0 || v > 100)
+                            throw new ArgumentException($"Invalid 'crop' value: '{s.Trim()}'. Crop percentage must be between 0 and 100.");
+                        return v;
+                    }
+                    if (parts.Length == 4)
+                    {
+                        cropL = (int)(Parse1(parts[0]) * 1000);
+                        cropT = (int)(Parse1(parts[1]) * 1000);
+                        cropR = (int)(Parse1(parts[2]) * 1000);
+                        cropB = (int)(Parse1(parts[3]) * 1000);
+                    }
+                    else if (parts.Length == 2)
+                    {
+                        var v = (int)(Parse1(parts[0]) * 1000);
+                        var h = (int)(Parse1(parts[1]) * 1000);
+                        cropT = v; cropB = v; cropL = h; cropR = h;
+                    }
+                    else if (parts.Length == 1)
+                    {
+                        var p = (int)(Parse1(parts[0]) * 1000);
+                        cropL = p; cropT = p; cropR = p; cropB = p;
+                    }
+                    else
+                    {
+                        throw new ArgumentException($"Invalid 'crop' value: '{cropAll}'. Expected 1, 2, or 4 comma-separated percentages.");
+                    }
+                }
+                int? SidePct(string k)
+                {
+                    if (!properties.TryGetValue(k, out var v)) return null;
+                    if (!double.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d))
+                        throw new ArgumentException($"Invalid '{k}' value: '{v}'. Expected a percentage (0-100).");
+                    if (d < 0 || d > 100)
+                        throw new ArgumentException($"Invalid '{k}' value: '{v}'. Crop percentage must be between 0 and 100.");
+                    return (int)(d * 1000);
+                }
+                cropL = SidePct("cropleft") ?? cropL;
+                cropT = SidePct("croptop") ?? cropT;
+                cropR = SidePct("cropright") ?? cropR;
+                cropB = SidePct("cropbottom") ?? cropB;
+                var hasCrop = cropL is not null || cropT is not null || cropR is not null || cropB is not null;
+                var anyNonZero = (cropL ?? 0) != 0 || (cropT ?? 0) != 0 || (cropR ?? 0) != 0 || (cropB ?? 0) != 0;
+                if (hasCrop && anyNonZero)
+                {
+                    var srcRect = new Drawing.SourceRectangle();
+                    if (cropL is not null) srcRect.Left = cropL;
+                    if (cropT is not null) srcRect.Top = cropT;
+                    if (cropR is not null) srcRect.Right = cropR;
+                    if (cropB is not null) srcRect.Bottom = cropB;
+                    picture.BlipFill.AppendChild(srcRect); // stretch not yet appended
+                }
+                // Fill mode: stretch (default) | contain (letterbox) |
+                // cover (crop) | tile. stretch preserves the historical
+                // <a:stretch><a:fillRect/></a:stretch> emission so existing
+                // docs stay byte-identical. contain/cover require image and
+                // container dimensions; if either is unknown, we fall back
+                // to a bare stretch.
+                var fillMode = (properties.GetValueOrDefault("fill", "stretch") ?? "stretch")
+                    .Trim().ToLowerInvariant();
+                if (fillMode == "tile")
+                {
+                    double tileScale = 1.0;
+                    if (properties.TryGetValue("tilescale", out var tsStr)
+                        && double.TryParse(tsStr, System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out var ts) && ts > 0)
+                        tileScale = ts;
+                    var tile = new Drawing.Tile
+                    {
+                        HorizontalRatio = (int)(tileScale * 100000),
+                        VerticalRatio = (int)(tileScale * 100000),
+                        Flip = Drawing.TileFlipValues.None,
+                        Alignment = Drawing.RectangleAlignmentValues.TopLeft,
+                    };
+                    if (properties.TryGetValue("tilealign", out var taStr))
+                    {
+                        tile.Alignment = taStr.Trim().ToLowerInvariant() switch
+                        {
+                            "tl" or "topleft" => Drawing.RectangleAlignmentValues.TopLeft,
+                            "t" or "top" => Drawing.RectangleAlignmentValues.Top,
+                            "tr" or "topright" => Drawing.RectangleAlignmentValues.TopRight,
+                            "l" or "left" => Drawing.RectangleAlignmentValues.Left,
+                            "ctr" or "center" or "centre" => Drawing.RectangleAlignmentValues.Center,
+                            "r" or "right" => Drawing.RectangleAlignmentValues.Right,
+                            "bl" or "bottomleft" => Drawing.RectangleAlignmentValues.BottomLeft,
+                            "b" or "bottom" => Drawing.RectangleAlignmentValues.Bottom,
+                            "br" or "bottomright" => Drawing.RectangleAlignmentValues.BottomRight,
+                            _ => Drawing.RectangleAlignmentValues.TopLeft,
+                        };
+                    }
+                    if (properties.TryGetValue("tileflip", out var tfStr))
+                    {
+                        tile.Flip = tfStr.Trim().ToLowerInvariant() switch
+                        {
+                            "none" => Drawing.TileFlipValues.None,
+                            "x" => Drawing.TileFlipValues.Horizontal,
+                            "y" => Drawing.TileFlipValues.Vertical,
+                            "xy" or "both" => Drawing.TileFlipValues.HorizontalAndVertical,
+                            _ => Drawing.TileFlipValues.None,
+                        };
+                    }
+                    picture.BlipFill.AppendChild(tile);
+                }
+                else if (fillMode == "contain" || fillMode == "cover")
+                {
+                    // Compute native-vs-container aspect to derive fillRect
+                    // offsets. a:fillRect insets are in thousandths of a
+                    // percent (100000 = 100%). Positive insets shrink the
+                    // stretched area (letterbox for contain), negatives
+                    // enlarge it (crop for cover).
+                    imgStream.Position = 0;
+                    var dims = OfficeCli.Core.ImageSource.TryGetDimensions(imgStream);
+                    if (dims is { Width: > 0, Height: > 0 } d2 && cxEmu > 0 && cyEmu > 0)
+                    {
+                        double imgAspect = (double)d2.Width / d2.Height;
+                        double boxAspect = (double)cxEmu / cyEmu;
+                        var fr = new Drawing.FillRectangle();
+                        if (fillMode == "contain")
+                        {
+                            if (imgAspect > boxAspect)
+                            {
+                                // Image wider than box — pad top/bottom
+                                var pad = (int)Math.Round(((1.0 - boxAspect / imgAspect) / 2.0) * 100000);
+                                fr.Top = pad; fr.Bottom = pad;
+                            }
+                            else
+                            {
+                                var pad = (int)Math.Round(((1.0 - imgAspect / boxAspect) / 2.0) * 100000);
+                                fr.Left = pad; fr.Right = pad;
+                            }
+                        }
+                        else // cover
+                        {
+                            if (imgAspect > boxAspect)
+                            {
+                                // Image wider than box — crop left/right (negative inset)
+                                var crop = (int)Math.Round(((imgAspect / boxAspect - 1.0) / 2.0) * 100000);
+                                fr.Left = -crop; fr.Right = -crop;
+                            }
+                            else
+                            {
+                                var crop = (int)Math.Round(((boxAspect / imgAspect - 1.0) / 2.0) * 100000);
+                                fr.Top = -crop; fr.Bottom = -crop;
+                            }
+                        }
+                        picture.BlipFill.AppendChild(new Drawing.Stretch(fr));
+                    }
+                    else
+                    {
+                        picture.BlipFill.AppendChild(new Drawing.Stretch(new Drawing.FillRectangle()));
+                    }
+                }
+                else
+                {
+                    picture.BlipFill.AppendChild(new Drawing.Stretch(new Drawing.FillRectangle()));
+                }
 
                 picture.ShapeProperties = new ShapeProperties();
                 picture.ShapeProperties.Transform2D = new Drawing.Transform2D();

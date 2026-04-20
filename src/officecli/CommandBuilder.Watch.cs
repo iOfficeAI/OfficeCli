@@ -58,7 +58,13 @@ static partial class CommandBuilder
                         else if (handler is OfficeCli.Handlers.WordHandler word)
                             initialHtml = word.ViewAsHtml();
                     }
-                    catch { /* ignore — will show waiting page */ }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"Warning: initial render failed — preview will show 'Waiting for first update' until the next document change.");
+                        Console.Error.WriteLine($"  {ex.GetType().Name}: {ex.Message}");
+                        if (Environment.GetEnvironmentVariable("OFFICECLI_DEBUG") == "1" && ex.StackTrace != null)
+                            Console.Error.WriteLine(ex.StackTrace);
+                    }
                 }
             }
 

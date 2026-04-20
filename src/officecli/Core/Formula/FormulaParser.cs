@@ -195,7 +195,10 @@ internal static class FormulaParser
                 }
                 else
                     result = EscapeLatex(text);
-                if (colorHex != null)
+                // Hex-gate before interpolating into LaTeX: a crafted w:color
+                // val could close the \textcolor brace group and inject
+                // \href{…} / \url{…} that KaTeX may honor when trust=true.
+                if (colorHex != null && IsLaTeXHex(colorHex))
                     result = $"\\textcolor{{#{colorHex}}}{{{result}}}";
                 return result;
             }
@@ -1665,6 +1668,15 @@ internal static class FormulaParser
     {
         if (arg == null) return "";
         return string.Concat(arg.ChildElements.Select(ToReadableText));
+    }
+
+    private static bool IsLaTeXHex(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return false;
+        if (s.Length is not (3 or 6 or 8)) return false;
+        foreach (var c in s)
+            if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f'))) return false;
+        return true;
     }
 
     private static string EscapeLatex(string text)

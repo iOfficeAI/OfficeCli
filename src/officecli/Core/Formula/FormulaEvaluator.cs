@@ -138,7 +138,10 @@ internal partial class FormulaEvaluator
         try
         {
             if (_depth == 0) _visiting.Clear();
-            return EvaluateFormula(formula);
+            // Accept both qualified (`_xlfn.SEQUENCE`) and bare (`SEQUENCE`)
+            // forms. Stored XML uses the qualified form post-R11-2; user code
+            // and tests still pass the canonical name.
+            return EvaluateFormula(ModernFunctionQualifier.Unqualify(formula));
         }
         catch { return null; }
     }
@@ -488,7 +491,7 @@ internal partial class FormulaEvaluator
             {
                 try
                 {
-                    var evaluated = EvaluateFormula(cell.CellFormula.Text);
+                    var evaluated = EvaluateFormula(ModernFunctionQualifier.Unqualify(cell.CellFormula.Text));
                     if (evaluated != null) return evaluated;
                 }
                 catch { /* fall through to cached value */ }

@@ -6,7 +6,6 @@ using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using C = DocumentFormat.OpenXml.Drawing.Charts;
-using X14 = DocumentFormat.OpenXml.Office2010.Excel;
 using XDR = DocumentFormat.OpenXml.Drawing.Spreadsheet;
 
 namespace OfficeCli.Handlers;
@@ -90,6 +89,17 @@ public partial class ExcelHandler
                     .ToList()
                 : new List<PivotTableCacheDefinitionPart>();
 
+            // Evict the worksheet part from the row cache and dirty set BEFORE
+            // DeletePart destroys it. FlushDirtyParts() calls GetSheet() on
+            // every entry in _dirtyWorksheets; if the part is already destroyed
+            // that call throws InvalidOperationException.
+            if (sheetWsPart != null)
+            {
+                var removedSheetData = GetSheet(sheetWsPart).GetFirstChild<SheetData>();
+                if (removedSheetData != null) InvalidateRowIndex(removedSheetData);
+                _dirtyWorksheets.Remove(sheetWsPart);
+            }
+
             sheet.Remove();
             if (relId != null)
                 workbookPart.DeletePart(workbookPart.GetPartById(relId));
@@ -114,6 +124,14 @@ public partial class ExcelHandler
                 foreach (var dn in toRemove) dn.Remove();
                 if (!definedNames.HasChildren) definedNames.Remove();
             }
+
+            // R9-1: invalidate stale cachedValue on formulas in other sheets
+            // that referenced the removed sheet. Real Excel would recompute
+            // to #REF! on open; our Get must not report the stale value.
+            // Minimum viable: clear <x:v> so cachedValue drops out. We leave
+            // the formula body alone — rewriting it to #REF! is what Excel
+            // does on recalc and is hard to get right.
+            InvalidateFormulaCacheReferencingSheet(workbookPart, sheetName);
 
             // Fix ActiveTab to prevent workbook corruption when deleting the last tab
             var remainingCount = sheets!.Elements<Sheet>().Count();
@@ -600,6 +618,8 @@ public partial class ExcelHandler
 
         if (sheetData != null)
         {
+            // Row indices change after a shift — cached positions are stale
+            InvalidateRowIndex(sheetData);
             // Process in reverse order to avoid collision
             foreach (var row in sheetData.Elements<Row>().OrderByDescending(r => r.RowIndex?.Value ?? 0).ToList())
             {
@@ -813,6 +833,8 @@ public partial class ExcelHandler
         // 1. Shift all rows after the deleted row: update RowIndex + all CellReferences
         if (sheetData != null)
         {
+            // Row indices change after a shift — cached positions are stale
+            InvalidateRowIndex(sheetData);
             foreach (var row in sheetData.Elements<Row>().ToList())
             {
                 var rowIdx = (int)(row.RowIndex?.Value ?? 0);
@@ -1226,6 +1248,56 @@ public partial class ExcelHandler
                 return $"{dollar1}{IndexToColumnName(colIdx - 1)}{dollar2}{row}";
             },
             RegexOptions.IgnoreCase);
+    }
+
+    /// <summary>
+    /// R9-1: after a sheet is removed, walk every remaining worksheet's
+    /// formula cells and clear the CellValue on any formula that still
+    /// references the removed sheet by name (bare or single-quote wrapped).
+    /// We do not rewrite the formula body — that is Excel's job on recalc.
+    /// Clearing the cached value keeps officecli's Get consistent with the
+    /// state Real Excel presents when it opens the file.
+    /// </summary>
+    private void InvalidateFormulaCacheReferencingSheet(WorkbookPart workbookPart, string removedSheetName)
+    {
+        // Two literal match forms Excel uses for sheet-qualified refs:
+        //   Sheet2!A1             (bare, no special chars)
+        //   'My Data'!A1          (quoted when name has spaces/specials)
+        // Internal single quotes in sheet names are escaped as '' inside
+        // the quoted form, but creating such names is rare and the
+        // Contains check below still handles the unescaped prefix.
+        var bareToken = removedSheetName + "!";
+        var quotedToken = "'" + removedSheetName.Replace("'", "''") + "'!";
+
+        foreach (var wsPart in workbookPart.WorksheetParts)
+        {
+            var sheetData = GetSheet(wsPart).GetFirstChild<SheetData>();
+            if (sheetData == null) continue;
+
+            bool touched = false;
+            foreach (var row in sheetData.Elements<Row>())
+            {
+                foreach (var cell in row.Elements<Cell>())
+                {
+                    var formula = cell.CellFormula?.Text;
+                    if (string.IsNullOrEmpty(formula)) continue;
+                    if (formula.IndexOf(bareToken, StringComparison.OrdinalIgnoreCase) < 0 &&
+                        formula.IndexOf(quotedToken, StringComparison.OrdinalIgnoreCase) < 0)
+                        continue;
+
+                    // Clear the cached value. CellValue element removed so
+                    // Get reports null/missing cachedValue, matching Excel's
+                    // initial state on open (before recalc fills in #REF!).
+                    cell.CellValue?.Remove();
+                    touched = true;
+                }
+            }
+
+            if (touched)
+            {
+                GetSheet(wsPart).Save();
+            }
+        }
     }
 
     /// <summary>
