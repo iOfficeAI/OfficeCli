@@ -57,11 +57,23 @@ public partial class WordHandler
         }
         else
         {
-            var after = commentPara.ParagraphProperties as OpenXmlElement;
-            if (after != null) after.InsertAfterSelf(rangeStart);
-            else commentPara.InsertAt(rangeStart, 0);
-            commentPara.AppendChild(rangeEnd);
-            commentPara.AppendChild(refRun);
+            // index is a childElement-index (ResolveAnchorPosition counts pPr).
+            var cmChildren = commentPara.ChildElements.ToList();
+            if (index.HasValue && index.Value < cmChildren.Count)
+            {
+                var cmAnchor = cmChildren[index.Value];
+                commentPara.InsertBefore(rangeStart, cmAnchor);
+                commentPara.InsertAfter(rangeEnd, rangeStart);
+                commentPara.InsertAfter(refRun, rangeEnd);
+            }
+            else
+            {
+                var after = commentPara.ParagraphProperties as OpenXmlElement;
+                if (after != null) after.InsertAfterSelf(rangeStart);
+                else commentPara.InsertAt(rangeStart, 0);
+                commentPara.AppendChild(rangeEnd);
+                commentPara.AppendChild(refRun);
+            }
         }
 
         // Return navigable path using /comments/comment[N] (sequential index)
@@ -87,18 +99,42 @@ public partial class WordHandler
         var bookmarkStart = new BookmarkStart { Id = bkId, Name = bkName };
         var bookmarkEnd = new BookmarkEnd { Id = bkId };
 
+        // index is a childElement-index (ResolveAnchorPosition counts pPr).
+        // When anchor-based insert is requested, bypass the text-wrapping path
+        // (which finds its own position inside existing runs) and do a positional
+        // insert — the anchor wins.
+        var bkChildren = parent.ChildElements.ToList();
+        var bkAnchor = index.HasValue && index.Value < bkChildren.Count
+            ? bkChildren[index.Value]
+            : null;
+
         if (properties.TryGetValue("text", out var bkText))
         {
-            // Try to find existing runs whose concatenated text contains the bookmark text
-            var runs = parent.Elements<Run>().ToList();
-            var wrapped = TryWrapExistingRunsWithBookmark(parent, runs, bkText, bookmarkStart, bookmarkEnd);
-            if (!wrapped)
+            if (bkAnchor != null)
             {
-                // No matching text found — create a new run as fallback
-                parent.AppendChild(bookmarkStart);
-                parent.AppendChild(new Run(new Text(bkText) { Space = SpaceProcessingModeValues.Preserve }));
-                parent.AppendChild(bookmarkEnd);
+                var bkRun = new Run(new Text(bkText) { Space = SpaceProcessingModeValues.Preserve });
+                parent.InsertBefore(bookmarkStart, bkAnchor);
+                parent.InsertAfter(bkRun, bookmarkStart);
+                parent.InsertAfter(bookmarkEnd, bkRun);
             }
+            else
+            {
+                // Try to find existing runs whose concatenated text contains the bookmark text
+                var runs = parent.Elements<Run>().ToList();
+                var wrapped = TryWrapExistingRunsWithBookmark(parent, runs, bkText, bookmarkStart, bookmarkEnd);
+                if (!wrapped)
+                {
+                    // No matching text found — create a new run as fallback
+                    parent.AppendChild(bookmarkStart);
+                    parent.AppendChild(new Run(new Text(bkText) { Space = SpaceProcessingModeValues.Preserve }));
+                    parent.AppendChild(bookmarkEnd);
+                }
+            }
+        }
+        else if (bkAnchor != null)
+        {
+            parent.InsertBefore(bookmarkStart, bkAnchor);
+            parent.InsertAfter(bookmarkEnd, bookmarkStart);
         }
         else
         {
@@ -503,9 +539,15 @@ public partial class WordHandler
         string resultPath;
         if (parent is Paragraph brkPara)
         {
-            brkPara.AppendChild(brkRun);
+            // index is a childElement-index (ResolveAnchorPosition counts pPr).
+            var brkChildren = brkPara.ChildElements.ToList();
+            if (index.HasValue && index.Value < brkChildren.Count)
+                brkPara.InsertBefore(brkRun, brkChildren[index.Value]);
+            else
+                brkPara.AppendChild(brkRun);
             var brkParaIdx = body.Elements<Paragraph>().TakeWhile(p => p != brkPara).Count();
-            resultPath = $"/body/{BuildParaPathSegment(brkPara, brkParaIdx + 1)}/r[{GetAllRuns(brkPara).Count}]";
+            var brkRunIdx = brkPara.Elements<Run>().TakeWhile(r => r != brkRun).Count() + 1;
+            resultPath = $"/body/{BuildParaPathSegment(brkPara, brkParaIdx + 1)}/r[{brkRunIdx}]";
         }
         else
         {
@@ -619,7 +661,13 @@ public partial class WordHandler
             sdtContent.AppendChild(contentRun);
             sdtRun.AppendChild(sdtContent);
 
-            ((Paragraph)parent).AppendChild(sdtRun);
+            // index is a childElement-index (ResolveAnchorPosition counts pPr).
+            var sdtPara = (Paragraph)parent;
+            var sdtChildren = sdtPara.ChildElements.ToList();
+            if (index.HasValue && index.Value < sdtChildren.Count)
+                sdtPara.InsertBefore(sdtRun, sdtChildren[index.Value]);
+            else
+                sdtPara.AppendChild(sdtRun);
             // Build stable @paraId= and @sdtId= based path
             var inlineParaId = ((Paragraph)parent).ParagraphId?.Value;
             var inlineParaSegment = !string.IsNullOrEmpty(inlineParaId)
