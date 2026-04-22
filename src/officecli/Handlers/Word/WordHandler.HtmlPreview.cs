@@ -142,12 +142,19 @@ public partial class WordHandler
                     .Select(SanitizeFontName)
                     .Where(f => !string.IsNullOrEmpty(f))
                     .Select(f => $"family={f.Replace(' ', '+')}:ital,wght@0,400;0,700;1,400;1,700"));
-                sb.AppendLine($"<link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?{families}&display=swap\" onerror=\"this.remove()\">");
+                // media=print + onload swap → load asynchronously without blocking first paint
+                // (Google Fonts is unreachable in many networks and would otherwise stall render until TCP timeout).
+                sb.AppendLine($"<link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?{families}&display=swap\" media=\"print\" onload=\"this.media='all'\" onerror=\"this.remove()\">");
             }
         }
-        // KaTeX for math rendering (graceful degradation: shows raw LaTeX when offline)
-        sb.AppendLine("<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css\" onerror=\"this.remove()\">");
-        sb.AppendLine("<script defer src=\"https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js\" onerror=\"document.querySelectorAll('.katex-formula').forEach(function(el){el.textContent=el.dataset.formula;el.style.fontFamily='monospace';el.style.color='#666'})\"></script>");
+        // KaTeX for math rendering — only include when the document actually has formulas.
+        // Same non-blocking load trick so KaTeX CSS can never stall first paint.
+        bool hasMathFormulas = body.Descendants<M.OfficeMath>().Any();
+        if (hasMathFormulas)
+        {
+            sb.AppendLine("<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css\" media=\"print\" onload=\"this.media='all'\" onerror=\"this.remove()\">");
+            sb.AppendLine("<script defer src=\"https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js\" onerror=\"document.querySelectorAll('.katex-formula').forEach(function(el){el.textContent=el.dataset.formula;el.style.fontFamily='monospace';el.style.color='#666'})\"></script>");
+        }
         sb.AppendLine("</head>");
         sb.AppendLine("<body>");
 
@@ -721,12 +728,27 @@ public partial class WordHandler
       if(!rSet.has(i+1))p.style.display='none';
     });
   }
+  function _loadKatexLazy(cb){
+    // Watch mode: doc may start formula-free (KaTeX tags omitted), then
+    // gain a formula via SSE patch. Inject CSS + JS on demand; on load,
+    // re-invoke the caller so the new formula renders.
+    if(window._katexLoading){window._katexCallbacks=window._katexCallbacks||[];window._katexCallbacks.push(cb);return;}
+    window._katexLoading=true;window._katexCallbacks=[cb];
+    var link=document.createElement('link');link.rel='stylesheet';link.href='https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css';link.onerror=function(){this.remove();};document.head.appendChild(link);
+    var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js';
+    s.onload=function(){(window._katexCallbacks||[]).forEach(function(f){try{f();}catch(e){}});window._katexCallbacks=[];};
+    s.onerror=function(){document.querySelectorAll('.katex-formula:not(.katex-rendered)').forEach(function(el){el.textContent=el.dataset.formula;el.style.fontFamily='monospace';el.style.color='#666';el.classList.add('katex-rendered');});};
+    document.head.appendChild(s);
+  }
   function renderNewContent(){
+    var pending=document.querySelectorAll('.katex-formula:not(.katex-rendered)');
     if(typeof katex!=='undefined'){
-      document.querySelectorAll('.katex-formula:not(.katex-rendered)').forEach(function(el){
+      pending.forEach(function(el){
         try{katex.render(el.dataset.formula,el,{throwOnError:false,displayMode:!!el.dataset.display});}catch(e){el.textContent=el.dataset.formula;}
         el.classList.add('katex-rendered');
       });
+    }else if(pending.length>0){
+      _loadKatexLazy(renderNewContent);
     }
     // CJK punctuation compression on new content
     var cjkRe=/([\u3000-\u303F\uFF01-\uFF60\uFE30-\uFE4F\u2014\u2015\u2026\u2018\u2019\u201C\u201D])/;
