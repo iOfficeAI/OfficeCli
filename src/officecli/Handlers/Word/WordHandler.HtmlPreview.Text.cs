@@ -24,6 +24,15 @@ public partial class WordHandler
 
     private void RenderParagraphHtml(StringBuilder sb, Paragraph para)
     {
+        // Keep standalone manual page-break paragraphs out of surrounding <p>
+        // tags so page splitting does not leave dangling open/close tags across
+        // page boundaries.
+        if (IsStandalonePageBreakParagraph(para))
+        {
+            sb.AppendLine("<!--PAGE_BREAK-->");
+            return;
+        }
+
         // Use <div> instead of <p> when paragraph contains block-level elements (text boxes, charts, shapes)
         var tag = HasBlockLevelDrawing(para) ? "div" : "p";
         sb.Append($"<{tag}");
@@ -43,6 +52,12 @@ public partial class WordHandler
     {
         OnHtmlParagraphBegin(para);
         _ctx.CurrentParagraphTabIndex = 0;
+        if (_ctx.RenderingHeaderFooter)
+            _ctx.ResetHeaderFooterFieldState();
+
+        // MOD(#5): Reopen comment marks that span from previous paragraphs
+        foreach (var cmId in _ctx.OpenCommentMarks)
+            sb.Append($"<mark data-id=\"cm{cmId}\">");
 
         // Render bookmark anchors for internal hyperlink targets
         foreach (var bm in para.Elements<BookmarkStart>())
@@ -59,6 +74,42 @@ public partial class WordHandler
 
         foreach (var child in para.ChildElements)
         {
+            // MOD(#5): Handle comment range start/end within paragraphs
+            if (child is CommentRangeStart crs)
+            {
+                var id = crs.Id?.Value;
+                if (id != null)
+                {
+                    sb.Append($"<mark data-id=\"cm{id}\">");
+                    _ctx.OpenCommentMarks.Add(id);
+                    if (!_ctx.CommentIds.Contains(id))
+                        _ctx.CommentIds.Add(id);
+                }
+                continue;
+            }
+            if (child is CommentRangeEnd cre)
+            {
+                var id = cre.Id?.Value;
+                if (id != null && _ctx.OpenCommentMarks.Contains(id))
+                {
+                    // Close marks in reverse order up to this one, then reopen the rest
+                    var idx = _ctx.OpenCommentMarks.LastIndexOf(id);
+                    var toReopen = new List<string>();
+                    for (int i = _ctx.OpenCommentMarks.Count - 1; i > idx; i--)
+                    {
+                        sb.Append("</mark>");
+                        toReopen.Add(_ctx.OpenCommentMarks[i]);
+                    }
+                    sb.Append("</mark>"); // close the target mark
+                    _ctx.OpenCommentMarks.RemoveAt(idx);
+                    // Reopen marks that were closed just for nesting
+                    toReopen.Reverse();
+                    foreach (var reopenId in toReopen)
+                        sb.Append($"<mark data-id=\"cm{reopenId}\">");
+                }
+                continue;
+            }
+
             if (child is Run run)
             {
                 // Find drawing (direct child or inside mc:AlternateContent Choice)
@@ -93,38 +144,49 @@ public partial class WordHandler
             }
             else if (child.LocalName is "ins" or "moveTo")
             {
-                // Tracked insertions — underline to match Word's default revision mark style
+                // Tracked insertions — wrap in <ins> tag (red via CSS)
                 var author = child.GetAttributes().FirstOrDefault(a => a.LocalName == "author").Value;
                 var authorAttr = string.IsNullOrEmpty(author) ? "" : $" title=\"Inserted by {HtmlEncodeAttr(author)}\"";
-                sb.Append($"<span class=\"track-ins\" style=\"text-decoration:underline;color:#2E7D32\"{authorAttr}>");
-                // Walk all nested runs so a <w:del> or <w:hyperlink> nested
-                // inside <w:ins> doesn't drop its content (Descendants<Run>
-                // picks up runs at any depth).
+                sb.Append($"<ins{authorAttr}>");
+                var renderedTrackedInsert = false;
                 foreach (var insRun in child.Descendants<Run>())
+                {
                     RenderRunHtml(sb, insRun, para);
-                // Also render nested deletion text (ins-of-del revision) so
-                // the reader sees what was removed within the insertion.
-                var nestedDelText = string.Concat(child.Descendants()
-                    .Where(e => e.LocalName is "del" or "moveFrom")
-                    .SelectMany(d => d.Descendants())
-                    .Where(e => e.LocalName is "delText" or "t")
-                    .Select(e => e.InnerText));
-                if (!string.IsNullOrEmpty(nestedDelText))
-                    sb.Append($"<span class=\"track-del\" style=\"text-decoration:line-through;color:#C62828\">{HtmlEncode(nestedDelText)}</span>");
-                sb.Append("</span>");
+                    renderedTrackedInsert = true;
+                }
+                if (!renderedTrackedInsert)
+                {
+                    var insText = string.Concat(child.Descendants()
+                        .Where(e => e.LocalName == "t")
+                        .Select(e => e.InnerText));
+                    if (!string.IsNullOrEmpty(insText))
+                        sb.Append(HtmlEncode(insText));
+                }
+                sb.Append("</ins>");
             }
             else if (child.LocalName is "del" or "moveFrom")
             {
-                // Tracked deletions — strikethrough with color, preserving the deleted text
-                // The delText inside del runs carries the actual deleted content; we render it so
-                // a reader of the preview can see what was removed.
+                // Tracked deletions — wrap in <del> tag (gray strikethrough via CSS).
+                // DeletedRun contains Run elements whose Text is stored as DeletedText,
+                // not Text. RenderRunHtml handles both.
                 var author = child.GetAttributes().FirstOrDefault(a => a.LocalName == "author").Value;
                 var authorAttr = string.IsNullOrEmpty(author) ? "" : $" title=\"Deleted by {HtmlEncodeAttr(author)}\"";
-                var delText = string.Concat(child.Descendants()
-                    .Where(e => e.LocalName == "delText" || e.LocalName == "t")
-                    .Select(e => e.InnerText));
-                if (!string.IsNullOrEmpty(delText))
-                    sb.Append($"<span class=\"track-del\" style=\"text-decoration:line-through;color:#C62828\"{authorAttr}>{HtmlEncode(delText)}</span>");
+                sb.Append($"<del{authorAttr}>");
+                var renderedTrackedDelete = false;
+                foreach (var delRun in child.Descendants<Run>())
+                {
+                    RenderRunHtml(sb, delRun, para);
+                    renderedTrackedDelete = true;
+                }
+                if (!renderedTrackedDelete)
+                {
+                    var delText = string.Concat(child.Descendants()
+                        .Where(e => e.LocalName == "delText" || e.LocalName == "t")
+                        .Select(e => e.InnerText));
+                    if (!string.IsNullOrEmpty(delText))
+                        sb.Append(HtmlEncode(delText));
+                }
+                sb.Append("</del>");
             }
             else if (child is Hyperlink hyperlink)
             {
@@ -135,7 +197,25 @@ public partial class WordHandler
                 var latex = FormulaParser.ToLatex(child);
                 sb.Append($"<span class=\"katex-formula\" data-formula=\"{HtmlEncodeAttr(latex)}\"></span>");
             }
-            else if (child.LocalName is "sdt" or "smartTag" or "customXml" or "fldSimple")
+            else if (child is SimpleField simpleField)
+            {
+                if (TryRenderHeaderFooterSimpleField(sb, simpleField, para))
+                    continue;
+
+                var emittedRuns = new HashSet<OpenXmlElement>();
+                foreach (var innerHyp in simpleField.Descendants<Hyperlink>())
+                {
+                    RenderHyperlinkHtml(sb, innerHyp, para);
+                    foreach (var r in innerHyp.Descendants<Run>())
+                        emittedRuns.Add(r);
+                }
+                foreach (var innerRun in simpleField.Descendants<Run>())
+                {
+                    if (emittedRuns.Contains(innerRun)) continue;
+                    RenderRunHtml(sb, innerRun, para);
+                }
+            }
+            else if (child.LocalName is "sdt" or "smartTag" or "customXml")
             {
                 // Content controls, smart tags, custom XML, simple fields —
                 // render hyperlinks with href + their own runs (TOC entries
@@ -158,7 +238,36 @@ public partial class WordHandler
             }
         }
 
+        // MOD(#5): Close comment marks that span to next paragraphs (will be reopened there)
+        for (int i = _ctx.OpenCommentMarks.Count - 1; i >= 0; i--)
+            sb.Append("</mark>");
+
+        if (_ctx.RenderingHeaderFooter)
+            _ctx.ResetHeaderFooterFieldState();
         OnHtmlParagraphEnd(sb);
+    }
+
+    private static bool IsStandalonePageBreakParagraph(Paragraph para)
+    {
+        var hasPageBreak = para.Descendants()
+            .Any(el =>
+                el.LocalName == "br"
+                && el.GetAttributes().Any(attr =>
+                    attr.LocalName == "type"
+                    && attr.Value == "page"));
+        if (!hasPageBreak) return false;
+
+        return !para.Descendants<Text>().Any(t => !string.IsNullOrEmpty(t.Text))
+            && !para.Descendants<DeletedText>().Any(t => !string.IsNullOrEmpty(t.Text))
+            && !para.Descendants<TabChar>().Any()
+            && !para.Descendants<CarriageReturn>().Any()
+            && !para.Descendants<SymbolChar>().Any()
+            && !para.Descendants<Drawing>().Any()
+            && !para.Descendants<EmbeddedObject>().Any()
+            && !para.Descendants<FootnoteReference>().Any()
+            && !para.Descendants<EndnoteReference>().Any()
+            && !para.Descendants<Hyperlink>().Any()
+            && !para.ChildElements.Any(child => child.LocalName == "oMath" || child is M.OfficeMath);
     }
 
     // ==================== Run Rendering ====================
@@ -202,6 +311,8 @@ public partial class WordHandler
             return;
         }
 
+        if (TryRenderHeaderFooterFieldRun(sb, run, para))
+            return;
         // Form field checkbox: fldChar begin with ffData/ffCheckBox — emit ☑ / ☐ glyph
         var fldChar = run.GetFirstChild<FieldChar>();
         if (fldChar?.FieldCharType?.Value == FieldCharValues.Begin)
@@ -271,7 +382,8 @@ public partial class WordHandler
         var hasContent = run.ChildElements.Any(c =>
             c is Break || c is TabChar || c is SymbolChar || c is CarriageReturn
             || c.LocalName is "noBreakHyphen" or "softHyphen"
-            || (c is Text t && !string.IsNullOrEmpty(t.Text)));
+            || (c is Text t && !string.IsNullOrEmpty(t.Text))
+            || (c is DeletedText dt && !string.IsNullOrEmpty(dt.Text)));
 
         if (!hasContent) return;
 
@@ -392,6 +504,12 @@ public partial class WordHandler
                 if (!handled)
                     sb.Append(HtmlEncode(t.Text));
             }
+            else if (child is DeletedText dt && !string.IsNullOrEmpty(dt.Text))
+            {
+                // Deleted text (inside <w:del>): same as regular text; the wrapping
+                // <del> tag in RenderParagraphContentHtml provides the visual styling.
+                sb.Append(HtmlEncode(dt.Text));
+            }
             else if (child is SymbolChar sym)
             {
                 // w:sym — render with correct font family for symbol fonts
@@ -411,6 +529,73 @@ public partial class WordHandler
 
         if (needsSpan && !_ctx.LineBreakEnabled)
             sb.Append("</span>");
+    }
+
+    private bool TryRenderHeaderFooterSimpleField(StringBuilder sb, SimpleField simpleField, Paragraph para)
+    {
+        if (!_ctx.RenderingHeaderFooter) return false;
+
+        var fieldType = ParseHeaderFooterFieldType(simpleField.Instruction?.Value);
+        if (string.IsNullOrEmpty(fieldType)) return false;
+
+        AppendHeaderFooterFieldHtml(sb, simpleField.Elements<Run>().FirstOrDefault(), para, fieldType);
+        return true;
+    }
+
+    private bool TryRenderHeaderFooterFieldRun(StringBuilder sb, Run run, Paragraph para)
+    {
+        if (!_ctx.RenderingHeaderFooter) return false;
+
+        var fldChar = run.GetFirstChild<FieldChar>();
+        if (fldChar != null)
+        {
+            var fieldCharType = fldChar.FieldCharType?.Value;
+            if (fieldCharType == FieldCharValues.Begin)
+            {
+                _ctx.ResetHeaderFooterFieldState();
+                return true;
+            }
+
+            if (fieldCharType == FieldCharValues.Separate)
+            {
+                if (!string.IsNullOrEmpty(_ctx.ActiveHeaderFooterField))
+                {
+                    AppendHeaderFooterFieldHtml(sb, run, para, _ctx.ActiveHeaderFooterField);
+                    _ctx.SkipHeaderFooterFieldResult = true;
+                }
+                return true;
+            }
+
+            if (fieldCharType == FieldCharValues.End)
+            {
+                _ctx.ResetHeaderFooterFieldState();
+                return true;
+            }
+
+            return true;
+        }
+
+        var fieldCode = run.GetFirstChild<FieldCode>();
+        if (fieldCode != null)
+        {
+            _ctx.ActiveHeaderFooterField = ParseHeaderFooterFieldType(fieldCode.Text);
+            return true;
+        }
+
+        return _ctx.SkipHeaderFooterFieldResult;
+    }
+
+    private void AppendHeaderFooterFieldHtml(StringBuilder sb, Run? run, Paragraph para, string fieldType)
+    {
+        var placeholder = GetHeaderFooterFieldPlaceholder(fieldType);
+        if (string.IsNullOrEmpty(placeholder)) return;
+
+        var rProps = run != null ? ResolveEffectiveRunProperties(run, para) : null;
+        var style = GetRunInlineCss(rProps);
+        if (!string.IsNullOrEmpty(style))
+            sb.Append($"<span style=\"{style}\">{placeholder}</span>");
+        else
+            sb.Append(placeholder);
     }
 
     // ==================== OLE Object Preview Rendering ====================
@@ -636,6 +821,102 @@ public partial class WordHandler
             sb.AppendLine("</div>");
         }
         sb.AppendLine("</div>");
+    }
+
+    // MOD(#5): Render comment annotations as <aside data-type="comments"> block
+    private void RenderCommentsHtml(StringBuilder sb)
+    {
+        var commentsPart = _doc.MainDocumentPart?.WordprocessingCommentsPart;
+        if (commentsPart?.Comments == null) return;
+
+        var allComments = commentsPart.Comments.Elements<Comment>().ToList();
+        if (allComments.Count == 0) return;
+
+        // Build a lookup by ID for quick access
+        var commentById = new Dictionary<string, Comment>();
+        foreach (var c in allComments)
+        {
+            var cid = c.Id?.Value;
+            if (cid != null) commentById[cid] = c;
+        }
+
+        // Build a set of IDs that have ranges in the document (root comments)
+        var rootIds = new HashSet<string>(_ctx.CommentIds);
+
+        // Output comments in document position order (mark appearance order),
+        // then append any remaining comments (replies without ranges)
+        var ordered = new List<Comment>();
+        var emitted = new HashSet<string>();
+        foreach (var id in _ctx.CommentIds)
+        {
+            if (commentById.TryGetValue(id, out var c) && emitted.Add(id))
+                ordered.Add(c);
+        }
+        foreach (var c in allComments)
+        {
+            var cid = c.Id?.Value;
+            if (cid != null && emitted.Add(cid))
+                ordered.Add(c);
+        }
+
+        sb.AppendLine("<aside data-type=\"comments\">");
+
+        foreach (var comment in ordered)
+        {
+            var id = comment.Id?.Value;
+            if (id == null) continue;
+
+            var author = comment.Author?.Value ?? "";
+
+            // Extract comment text from paragraphs
+            var textSb = new StringBuilder();
+            foreach (var p in comment.Elements<Paragraph>())
+            {
+                if (textSb.Length > 0) textSb.Append("<br>");
+                foreach (var run in p.Elements<Run>())
+                {
+                    var t = run.GetFirstChild<Text>();
+                    if (t != null) textSb.Append(HtmlEncode(t.Text));
+                }
+            }
+
+            sb.Append($"  <p data-id=\"cm{id}\" data-author=\"{HtmlEncodeAttr(author)}\"");
+
+            // Detect reply-to: comment without its own range is a reply to the previous root comment
+            if (!rootIds.Contains(id) && _ctx.CommentIds.Count > 0)
+            {
+                // Find the closest root comment that precedes this ID numerically
+                string? parentId = null;
+                if (int.TryParse(id, out var numId))
+                {
+                    for (int i = numId - 1; i >= 0; i--)
+                    {
+                        var candidateId = i.ToString();
+                        if (rootIds.Contains(candidateId))
+                        {
+                            parentId = candidateId;
+                            break;
+                        }
+                    }
+                }
+                if (parentId != null)
+                    sb.Append($" data-reply-to=\"cm{parentId}\"");
+            }
+
+            // Check for resolved/done state (w16cid:done="1")
+            foreach (var attr in comment.GetAttributes())
+            {
+                if (attr.LocalName == "done" && attr.Value == "1")
+                {
+                    sb.Append(" data-resolved=\"true\"");
+                    break;
+                }
+            }
+
+            sb.AppendLine($">{textSb}</p>");
+        }
+
+        sb.AppendLine("</aside>");
     }
 
     /// <summary>Get the numbering format for footnotes (default: decimal per OOXML spec §17.11.11).</summary>
