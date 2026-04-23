@@ -1397,6 +1397,57 @@ public partial class WordHandler
                 }
             }
         }
+        else if (element is Body bodyNode)
+        {
+            // CONSISTENCY(body-listing): enumerate body children using the
+            // same p[N]/oMathPara[M] counting rules as NavigateToElement so
+            // `get /body` emits paths that `get <path>` can resolve. The
+            // generic fallback would count every LocalName, listing wrapper
+            // <w:p> (pure oMathPara) as p[2] even though the resolver skips
+            // them. Mirrors the logic in WordHandler.View.ViewAsText.
+            node.ChildCount = bodyNode.ChildElements.Count;
+            if (depth > 0)
+            {
+                int pIdx = 0, tblIdx = 0, mathParaIdx = 0, sdtIdx = 0;
+                foreach (var child in bodyNode.ChildElements)
+                {
+                    if (child.LocalName == "oMathPara" || child is M.Paragraph)
+                    {
+                        mathParaIdx++;
+                        node.Children.Add(ElementToNode(child, $"{path}/oMathPara[{mathParaIdx}]", depth - 1));
+                    }
+                    else if (child is Paragraph bPara)
+                    {
+                        if (IsOMathParaWrapperParagraph(bPara))
+                        {
+                            mathParaIdx++;
+                            node.Children.Add(ElementToNode(bPara, $"{path}/oMathPara[{mathParaIdx}]", depth - 1));
+                        }
+                        else
+                        {
+                            pIdx++;
+                            var bSeg = BuildParaPathSegment(bPara, pIdx);
+                            node.Children.Add(ElementToNode(bPara, $"{path}/{bSeg}", depth - 1));
+                        }
+                    }
+                    else if (child is Table)
+                    {
+                        tblIdx++;
+                        node.Children.Add(ElementToNode(child, $"{path}/tbl[{tblIdx}]", depth - 1));
+                    }
+                    else if (child is SdtBlock)
+                    {
+                        sdtIdx++;
+                        node.Children.Add(ElementToNode(child, $"{path}/sdt[{sdtIdx}]", depth - 1));
+                    }
+                    else
+                    {
+                        // Non-structural (sectPr etc.) — keep localName naming
+                        node.Children.Add(ElementToNode(child, $"{path}/{child.LocalName}[1]", depth - 1));
+                    }
+                }
+            }
+        }
         else
         {
             // Generic fallback: collect XML attributes and child val patterns

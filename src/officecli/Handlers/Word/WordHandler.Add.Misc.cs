@@ -95,6 +95,11 @@ public partial class WordHandler
                 $"Bookmark name '{bkName}' contains path-special characters " +
                 "('/', '[', ']'). These characters prevent later addressing via " +
                 "selectors. Use only letters, digits, '.', '_', '-' in bookmark names.");
+        if (bkName.Any(char.IsWhiteSpace) || bkName[0] == '@' || bkName[0] == '\'' || bkName.Contains('"'))
+            throw new ArgumentException(
+                $"Bookmark name '{bkName}' contains whitespace or quote/@ chars " +
+                "that prevent later addressing via bare attribute selectors. " +
+                "Use only letters, digits, '.', '_', '-' in bookmark names.");
 
         // Reject duplicate bookmark names. OOXML bookmark names are expected
         // to be unique per document; tolerating duplicates makes
@@ -175,8 +180,29 @@ public partial class WordHandler
         // a real DOM element Navigation understands (the legacy
         // `/bookmark[<name>]` form addressed a synthetic type that Get/Add
         // could not resolve, breaking --after/--before reuse).
-        var resultPath = $"{parentPath}/bookmarkStart[@name={bkName}]";
+        // ValidateAndNormalizePredicate rejects bare attribute values that
+        // contain whitespace, leading '@', or quote chars; double-quote the
+        // value when the raw name would otherwise be rejected so the returned
+        // path is round-trippable via `get`/`add --after`.
+        var resultPath = $"{parentPath}/bookmarkStart[@name={QuoteAttrValueIfNeeded(bkName)}]";
         return resultPath;
+    }
+
+    /// <summary>
+    /// Quote an attribute predicate value when the bare form would be rejected
+    /// by ValidateAndNormalizePredicate. Bare values must have no whitespace,
+    /// no leading '@' or quote. Embedded double quotes cannot be represented
+    /// by either form — error up front.
+    /// </summary>
+    private static string QuoteAttrValueIfNeeded(string value)
+    {
+        if (value.Contains('"'))
+            throw new ArgumentException(
+                $"Name '{value}' contains embedded double-quote, which cannot be represented in an attribute selector.");
+        bool needsQuote = value.Length == 0
+            || value[0] == '@' || value[0] == '\''
+            || value.Any(char.IsWhiteSpace);
+        return needsQuote ? $"\"{value}\"" : value;
     }
 
     /// <summary>

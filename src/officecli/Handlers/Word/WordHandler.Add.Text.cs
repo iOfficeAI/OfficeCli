@@ -260,7 +260,7 @@ public partial class WordHandler
             }
 
             run.AppendChild(rProps);
-            run.AppendChild(new Text(text) { Space = SpaceProcessingModeValues.Preserve });
+            AppendTextWithBreaks(run, text);
             para.AppendChild(run);
         }
 
@@ -512,7 +512,7 @@ public partial class WordHandler
 
         newRun.AppendChild(newRProps);
         var runText = properties.GetValueOrDefault("text", "");
-        newRun.AppendChild(new Text(runText) { Space = SpaceProcessingModeValues.Preserve });
+        AppendTextWithBreaks(newRun, runText);
 
         // Use ChildElements for index lookup so ResolveAnchorPosition's
         // childElement-indexed result lines up. If index points at
@@ -547,5 +547,38 @@ public partial class WordHandler
         targetPara.TextId = GenerateParaId();
 
         return resultPath;
+    }
+
+    /// <summary>
+    /// Append <paramref name="text"/> to <paramref name="run"/>, tokenizing on
+    /// '\n' (w:br) and '\t' (w:tab) so the user-visible line breaks and tabs
+    /// round-trip through Word instead of being collapsed to a single space.
+    /// CRLF/CR are normalized to LF first.
+    /// </summary>
+    private static void AppendTextWithBreaks(Run run, string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            run.AppendChild(new Text("") { Space = SpaceProcessingModeValues.Preserve });
+            return;
+        }
+        var s = text.Replace("\r\n", "\n").Replace("\r", "\n");
+        int start = 0;
+        for (int i = 0; i < s.Length; i++)
+        {
+            char c = s[i];
+            if (c == '\n' || c == '\t')
+            {
+                if (i > start)
+                    run.AppendChild(new Text(s.Substring(start, i - start)) { Space = SpaceProcessingModeValues.Preserve });
+                if (c == '\n') run.AppendChild(new Break());
+                else run.AppendChild(new TabChar());
+                start = i + 1;
+            }
+        }
+        if (start < s.Length)
+            run.AppendChild(new Text(s.Substring(start)) { Space = SpaceProcessingModeValues.Preserve });
+        else if (start == 0)
+            run.AppendChild(new Text("") { Space = SpaceProcessingModeValues.Preserve });
     }
 }
