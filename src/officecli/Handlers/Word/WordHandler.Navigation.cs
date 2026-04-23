@@ -170,6 +170,19 @@ public partial class WordHandler
         if (!anchorPath.StartsWith("/"))
             anchorPath = parentPath.TrimEnd('/') + "/" + anchorPath;
 
+        // Top-level /watermark[N]? special case. Watermarks are stored in
+        // the header parts, not the body — there is no body-level sibling
+        // that represents the watermark. `add --type watermark` returns
+        // "/watermark" as the new element's identity; to keep that path
+        // round-trippable as --after/--before, treat it as a no-op
+        // positional hint: --after /watermark appends to parent, --before
+        // /watermark prepends. Callers needing a specific body position
+        // should pass an explicit /body/p[N] anchor instead.
+        if (System.Text.RegularExpressions.Regex.IsMatch(anchorPath, @"^/watermark(\[\d+\])?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+        {
+            return position.After != null ? (int?)null : 0;
+        }
+
         var segments = ParsePath(anchorPath);
         var anchor = NavigateToElement(segments, out var ctx)
             ?? throw new ArgumentException($"Anchor element not found: {anchorPath}" + (ctx != null ? $". {ctx}" : ""));
@@ -415,6 +428,42 @@ public partial class WordHandler
                     .ToList();
                 if (n >= 1 && n <= sectParas.Count)
                     return sectParas[n - 1];
+            }
+        }
+
+        // Top-level /chart[N] anchor routing. `add --type chart` returns
+        // "/chart[N]" as the new element's identity; resolve it to the
+        // body-level paragraph containing the Nth chart drawing so callers
+        // can use the returned path directly as --after/--before.
+        if (first.Name.ToLowerInvariant() == "chart" && segments.Count == 1 && first.Index.HasValue)
+        {
+            var charts = GetAllWordCharts();
+            var n = first.Index.Value;
+            if (n >= 1 && n <= charts.Count)
+            {
+                OpenXmlElement? cur = charts[n - 1].Inline;
+                while (cur != null && cur is not Paragraph) cur = cur.Parent;
+                if (cur is Paragraph chartPara) return chartPara;
+            }
+        }
+
+        // Top-level /toc[N] anchor routing. `add --type toc` returns
+        // "/toc[N]" as the new element's identity; resolve it to the Nth
+        // body paragraph whose descendants include a FieldCode starting
+        // with "TOC" (mirrors AddToc's counting logic) so callers can use
+        // the returned path directly as --after/--before.
+        if (first.Name.ToLowerInvariant() == "toc" && segments.Count == 1 && first.Index.HasValue)
+        {
+            var body = _doc.MainDocumentPart?.Document?.Body;
+            if (body != null)
+            {
+                var tocParas = body.Elements<Paragraph>()
+                    .Where(p => p.Descendants<FieldCode>().Any(fc =>
+                        fc.Text != null && fc.Text.TrimStart().StartsWith("TOC", StringComparison.OrdinalIgnoreCase)))
+                    .ToList();
+                var n = first.Index.Value;
+                if (n >= 1 && n <= tocParas.Count)
+                    return tocParas[n - 1];
             }
         }
 
