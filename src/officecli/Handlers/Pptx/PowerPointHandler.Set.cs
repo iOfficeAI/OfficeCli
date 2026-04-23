@@ -1297,7 +1297,15 @@ public partial class PowerPointHandler
                 switch (key.ToLowerInvariant())
                 {
                     case "background":
-                        ApplySlideBackground(slidePart2, value);
+                        ApplyBackground(slidePart2, value, ReadBackgroundImageOptions(properties));
+                        break;
+                    case "background.mode":
+                    case "background.alpha":
+                    case "background.scale":
+                        // Consumed alongside "background" — see ReadBackgroundImageOptions.
+                        // Emit a helpful error when used without a paired "background=image:...".
+                        if (!properties.Keys.Any(k => k.Equals("background", StringComparison.OrdinalIgnoreCase)))
+                            throw new ArgumentException($"'{key}' requires a paired 'background=image:<path>' property");
                         break;
                     case "transition":
                         ApplyTransition(slidePart2, value);
@@ -1439,11 +1447,17 @@ public partial class PowerPointHandler
                 switch (key.ToLowerInvariant())
                 {
                     case "background":
-                        ApplyBackground(targetPart, value);
+                        ApplyBackground(targetPart, value, ReadBackgroundImageOptions(properties));
+                        break;
+                    case "background.mode":
+                    case "background.alpha":
+                    case "background.scale":
+                        if (!properties.Keys.Any(k => k.Equals("background", StringComparison.OrdinalIgnoreCase)))
+                            throw new ArgumentException($"'{key}' requires a paired 'background=image:<path>' property");
                         break;
                     default:
                         if (unsupported.Count == 0)
-                            unsupported.Add($"{key} (valid slidemaster/slidelayout props: background)");
+                            unsupported.Add($"{key} (valid slidemaster/slidelayout props: background, background.mode, background.alpha, background.scale)");
                         else
                             unsupported.Add(key);
                         break;

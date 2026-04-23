@@ -27,7 +27,30 @@ public partial class PowerPointHandler
     /// Accepts SlidePart, SlideLayoutPart, or SlideMasterPart — all three parts share
     /// the same p:bg / p:bgPr schema inside CommonSlideData.
     /// </summary>
-    private static void ApplyBackground(OpenXmlPart part, string value)
+    internal record BackgroundImageOptions(string? Mode = null, int? Alpha = null, int? Scale = null);
+
+    internal static BackgroundImageOptions? ReadBackgroundImageOptions(Dictionary<string, string> properties)
+    {
+        string? Lookup(string k) => properties
+            .Where(p => p.Key.Equals(k, StringComparison.OrdinalIgnoreCase))
+            .Select(p => p.Value).FirstOrDefault();
+
+        var mode = Lookup("background.mode");
+        var alphaStr = Lookup("background.alpha");
+        var scaleStr = Lookup("background.scale");
+        if (mode == null && alphaStr == null && scaleStr == null) return null;
+
+        int? alpha = null, scale = null;
+        if (alphaStr != null && !int.TryParse(alphaStr, out var a))
+            throw new ArgumentException($"background.alpha must be an integer 0..100, got '{alphaStr}'");
+        else if (alphaStr != null) alpha = int.Parse(alphaStr);
+        if (scaleStr != null && !int.TryParse(scaleStr, out var s))
+            throw new ArgumentException($"background.scale must be an integer 1..500, got '{scaleStr}'");
+        else if (scaleStr != null) scale = int.Parse(scaleStr);
+        return new BackgroundImageOptions(mode, alpha, scale);
+    }
+
+    private static void ApplyBackground(OpenXmlPart part, string value, BackgroundImageOptions? imgOpts = null)
     {
         // Normalize alternative gradient format: "LINEAR;C1;C2;angle" → "C1-C2-angle"
         value = NormalizeGradientValue(value);
@@ -49,7 +72,7 @@ public partial class PowerPointHandler
         if (value.StartsWith("image:", StringComparison.OrdinalIgnoreCase))
         {
             var imagePath = value[6..].Trim();
-            ApplyBackgroundImageFill(bgPr, part, imagePath);
+            ApplyBackgroundImageFill(bgPr, part, imagePath, imgOpts);
         }
         else if (value.StartsWith("radial:", StringComparison.OrdinalIgnoreCase) ||
                  value.StartsWith("path:", StringComparison.OrdinalIgnoreCase))
@@ -120,7 +143,8 @@ public partial class PowerPointHandler
     };
 
     private static void ApplyBackgroundImageFill(
-        BackgroundProperties bgPr, OpenXmlPart part, string imagePath)
+        BackgroundProperties bgPr, OpenXmlPart part, string imagePath,
+        BackgroundImageOptions? opts = null)
     {
         var (stream, partType) = OfficeCli.Core.ImageSource.Resolve(imagePath);
         using var streamDispose = stream;
@@ -129,10 +153,51 @@ public partial class PowerPointHandler
         imagePart.FeedData(stream);
         var relId = GetBackgroundImageRelId(part, imagePart);
 
+        var blip = new Drawing.Blip { Embed = relId };
+        // Alpha: a:alphaModFix inside a:blip. amt is 0..100000 (100000 = opaque).
+        if (opts?.Alpha is int alpha)
+        {
+            if (alpha < 0 || alpha > 100)
+                throw new ArgumentException($"background.alpha must be 0..100, got {alpha}");
+            blip.Append(new Drawing.AlphaModulationFixed { Amount = alpha * 1000 });
+        }
+
         var blipFill = new Drawing.BlipFill();
-        blipFill.Append(new Drawing.Blip { Embed = relId });
-        blipFill.Append(new Drawing.Stretch(new Drawing.FillRectangle()));
+        blipFill.Append(blip);
+        // Schema order inside a:blipFill: a:blip → a:srcRect → {a:tile | a:stretch}.
+        blipFill.Append(BuildBlipFillMode(opts));
         bgPr.Append(blipFill);
+    }
+
+    private static OpenXmlElement BuildBlipFillMode(BackgroundImageOptions? opts)
+    {
+        var mode = (opts?.Mode ?? "stretch").ToLowerInvariant();
+        var scale = opts?.Scale ?? 100;
+        if (scale < 1 || scale > 500)
+            throw new ArgumentException($"background.scale must be 1..500, got {scale}");
+        var sxSy = scale * 1000; // 100% == 100000
+
+        return mode switch
+        {
+            "stretch" => new Drawing.Stretch(new Drawing.FillRectangle()),
+            "tile" => new Drawing.Tile
+            {
+                HorizontalRatio = sxSy,
+                VerticalRatio = sxSy,
+                Alignment = Drawing.RectangleAlignmentValues.TopLeft,
+                Flip = Drawing.TileFlipValues.None,
+            },
+            // Center = tile anchored at center with no scaling. Matches LibreOffice's
+            // FillBitmapMode_NO_REPEAT → oox export pattern (WriteXGraphicTile algn=ctr).
+            "center" => new Drawing.Tile
+            {
+                HorizontalRatio = 100000,
+                VerticalRatio = 100000,
+                Alignment = Drawing.RectangleAlignmentValues.Center,
+                Flip = Drawing.TileFlipValues.None,
+            },
+            _ => throw new ArgumentException($"background.mode must be stretch/tile/center, got '{mode}'"),
+        };
     }
 
     // ==================== Read back ====================
@@ -201,6 +266,35 @@ public partial class PowerPointHandler
         else if (blipFill != null)
         {
             node.Format["background"] = "image";
+
+            var blip = blipFill.GetFirstChild<Drawing.Blip>();
+            var alphaMod = blip?.GetFirstChild<Drawing.AlphaModulationFixed>();
+            if (alphaMod?.Amount?.HasValue == true)
+            {
+                // amt is 0..100000 (100000 = opaque). Expose as 0..100.
+                var amt = alphaMod.Amount.Value;
+                node.Format["background.alpha"] = (int)Math.Round(amt / 1000.0);
+            }
+
+            var tile = blipFill.GetFirstChild<Drawing.Tile>();
+            if (tile != null)
+            {
+                // LibreOffice convention: algn=ctr + sx=sy=100000 → "center",
+                // anything else with tile → "tile".
+                var algn = tile.Alignment?.Value;
+                var sx = tile.HorizontalRatio?.Value ?? 100000;
+                if (algn == Drawing.RectangleAlignmentValues.Center && sx == 100000)
+                {
+                    node.Format["background.mode"] = "center";
+                }
+                else
+                {
+                    node.Format["background.mode"] = "tile";
+                    if (sx != 100000)
+                        node.Format["background.scale"] = (int)Math.Round(sx / 1000.0);
+                }
+            }
+            // Stretch is the default; only emit background.mode when non-default.
         }
     }
 
