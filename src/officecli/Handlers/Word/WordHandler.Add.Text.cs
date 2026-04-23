@@ -349,9 +349,26 @@ public partial class WordHandler
                 {
                     AppendToParent(insertTarget, wrapPara);
                 }
-                var mathParaCount = insertTarget.Descendants<M.Paragraph>().Count();
+                // Compute doc-order index matching NavigateToElement's /body/oMathPara[N]
+                // resolution: enumerate bare M.Paragraph and pure oMathPara wrapper w:p's.
+                var oMathParaOrdinal = 0;
+                var found = 0;
+                foreach (var el in insertTarget.ChildElements)
+                {
+                    if (el is M.Paragraph)
+                    {
+                        oMathParaOrdinal++;
+                        if (ReferenceEquals(el, mathPara)) { found = oMathParaOrdinal; break; }
+                    }
+                    else if (el is Paragraph wp && IsOMathParaWrapperParagraph(wp))
+                    {
+                        oMathParaOrdinal++;
+                        if (ReferenceEquals(el, wrapPara)) { found = oMathParaOrdinal; break; }
+                    }
+                }
+                if (found == 0) found = oMathParaOrdinal; // fallback
                 var bodyPath = insertAfter != null ? parentPath.Substring(0, parentPath.LastIndexOf('/')) : parentPath;
-                resultPath = $"{bodyPath}/oMathPara[{mathParaCount}]";
+                resultPath = $"{bodyPath}/oMathPara[{found}]";
             }
             else
             {

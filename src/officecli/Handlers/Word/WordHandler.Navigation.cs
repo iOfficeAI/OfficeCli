@@ -223,6 +223,17 @@ public partial class WordHandler
 
         // Find anchor's position among parent's children
         var siblings = parent.ChildElements.ToList();
+        // /body/oMathPara[N] resolves to the inner M.Paragraph/oMathPara element;
+        // when it lives inside a pure wrapper w:p, the wrapper is the actual
+        // body child. Re-target the anchor to that wrapper so --after/--before
+        // can find it among body siblings.
+        if ((anchor is M.Paragraph || anchor.LocalName == "oMathPara")
+            && anchor.Parent is Paragraph wrapAnchor
+            && IsOMathParaWrapperParagraph(wrapAnchor)
+            && parent.ChildElements.Contains(wrapAnchor))
+        {
+            anchor = wrapAnchor;
+        }
         var anchorIdx = siblings.IndexOf(anchor);
         if (anchorIdx < 0)
             throw new ArgumentException($"Anchor element is not a child of {parentPath}: {anchorPath}");
