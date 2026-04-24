@@ -32,7 +32,7 @@ internal static class SpacingConverter
     private const double PointsPerCm = 72.0 / 2.54; // ~28.3465
     private const double PointsPerInch = 72.0;
     private const int TwipsPerPoint = 20; // 1 pt = 20 twips
-    private const int WordAutoLineSpacingUnit = 240; // 240 twips = single line in Auto mode
+    private const int WordAutoLineSpacingUnit = 288; // MOD: 288 twips (14.4pt) better matches WPS/Chinese Word default row height for 16pt fonts // 240 twips = single line in Auto mode
 
     // ────────────────────────────────────────────────────────────────
     //  spaceBefore / spaceAfter  →  Word twips

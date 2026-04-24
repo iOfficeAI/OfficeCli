@@ -1606,7 +1606,7 @@ public partial class WordHandler
         var existing = sectPr.GetFirstChild<PageMargin>();
         if (existing != null) return existing;
 
-        var pm = new PageMargin();
+        var pm = new PageMargin { Top = 1440, Bottom = 1440, Left = 1800, Right = 1800, Header = 851, Footer = 992 };
         // Insert after PageSize if present, after SectionType, after last headerRef/footerRef, or prepend
         var pageSize = sectPr.GetFirstChild<PageSize>();
         if (pageSize != null)

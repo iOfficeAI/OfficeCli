@@ -23,6 +23,13 @@ public partial class WordHandler
         public List<(string markerId, string imgHtml)> TopAnchoredImages { get; } = new();
         public PageLayout? CachedPageLayout { get; set; }
         public bool RenderingBody { get; set; }
+        public bool RenderingHeaderFooter { get; set; }
+        public string? ActiveHeaderFooterField { get; set; }
+        public bool SkipHeaderFooterFieldResult { get; set; }
+
+        // MOD(#5): Comment annotation tracking
+        public List<string> OpenCommentMarks { get; } = new(); // stack of open comment mark IDs
+        public List<string> CommentIds { get; } = new(); // ordered comment IDs for rendering
 
         // #8a: section-relative footnote numbering. When a section's
         // FootnoteProperties.NumberingRestart = eachSect, the fn counter
@@ -57,6 +64,12 @@ public partial class WordHandler
             LineWidthPt = contentWidthPt;
             LineAccumPt = 0;
         }
+
+        public void ResetHeaderFooterFieldState()
+        {
+            ActiveHeaderFooterField = null;
+            SkipHeaderFooterFieldResult = false;
+        }
     }
 
     /// <summary>Current render context — set during ViewAsHtml, used by all render methods.</summary>
@@ -67,6 +80,21 @@ public partial class WordHandler
 
     /// <summary>CJK font resolved from theme's supplemental font list (e.g. "Microsoft YaHei" for Hans).</summary>
     private string? _themeCjkFont;
+
+    private sealed record PreviewPageTemplates(
+        string FirstHeaderHtml,
+        string OddHeaderHtml,
+        string EvenHeaderHtml,
+        string FirstFooterTemplate,
+        string OddFooterTemplate,
+        string EvenFooterTemplate)
+    {
+        public string HeaderForPage(int pageNumber) =>
+            PickPageTemplate(FirstHeaderHtml, OddHeaderHtml, EvenHeaderHtml, pageNumber);
+
+        public string FooterForPage(int pageNumber) =>
+            PickPageTemplate(FirstFooterTemplate, OddFooterTemplate, EvenFooterTemplate, pageNumber);
+    }
 
     /// <summary>
     /// Generate a self-contained HTML file that previews the Word document
@@ -159,7 +187,6 @@ public partial class WordHandler
         sb.AppendLine("<body>");
 
         // Render body into temporary buffer, then split on page breaks
-        var maxW = $"width:{pgLayout.WidthPt:0.#}pt";
         var bodySb = new StringBuilder();
         _ctx.RenderingBody = true;
         RenderBodyHtml(bodySb, body);
@@ -192,7 +219,7 @@ public partial class WordHandler
         RenderEndnotesHtml(endnotesSb);
         var endnotesHtml = endnotesSb.ToString();
 
-        var bodyContent = bodySb.ToString();
+        var bodyContent = NormalizeStandalonePageBreakParagraphs(bodySb.ToString());
 
         // Split body content on page breaks into pages
         var pages = bodyContent.Split("<!--PAGE_BREAK-->");
@@ -226,7 +253,6 @@ public partial class WordHandler
 
         // Parse page filter (e.g. "1", "2-5", "1,3,5", "2-4,7")
         HashSet<int>? requestedPages = null;
-        int totalServerPages = pageList.Count;
         if (!string.IsNullOrWhiteSpace(pageFilter))
         {
             requestedPages = new HashSet<int>();
@@ -260,7 +286,6 @@ public partial class WordHandler
         var footerTemplateWithTotal = pageNumPattern.Replace(footerTemplate,
             "$1<span class=\"num-pages-field\"><!--NUM_PAGES--></span>$2", 1);
         footerTemplate = footerTemplateWithTotal;
-
         // Section-level multi-column layout: w:cols num=N sep=true
         var sectCols = _doc.MainDocumentPart?.Document?.Body?.GetFirstChild<SectionProperties>()?.GetFirstChild<Columns>();
         var colCount = sectCols?.ColumnCount?.Value ?? 1;
@@ -287,13 +312,14 @@ public partial class WordHandler
         var activeLayout = pgLayout;
         // #10: per-section pgNumType — w:start resets the displayed page
         // counter at the section boundary; w:fmt swaps the number format
-        // (decimalZero, upperRoman, …) applied to PAGE/NUMPAGES substitutions.
+        // (decimalZero, upperRoman, …) applied to PAGE substitutions.
         int displayedPageNum = 0;
         string displayedFmt = "decimal";
         int activeSectionIdx = 0;
         int prevActiveSectionIdx = -1;
         for (int i = 0; i < pageList.Count; i++)
         {
+            var pageNumber = i + 1;
             var pgContent = pageList[i];
             var sectMatches = sectRegex.Matches(pgContent);
             if (sectMatches.Count > 0)
@@ -381,9 +407,9 @@ public partial class WordHandler
                 .Replace("<!--PAGE_NUM-->", hdrPageNumStr)
                 .Replace("<!--NUM_PAGES-->", pageList.Count.ToString()));
             sb.Append($"<div class=\"page-body\"{colBodyStyle}>");
-            sb.Append(pageList[i]);
+            sb.Append(pgContent);
             // Place footnotes on the page that contains the footnote reference
-            if (!string.IsNullOrEmpty(footnotesHtml) && pageList[i].Contains("fn-ref"))
+            if (!string.IsNullOrEmpty(footnotesHtml) && pgContent.Contains("fn-ref"))
                 sb.Append(footnotesHtml);
             // Place endnotes on the last page
             if (i == pageList.Count - 1 && !string.IsNullOrEmpty(endnotesHtml))
@@ -453,6 +479,18 @@ public partial class WordHandler
         headerTemplate = pageNumPattern.Replace(headerTemplate, "$1<!--NUM_PAGES-->$2", 1);
         sb.AppendLine("  var htpl=" + JsStringLiteral(headerTemplate) + ";");
         sb.AppendLine(@"
+  function shouldScalePages(){
+    try{
+      // MOD(#13): see docs/cove-desktop-mods.md
+      // Embedded previews (for example Cove's iframe-based panel) still need
+      // the same fit-to-width behavior as the standalone HTML view.
+      // Keep an explicit opt-out for future hosts that truly need native width.
+      if(window.__officecliDisablePageScaling===true)return false;
+      if(document.body&&document.body.getAttribute('data-officecli-scale')==='off')return false;
+    }catch(e){}
+    return true;
+  }
+
   function paginate(){
     var pages=document.querySelectorAll('.page');
     for(var pi=0;pi<pages.length;pi++){
@@ -562,6 +600,7 @@ public partial class WordHandler
     }
     // Renumber pages
     var allPages=document.querySelectorAll('.page');
+    var totalPageCount=allPages.length;
     allPages.forEach(function(p,i){
       var nums=p.querySelectorAll('.page-num');
       nums.forEach(function(n){n.textContent=(i+1);});
@@ -590,7 +629,7 @@ public partial class WordHandler
       if(ch>maxBodyH-fh+2 && visibleCount>1)again=true;
     });
     if(again)setTimeout(paginate,0);
-    else{setTimeout(positionFootnotes,0);setTimeout(wrapFloats,0);setTimeout(applyLineNumbers,0);setTimeout(applyPageFilter,0);setTimeout(function(){scalePages(false);},0);}
+    else{setTimeout(positionFootnotes,0);setTimeout(wrapFloats,0);setTimeout(applyLineNumbers,0);setTimeout(applyPageFilter,0);if(shouldScalePages())setTimeout(function(){scalePages(false);},0);}
   }
   // #2 / #7b light approximation: a floating table whose CSS has float:*
   // sits directly under .page-body (flex column) and has its float ignored.
@@ -808,6 +847,7 @@ public partial class WordHandler
   }
   var _resizeTimer;
   window.addEventListener('resize',function(){
+    if(!shouldScalePages())return;
     clearTimeout(_resizeTimer);
     _resizeTimer=setTimeout(function(){scalePages(true);},100);
   });");
@@ -819,9 +859,216 @@ public partial class WordHandler
         sb.AppendLine("else _wordInit();");
         sb.AppendLine("</script>");
 
+        // MOD(#5): Render comment annotations after script block
+        RenderCommentsHtml(sb);
+
         sb.AppendLine("</body>");
         sb.AppendLine("</html>");
+    return sb.ToString();
+    }
+
+    private PreviewPageTemplates BuildPreviewPageTemplates()
+    {
+        var sectPr = GetPreviewSectionProperties();
+        return new PreviewPageTemplates(
+            RenderHeaderFooterHtml(isHeader: true, sectPr, HeaderFooterValues.First),
+            RenderHeaderFooterHtml(isHeader: true, sectPr, HeaderFooterValues.Default),
+            RenderHeaderFooterHtml(isHeader: true, sectPr, HeaderFooterValues.Even),
+            BuildFooterTemplate(RenderHeaderFooterHtml(isHeader: false, sectPr, HeaderFooterValues.First)),
+            BuildFooterTemplate(RenderHeaderFooterHtml(isHeader: false, sectPr, HeaderFooterValues.Default)),
+            BuildFooterTemplate(RenderHeaderFooterHtml(isHeader: false, sectPr, HeaderFooterValues.Even))
+        );
+    }
+
+    private static string PickPageTemplate(string first, string odd, string even, int pageNumber)
+    {
+        if (pageNumber == 1 && !string.IsNullOrEmpty(first))
+            return first;
+        if (pageNumber % 2 == 0 && !string.IsNullOrEmpty(even))
+            return even;
+        if (!string.IsNullOrEmpty(odd))
+            return odd;
+        if (!string.IsNullOrEmpty(even))
+            return even;
+        return first;
+    }
+
+    private static string BuildFooterTemplate(string footerHtml)
+    {
+        if (string.IsNullOrEmpty(footerHtml)) return string.Empty;
+        if (footerHtml.Contains("<!--PAGE_NUM-->") || footerHtml.Contains("<!--PAGE_COUNT-->"))
+            return footerHtml;
+
+        var matchIndex = 0;
+        return Regex.Replace(
+            footerHtml,
+            @"(<span[^>]*>)\s*\d+\s*(</span>)",
+            match =>
+            {
+                matchIndex++;
+                return matchIndex switch
+                {
+                    1 => $"{match.Groups[1].Value}<!--PAGE_NUM-->{match.Groups[2].Value}",
+                    2 => $"{match.Groups[1].Value}<!--PAGE_COUNT-->{match.Groups[2].Value}",
+                    _ => match.Value
+                };
+            });
+    }
+
+    private static string PopulateFooterPageFields(string footerHtml, string pageNumber, string pageCount)
+    {
+        if (string.IsNullOrEmpty(footerHtml)) return string.Empty;
+        return footerHtml
+            .Replace("<!--PAGE_NUM-->", pageNumber)
+            .Replace("<!--PAGE_COUNT-->", pageCount);
+    }
+
+    private static string NormalizeStandalonePageBreakParagraphs(string bodyContent)
+    {
+        return Regex.Replace(
+            bodyContent,
+            @"(?:<a id=""w-p-\d+""></a>)?(?:<span class=""w[be]""[^>]*></span>)*<p\b[^>]*>\s*<!--PAGE_BREAK-->\s*</p>",
+            "<!--PAGE_BREAK-->");
+    }
+
+    private SectionProperties? GetPreviewSectionProperties()
+    {
+        var body = _doc.MainDocumentPart?.Document?.Body;
+        return body?.GetFirstChild<SectionProperties>()
+            ?? body?.Descendants<SectionProperties>().LastOrDefault();
+    }
+
+    private string RenderHeaderFooterHtml(
+        bool isHeader,
+        SectionProperties? sectPr,
+        HeaderFooterValues requestedType)
+    {
+        var sb = new StringBuilder();
+        var cssClass = isHeader ? "doc-header" : "doc-footer";
+        OpenXmlElement? headerFooter = isHeader
+            ? ResolveHeaderPart(sectPr, requestedType)?.Header
+            : ResolveFooterPart(sectPr, requestedType)?.Footer;
+        if (headerFooter == null || !HeaderFooterHasContent(headerFooter))
+            return string.Empty;
+
+        var previousRenderingHeaderFooter = _ctx.RenderingHeaderFooter;
+        _ctx.RenderingHeaderFooter = true;
+        _ctx.ResetHeaderFooterFieldState();
+        try
+        {
+            sb.AppendLine($"<div class=\"{cssClass}\">");
+            RenderHeaderFooterBody(sb, headerFooter);
+            sb.AppendLine("</div>");
+        }
+        finally
+        {
+            _ctx.ResetHeaderFooterFieldState();
+            _ctx.RenderingHeaderFooter = previousRenderingHeaderFooter;
+        }
         return sb.ToString();
+    }
+
+    private static string? ParseHeaderFooterFieldType(string? instruction)
+    {
+        if (string.IsNullOrWhiteSpace(instruction)) return null;
+        var fieldName = instruction
+            .Trim()
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault()
+            ?.ToUpperInvariant();
+        return fieldName is "PAGE" or "NUMPAGES" or "SECTIONPAGES" ? fieldName : null;
+    }
+
+    private static string GetHeaderFooterFieldPlaceholder(string fieldType)
+    {
+        return fieldType switch
+        {
+            "PAGE" => "<span class=\"page-num\"><!--PAGE_NUM--></span>",
+            "NUMPAGES" or "SECTIONPAGES" => "<span class=\"page-count\"><!--PAGE_COUNT--></span>",
+            _ => string.Empty
+        };
+    }
+
+    private HeaderPart? ResolveHeaderPart(SectionProperties? sectPr, HeaderFooterValues requestedType)
+    {
+        var mainPart = _doc.MainDocumentPart;
+        if (mainPart == null) return null;
+        if (sectPr != null)
+        {
+            var relId = ResolveHeaderFooterRelId(sectPr.Elements<HeaderReference>(), requestedType);
+            if (!string.IsNullOrEmpty(relId))
+            {
+                try { return mainPart.GetPartById(relId) as HeaderPart; }
+                catch { }
+            }
+        }
+        return mainPart.HeaderParts.FirstOrDefault();
+    }
+
+    private FooterPart? ResolveFooterPart(SectionProperties? sectPr, HeaderFooterValues requestedType)
+    {
+        var mainPart = _doc.MainDocumentPart;
+        if (mainPart == null) return null;
+        if (sectPr != null)
+        {
+            var relId = ResolveHeaderFooterRelId(sectPr.Elements<FooterReference>(), requestedType);
+            if (!string.IsNullOrEmpty(relId))
+            {
+                try { return mainPart.GetPartById(relId) as FooterPart; }
+                catch { }
+            }
+        }
+        return mainPart.FooterParts.FirstOrDefault();
+    }
+
+    private static string? ResolveHeaderFooterRelId<TReference>(
+        IEnumerable<TReference> references,
+        HeaderFooterValues requestedType)
+        where TReference : HeaderFooterReferenceType
+    {
+        var refs = references.ToList();
+        var relId = refs.FirstOrDefault(r => r.Type?.Value == requestedType)?.Id?.Value;
+        if (!string.IsNullOrEmpty(relId)) return relId;
+
+        relId = refs.FirstOrDefault(r => r.Type?.Value == HeaderFooterValues.Default)?.Id?.Value;
+        if (!string.IsNullOrEmpty(relId)) return relId;
+
+        if (requestedType != HeaderFooterValues.First)
+        {
+            relId = refs.FirstOrDefault(r => r.Type?.Value == HeaderFooterValues.First)?.Id?.Value;
+            if (!string.IsNullOrEmpty(relId)) return relId;
+        }
+
+        if (requestedType != HeaderFooterValues.Even)
+        {
+            relId = refs.FirstOrDefault(r => r.Type?.Value == HeaderFooterValues.Even)?.Id?.Value;
+            if (!string.IsNullOrEmpty(relId)) return relId;
+        }
+
+        return refs.FirstOrDefault()?.Id?.Value;
+    }
+
+    private static bool HasRenderableHeaderFooterContent(IEnumerable<Paragraph>? paragraphs)
+    {
+        return paragraphs != null && paragraphs.Any(HasRenderableHeaderFooterContent);
+    }
+
+    private static bool HasRenderableHeaderFooterContent(Paragraph para)
+    {
+        if (!string.IsNullOrWhiteSpace(GetParagraphText(para)))
+            return true;
+
+        return para.Descendants<DeletedText>().Any(t => !string.IsNullOrEmpty(t.Text))
+            || para.Descendants<Drawing>().Any()
+            || para.Descendants<EmbeddedObject>().Any()
+            || para.Descendants<Hyperlink>().Any()
+            || para.Descendants<SymbolChar>().Any()
+            || para.Descendants<SimpleField>().Any()
+            || para.Descendants<FieldCode>().Any(fc => !string.IsNullOrWhiteSpace(fc.Text))
+            || para.ChildElements.Any(child =>
+                child.LocalName is "oMath" or "oMathPara"
+                || child is M.OfficeMath
+                || child is M.Paragraph);
     }
 
     // ==================== Page Layout + Doc Defaults from OOXML ====================
@@ -836,7 +1083,7 @@ public partial class WordHandler
     private PageLayout GetPageLayout()
     {
         if (_ctx?.CachedPageLayout != null) return _ctx.CachedPageLayout;
-        var sectPr = _doc.MainDocumentPart?.Document?.Body?.GetFirstChild<SectionProperties>();
+        var sectPr = GetPreviewSectionProperties();
         var result = GetPageLayoutFor(sectPr);
         if (_ctx != null) _ctx.CachedPageLayout = result;
         return result;
@@ -965,12 +1212,16 @@ public partial class WordHandler
 
         // docGrid linePitch — controls CJK snap-to-grid line spacing (twips → pt)
         double gridLinePitchPt = 0;
-        var sectPr = _doc.MainDocumentPart?.Document?.Body?.GetFirstChild<SectionProperties>();
+        var sectPr = GetPreviewSectionProperties();
         var docGrid = sectPr?.GetFirstChild<DocGrid>();
-        if (docGrid?.Type?.Value == DocGridValues.Lines || docGrid?.Type?.Value == DocGridValues.LinesAndChars)
+        // MOD(#11): see cove-desktop-mods.md
+        // WPS-authored DOCX frequently omits w:docGrid/@w:type while still
+        // writing a meaningful linePitch. Treat "type missing + linePitch>0"
+        // as an active line grid instead of dropping back to browser defaults.
+        if (docGrid?.LinePitch?.Value is int lp && lp > 0
+            && docGrid.Type?.Value != DocGridValues.SnapToChars)
         {
-            if (docGrid.LinePitch?.Value is int lp && lp > 0)
-                gridLinePitchPt = lp / 20.0; // twips to pt
+            gridLinePitchPt = lp / 20.0; // twips to pt
         }
 
         // Default text color: docDefaults → theme dk1
@@ -1108,10 +1359,23 @@ public partial class WordHandler
             _themeCjkFont = eaFont;
     }
 
-    /// <summary>Generate @font-face rules with local() for document fonts.
-    /// Includes ascent-override/descent-override/line-gap-override to force
-    /// the browser to use OS/2 winAscent+winDescent metrics instead of
-    /// the browser's default (which may include hhea lineGap).</summary>
+    /// <summary>
+    /// Generate @font-face rules with local() for document fonts, including
+    /// ascent-override / descent-override / line-gap-override descriptors.
+    ///
+    /// Why the overrides: CSS's default line-height model distributes leading
+    /// via the font's sTypoAscender/Descender + sTypoLineGap (or hhea metrics,
+    /// depending on fsSelection USE_TYPO_METRICS), which is NOT what Word uses.
+    /// Word uses usWinAscent/usWinDescent and no line-gap. For CJK fonts in
+    /// particular, typo metrics tend to be tight while winMetrics leave proper
+    /// breathing room for glyphs — which is why a docx rendered faithfully
+    /// (line-height: 1.15) looks cramped in the browser but correct in Word.
+    ///
+    /// By emitting ascent/descent overrides based on OS/2 usWinAscent/usWinDescent,
+    /// CSS line-height: X now produces Word-equivalent line boxes at the same
+    /// multiplier value. No per-document line-height floor needed — Word's
+    /// original values are preserved and render correctly.
+    /// </summary>
     private static string ResolveLocalFontFaces(HashSet<string> docFonts)
     {
         var sb = new StringBuilder();
@@ -1224,36 +1488,7 @@ public partial class WordHandler
 
     private void RenderHeaderFooterHtml(StringBuilder sb, bool isHeader)
     {
-        var cssClass = isHeader ? "doc-header" : "doc-footer";
-
-        if (isHeader)
-        {
-            var headerParts = _doc.MainDocumentPart?.HeaderParts;
-            if (headerParts == null) return;
-            foreach (var hp in headerParts)
-            {
-                if (hp.Header == null) continue;
-                if (!HeaderFooterHasContent(hp.Header)) continue;
-                sb.AppendLine($"<div class=\"{cssClass}\">");
-                RenderHeaderFooterBody(sb, hp.Header);
-                sb.AppendLine("</div>");
-                break;
-            }
-        }
-        else
-        {
-            var footerParts = _doc.MainDocumentPart?.FooterParts;
-            if (footerParts == null) return;
-            foreach (var fp in footerParts)
-            {
-                if (fp.Footer == null) continue;
-                if (!HeaderFooterHasContent(fp.Footer)) continue;
-                sb.AppendLine($"<div class=\"{cssClass}\">");
-                RenderHeaderFooterBody(sb, fp.Footer);
-                sb.AppendLine("</div>");
-                break;
-            }
-        }
+        sb.Append(RenderHeaderFooterHtml(isHeader, GetPreviewSectionProperties(), HeaderFooterValues.Default));
     }
 
     /// <summary>Returns true if the header/footer has any visible content:
@@ -1285,6 +1520,7 @@ public partial class WordHandler
         {
             if (child is Paragraph para)
             {
+                _ctx.ResetHeaderFooterFieldState();
                 // Legacy VML watermark: a <v:shape> in a <w:pict> with
                 // a <v:textpath> child carrying the watermark string
                 // (DRAFT / CONFIDENTIAL / …). DrawingML text boxes are
@@ -1433,6 +1669,32 @@ public partial class WordHandler
             // emitted as a <div class="equation">, not a <p>. Skip it from
             // the wParaCount sequence so /body/p[N] in data-path attrs
             // lines up with Navigation.cs's path resolution.
+            if (element is CommentRangeStart bodyCrs)
+            {
+                var id = bodyCrs.Id?.Value;
+                if (id != null)
+                {
+                    _ctx.OpenCommentMarks.Add(id);
+                    if (!_ctx.CommentIds.Contains(id))
+                        _ctx.CommentIds.Add(id);
+                }
+                continue;
+            }
+            if (element is CommentRangeEnd bodyCre)
+            {
+                var id = bodyCre.Id?.Value;
+                if (id != null)
+                    _ctx.OpenCommentMarks.Remove(id);
+                continue;
+            }
+
+            if (element is Paragraph manualPageBreakPara
+                && IsStandalonePageBreakParagraph(manualPageBreakPara))
+            {
+                sb.Append("<!--PAGE_BREAK-->");
+                continue;
+            }
+
             if (element is Paragraph wpara && !IsOMathParaWrapperParagraph(wpara))
             { wParaCount++; sb.Append($"<a id=\"w-p-{wParaCount}\"></a>"); }
             else if (element is Table) { wTableCount++; sb.Append($"<a id=\"w-table-{wTableCount}\"></a>"); }
