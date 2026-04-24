@@ -154,6 +154,31 @@ internal static class SchemaHelpRenderer
             sb.AppendLine($"Note: {noteStr}");
         }
 
+        if (root.TryGetProperty("examples", out var topExamples)
+            && topExamples.ValueKind == JsonValueKind.Array
+            && topExamples.GetArrayLength() > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("Examples:");
+            foreach (var ex in topExamples.EnumerateArray())
+            {
+                if (ex.ValueKind == JsonValueKind.String)
+                {
+                    if (ex.GetString() is { } s) sb.AppendLine($"  {s}");
+                }
+                else if (ex.ValueKind == JsonValueKind.Object)
+                {
+                    var title = ex.TryGetProperty("title", out var t) ? t.GetString() : null;
+                    if (!string.IsNullOrEmpty(title)) sb.AppendLine($"  {title}:");
+                    if (ex.TryGetProperty("commands", out var cmds) && cmds.ValueKind == JsonValueKind.Array)
+                        foreach (var cmdElement in cmds.EnumerateArray())
+                            if (cmdElement.GetString() is { } cs) sb.AppendLine($"    {cs}");
+                    else if (ex.TryGetProperty("command", out var cmd) && cmd.GetString() is { } cmdStr)
+                        sb.AppendLine($"    {cmdStr}");
+                }
+            }
+        }
+
         return sb.ToString().TrimEnd('\r', '\n');
     }
 
