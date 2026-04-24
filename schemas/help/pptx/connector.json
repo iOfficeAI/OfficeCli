@@ -25,17 +25,17 @@
     },
     "from": {
       "type": "string",
-      "description": "start-point shape path or coordinate.",
+      "description": "start-point shape reference. Accepts /slide[N]/shape[M] (positional) or /slide[N]/shape[@id=M] (as returned by 'query shape').",
       "add": true, "set": true, "get": true,
-      "examples": ["--prop from=/slide[1]/shape[1]"],
+      "examples": ["--prop from=/slide[1]/shape[1]", "--prop from=/slide[1]/shape[@id=10001]"],
       "readback": "start reference",
       "enforcement": "report"
     },
     "to": {
       "type": "string",
-      "description": "end-point shape path or coordinate.",
+      "description": "end-point shape reference. Accepts /slide[N]/shape[M] (positional) or /slide[N]/shape[@id=M] (as returned by 'query shape').",
       "add": true, "set": true, "get": true,
-      "examples": ["--prop to=/slide[1]/shape[2]"],
+      "examples": ["--prop to=/slide[1]/shape[2]", "--prop to=/slide[1]/shape[@id=10002]"],
       "readback": "end reference",
       "enforcement": "report"
     },

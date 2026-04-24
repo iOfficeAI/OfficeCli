@@ -347,7 +347,9 @@ public partial class PowerPointHandler
         if (opts.Mode != null || opts.Scale != null)
         {
             var (curMode, curScale) = ReadCurrentBlipFillMode(blipFill);
-            var effectiveMode = opts.Mode ?? curMode;
+            // Normalize incoming mode so the scale-compat check doesn't reject "TILE"
+            // simply because it wasn't lowercased. BuildBlipFillMode also lowercases.
+            var effectiveMode = (opts.Mode ?? curMode).Trim().ToLowerInvariant();
             // Scale is meaningful only in tile mode — reject scale-on-stretch/center to
             // prevent a silent no-op. Callers must set mode=tile to use scale.
             if (opts.Scale != null && effectiveMode != "tile")
@@ -565,6 +567,17 @@ public partial class PowerPointHandler
         var type = parts[0].Trim().ToUpperInvariant();
         var colorAndParams = parts.Skip(1).Select(p => p.Trim()).ToArray();
 
+        // Dash is the separator in the canonical form, so a trailing negative angle
+        // (e.g. "LINEAR;C1;C2;-90") would splice into "C1-C2--90" and fail as an
+        // empty color token. Normalize a negative trailing integer to its positive
+        // equivalent (-90 → 270) so the advertised semicolon form stays usable.
+        if (colorAndParams.Length >= 2 && (type == "LINEAR" || type == "RADIAL" || type == "PATH"))
+        {
+            var tail = colorAndParams[^1];
+            if (int.TryParse(tail, out var angleDeg) && angleDeg < 0 && angleDeg >= -360)
+                colorAndParams[^1] = (((angleDeg % 360) + 360) % 360).ToString();
+        }
+
         return type switch
         {
             "LINEAR" => string.Join("-", colorAndParams),
@@ -639,6 +652,7 @@ public partial class PowerPointHandler
         var colorParts = parts.ToList();
         string? focusPoint = null;
         int angle = 5400000; // default 90° = top→bottom
+        bool angleStripped = false;
 
         if (gradientType != null)
         {
@@ -671,12 +685,21 @@ public partial class PowerPointHandler
                 angleDeg = ((angleDeg % 360) + 360) % 360;
                 angle = angleDeg * 60000;
                 colorParts.RemoveAt(colorParts.Count - 1);
+                angleStripped = true;
             }
         }
 
-        // If only one color remains after removing angle/focus, duplicate it
+        // If only one color remains after removing angle/focus, duplicate it — but
+        // only when the user supplied a focus keyword (radial/path form). Falling back
+        // to duplicate silently turns "FF0000-90" into a 2-stop same-color gradient,
+        // hiding the fact that the user never specified a real second stop.
         if (colorParts.Count == 1)
+        {
+            if (angleStripped)
+                throw new ArgumentException(
+                    "gradient requires at least 2 colors, e.g. 'FF0000-0000FF-45'");
             colorParts.Add(colorParts[0]);
+        }
 
         var gradFill = new Drawing.GradientFill();
         var gsLst = new Drawing.GradientStopList();
