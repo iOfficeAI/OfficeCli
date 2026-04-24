@@ -70,6 +70,23 @@ public partial class PowerPointHandler
         // Normalize alternative gradient format: "LINEAR;C1;C2;angle" → "C1-C2-angle"
         value = NormalizeGradientValue(value);
 
+        // background.mode/alpha/scale are image-only; reject early if paired with a
+        // non-image value so the user isn't fooled by a success echo for a no-op.
+        var isImage = value.StartsWith("image:", StringComparison.OrdinalIgnoreCase);
+        var isClear = value.Equals("none", StringComparison.OrdinalIgnoreCase)
+                   || value.Equals("transparent", StringComparison.OrdinalIgnoreCase)
+                   || value.Equals("clear", StringComparison.OrdinalIgnoreCase);
+        if (imgOpts != null && !isImage)
+        {
+            var opt = imgOpts.Mode != null ? "background.mode"
+                    : imgOpts.Alpha != null ? "background.alpha"
+                    : "background.scale";
+            var kind = isClear ? "none/transparent" : "solid/gradient";
+            throw new ArgumentException(
+                $"{opt} is only valid with an image background (current background={kind}); " +
+                "pair with background=image:<path>");
+        }
+
         var cSld = GetCommonSlideData(part)
             ?? throw new InvalidOperationException($"{part.GetType().Name} has no CommonSlideData");
 
@@ -520,8 +537,11 @@ public partial class PowerPointHandler
                 ? lastPart[..^3] : lastPart;
             if (colorParts.Count >= 2 &&
                 int.TryParse(angleCandidate, out var angleDeg) &&
-                angleCandidate.Length <= 3)
+                angleCandidate.Length <= 4)
             {
+                // OOXML a:lin/@ang range is [0, 21600000) in 60000ths of a degree.
+                // Normalize into [0, 360) so 720, -45, 400 don't break validation.
+                angleDeg = ((angleDeg % 360) + 360) % 360;
                 angle = angleDeg * 60000;
                 colorParts.RemoveAt(colorParts.Count - 1);
             }
