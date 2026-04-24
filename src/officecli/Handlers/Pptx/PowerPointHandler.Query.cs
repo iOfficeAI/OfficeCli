@@ -652,6 +652,25 @@ public partial class PowerPointHandler
             return seriesNode;
         }
 
+        // Try chart axis-by-role sub-path: /slide[N]/chart[M]/axis[@role=ROLE]
+        // Per schemas/help/pptx/chart-axis.json.
+        var chartAxisGetMatch = Regex.Match(path,
+            @"^/slide\[(\d+)\]/chart\[(\d+)\]/axis\[@role=([a-zA-Z0-9_]+)\]$");
+        if (chartAxisGetMatch.Success)
+        {
+            var caSlideIdx = int.Parse(chartAxisGetMatch.Groups[1].Value);
+            var caChartIdx = int.Parse(chartAxisGetMatch.Groups[2].Value);
+            var caRole = chartAxisGetMatch.Groups[3].Value;
+
+            var (_, _, caChartPart, _) = ResolveChart(caSlideIdx, caChartIdx);
+            if (caChartPart?.ChartSpace == null)
+                throw new ArgumentException($"Axis not found on chart {caChartIdx}: extended charts not supported.");
+            var axisNode = Core.ChartHelper.BuildAxisNode(caChartPart.ChartSpace, caRole, path);
+            if (axisNode == null)
+                throw new ArgumentException($"Axis with role '{caRole}' not found on chart {caChartIdx}.");
+            return axisNode;
+        }
+
         // Try resolving logical paths with deeper segments (e.g. /slide[1]/placeholder[1]/...)
         // Only for paths not handled by dedicated handlers above
         if (Regex.IsMatch(path, @"^/slide\[\d+\]/placeholder\[\w+\]/"))

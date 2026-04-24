@@ -533,6 +533,24 @@ public partial class PowerPointHandler
             return unsupported;
         }
 
+        // Try chart axis-by-role sub-path: /slide[N]/chart[M]/axis[@role=ROLE].
+        // Routed separately from the chart[]/series[] path because the role capture
+        // needs to drive a different forwarder (SetAxisProperties, not series-prefix).
+        var chartAxisSetMatch = Regex.Match(path,
+            @"^/slide\[(\d+)\]/chart\[(\d+)\]/axis\[@role=([a-zA-Z0-9_]+)\]$");
+        if (chartAxisSetMatch.Success)
+        {
+            var caSlideIdx = int.Parse(chartAxisSetMatch.Groups[1].Value);
+            var caChartIdx = int.Parse(chartAxisSetMatch.Groups[2].Value);
+            var caRole = chartAxisSetMatch.Groups[3].Value;
+            var (caSlidePart, _, caChartPart, _) = ResolveChart(caSlideIdx, caChartIdx);
+            if (caChartPart == null)
+                throw new ArgumentException($"Axis Set not supported on extended charts.");
+            var axUnsupported = ChartHelper.SetAxisProperties(caChartPart, caRole, properties);
+            GetSlide(caSlidePart).Save();
+            return axUnsupported;
+        }
+
         // Try chart path: /slide[N]/chart[M] or /slide[N]/chart[M]/series[K]
         var chartSetMatch = Regex.Match(path, @"^/slide\[(\d+)\]/chart\[(\d+)\](?:/series\[(\d+)\])?$");
         if (chartSetMatch.Success)

@@ -281,6 +281,26 @@ public partial class WordHandler
             return FieldToNode(allFields[fieldIdx - 1], path);
         }
 
+        // Chart axis-by-role sub-path: /chart[N]/axis[@role=ROLE].
+        // Per schemas/help/pptx/chart-axis.json (shared contract across Pptx/Word/Excel).
+        var chartAxisGetMatch = System.Text.RegularExpressions.Regex.Match(path,
+            @"^/chart\[(\d+)\]/axis\[@role=([a-zA-Z0-9_]+)\]$");
+        if (chartAxisGetMatch.Success)
+        {
+            var caChartIdx = int.Parse(chartAxisGetMatch.Groups[1].Value);
+            var caRole = chartAxisGetMatch.Groups[2].Value;
+            var caAllCharts = GetAllWordCharts();
+            if (caChartIdx < 1 || caChartIdx > caAllCharts.Count)
+                return new DocumentNode { Path = path, Type = "error", Text = $"Chart {caChartIdx} not found" };
+            var caChartInfo = caAllCharts[caChartIdx - 1];
+            if (caChartInfo.IsExtended || caChartInfo.StandardPart?.ChartSpace == null)
+                throw new ArgumentException($"Axis not available on chart {caChartIdx}: extended charts not supported.");
+            var axisNode = Core.ChartHelper.BuildAxisNode(caChartInfo.StandardPart.ChartSpace, caRole, path);
+            if (axisNode == null)
+                throw new ArgumentException($"Axis with role '{caRole}' not found on chart {caChartIdx}.");
+            return axisNode;
+        }
+
         // Chart paths: /chart[N] or /chart[N]/series[K]
         var chartGetMatch = System.Text.RegularExpressions.Regex.Match(path, @"^/chart\[(\d+)\](?:/series\[(\d+)\])?$");
         if (chartGetMatch.Success)

@@ -515,6 +515,29 @@ public partial class ExcelHandler
             return afNode;
         }
 
+        // Chart axis-by-role sub-path: /Sheet1/chart[N]/axis[@role=ROLE].
+        // Per schemas/help/pptx/chart-axis.json (shared contract).
+        var chartAxisGetMatch = Regex.Match(cellRef,
+            @"^chart\[(\d+)\]/axis\[@role=([a-zA-Z0-9_]+)\]$");
+        if (chartAxisGetMatch.Success)
+        {
+            var caChartIdx = int.Parse(chartAxisGetMatch.Groups[1].Value);
+            var caRole = chartAxisGetMatch.Groups[2].Value;
+            var caDrawingsPart = worksheet.DrawingsPart;
+            if (caDrawingsPart == null)
+                throw new ArgumentException($"No charts found in sheet");
+            var caAllCharts = GetExcelCharts(caDrawingsPart);
+            if (caChartIdx < 1 || caChartIdx > caAllCharts.Count)
+                throw new ArgumentException($"Chart index {caChartIdx} out of range (1-{caAllCharts.Count})");
+            var caChartInfo = caAllCharts[caChartIdx - 1];
+            if (caChartInfo.IsExtended || caChartInfo.StandardPart?.ChartSpace == null)
+                throw new ArgumentException($"Axis not available on chart {caChartIdx}: extended charts not supported.");
+            var axisNode = ChartHelper.BuildAxisNode(caChartInfo.StandardPart.ChartSpace, caRole, path);
+            if (axisNode == null)
+                throw new ArgumentException($"Axis with role '{caRole}' not found on chart {caChartIdx}.");
+            return axisNode;
+        }
+
         // Chart path: /Sheet1/chart[N] or /Sheet1/chart[N]/series[K]
         var chartMatch = Regex.Match(cellRef, @"^chart\[(\d+)\](?:/series\[(\d+)\])?$");
         if (chartMatch.Success)

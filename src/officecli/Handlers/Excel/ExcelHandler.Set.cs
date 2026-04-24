@@ -1132,6 +1132,28 @@ public partial class ExcelHandler
             return SetRow(worksheet, rowIdx, properties);
         }
 
+        // Handle /SheetName/chart[N]/axis[@role=ROLE]
+        var chartAxisSetMatch = Regex.Match(cellRef,
+            @"^chart\[(\d+)\]/axis\[@role=([a-zA-Z0-9_]+)\]$");
+        if (chartAxisSetMatch.Success)
+        {
+            var caChartIdx = int.Parse(chartAxisSetMatch.Groups[1].Value);
+            var caRole = chartAxisSetMatch.Groups[2].Value;
+            var caDrawingsPart = worksheet.DrawingsPart;
+            if (caDrawingsPart == null)
+                throw new ArgumentException("No charts in this sheet");
+            var caAllCharts = GetExcelCharts(caDrawingsPart);
+            if (caChartIdx < 1 || caChartIdx > caAllCharts.Count)
+                throw new ArgumentException($"Chart {caChartIdx} not found (total: {caAllCharts.Count})");
+            var caChartInfo = caAllCharts[caChartIdx - 1];
+            if (caChartInfo.IsExtended || caChartInfo.StandardPart == null)
+                throw new ArgumentException("Axis Set not supported on extended charts.");
+            var axUnsupported = ChartHelper.SetAxisProperties(
+                caChartInfo.StandardPart, caRole, properties);
+            caChartInfo.StandardPart.ChartSpace?.Save();
+            return axUnsupported;
+        }
+
         // Handle /SheetName/chart[N] or /SheetName/chart[N]/series[K]
         var chartMatch = Regex.Match(cellRef, @"^chart\[(\d+)\](?:/series\[(\d+)\])?$");
         if (chartMatch.Success)
