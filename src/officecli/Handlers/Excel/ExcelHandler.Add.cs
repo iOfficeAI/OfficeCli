@@ -66,6 +66,21 @@ public partial class ExcelHandler
                 {
                     sheets.AppendChild(newSheet);
                 }
+
+                // Add/Set symmetry (CLAUDE.md): apply autoFilter / tabColor / hidden
+                // at creation time by funneling into the same code paths Set uses,
+                // so property bags accepted by Set are also accepted by Add.
+                var sheetLevelForwarded = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (properties.TryGetValue("autoFilter", out var addAf)) sheetLevelForwarded["autofilter"] = addAf;
+                if (properties.TryGetValue("tabColor", out var addTc)) sheetLevelForwarded["tabcolor"] = addTc;
+                if (sheetLevelForwarded.Count > 0)
+                    SetSheetLevel(newWorksheetPart, name, sheetLevelForwarded);
+
+                // Sheet-state (hidden) lives on the workbook-level Sheet element,
+                // not on the Worksheet, so it can't route through SetSheetLevel.
+                if (properties.TryGetValue("hidden", out var addHidden) && ParseHelpers.IsTruthy(addHidden))
+                    newSheet.State = SheetStateValues.Hidden;
+
                 GetWorkbook().Save();
                 return $"/{name}";
 
@@ -85,6 +100,19 @@ public partial class ExcelHandler
                     ShiftRowsDown(worksheet, rowIdx);
 
                 var newRow = new Row { RowIndex = (uint)rowIdx };
+
+                // CONSISTENCY(add-set-symmetry): accept height/hidden at creation
+                // time, mirroring SetRow semantics (ExcelHandler.Set.cs L3157-3164).
+                if (properties.TryGetValue("height", out var addRowHeight) && !string.IsNullOrWhiteSpace(addRowHeight))
+                {
+                    newRow.Height = ParseRowHeightPoints(addRowHeight);
+                    newRow.CustomHeight = true;
+                }
+                if (properties.TryGetValue("hidden", out var addRowHidden))
+                {
+                    newRow.Hidden = addRowHidden.Equals("true", StringComparison.OrdinalIgnoreCase)
+                        || addRowHidden == "1" || addRowHidden.Equals("yes", StringComparison.OrdinalIgnoreCase);
+                }
 
                 // Create cells if cols specified
                 if (properties.TryGetValue("cols", out var colsStr))
@@ -3061,19 +3089,30 @@ public partial class ExcelHandler
                     DeleteCalcChainIfPresent();
                 }
 
-                // Optionally set column width (accepts bare char units or unit-qualified)
-                if (properties.TryGetValue("width", out var widthStr) && !string.IsNullOrWhiteSpace(widthStr))
+                // Optionally set column width/hidden (CONSISTENCY(add-set-symmetry):
+                // create a Column element if EITHER width or hidden is supplied).
+                bool hasColWidth = properties.TryGetValue("width", out var widthStr) && !string.IsNullOrWhiteSpace(widthStr);
+                bool hasColHidden = properties.TryGetValue("hidden", out var addColHidden);
+                if (hasColWidth || hasColHidden)
                 {
-                    var width = ParseColWidthChars(widthStr);
                     var ws = GetSheet(colWorksheet);
                     var columns = ws.GetFirstChild<Columns>() ?? ws.PrependChild(new Columns());
-                    columns.AppendChild(new Column
+                    var newCol = new Column
                     {
                         Min = (uint)insertColIdx,
-                        Max = (uint)insertColIdx,
-                        Width = width,
-                        CustomWidth = true
-                    });
+                        Max = (uint)insertColIdx
+                    };
+                    if (hasColWidth)
+                    {
+                        newCol.Width = ParseColWidthChars(widthStr!);
+                        newCol.CustomWidth = true;
+                    }
+                    if (hasColHidden)
+                    {
+                        newCol.Hidden = addColHidden!.Equals("true", StringComparison.OrdinalIgnoreCase)
+                            || addColHidden == "1" || addColHidden.Equals("yes", StringComparison.OrdinalIgnoreCase);
+                    }
+                    columns.AppendChild(newCol);
                 }
 
                 SaveWorksheet(colWorksheet);
