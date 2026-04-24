@@ -797,6 +797,18 @@ public partial class PowerPointHandler
 
     public List<DocumentNode> Query(string selector)
     {
+        // CONSISTENCY(query-selector-vs-path): ParseShapeSelector's regex
+        // `^(\w+)` can't match a leading '/', so a path-style selector like
+        // "/slide" produced elementType=null, isKnownType=true, and returned
+        // ALL shapes — a false positive far worse than an empty result. Reject
+        // any leading '/' selector that is NOT the supported `/slide[N]/...`
+        // scoping form (handled by CONSISTENCY(query-slide-prefix) below).
+        if (!string.IsNullOrEmpty(selector)
+            && selector.StartsWith("/")
+            && !Regex.IsMatch(selector, @"^\s*/slide\[\d+\]", RegexOptions.IgnoreCase))
+            throw new ArgumentException(
+                $"Invalid selector '{selector}': path-style selectors starting with '/' are not allowed in query. Use the element name (e.g. 'shape', 'slide') or a typed selector (e.g. 'shape[text=Hello]').");
+
         var results = new List<DocumentNode>();
         var parsed = ParseShapeSelector(selector);
         bool isEquationSelector = parsed.ElementType is "equation" or "math" or "formula";

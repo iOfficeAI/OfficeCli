@@ -497,6 +497,22 @@ public partial class ExcelHandler
                     hyperlinksEl.AppendChild(hl);
                 }
 
+                // CONSISTENCY(cell-prop-hints): mirror Set's CellPropHints check
+                // here. Before the style filter runs, flag any ambiguous flat
+                // keys (e.g. `color` — is it font.color or fill?) as unsupported.
+                // Without this, Add silently drops the key while Set loudly
+                // rejects it — inconsistent, and the caller's intent is lost.
+                var cellHintMessages = new List<string>();
+                foreach (var (key, _) in properties)
+                {
+                    var hint = CellPropHints.TryGetHint(key);
+                    if (hint != null)
+                        cellHintMessages.Add(hint);
+                }
+                if (cellHintMessages.Count > 0)
+                    throw new ArgumentException(
+                        "Unsupported cell property: " + string.Join("; ", cellHintMessages));
+
                 // Apply style properties if any
                 var cellStyleProps = new Dictionary<string, string>();
                 foreach (var (key, val) in properties)

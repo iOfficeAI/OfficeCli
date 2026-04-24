@@ -18,6 +18,17 @@ public partial class WordHandler
 {
     public string? Remove(string path)
     {
+        // CONSISTENCY(container-remove-guard): reject removal of required
+        // structural container elements up front. Without this guard,
+        // `remove /body` / `remove /styles` etc. fall through to
+        // NavigateToElement + element.Remove() and permanently corrupt
+        // the document (body cleared, styles/numbering NRE). AI agents
+        // mis-dispatching a remove command should never be able to nuke
+        // the file.
+        if (IsProtectedContainerPath(path))
+            throw new ArgumentException(
+                $"Cannot remove container element '{path}': it is a required structural element of the document.");
+
         // Handle /watermark removal
         if (path.Equals("/watermark", StringComparison.OrdinalIgnoreCase))
         {
@@ -303,6 +314,27 @@ public partial class WordHandler
                 fp.Footer?.Save();
         }
         return null;
+    }
+
+    // CONSISTENCY(container-remove-guard): hardcoded list of root-level
+    // container paths that must never be removed. Kept in sync (in spirit)
+    // with schema entries marked `"container": true` under
+    // schemas/help/docx/*.json (document, body, styles, numbering). /settings
+    // is also blocked: docSettings are part of the main document part and
+    // removing that part destroys the document.
+    private static readonly HashSet<string> ProtectedContainerPaths = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "/body",
+        "/document",
+        "/styles",
+        "/numbering",
+        "/settings",
+    };
+
+    private static bool IsProtectedContainerPath(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return false;
+        return ProtectedContainerPaths.Contains(path.TrimEnd('/'));
     }
 
     /// <summary>
