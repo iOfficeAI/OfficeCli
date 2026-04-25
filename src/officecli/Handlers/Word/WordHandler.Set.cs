@@ -1528,51 +1528,19 @@ public partial class WordHandler
                                 ApplyRunFormatting(EnsureRunProperties(cellRun), key, value);
                             }
                         }
-                        // If no runs exist, store formatting in ParagraphMarkRunProperties on first paragraph
+                        // If no runs exist, store formatting in
+                        // ParagraphMarkRunProperties on first paragraph so a
+                        // future inserted run inherits the formatting.
+                        // CONSISTENCY(run-prop-helper): same ApplyRunFormatting
+                        // helper as the runs branch above — pmrp extends
+                        // OpenXmlCompositeElement so it just works.
                         if (!hasRuns)
                         {
                             var fp = cell.Elements<Paragraph>().FirstOrDefault();
                             if (fp == null) { fp = new Paragraph(); cell.AppendChild(fp); }
                             var pPr = fp.ParagraphProperties ?? fp.PrependChild(new ParagraphProperties());
                             var pmrp = pPr.ParagraphMarkRunProperties ?? pPr.AppendChild(new ParagraphMarkRunProperties());
-                            switch (key.ToLowerInvariant())
-                            {
-                                case "font":
-                                    pmrp.RemoveAllChildren<RunFonts>();
-                                    InsertRunPropInSchemaOrder(pmrp, new RunFonts { Ascii = value, HighAnsi = value, EastAsia = value });
-                                    break;
-                                case "size":
-                                    pmrp.RemoveAllChildren<FontSize>();
-                                    InsertRunPropInSchemaOrder(pmrp, new FontSize { Val = ((int)Math.Round(ParseFontSize(value) * 2, MidpointRounding.AwayFromZero)).ToString() });
-                                    break;
-                                case "bold":
-                                    pmrp.RemoveAllChildren<Bold>();
-                                    if (IsTruthy(value)) InsertRunPropInSchemaOrder(pmrp, new Bold());
-                                    break;
-                                case "italic":
-                                    pmrp.RemoveAllChildren<Italic>();
-                                    if (IsTruthy(value)) InsertRunPropInSchemaOrder(pmrp, new Italic());
-                                    break;
-                                case "color":
-                                    pmrp.RemoveAllChildren<Color>();
-                                    InsertRunPropInSchemaOrder(pmrp, new Color { Val = SanitizeHex(value) });
-                                    break;
-                                case "highlight":
-                                    pmrp.RemoveAllChildren<Highlight>();
-                                    InsertRunPropInSchemaOrder(pmrp, new Highlight { Val = ParseHighlightColor(value) });
-                                    break;
-                                case "underline":
-                                {
-                                    var ulVal = NormalizeUnderlineValue(value);
-                                    pmrp.RemoveAllChildren<Underline>();
-                                    InsertRunPropInSchemaOrder(pmrp, new Underline { Val = new UnderlineValues(ulVal) });
-                                    break;
-                                }
-                                case "strike":
-                                    pmrp.RemoveAllChildren<Strike>();
-                                    if (IsTruthy(value)) InsertRunPropInSchemaOrder(pmrp, new Strike());
-                                    break;
-                            }
+                            ApplyRunFormatting(pmrp, key, value);
                         }
                         break;
                     case "shd" or "shading" or "fill":
