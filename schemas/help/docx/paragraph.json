@@ -11,7 +11,7 @@
   },
   "paths": {
     "stable":     ["/body/p[@paraId=ID]"],
-    "positional": ["/body/p[N]", "/p[N]"]
+    "positional": ["/body/p[N]"]
   },
   "note": "Canonical keys per CLAUDE.md: spaceBefore/spaceAfter/lineSpacing/alignment. Legacy aliases (spacebefore, linespacing, halign) are still accepted on Add/Set but Get normalizes to canonical.",
   "properties": {

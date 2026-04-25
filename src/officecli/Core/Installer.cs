@@ -36,7 +36,19 @@ internal static class Installer
         InstallBinary();
 
         var target = args.Length >= 1 ? args[0] : "all";
-        var skilledTools = SkillInstaller.Install(target);
+
+        // Skip the skill phase when the target is MCP-only (vscode, lms).
+        // SkillInstaller has no equivalent agent for these and would otherwise
+        // print a misleading 'Unknown target' to stderr before InstallMcpFallback
+        // succeeds. The skill/MCP target namespaces are deliberately allowed to
+        // diverge — McpTargets with empty SkillAliases is the source of truth
+        // for "no skill phase needed".
+        var isMcpOnly = McpTargets.Any(t =>
+            t.SkillAliases.Length == 0 &&
+            t.McpTarget.Equals(target, StringComparison.OrdinalIgnoreCase));
+        var skilledTools = isMcpOnly
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : SkillInstaller.Install(target);
 
         // Install MCP for tools that didn't get a skill
         var mcpInstalled = InstallMcpFallback(skilledTools, target);

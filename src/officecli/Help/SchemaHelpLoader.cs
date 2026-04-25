@@ -127,10 +127,22 @@ internal static class SchemaHelpLoader
         var suggestion = best != null ? $"\nDid you mean: {best}?" : "";
         // CONSISTENCY(mcp-error): truncate user-supplied value in error messages to prevent
         // response amplification (caller echoes arbitrary-length input back unchanged).
-        var displayElement = element.Length > 64 ? element[..64] + "…" : element;
         throw new InvalidOperationException(
-            $"error: unknown element '{displayElement}' for format '{canonical}'.{suggestion}\n" +
+            $"error: unknown element '{TruncateForError(element, 64)}' for format '{canonical}'.{suggestion}\n" +
             $"Use: officecli help {canonical}");
+    }
+
+    /// <summary>
+    /// Truncate a user-supplied string for safe display in error messages,
+    /// avoiding split UTF-16 surrogate pairs (which serialize as U+FFFD).
+    /// Used by error sites that echo caller input back verbatim.
+    /// </summary>
+    internal static string TruncateForError(string s, int maxChars)
+    {
+        if (s.Length <= maxChars) return s;
+        var cut = maxChars;
+        if (cut > 0 && char.IsHighSurrogate(s[cut - 1])) cut--;
+        return s[..cut] + "…";
     }
 
     /// <summary>

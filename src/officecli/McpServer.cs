@@ -48,12 +48,26 @@ public static class McpServer
                 if (line == null) break;
                 if (string.IsNullOrWhiteSpace(line)) continue;
 
+                JsonElement? id = null;
                 try
                 {
                     using var doc = JsonDocument.Parse(line);
                     var root = doc.RootElement;
-                    var method = root.TryGetProperty("method", out var m) ? m.GetString() : null;
-                    var id = root.TryGetProperty("id", out var idEl) ? idEl.Clone() : (JsonElement?)null;
+                    // Parse id BEFORE method so a malformed method ('method': 42)
+                    // can still echo the original id back per JSON-RPC 2.0 §5.
+                    id = root.TryGetProperty("id", out var idEl) ? idEl.Clone() : null;
+                    // method must be a string per spec; non-string is an
+                    // Invalid Request (-32600), not an internal error.
+                    string? method = null;
+                    if (root.TryGetProperty("method", out var m))
+                    {
+                        if (m.ValueKind != JsonValueKind.String)
+                        {
+                            await writer.WriteLineAsync(ErrorJson(id, -32600, "Invalid Request: 'method' must be a string"));
+                            continue;
+                        }
+                        method = m.GetString();
+                    }
 
                     var response = method switch
                     {
@@ -74,7 +88,7 @@ public static class McpServer
                 }
                 catch (Exception ex)
                 {
-                    await writer.WriteLineAsync(ErrorJson(null, -32603, $"Internal error: {ex.Message}"));
+                    await writer.WriteLineAsync(ErrorJson(id, -32603, $"Internal error: {ex.Message}"));
                 }
             }
         }
@@ -403,7 +417,7 @@ public static class McpServer
                 {
                     // CONSISTENCY(mcp-error): truncate user-supplied value in error messages to prevent
                     // response amplification (caller echoes arbitrary-length input back unchanged).
-                    var displayFormat = format.Length > 64 ? format[..64] + "…" : format;
+                    var displayFormat = OfficeCli.Help.SchemaHelpLoader.TruncateForError(format, 64);
                     return $"Unknown format '{displayFormat}'. Supported: docx, xlsx, pptx.";
                 }
 

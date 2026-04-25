@@ -11,7 +11,7 @@
   },
   "paths": {
     "stable":     ["/body/p[@paraId=ID]/r[N]"],
-    "positional": ["/body/p[N]/r[N]", "/p[N]/r[N]"]
+    "positional": ["/body/p[N]/r[N]"]
   },
   "properties": {
     "text": {
