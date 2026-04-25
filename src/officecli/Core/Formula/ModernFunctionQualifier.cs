@@ -141,6 +141,107 @@ public static class ModernFunctionQualifier
         return s;
     }
 
+    /// <summary>
+    /// Auto-quote unquoted sheet-name references in a formula when the sheet
+    /// name needs single-quotes per Excel rules — i.e. starts with a digit,
+    /// or contains a space, or contains any of <c>[ ] : / \ ? *</c> /
+    /// punctuation. Already-quoted (e.g. <c>'1stQ'!A1</c>) refs are kept as-is.
+    /// String literals are skipped.
+    /// </summary>
+    public static string AutoQuoteSheetRefs(string formula)
+    {
+        if (string.IsNullOrEmpty(formula) || !formula.Contains('!')) return formula;
+
+        var sb = new System.Text.StringBuilder(formula.Length + 16);
+        int i = 0;
+        while (i < formula.Length)
+        {
+            char c = formula[i];
+            // Skip string literals verbatim
+            if (c == '"')
+            {
+                sb.Append(c);
+                i++;
+                while (i < formula.Length)
+                {
+                    sb.Append(formula[i]);
+                    if (formula[i] == '"')
+                    {
+                        if (i + 1 < formula.Length && formula[i + 1] == '"')
+                        {
+                            sb.Append('"'); i += 2; continue;
+                        }
+                        i++;
+                        break;
+                    }
+                    i++;
+                }
+                continue;
+            }
+            // Skip already-quoted sheet refs verbatim
+            if (c == '\'')
+            {
+                sb.Append(c);
+                i++;
+                while (i < formula.Length)
+                {
+                    sb.Append(formula[i]);
+                    if (formula[i] == '\'')
+                    {
+                        if (i + 1 < formula.Length && formula[i + 1] == '\'')
+                        {
+                            sb.Append('\''); i += 2; continue;
+                        }
+                        i++;
+                        break;
+                    }
+                    i++;
+                }
+                continue;
+            }
+
+            // Detect bare sheet-name token followed by '!'. A sheet name token
+            // here is a maximal run of [A-Za-z0-9_.] possibly preceded only by
+            // a non-identifier char.
+            if ((char.IsLetterOrDigit(c) || c == '_') &&
+                (i == 0 || !IsIdentPrev(formula[i - 1])))
+            {
+                int start = i;
+                while (i < formula.Length && (char.IsLetterOrDigit(formula[i]) || formula[i] == '_' || formula[i] == '.'))
+                    i++;
+                if (i < formula.Length && formula[i] == '!')
+                {
+                    var name = formula.Substring(start, i - start);
+                    if (SheetNameNeedsQuoting(name))
+                        sb.Append('\'').Append(name).Append('\'');
+                    else
+                        sb.Append(name);
+                    continue;
+                }
+                sb.Append(formula, start, i - start);
+                continue;
+            }
+
+            sb.Append(c);
+            i++;
+        }
+        return sb.ToString();
+    }
+
+    private static bool SheetNameNeedsQuoting(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return false;
+        // Starts with digit
+        if (char.IsDigit(name[0])) return true;
+        // Punctuation/special chars: space, [ ] : / \ ? *, plus '.','-','+',etc.
+        foreach (var ch in name)
+        {
+            if (char.IsLetterOrDigit(ch) || ch == '_') continue;
+            return true;
+        }
+        return false;
+    }
+
     private static bool IsIdentStart(char c) => char.IsLetter(c) || c == '_';
     private static bool IsIdentCont(char c) => char.IsLetterOrDigit(c) || c == '_' || c == '.';
     // Prev char that would mean we're in the middle of an existing identifier
