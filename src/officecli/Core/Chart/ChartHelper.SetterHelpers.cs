@@ -364,11 +364,43 @@ internal static partial class ChartHelper
                 return true;
 
             case "markersize":
+            case "marker.size":
             {
                 var marker = ser.GetFirstChild<C.Marker>();
-                if (marker == null) { marker = new C.Marker(); ser.AppendChild(marker); }
+                if (marker == null)
+                {
+                    marker = new C.Marker();
+                    var insertBefore = (OpenXmlElement?)ser.Elements().FirstOrDefault(e =>
+                        e.LocalName is "xVal" or "yVal" or "cat" or "val" or "bubbleSize"
+                            or "smooth" or "extLst")
+                        ?? ser.Elements().FirstOrDefault(e => e.LocalName == "trendline");
+                    if (insertBefore != null) ser.InsertBefore(marker, insertBefore);
+                    else ser.AppendChild(marker);
+                }
                 marker.RemoveAllChildren<C.Size>();
                 marker.AppendChild(new C.Size { Val = ParseHelpers.SafeParseByte(value, "series.markerSize") });
+                return true;
+            }
+
+            case "marker.style":
+            {
+                // CONSISTENCY(marker-dotted): mirror "marker=circle" but accept the
+                // dotted alternative seriesN.marker.style=circle. Preserve any
+                // existing c:size so users can set style and size independently.
+                var existing = ser.GetFirstChild<C.Marker>();
+                var existingSize = existing?.GetFirstChild<C.Size>()?.Val?.Value;
+                ApplySeriesMarker(ser, value);
+                if (existingSize.HasValue)
+                {
+                    var newMarker = ser.GetFirstChild<C.Marker>();
+                    if (newMarker != null && newMarker.GetFirstChild<C.Size>() == null)
+                    {
+                        var sym = newMarker.GetFirstChild<C.Symbol>();
+                        var sz = new C.Size { Val = existingSize.Value };
+                        if (sym != null) sym.InsertAfterSelf(sz);
+                        else newMarker.AppendChild(sz);
+                    }
+                }
                 return true;
             }
 
