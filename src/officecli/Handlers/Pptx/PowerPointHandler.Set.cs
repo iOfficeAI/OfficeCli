@@ -295,227 +295,7 @@ public partial class PowerPointHandler
         if (oleSetMatch.Success) return SetOleByPath(oleSetMatch, properties);
 
         var picSetMatch = Regex.Match(path, @"^/slide\[(\d+)\]/(?:picture|pic)\[(\d+)\]$");
-        if (picSetMatch.Success)
-        {
-            var slideIdx = int.Parse(picSetMatch.Groups[1].Value);
-            var picIdx = int.Parse(picSetMatch.Groups[2].Value);
-
-            var slideParts3 = GetSlideParts().ToList();
-            if (slideIdx < 1 || slideIdx > slideParts3.Count)
-                throw new ArgumentException($"Slide {slideIdx} not found (total: {slideParts3.Count})");
-
-            var slidePart = slideParts3[slideIdx - 1];
-            var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree
-                ?? throw new ArgumentException("Slide has no shape tree");
-            var pics = shapeTree.Elements<Picture>().ToList();
-            if (picIdx < 1 || picIdx > pics.Count)
-                throw new ArgumentException($"Picture {picIdx} not found (total: {pics.Count})");
-
-            var pic = pics[picIdx - 1];
-            var unsupported = new List<string>();
-            foreach (var (key, value) in properties)
-            {
-                switch (key.ToLowerInvariant())
-                {
-                    case "alt":
-                        var nvPicPr = pic.NonVisualPictureProperties?.NonVisualDrawingProperties;
-                        if (nvPicPr != null) nvPicPr.Description = value;
-                        break;
-                    case "x" or "y" or "width" or "height":
-                    {
-                        var spPr = pic.ShapeProperties ?? (pic.ShapeProperties = new ShapeProperties());
-                        var xfrm = spPr.Transform2D ?? (spPr.Transform2D = new Drawing.Transform2D());
-                        TryApplyPositionSize(key.ToLowerInvariant(), value,
-                            xfrm.Offset ?? (xfrm.Offset = new Drawing.Offset()),
-                            xfrm.Extents ?? (xfrm.Extents = new Drawing.Extents()));
-                        break;
-                    }
-                    case "path" or "src":
-                    {
-                        // Replace image source
-                        var blipFill = pic.BlipFill;
-                        var blip = blipFill?.GetFirstChild<Drawing.Blip>();
-                        if (blip == null) { unsupported.Add(key); break; }
-                        var (imgStream, imgType) = OfficeCli.Core.ImageSource.Resolve(value);
-                        using var imgStreamDispose2 = imgStream;
-                        // Remove old image part(s) to avoid storage bloat,
-                        // including the asvg:svgBlip-referenced SVG part
-                        // when the previous image was SVG.
-                        var oldEmbedId = blip.Embed?.Value;
-                        if (oldEmbedId != null)
-                        {
-                            try { slidePart.DeletePart(oldEmbedId); } catch { }
-                        }
-                        var oldPicSvgRelId = OfficeCli.Core.SvgImageHelper.GetSvgRelId(blip);
-                        if (oldPicSvgRelId != null)
-                        {
-                            try { slidePart.DeletePart(oldPicSvgRelId); } catch { }
-                        }
-
-                        if (imgType == ImagePartType.Svg)
-                        {
-                            using var newSvgBuf = new MemoryStream();
-                            imgStream.CopyTo(newSvgBuf);
-                            newSvgBuf.Position = 0;
-                            var newSvgPart = slidePart.AddImagePart(ImagePartType.Svg);
-                            newSvgPart.FeedData(newSvgBuf);
-                            var newPicSvgRelId = slidePart.GetIdOfPart(newSvgPart);
-
-                            var pngFb = slidePart.AddImagePart(ImagePartType.Png);
-                            pngFb.FeedData(new MemoryStream(
-                                OfficeCli.Core.SvgImageHelper.TransparentPng1x1, writable: false));
-                            blip.Embed = slidePart.GetIdOfPart(pngFb);
-                            OfficeCli.Core.SvgImageHelper.AppendSvgExtension(blip, newPicSvgRelId);
-                        }
-                        else
-                        {
-                            var newImgPart = slidePart.AddImagePart(imgType);
-                            newImgPart.FeedData(imgStream);
-                            blip.Embed = slidePart.GetIdOfPart(newImgPart);
-                            if (oldPicSvgRelId != null)
-                            {
-                                var extLst = blip.GetFirstChild<Drawing.BlipExtensionList>();
-                                if (extLst != null)
-                                {
-                                    foreach (var ext in extLst.Elements<Drawing.BlipExtension>().ToList())
-                                    {
-                                        if (string.Equals(ext.Uri?.Value,
-                                            OfficeCli.Core.SvgImageHelper.SvgExtensionUri,
-                                            StringComparison.OrdinalIgnoreCase))
-                                            ext.Remove();
-                                    }
-                                    if (!extLst.Elements<Drawing.BlipExtension>().Any())
-                                        extLst.Remove();
-                                }
-                            }
-                        }
-                        break;
-                    }
-                    case "rotation" or "rotate":
-                    {
-                        var spPr = pic.ShapeProperties ?? (pic.ShapeProperties = new ShapeProperties());
-                        var xfrm = spPr.Transform2D ?? (spPr.Transform2D = new Drawing.Transform2D());
-                        xfrm.Rotation = (int)(ParseHelpers.SafeParseDouble(value, "rotation") * 60000);
-                        break;
-                    }
-                    case "crop" or "cropleft" or "cropright" or "croptop" or "cropbottom":
-                    {
-                        var blipFill = pic.BlipFill;
-                        if (blipFill == null) { unsupported.Add(key); break; }
-                        var srcRect = blipFill.GetFirstChild<Drawing.SourceRectangle>();
-                        if (srcRect == null)
-                        {
-                            srcRect = new Drawing.SourceRectangle();
-                            // CONSISTENCY(ooxml-element-order): in CT_BlipFillProperties
-                            // srcRect must precede the fill-mode element (stretch/tile).
-                            // PowerPoint silently ignores out-of-order srcRect.
-                            var fillMode = (OpenXmlElement?)blipFill.GetFirstChild<Drawing.Stretch>()
-                                ?? blipFill.GetFirstChild<Drawing.Tile>();
-                            if (fillMode != null)
-                                blipFill.InsertBefore(srcRect, fillMode);
-                            else
-                                blipFill.AppendChild(srcRect);
-                        }
-
-                        if (key.Equals("crop", StringComparison.OrdinalIgnoreCase))
-                        {
-                            // Single value: "left,top,right,bottom" as percentages (0-100)
-                            var parts = value.Split(',');
-                            if (parts.Length == 4)
-                            {
-                                var cropVals = new double[4];
-                                for (int ci = 0; ci < 4; ci++)
-                                {
-                                    cropVals[ci] = ParseHelpers.SafeParseDouble(parts[ci].Trim(), "crop");
-                                    if (cropVals[ci] < 0 || cropVals[ci] > 100)
-                                        throw new ArgumentException($"Invalid 'crop' value: '{parts[ci].Trim()}'. Crop percentage must be between 0 and 100.");
-                                }
-                                srcRect.Left = (int)(cropVals[0] * 1000);
-                                srcRect.Top = (int)(cropVals[1] * 1000);
-                                srcRect.Right = (int)(cropVals[2] * 1000);
-                                srcRect.Bottom = (int)(cropVals[3] * 1000);
-                            }
-                            else if (parts.Length == 2)
-                            {
-                                // 2-value: vertical,horizontal (top/bottom, left/right)
-                                var vCrop = ParseHelpers.SafeParseDouble(parts[0].Trim(), "crop");
-                                var hCrop = ParseHelpers.SafeParseDouble(parts[1].Trim(), "crop");
-                                if (vCrop < 0 || vCrop > 100 || hCrop < 0 || hCrop > 100)
-                                    throw new ArgumentException($"Invalid 'crop' value: '{value}'. Crop percentages must be between 0 and 100.");
-                                srcRect.Top = (int)(vCrop * 1000); srcRect.Bottom = (int)(vCrop * 1000);
-                                srcRect.Left = (int)(hCrop * 1000); srcRect.Right = (int)(hCrop * 1000);
-                            }
-                            else if (parts.Length == 1)
-                            {
-                                if (!double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var cropVal))
-                                    throw new ArgumentException($"Invalid 'crop' value: '{value}'. Expected a percentage (e.g. 10 = 10% from each edge).");
-                                if (cropVal < 0 || cropVal > 100)
-                                    throw new ArgumentException($"Invalid 'crop' value: '{value}'. Crop percentage must be between 0 and 100.");
-                                var cropPct = (int)(cropVal * 1000);
-                                srcRect.Left = cropPct; srcRect.Top = cropPct; srcRect.Right = cropPct; srcRect.Bottom = cropPct;
-                            }
-                            else
-                            {
-                                throw new ArgumentException($"Invalid 'crop' value: '{value}'. Expected 1 value (symmetric), 2 values (vertical,horizontal), or 4 values (left,top,right,bottom).");
-                            }
-                        }
-                        else
-                        {
-                            if (!double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var cropSingle))
-                                throw new ArgumentException($"Invalid '{key}' value: '{value}'. Expected a percentage (0-100).");
-                            if (cropSingle < 0 || cropSingle > 100)
-                                throw new ArgumentException($"Invalid '{key}' value: '{value}'. Crop percentage must be between 0 and 100.");
-                            var pct = (int)(cropSingle * 1000); // percent (0-100) → 1/1000ths
-                            switch (key.ToLowerInvariant())
-                            {
-                                case "cropleft": srcRect.Left = pct; break;
-                                case "croptop": srcRect.Top = pct; break;
-                                case "cropright": srcRect.Right = pct; break;
-                                case "cropbottom": srcRect.Bottom = pct; break;
-                            }
-                        }
-                        // Reset semantics: if all four sides are zero (or unset),
-                        // drop the srcRect entirely so the XML is clean.
-                        int L = srcRect.Left?.Value ?? 0;
-                        int T = srcRect.Top?.Value ?? 0;
-                        int R = srcRect.Right?.Value ?? 0;
-                        int B = srcRect.Bottom?.Value ?? 0;
-                        if (L == 0 && T == 0 && R == 0 && B == 0)
-                            srcRect.Remove();
-                        break;
-                    }
-                    case "opacity":
-                    {
-                        if (!double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var opacityVal)
-                            || double.IsNaN(opacityVal) || double.IsInfinity(opacityVal))
-                            throw new ArgumentException($"Invalid 'opacity' value: '{value}'. Expected a finite decimal 0.0-1.0.");
-                        if (opacityVal > 1.0) opacityVal /= 100.0;
-                        var blip = pic.BlipFill?.GetFirstChild<Drawing.Blip>();
-                        if (blip != null)
-                        {
-                            blip.RemoveAllChildren<Drawing.AlphaModulationFixed>();
-                            var alphaVal = (int)(opacityVal * 100000); // 0.0-1.0 → 0-100000
-                            blip.AppendChild(new Drawing.AlphaModulationFixed { Amount = alphaVal });
-                        }
-                        break;
-                    }
-                    case "name":
-                    {
-                        var nvPr = pic.NonVisualPictureProperties?.NonVisualDrawingProperties;
-                        if (nvPr != null) nvPr.Name = value;
-                        break;
-                    }
-                    default:
-                        if (unsupported.Count == 0)
-                            unsupported.Add($"{key} (valid picture props: path, src, x, y, width, height, rotation, opacity, name, crop, cropleft, croptop, cropright, cropbottom)");
-                        else
-                            unsupported.Add(key);
-                        break;
-                }
-            }
-            GetSlide(slidePart).Save();
-            return unsupported;
-        }
+        if (picSetMatch.Success) return SetPictureByPath(picSetMatch, properties);
 
         // Try slide-level path: /slide[N]
         var slideOnlyMatch = Regex.Match(path, @"^/slide\[(\d+)\]$");
@@ -1315,6 +1095,228 @@ public partial class PowerPointHandler
 
         var allRuns = shape.Descendants<Drawing.Run>().ToList();
         var unsupported = SetRunOrShapeProperties(properties, allRuns, shape, slidePart);
+        GetSlide(slidePart).Save();
+        return unsupported;
+    }
+
+    private List<string> SetPictureByPath(Match picSetMatch, Dictionary<string, string> properties)
+    {
+        var slideIdx = int.Parse(picSetMatch.Groups[1].Value);
+        var picIdx = int.Parse(picSetMatch.Groups[2].Value);
+
+        var slideParts3 = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > slideParts3.Count)
+            throw new ArgumentException($"Slide {slideIdx} not found (total: {slideParts3.Count})");
+
+        var slidePart = slideParts3[slideIdx - 1];
+        var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree
+            ?? throw new ArgumentException("Slide has no shape tree");
+        var pics = shapeTree.Elements<Picture>().ToList();
+        if (picIdx < 1 || picIdx > pics.Count)
+            throw new ArgumentException($"Picture {picIdx} not found (total: {pics.Count})");
+
+        var pic = pics[picIdx - 1];
+        var unsupported = new List<string>();
+        foreach (var (key, value) in properties)
+        {
+            switch (key.ToLowerInvariant())
+            {
+                case "alt":
+                    var nvPicPr = pic.NonVisualPictureProperties?.NonVisualDrawingProperties;
+                    if (nvPicPr != null) nvPicPr.Description = value;
+                    break;
+                case "x" or "y" or "width" or "height":
+                {
+                    var spPr = pic.ShapeProperties ?? (pic.ShapeProperties = new ShapeProperties());
+                    var xfrm = spPr.Transform2D ?? (spPr.Transform2D = new Drawing.Transform2D());
+                    TryApplyPositionSize(key.ToLowerInvariant(), value,
+                        xfrm.Offset ?? (xfrm.Offset = new Drawing.Offset()),
+                        xfrm.Extents ?? (xfrm.Extents = new Drawing.Extents()));
+                    break;
+                }
+                case "path" or "src":
+                {
+                    // Replace image source
+                    var blipFill = pic.BlipFill;
+                    var blip = blipFill?.GetFirstChild<Drawing.Blip>();
+                    if (blip == null) { unsupported.Add(key); break; }
+                    var (imgStream, imgType) = OfficeCli.Core.ImageSource.Resolve(value);
+                    using var imgStreamDispose2 = imgStream;
+                    // Remove old image part(s) to avoid storage bloat,
+                    // including the asvg:svgBlip-referenced SVG part
+                    // when the previous image was SVG.
+                    var oldEmbedId = blip.Embed?.Value;
+                    if (oldEmbedId != null)
+                    {
+                        try { slidePart.DeletePart(oldEmbedId); } catch { }
+                    }
+                    var oldPicSvgRelId = OfficeCli.Core.SvgImageHelper.GetSvgRelId(blip);
+                    if (oldPicSvgRelId != null)
+                    {
+                        try { slidePart.DeletePart(oldPicSvgRelId); } catch { }
+                    }
+
+                    if (imgType == ImagePartType.Svg)
+                    {
+                        using var newSvgBuf = new MemoryStream();
+                        imgStream.CopyTo(newSvgBuf);
+                        newSvgBuf.Position = 0;
+                        var newSvgPart = slidePart.AddImagePart(ImagePartType.Svg);
+                        newSvgPart.FeedData(newSvgBuf);
+                        var newPicSvgRelId = slidePart.GetIdOfPart(newSvgPart);
+
+                        var pngFb = slidePart.AddImagePart(ImagePartType.Png);
+                        pngFb.FeedData(new MemoryStream(
+                            OfficeCli.Core.SvgImageHelper.TransparentPng1x1, writable: false));
+                        blip.Embed = slidePart.GetIdOfPart(pngFb);
+                        OfficeCli.Core.SvgImageHelper.AppendSvgExtension(blip, newPicSvgRelId);
+                    }
+                    else
+                    {
+                        var newImgPart = slidePart.AddImagePart(imgType);
+                        newImgPart.FeedData(imgStream);
+                        blip.Embed = slidePart.GetIdOfPart(newImgPart);
+                        if (oldPicSvgRelId != null)
+                        {
+                            var extLst = blip.GetFirstChild<Drawing.BlipExtensionList>();
+                            if (extLst != null)
+                            {
+                                foreach (var ext in extLst.Elements<Drawing.BlipExtension>().ToList())
+                                {
+                                    if (string.Equals(ext.Uri?.Value,
+                                        OfficeCli.Core.SvgImageHelper.SvgExtensionUri,
+                                        StringComparison.OrdinalIgnoreCase))
+                                        ext.Remove();
+                                }
+                                if (!extLst.Elements<Drawing.BlipExtension>().Any())
+                                    extLst.Remove();
+                            }
+                        }
+                    }
+                    break;
+                }
+                case "rotation" or "rotate":
+                {
+                    var spPr = pic.ShapeProperties ?? (pic.ShapeProperties = new ShapeProperties());
+                    var xfrm = spPr.Transform2D ?? (spPr.Transform2D = new Drawing.Transform2D());
+                    xfrm.Rotation = (int)(ParseHelpers.SafeParseDouble(value, "rotation") * 60000);
+                    break;
+                }
+                case "crop" or "cropleft" or "cropright" or "croptop" or "cropbottom":
+                {
+                    var blipFill = pic.BlipFill;
+                    if (blipFill == null) { unsupported.Add(key); break; }
+                    var srcRect = blipFill.GetFirstChild<Drawing.SourceRectangle>();
+                    if (srcRect == null)
+                    {
+                        srcRect = new Drawing.SourceRectangle();
+                        // CONSISTENCY(ooxml-element-order): in CT_BlipFillProperties
+                        // srcRect must precede the fill-mode element (stretch/tile).
+                        // PowerPoint silently ignores out-of-order srcRect.
+                        var fillMode = (OpenXmlElement?)blipFill.GetFirstChild<Drawing.Stretch>()
+                            ?? blipFill.GetFirstChild<Drawing.Tile>();
+                        if (fillMode != null)
+                            blipFill.InsertBefore(srcRect, fillMode);
+                        else
+                            blipFill.AppendChild(srcRect);
+                    }
+
+                    if (key.Equals("crop", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Single value: "left,top,right,bottom" as percentages (0-100)
+                        var parts = value.Split(',');
+                        if (parts.Length == 4)
+                        {
+                            var cropVals = new double[4];
+                            for (int ci = 0; ci < 4; ci++)
+                            {
+                                cropVals[ci] = ParseHelpers.SafeParseDouble(parts[ci].Trim(), "crop");
+                                if (cropVals[ci] < 0 || cropVals[ci] > 100)
+                                    throw new ArgumentException($"Invalid 'crop' value: '{parts[ci].Trim()}'. Crop percentage must be between 0 and 100.");
+                            }
+                            srcRect.Left = (int)(cropVals[0] * 1000);
+                            srcRect.Top = (int)(cropVals[1] * 1000);
+                            srcRect.Right = (int)(cropVals[2] * 1000);
+                            srcRect.Bottom = (int)(cropVals[3] * 1000);
+                        }
+                        else if (parts.Length == 2)
+                        {
+                            // 2-value: vertical,horizontal (top/bottom, left/right)
+                            var vCrop = ParseHelpers.SafeParseDouble(parts[0].Trim(), "crop");
+                            var hCrop = ParseHelpers.SafeParseDouble(parts[1].Trim(), "crop");
+                            if (vCrop < 0 || vCrop > 100 || hCrop < 0 || hCrop > 100)
+                                throw new ArgumentException($"Invalid 'crop' value: '{value}'. Crop percentages must be between 0 and 100.");
+                            srcRect.Top = (int)(vCrop * 1000); srcRect.Bottom = (int)(vCrop * 1000);
+                            srcRect.Left = (int)(hCrop * 1000); srcRect.Right = (int)(hCrop * 1000);
+                        }
+                        else if (parts.Length == 1)
+                        {
+                            if (!double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var cropVal))
+                                throw new ArgumentException($"Invalid 'crop' value: '{value}'. Expected a percentage (e.g. 10 = 10% from each edge).");
+                            if (cropVal < 0 || cropVal > 100)
+                                throw new ArgumentException($"Invalid 'crop' value: '{value}'. Crop percentage must be between 0 and 100.");
+                            var cropPct = (int)(cropVal * 1000);
+                            srcRect.Left = cropPct; srcRect.Top = cropPct; srcRect.Right = cropPct; srcRect.Bottom = cropPct;
+                        }
+                        else
+                        {
+                            throw new ArgumentException($"Invalid 'crop' value: '{value}'. Expected 1 value (symmetric), 2 values (vertical,horizontal), or 4 values (left,top,right,bottom).");
+                        }
+                    }
+                    else
+                    {
+                        if (!double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var cropSingle))
+                            throw new ArgumentException($"Invalid '{key}' value: '{value}'. Expected a percentage (0-100).");
+                        if (cropSingle < 0 || cropSingle > 100)
+                            throw new ArgumentException($"Invalid '{key}' value: '{value}'. Crop percentage must be between 0 and 100.");
+                        var pct = (int)(cropSingle * 1000); // percent (0-100) → 1/1000ths
+                        switch (key.ToLowerInvariant())
+                        {
+                            case "cropleft": srcRect.Left = pct; break;
+                            case "croptop": srcRect.Top = pct; break;
+                            case "cropright": srcRect.Right = pct; break;
+                            case "cropbottom": srcRect.Bottom = pct; break;
+                        }
+                    }
+                    // Reset semantics: if all four sides are zero (or unset),
+                    // drop the srcRect entirely so the XML is clean.
+                    int L = srcRect.Left?.Value ?? 0;
+                    int T = srcRect.Top?.Value ?? 0;
+                    int R = srcRect.Right?.Value ?? 0;
+                    int B = srcRect.Bottom?.Value ?? 0;
+                    if (L == 0 && T == 0 && R == 0 && B == 0)
+                        srcRect.Remove();
+                    break;
+                }
+                case "opacity":
+                {
+                    if (!double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var opacityVal)
+                        || double.IsNaN(opacityVal) || double.IsInfinity(opacityVal))
+                        throw new ArgumentException($"Invalid 'opacity' value: '{value}'. Expected a finite decimal 0.0-1.0.");
+                    if (opacityVal > 1.0) opacityVal /= 100.0;
+                    var blip = pic.BlipFill?.GetFirstChild<Drawing.Blip>();
+                    if (blip != null)
+                    {
+                        blip.RemoveAllChildren<Drawing.AlphaModulationFixed>();
+                        var alphaVal = (int)(opacityVal * 100000); // 0.0-1.0 → 0-100000
+                        blip.AppendChild(new Drawing.AlphaModulationFixed { Amount = alphaVal });
+                    }
+                    break;
+                }
+                case "name":
+                {
+                    var nvPr = pic.NonVisualPictureProperties?.NonVisualDrawingProperties;
+                    if (nvPr != null) nvPr.Name = value;
+                    break;
+                }
+                default:
+                    if (unsupported.Count == 0)
+                        unsupported.Add($"{key} (valid picture props: path, src, x, y, width, height, rotation, opacity, name, crop, cropleft, croptop, cropright, cropbottom)");
+                    else
+                        unsupported.Add(key);
+                    break;
+            }
+        }
         GetSlide(slidePart).Save();
         return unsupported;
     }
