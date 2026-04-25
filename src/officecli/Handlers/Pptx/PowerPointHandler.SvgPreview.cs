@@ -673,7 +673,7 @@ public partial class PowerPointHandler
 
             sb.Append($"<text x=\"{textAnchorX:0.##}\" y=\"{baselineY:0.##}\" text-anchor=\"{align}\"");
             sb.Append($" font-size=\"{fontSizePx:0.##}\"");
-            sb.Append($" font-family=\"Calibri, &apos;PingFang SC&apos;, &apos;Microsoft YaHei&apos;, sans-serif\"");
+            sb.Append($" font-family=\"{OfficeDefaultFonts.MinorLatin}, &apos;PingFang SC&apos;, &apos;Microsoft YaHei&apos;, sans-serif\"");
             sb.Append(">");
 
             // Bullet character
