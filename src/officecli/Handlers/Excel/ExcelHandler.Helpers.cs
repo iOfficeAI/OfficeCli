@@ -1966,6 +1966,26 @@ public partial class ExcelHandler
 
         ReadAnchorPosition(anchor, node);
 
+        // Rotation / flip readback from <xdr:spPr><a:xfrm rot=".." flipH=".." flipV="..">
+        // CONSISTENCY(shape-flip): same canonical form as GetShapeNode.
+        var picSpPr = picture.ShapeProperties;
+        var xfrm = picSpPr?.Transform2D;
+        if (xfrm != null)
+        {
+            if (xfrm.Rotation?.HasValue == true && xfrm.Rotation.Value != 0)
+            {
+                var deg = xfrm.Rotation.Value / 60000.0;
+                node.Format["rotation"] = Math.Round(deg, 2);
+            }
+            if (xfrm.HorizontalFlip?.HasValue == true && xfrm.VerticalFlip?.HasValue == true
+                && xfrm.HorizontalFlip.Value && xfrm.VerticalFlip.Value)
+                node.Format["flip"] = "both";
+            else if (xfrm.HorizontalFlip?.HasValue == true && xfrm.HorizontalFlip.Value)
+                node.Format["flip"] = "h";
+            else if (xfrm.VerticalFlip?.HasValue == true && xfrm.VerticalFlip.Value)
+                node.Format["flip"] = "v";
+        }
+
         return node;
     }
 
