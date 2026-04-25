@@ -3122,6 +3122,23 @@ public partial class ExcelHandler
     private (List<(string name, double[] values)> seriesData, string[]? categories) ParseDataRangeForChart(
         string dataRange, string defaultSheetName, Dictionary<string, string> properties)
     {
+        // CONSISTENCY(defined-name-range): if dataRange has no '!' and no ':' and
+        // looks like a workbook-defined name, resolve it to its referent range
+        // (e.g. "MyData" -> "Sheet1!$A$1:$B$3"). Excel charts accept defined-name
+        // references as a data source, so do the same here.
+        var trimmedInput = dataRange.Trim();
+        if (!trimmedInput.Contains('!') && !trimmedInput.Contains(':') &&
+            System.Text.RegularExpressions.Regex.IsMatch(trimmedInput, @"^[A-Za-z_][A-Za-z0-9_\.]*$"))
+        {
+            var workbook = _doc.WorkbookPart?.Workbook;
+            var defNames = workbook?.GetFirstChild<DefinedNames>();
+            var match = defNames?.Elements<DefinedName>()
+                .FirstOrDefault(dn => string.Equals(dn.Name?.Value, trimmedInput, StringComparison.OrdinalIgnoreCase));
+            if (match == null || string.IsNullOrEmpty(match.Text))
+                throw new ArgumentException($"DefinedName '{trimmedInput}' not found");
+            dataRange = match.Text!;
+        }
+
         // Parse sheet name and range
         string rangeSheetName = defaultSheetName;
         string rangePart = dataRange.Trim();
@@ -3136,7 +3153,7 @@ public partial class ExcelHandler
         var cleanRange = rangePart.Replace("$", "");
         var rangeParts = cleanRange.Split(':');
         if (rangeParts.Length != 2)
-            throw new ArgumentException($"Invalid dataRange: '{dataRange}'. Expected format: 'Sheet1!A1:D5' or 'A1:B3'");
+            throw new ArgumentException($"Invalid dataRange: '{dataRange}'. Expected format: 'Sheet1!A1:D5', 'A1:B3', or a defined-name");
 
         var (startCol, startRow) = ParseCellReference(rangeParts[0]);
         var (endCol, endRow) = ParseCellReference(rangeParts[1]);
