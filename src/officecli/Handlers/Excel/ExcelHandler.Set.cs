@@ -590,6 +590,16 @@ public partial class ExcelHandler
             var styleManager = new ExcelStyleManager(workbookPart);
             cell.StyleIndex = styleManager.ApplyStyle(cell, styleProps);
             _dirtyStylesheet = true;
+
+            // R24-1: numberformat="@" → force text storage. See ExcelHandler.Add.Cells.cs
+            // for the matching guard on the Add path.
+            if (IsTextNumberFormat(styleProps)
+                && cell.DataType?.Value != CellValues.SharedString
+                && cell.DataType?.Value != CellValues.InlineString
+                && cell.CellFormula == null)
+            {
+                cell.DataType = new EnumValue<CellValues>(CellValues.String);
+            }
         }
 
         return unsupported;

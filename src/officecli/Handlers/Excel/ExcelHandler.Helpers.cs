@@ -3746,4 +3746,19 @@ public partial class ExcelHandler
         }
         return any ? font : null;
     }
+
+    // R24-1: detect whether a styleProps bag asks for the text number format
+    // ("@"). All three accepted aliases are checked: numberformat, numfmt,
+    // format. Whitespace is trimmed; quoting is not expected here because
+    // ExcelStyleManager already strips surrounding quotes upstream.
+    private static bool IsTextNumberFormat(Dictionary<string, string> styleProps)
+    {
+        foreach (var key in new[] { "numberformat", "numfmt", "format" })
+        {
+            if (styleProps.TryGetValue(key, out var v) && v != null
+                && v.Trim() == "@")
+                return true;
+        }
+        return false;
+    }
 }

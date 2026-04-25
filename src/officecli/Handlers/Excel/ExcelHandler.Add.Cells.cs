@@ -529,6 +529,19 @@ public partial class ExcelHandler
             var styleManager = new ExcelStyleManager(cellWbPart);
             cell.StyleIndex = styleManager.ApplyStyle(cell, cellStyleProps);
             _dirtyStylesheet = true;
+
+            // R24-1: when caller explicitly chose the text number format ("@"),
+            // force the cell into String storage so leading zeros and any
+            // non-numeric content survive the round-trip. Without this, a
+            // value like "00456" gets written as <x:v>00456</x:v> with no
+            // t="str" and Excel reparses it as 456 on open.
+            if (IsTextNumberFormat(cellStyleProps)
+                && cell.DataType?.Value != CellValues.SharedString
+                && cell.DataType?.Value != CellValues.InlineString
+                && cell.CellFormula == null)
+            {
+                cell.DataType = new EnumValue<CellValues>(CellValues.String);
+            }
         }
         else if (properties.ContainsKey("link") && !string.IsNullOrEmpty(properties["link"]))
         {
