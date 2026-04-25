@@ -129,6 +129,14 @@ public partial class ExcelHandler
         else
             sheetData.InsertAt(newRow, 0);
 
+        // R33-2: this AddRow mutated sheetData directly (bypassing
+        // FindOrCreateRow). If the row-index cache was already populated
+        // by a prior cell op on the same sheet, it now lacks the new row
+        // — a subsequent AddCell at the same row index would cache-miss
+        // and create a duplicate <x:row r="N">, producing an
+        // Excel-rejected file. Invalidate the cache to force a rescan.
+        InvalidateRowIndex(sheetData);
+
         if (needsShift)
             DeleteCalcChainIfPresent();
         SaveWorksheet(worksheet);
