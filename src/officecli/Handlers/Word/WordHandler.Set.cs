@@ -677,6 +677,18 @@ public partial class WordHandler
 
             foreach (var (key, value) in properties)
             {
+                // CONSISTENCY(run-prop-helper): rPr-style props (font/size/bold/
+                // italic/color/highlight/underline/strike/caps/smallcaps/...)
+                // delegate to ApplyRunFormatting which works on
+                // StyleRunProperties via its OpenXmlCompositeElement base. This
+                // also extends Style's previously narrow rPr surface (was 7
+                // props) to cover the full ~23-prop ApplyRunFormatting set,
+                // matching what Word actually accepts in style/rPr.
+                if (ApplyRunFormatting(
+                        style.StyleRunProperties ?? style.AppendChild(new StyleRunProperties()),
+                        key, value))
+                    continue;
+
                 switch (key.ToLowerInvariant())
                 {
                     case "name":
@@ -690,37 +702,6 @@ public partial class WordHandler
                     case "next":
                         var ns = style.NextParagraphStyle ?? style.AppendChild(new NextParagraphStyle());
                         ns.Val = value;
-                        break;
-                    case "font":
-                        var rPr = style.StyleRunProperties ?? style.AppendChild(new StyleRunProperties());
-                        rPr.RunFonts = new RunFonts { Ascii = value, HighAnsi = value, EastAsia = value };
-                        break;
-                    case "size":
-                        var rPr2 = style.StyleRunProperties ?? style.AppendChild(new StyleRunProperties());
-                        rPr2.FontSize = new FontSize { Val = ((int)Math.Round(ParseFontSize(value) * 2, MidpointRounding.AwayFromZero)).ToString() };
-                        break;
-                    case "bold":
-                        var rPr3 = style.StyleRunProperties ?? style.AppendChild(new StyleRunProperties());
-                        rPr3.Bold = IsTruthy(value) ? new Bold() : null;
-                        break;
-                    case "italic":
-                        var rPr4 = style.StyleRunProperties ?? style.AppendChild(new StyleRunProperties());
-                        rPr4.Italic = IsTruthy(value) ? new Italic() : null;
-                        break;
-                    case "color":
-                        var rPr5 = style.StyleRunProperties ?? style.AppendChild(new StyleRunProperties());
-                        rPr5.Color = new Color { Val = SanitizeHex(value) };
-                        break;
-                    case "underline":
-                    {
-                        var rPrU = style.StyleRunProperties ?? style.AppendChild(new StyleRunProperties());
-                        var ulVal = NormalizeUnderlineValue(value);
-                        rPrU.Underline = new Underline { Val = new UnderlineValues(ulVal) };
-                        break;
-                    }
-                    case "strike" or "strikethrough":
-                        var rPrS = style.StyleRunProperties ?? style.AppendChild(new StyleRunProperties());
-                        rPrS.Strike = IsTruthy(value) ? new Strike() : null;
                         break;
                     case "alignment":
                         var pPr = style.StyleParagraphProperties ?? EnsureStyleParagraphProperties(style);

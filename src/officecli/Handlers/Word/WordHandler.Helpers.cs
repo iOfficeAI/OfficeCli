@@ -683,7 +683,7 @@ public partial class WordHandler
                 var ulMapped = NormalizeUnderlineValue(value);
                 InsertRunPropInSchemaOrder(props, new Underline { Val = new UnderlineValues(ulMapped) });
                 return true;
-            case "strike":
+            case "strike" or "strikethrough":
                 props.RemoveAllChildren<Strike>();
                 if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Strike());
                 return true;
