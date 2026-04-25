@@ -2518,7 +2518,14 @@ public partial class ExcelHandler
     private static int ParseAnchorDimension(string value, string name)
     {
         if (int.TryParse(value, out var plainInt))
+        {
+            // R30-1: negative cell-count is meaningless and silently
+            // produced an invalid file. Reject up front. CONSISTENCY with
+            // ParseAnchorDimensionEmu's negative-int guard.
+            if (plainInt <= 0)
+                throw new ArgumentException($"Picture/shape {name} must be positive (got '{value}').");
             return plainInt;
+        }
 
         // Not a plain integer — treat as EMU-convertible size string.
         long emu;
@@ -2530,6 +2537,10 @@ public partial class ExcelHandler
         {
             throw new ArgumentException($"Expected an integer cell count or a unit-qualified size (e.g. '6cm', '2in') for {name}, got '{value}'.");
         }
+        // R30-1: unit-qualified negative ("-2in") parses to a negative
+        // EMU; reject so the shape branch matches picture behavior.
+        if (emu <= 0)
+            throw new ArgumentException($"Picture/shape {name} must be positive (got '{value}').");
 
         // Rough conversion: 1 default Excel column ≈ 64px ≈ 0.677cm ≈ 609600 EMU.
         // 1 default Excel row    ≈ 15pt ≈ 0.529cm ≈ 190500 EMU.
@@ -2558,6 +2569,11 @@ public partial class ExcelHandler
     {
         if (long.TryParse(value, out var plainInt))
         {
+            // R30-1: reject negative bare integers up front. Without this,
+            // `width=-5` silently rounded to 0 (still invalid) and produced
+            // an Excel-rejected file with cx=0/cy=0 anchors.
+            if (plainInt <= 0)
+                throw new ArgumentException($"Picture/shape {name} must be positive (got '{value}').");
             // Bare integers are interpreted as cell counts (original grammar),
             // but values that exceed Excel's column max (16384) are clearly
             // EMU — for either axis. Using a single threshold (instead of
@@ -2566,19 +2582,26 @@ public partial class ExcelHandler
             // EMU at the same boundary.
             const int MaxCellIndex = 16384;
             if (plainInt >= MaxCellIndex)
-                return Math.Max(0, plainInt);
+                return plainInt;
             long perCell = (name == "height") ? EmuPerRowApprox : EmuPerColApprox;
-            return Math.Max(0, plainInt) * perCell;
+            return plainInt * perCell;
         }
 
+        long emu;
         try
         {
-            return OfficeCli.Core.EmuConverter.ParseEmu(value);
+            emu = OfficeCli.Core.EmuConverter.ParseEmu(value);
         }
         catch
         {
             throw new ArgumentException($"Expected an integer cell count or a unit-qualified size (e.g. '6cm', '2in') for {name}, got '{value}'.");
         }
+        // R30-1: unit-qualified negatives (e.g. "-5cm") parse to a negative
+        // EMU; reject so we don't write `<xdr:to><xdr:col>-2</xdr:col>...`
+        // anchors that crash Excel on open.
+        if (emu <= 0)
+            throw new ArgumentException($"Picture/shape {name} must be positive (got '{value}').");
+        return emu;
     }
 
     /// <summary>
@@ -2803,6 +2826,10 @@ public partial class ExcelHandler
     {
         if (long.TryParse(value, out var plainInt))
         {
+            // R30-1: x/y origins are 0-based cell indices; negative values
+            // would write an invalid <xdr:col>/-row anchor. Reject up front.
+            if (plainInt < 0)
+                throw new ArgumentException($"Picture/shape {name} must be non-negative (got '{value}').");
             // Excel's column max (16384) is the tightest sheet-coordinate
             // bound — anything beyond that is unambiguously an EMU offset
             // (rows go to 1048576 but a row index that high is also clearly
@@ -2813,22 +2840,25 @@ public partial class ExcelHandler
             if (plainInt >= MaxCellIndex)
             {
                 long perCell = (name == "y") ? EmuPerRowApprox : EmuPerColApprox;
-                return (int)Math.Max(0, plainInt / perCell);
+                return (int)(plainInt / perCell);
             }
-            return (int)Math.Max(0, plainInt);
+            return (int)plainInt;
         }
 
         // Unit-qualified ("1in", "2cm") → EMU → cell count via the same per-cell constants.
+        long emu;
         try
         {
-            var emu = OfficeCli.Core.EmuConverter.ParseEmu(value);
-            long perCell = (name == "y") ? EmuPerRowApprox : EmuPerColApprox;
-            return (int)Math.Max(0, emu / perCell);
+            emu = OfficeCli.Core.EmuConverter.ParseEmu(value);
         }
         catch
         {
             throw new ArgumentException($"Expected an integer cell index or a unit-qualified offset (e.g. '1in', '2cm') for {name}, got '{value}'.");
         }
+        if (emu < 0)
+            throw new ArgumentException($"Picture/shape {name} must be non-negative (got '{value}').");
+        long perCellOut = (name == "y") ? EmuPerRowApprox : EmuPerColApprox;
+        return (int)(emu / perCellOut);
     }
 
     /// <summary>
