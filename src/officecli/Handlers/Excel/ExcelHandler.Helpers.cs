@@ -45,6 +45,23 @@ public partial class ExcelHandler
     }
 
     /// <summary>
+    /// R35-3: cross-workbook cell formulas like "=[Other.xlsx]Sheet1!A1" or
+    /// "=[1]Sheet1!A1" need an externalLinks part to resolve. Without one,
+    /// Excel opens the file but the formula shows #REF!. Reject up-front
+    /// rather than silently persist a broken formula.
+    /// CONSISTENCY(cross-workbook-ref): mirrors the namedrange refersTo
+    /// guard in ExcelHandler.Add.Tables.cs (R27-1).
+    /// </summary>
+    internal static void RejectCrossWorkbookFormula(string formula)
+    {
+        if (string.IsNullOrEmpty(formula)) return;
+        var trimmed = formula.TrimStart('=', ' ', '\t');
+        if (System.Text.RegularExpressions.Regex.IsMatch(trimmed, @"^\["))
+            throw new ArgumentException(
+                $"Cross-workbook references like '{formula}' require an externalLinks part which officecli doesn't expose; use raw-set for this case");
+    }
+
+    /// <summary>
     /// Build an XDR BlipFill with an optional asvg:svgBlip extension when
     /// the caller wires in an SVG image part. Keeps Add/Set picture paths
     /// free of inline extension boilerplate.

@@ -226,6 +226,7 @@ public partial class ExcelHandler
             // Auto-detect formula: value starting with '=' is treated as formula
             if (value.StartsWith('=') && value.Length > 1)
             {
+                RejectCrossWorkbookFormula(value);
                 cell.CellFormula = new CellFormula(Core.ModernFunctionQualifier.Qualify(Core.ModernFunctionQualifier.AutoQuoteSheetRefs(value.TrimStart('='))));
                 cell.CellValue = null;
             }
@@ -261,6 +262,7 @@ public partial class ExcelHandler
             var fTrim = formula.TrimStart('=').Trim();
             if (fTrim.StartsWith("{") && fTrim.EndsWith("}"))
                 throw new ArgumentException("Literal braces '{...}' around a formula create an Excel-rejected file. Use --prop arrayformula=... (without braces) to declare a CSE array formula.");
+            RejectCrossWorkbookFormula(fTrim);
             cell.CellFormula = new CellFormula(Core.ModernFunctionQualifier.Qualify(Core.ModernFunctionQualifier.AutoQuoteSheetRefs(fTrim)));
             cell.CellValue = null;
         }
@@ -487,6 +489,7 @@ public partial class ExcelHandler
         // Array formula support during Add
         if (properties.TryGetValue("arrayformula", out var arrFormula))
         {
+            RejectCrossWorkbookFormula(arrFormula);
             var arrRef = properties.GetValueOrDefault("ref", cellRef);
             cell.CellFormula = new CellFormula(Core.ModernFunctionQualifier.Qualify(Core.ModernFunctionQualifier.AutoQuoteSheetRefs(arrFormula.TrimStart('='))))
             {
