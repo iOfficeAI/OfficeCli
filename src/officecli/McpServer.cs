@@ -378,155 +378,57 @@ public static class McpServer
             }
             case "help":
             {
+                // Schema-driven help — single source of truth shared with the CLI's
+                // `officecli help` command. The previous implementation was ~150 lines
+                // of hardcoded markdown cheat sheets that drifted from schemas/help/*.json
+                // (e.g. when chart aliases were added, this block was never updated).
+                //
+                // Shape (mirrors `officecli help <format> [<element>]`):
+                //   {command:"help"}                          → list formats
+                //   {command:"help", format:"docx"}           → list elements in that format
+                //   {command:"help", format:"docx", type:"paragraph"} → full element schema
+                //
+                // The Strategy preamble is MCP-specific guidance that schemas don't (and
+                // shouldn't) encode — kept inline as McpHelpStrategy.
                 var format = Arg("format").ToLowerInvariant();
-                const string strategy = @"## Strategy
-Use view (outline/stats/issues/annotated) to understand the document first, then get/query to inspect details, then set/add/remove to modify.
-View modes: text, annotated, outline, stats, issues, html, svg (pptx only), forms (docx only).
-For 3+ mutations on the same file, use batch (one open/save cycle) instead of separate calls.
-Get output keys can be used directly as Set input keys (round-trip safe).
-Colors: FF0000, red, rgb(255,0,0), accent1. Sizes: 24pt. Positions: 2cm, 1in, 72pt, or raw EMU.
+                var element = Arg("type"); // optional element to drill into
 
-";
-                var reference = format switch
+                if (string.IsNullOrEmpty(format))
+                    return McpHelpStrategy
+                        + "Supported formats: docx, xlsx, pptx.\n"
+                        + "Call again with format=<docx|xlsx|pptx> to list elements; "
+                        + "add type=<element> for full schema (properties, aliases, examples).";
+
+                if (!OfficeCli.Help.SchemaHelpLoader.IsKnownFormat(format))
+                    return $"Unknown format '{format}'. Supported: docx, xlsx, pptx.";
+
+                var canonical = OfficeCli.Help.SchemaHelpLoader.NormalizeFormat(format);
+                var sb = new StringBuilder(McpHelpStrategy);
+
+                if (string.IsNullOrEmpty(element))
                 {
-                    "xlsx" => @"# XLSX Reference
+                    sb.Append("# ").Append(canonical.ToUpperInvariant()).AppendLine(" Elements");
+                    sb.AppendLine();
+                    foreach (var el in OfficeCli.Help.SchemaHelpLoader.ListElements(canonical))
+                        sb.Append("- ").AppendLine(el);
+                    sb.AppendLine();
+                    var sampleElement = canonical switch { "docx" => "paragraph", "xlsx" => "cell", _ => "shape" };
+                    sb.Append("Call again with type=<element> for the full schema. ");
+                    sb.Append("Example: {\"command\":\"help\",\"format\":\"").Append(canonical)
+                      .Append("\",\"type\":\"").Append(sampleElement).AppendLine("\"}");
+                    return sb.ToString();
+                }
 
-## Add types
-sheet, row, cell, col, run (rich text in cell), shape, chart, picture, comment, namedrange, table, validation, pivottable, autofilter, pagebreak, colbreak, rowbreak, sparkline
-cf (conditional formatting): set type= to databar|colorscale|iconset|formula|topn|aboveaverage|duplicatevalues|uniquevalues|containstext|dateoccurring
-
-## Cell properties (Set/Add)
-value, formula, arrayformula, type (string|number|boolean), clear, link
-bold, italic, strike, underline (true|single|double), superscript, subscript
-font.color (#FF0000), font.size (14pt), font.name (Calibri), fill (#4472C4)
-border.all (thin|medium|thick), border.left/right/top/bottom, border.color
-alignment.horizontal (left|center|right), alignment.vertical, alignment.wrapText
-numfmt (0%|#,##0.00|...), rotation (0-180), indent, shrinktofit
-locked (true|false), formulahidden (true|false)
-
-## Sheet properties (Set)
-name, freeze (A2|B3|none), zoom (75-200), tabcolor (#FF0000|none)
-autofilter (A1:F100|none), merge (A1:D1), protect (true|false), password
-printarea ($A$1:$D$10|none), orientation (landscape|portrait), papersize (1=Letter|9=A4)
-fittopage (1x2|true), header (&CPage &P), footer (&LConfidential)
-sort (""Salary desc"" | ""Dept asc, Salary desc"" | none) — space between column and asc/desc, comma between keys; pair with sortHeader=true to keep row 1
-
-## Run properties (Set /Sheet/A1/run[N])
-text, bold, italic, strike, underline, superscript, subscript, size, color, font
-
-## Pivot table properties (Add/Set)
-source/src (Sheet1!A1:D100), position/pos, rows, cols/columns, values (Name:Sum), filters
-style (PivotStyleMedium9), layout (compact|outline|tabular), sort (asc|desc)
-subtotals (on|off), rowGrandTotals, colGrandTotals
-showRowHeaders, showColHeaders, showRowStripes, showColStripes, showLastColumn
-aggregate (Sum|Count|Average|Max|Min|Product|CountNums|StdDev|Var)
-showDataAs (normal|difference|percent|percent_of_row|percent_of_col|percent_of_total|running_total|rank_asc|rank_desc|index)
-dataField{N}.showAs — per-field display transform override
-
-## Chart properties (Add/Set)
-charttype (bar|column|line|pie|doughnut|area|scatter|radar|...), title, dataRange/range, data
-x, y, width, height (cm/in/pt/emu), categories, colors, series1..20 (.name, .values, .categories)
-datalabels/labels, labelpos, labelfont, axistitle/vtitle, cattitle/htitle
-axismin/min, axismax/max, majorunit, minorunit, axisnumfmt
-gridlines, majorgridlines, minorgridlines, plotareafill/plotfill, chartareafill/chartfill
-linewidth, linedash/dash, marker/markers, markersize, smooth, style/styleid/preset
-gradient, gradients, transparency/opacity, trendline, secondaryaxis/secondary
-referenceline, colorrule/conditionalcolor, view3d, camera, perspective
-holesize, firstsliceangle (pie/doughnut), gapwidth/gap, overlap (bar/column)
-legend (top|bottom|left|right|false), legendfont, title.font/size/color/bold
-datatable, varycolors, scatterstyle, radarstyle
-
-## Sparkline properties (Add/Set)
-cell (F1), range/data (A1:E1), type (line|column|stacked), color, negativecolor
-markers, highpoint, lowpoint, firstpoint, lastpoint, negative (boolean flags)
-highmarkercolor, lowmarkercolor, firstmarkercolor, lastmarkercolor, markerscolor, lineweight
-
-## CF properties
-sqref/range, color (font), fill, bold, italic, strike, underline, border (thin|medium), numfmt
-topn: rank, bottom (true), percent (true)
-aboveaverage: below (true)
-containstext: text
-dateoccurring: period (today|yesterday|tomorrow|last7days|thisweek|lastweek|thismonth|lastmonth)
-
-## Validation properties (Add)
-sqref/ref, type (list|whole|decimal|date|time|textlength|custom), operator (between|equal|...)
-formula1, formula2, allowBlank, showError, showInput, errorTitle, error, promptTitle, prompt
-
-## Workbook settings (Set / or /workbook)
-workbook.date1904, workbook.codeName, workbook.filterPrivacy
-calc.mode (auto|manual), calc.iterate, calc.iterateCount, calc.refMode (A1|R1C1)
-workbook.lockStructure, workbook.lockWindows
-
-## Extended properties
-extended.company, extended.manager, extended.template",
-
-                    "pptx" => @"# PPTX Reference
-
-## Add types
-slide, shape, textbox, picture, chart, table, row, cell, col/column, paragraph, run
-group, connector, animation, video, equation, notes, zoom, 3dmodel/model3d
-
-## Shape properties (Set/Add)
-text, bold, italic, underline, strike, superscript, subscript
-color (#FF0000), font (Arial), size (24pt), align (left|center|right)
-fill (#4472C4|gradient), outline (#000000), rotation (45)
-x, y, width, height (in cm/in/pt/emu)
-shadow, glow, reflection, softedge, effect3d
-link (https://...), alt (alt text)
-
-## Slide properties (Set)
-layout, background, transition, notes
-
-## Presentation settings (Set /)
-firstSlideNum, rtl, compatMode
-show.loop, show.narration, show.animation, show.useTimings
-print.what (slides|notes|outline), print.colorMode, print.frameSlides
-theme.color.accent1..6, theme.color.dk1/lt1/dk2/lt2/hlink/folHlink
-theme.font.major.latin, theme.font.minor.latin
-
-## Extended properties
-extended.company, extended.manager, extended.template",
-
-                    "docx" => @"# DOCX Reference
-
-## Add types
-paragraph, run, table, row, cell, picture, hyperlink, section
-style, chart, equation, footnote, endnote, bookmark, comment
-toc, pagebreak, columnbreak, header, footer, watermark, sdt
-field (pagenum|numpages|date|author), formfield
-
-## Run properties (Set/Add)
-text, bold, italic, underline, strike, superscript, subscript
-color (#FF0000), font (Arial), size (14pt), highlight
-caps, smallcaps, vanish
-
-## Paragraph properties (Set/Add)
-alignment (left|center|right|justify)
-spaceBefore (12pt), spaceAfter (6pt), lineSpacing (1.5x|18pt)
-indent, hanging, firstline
-pagebreakbefore (true|false)
-
-## Section properties
-pagewidth, pageheight, orientation (landscape|portrait)
-margintop, marginbottom, marginleft, marginright (supports 2cm|1in|36pt|raw twips)
-
-## Document settings (Set /)
-docDefaults.font, docDefaults.fontSize, docDefaults.lineSpacing, docDefaults.color
-docGrid.type (default|lines|linesAndChars|snapToCharacters), docGrid.linePitch
-autoSpaceDE, autoSpaceDN, kinsoku, overflowPunct (true|false)
-charSpacingControl (doNotCompress|compressPunctuation)
-compatibility.preset (word2019|word2010|css-layout), compatibility.mode, compatibility.<flag>
-embedFonts, mirrorMargins, gutterAtTop, bookFoldPrinting, evenAndOddHeaders
-defaultTabStop (720|1.27cm), columns.count, columns.space, section.type
-
-## Extended properties
-extended.company, extended.manager, extended.template",
-
-                    _ => null
-                };
-                if (reference == null)
-                    return "Supported formats: xlsx, pptx, docx. Call help with one of these.";
-                return strategy + reference;
+                try
+                {
+                    using var doc = OfficeCli.Help.SchemaHelpLoader.LoadSchema(canonical, element);
+                    sb.Append(OfficeCli.Help.SchemaHelpRenderer.RenderHuman(doc, null));
+                    return sb.ToString();
+                }
+                catch (Exception ex)
+                {
+                    return $"{ex.Message}\n\nList available elements via: {{\"command\":\"help\",\"format\":\"{canonical}\"}}";
+                }
             }
             default:
                 throw new ArgumentException($"Unknown tool: {name}");
@@ -546,11 +448,24 @@ extended.company, extended.manager, extended.template",
 
     // ==================== Tool Definitions ====================
 
+    // MCP-specific guidance prepended to every help response. Cannot be derived
+    // from schemas/help/*.json — it's about how to use the *tool*, not what the
+    // *document model* exposes.
+    private const string McpHelpStrategy = @"## Strategy
+Use view (outline/stats/issues/annotated) to understand the document first, then get/query to inspect details, then set/add/remove to modify.
+View modes: text, annotated, outline, stats, issues, html, svg (pptx only), forms (docx only).
+For 3+ mutations on the same file, use batch (one open/save cycle) instead of separate calls.
+Get output keys can be used directly as Set input keys (round-trip safe).
+Colors: FF0000, red, rgb(255,0,0), accent1. Sizes: 24pt. Positions: 2cm, 1in, 72pt, or raw EMU.
+Paths are 1-based: /slide[1]/shape[2], /body/p[3], /Sheet1/A1.
+
+";
+
     private const string ToolDescription = @"Create, read, and modify Office documents (.docx, .xlsx, .pptx).
 
-Commands: create (file), view (file, mode: text|annotated|outline|stats|issues|html|svg|forms), get (file, path, depth), query (file, selector), set (file, path, props[]), add (file, parent, type, props[], index/after/before), remove (file, path), move (file, path, to, index/after/before), swap (file, path, path2), validate (file), batch (file, commands), raw (file, part), help (format: xlsx|pptx|docx).
+Commands: create (file), view (file, mode: text|annotated|outline|stats|issues|html|svg|forms), get (file, path, depth), query (file, selector), set (file, path, props[]), add (file, parent, type, props[], index/after/before), remove (file, path), move (file, path, to, index/after/before), swap (file, path, path2), validate (file), batch (file, commands), raw (file, part), help (format: docx|xlsx|pptx, optional type=<element> for full schema).
 
-Paths are 1-based: /slide[1]/shape[2], /body/p[3], /Sheet1/A1. Props are key=value strings. Call help for detailed property reference per format.";
+Paths are 1-based: /slide[1]/shape[2], /body/p[3], /Sheet1/A1. Props are key=value strings. Call help with format= to list elements, then help with format= and type= to drill into a specific element's schema (properties, aliases, examples).";
 
     private static void WriteToolDefinitions(Utf8JsonWriter w)
     {
