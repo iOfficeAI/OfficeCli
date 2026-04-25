@@ -32,7 +32,15 @@ public partial class ExcelHandler
             "colorscale" => Add(parentPath, "colorscale", position, properties),
             "formula" or "expression" => Add(parentPath, "formulacf", position, properties),
             "cellis" => Add(parentPath, "cellis", position, properties),
-            "topn" or "top10" => Add(parentPath, "topn", position, properties),
+            // R39-1: `top` / `topPercent` / `bottom` / `bottomPercent` are
+            // user-facing aliases for the OOXML `top10` cfRule. Without this
+            // mapping, the dispatch fell through to the default `databar`
+            // branch and silently rewrote the rule type. Set `percent`/
+            // `bottom` properties so the topn branch emits the right attrs.
+            "topn" or "top10" or "top" => Add(parentPath, "topn", position, properties),
+            "toppercent" => AddTopRouted(parentPath, position, properties, percent: true, bottom: false),
+            "bottom" => AddTopRouted(parentPath, position, properties, percent: false, bottom: true),
+            "bottompercent" => AddTopRouted(parentPath, position, properties, percent: true, bottom: true),
             "aboveaverage" => Add(parentPath, "aboveaverage", position, properties),
             "uniquevalues" => Add(parentPath, "uniquevalues", position, properties),
             "duplicatevalues" => Add(parentPath, "duplicatevalues", position, properties),
@@ -42,6 +50,18 @@ public partial class ExcelHandler
                 => Add(parentPath, "cfextended", position, properties),
             _ => Add(parentPath, "conditionalformatting", position, properties)
         };
+    }
+
+    // R39-1: thread `percent`/`bottom` flags into the topn branch so that
+    // `type=topPercent` / `type=bottom` / `type=bottomPercent` route to the
+    // same `top10` cfRule with the right attributes set, instead of falling
+    // through to the dataBar default. Mutates `properties` in place; keys
+    // already supplied by the user take precedence.
+    private string AddTopRouted(string parentPath, InsertPosition? position, Dictionary<string, string> properties, bool percent, bool bottom)
+    {
+        if (!properties.ContainsKey("percent")) properties["percent"] = percent ? "true" : "false";
+        if (!properties.ContainsKey("bottom")) properties["bottom"] = bottom ? "true" : "false";
+        return Add(parentPath, "topn", position, properties);
     }
 
     private string AddDataBar(string parentPath, string type, InsertPosition? position, Dictionary<string, string> properties)
@@ -57,7 +77,11 @@ public partial class ExcelHandler
             if (cfTypeLower is "colorscale") return Add(parentPath, "colorscale", position, properties);
             if (cfTypeLower is "formula" or "expression") return Add(parentPath, "formulacf", position, properties);
             if (cfTypeLower is "cellis") return Add(parentPath, "cellis", position, properties);
-            if (cfTypeLower is "topn" or "top10") return Add(parentPath, "topn", position, properties);
+            // R39-1: same alias set as AddCf — keep both dispatch sites in sync.
+            if (cfTypeLower is "topn" or "top10" or "top") return Add(parentPath, "topn", position, properties);
+            if (cfTypeLower is "toppercent") return AddTopRouted(parentPath, position, properties, percent: true, bottom: false);
+            if (cfTypeLower is "bottom") return AddTopRouted(parentPath, position, properties, percent: false, bottom: true);
+            if (cfTypeLower is "bottompercent") return AddTopRouted(parentPath, position, properties, percent: true, bottom: true);
             if (cfTypeLower is "aboveaverage") return Add(parentPath, "aboveaverage", position, properties);
             if (cfTypeLower is "uniquevalues") return Add(parentPath, "uniquevalues", position, properties);
             if (cfTypeLower is "duplicatevalues") return Add(parentPath, "duplicatevalues", position, properties);
