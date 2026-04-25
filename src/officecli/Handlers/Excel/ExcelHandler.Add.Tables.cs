@@ -307,6 +307,23 @@ public partial class ExcelHandler
 
         var wsEl = GetSheet(dvWorksheet);
         var dvs = wsEl.GetFirstChild<DataValidations>();
+        // R27-3: stacking a second DV on a sqref that overlaps an existing
+        // DV is silently invisible in Excel (first wins). Reject up-front
+        // rather than persist a useless rule.
+        if (dvs != null)
+        {
+            var newRanges = dvSqref.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            foreach (var existing in dvs.Elements<DataValidation>())
+            {
+                var existingSqref = existing.SequenceOfReferences?.InnerText ?? "";
+                var existingRanges = existingSqref.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                foreach (var nr in newRanges)
+                    foreach (var er in existingRanges)
+                        if (RangesOverlap(nr, er))
+                            throw new ArgumentException(
+                                $"DataValidation sqref '{nr}' overlaps existing validation sqref '{er}'; Excel ignores stacked validations on the same cells. Remove the existing validation first or use a non-overlapping range.");
+            }
+        }
         if (dvs == null)
         {
             dvs = new DataValidations();
