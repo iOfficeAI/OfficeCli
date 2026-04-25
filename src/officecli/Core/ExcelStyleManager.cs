@@ -200,8 +200,21 @@ internal class ExcelStyleManager
                         alignment.WrapText = IsTruthy(value);
                         break;
                     case "rotation" or "textrotation":
-                        alignment.TextRotation = ParseHelpers.SafeParseUint(value, "rotation");
+                    {
+                        // R39-3: OOXML §18.18.20 ST_TextRotation — valid values
+                        // are 0..180 (degrees) plus the special sentinel 255
+                        // (vertical text stack). Excel rejects 181..254 and
+                        // anything above 255. R15 added the lower-bound guard
+                        // (negative parsing throws via SafeParseUint), but the
+                        // upper bound was missing, allowing files Excel later
+                        // refuses to open.
+                        var rot = ParseHelpers.SafeParseUint(value, "rotation");
+                        if (!(rot <= 180 || rot == 255))
+                            throw new ArgumentException(
+                                $"Invalid 'rotation' value '{value}'. Must be 0..180 (degrees) or 255 (vertical stack).");
+                        alignment.TextRotation = rot;
                         break;
+                    }
                     case "indent":
                         alignment.Indent = ParseHelpers.SafeParseUint(value, "indent");
                         break;
