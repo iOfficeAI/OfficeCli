@@ -1693,4 +1693,54 @@ public partial class WordHandler
         if (border.Color?.Value is { } c) node.Format[$"{key}.color"] = ParseHelpers.FormatHexColor(c);
         if (border.Space?.Value is uint sp) node.Format[$"{key}.space"] = sp;
     }
+
+    // OOXML localNames that the curated style/paragraph readers already map
+    // to canonical keys. FillUnknownChildProps skips these so the long-tail
+    // fallback doesn't re-expose them under their bare OOXML names alongside
+    // the canonical key (e.g. avoid emitting both `bold: true` and `b: true`).
+    private static readonly System.Collections.Generic.HashSet<string> CuratedStyleLocalNames =
+        new(System.StringComparer.Ordinal)
+    {
+        // rPr-side (covered by curated style/run readers)
+        "b", "bCs", "i", "iCs", "sz", "szCs", "u", "color", "strike", "rFonts",
+        // pPr-side
+        "jc", "spacing", "ind", "shd", "outlineLvl",
+        "keepNext", "keepLines", "pageBreakBefore", "contextualSpacing",
+        "pBdr", "numPr", "tabs",
+    };
+
+    // Long-tail OOXML fallback: walk a properties container (rPr/pPr/...) and
+    // surface every leaf child whose localName isn't already covered by the
+    // curated reader. Shape is symmetric with GenericXmlQuery.TryCreateTypedChild
+    // on the Set side: child-with-val → Format[name]=val; toggle (no attrs) →
+    // Format[name]=true. Multi-attribute / nested children are skipped — the
+    // generic Set path can't write them, so exposing them would produce keys
+    // that don't round-trip.
+    private static void FillUnknownChildProps(OpenXmlElement? container, DocumentNode node)
+    {
+        if (container == null) return;
+        foreach (var child in container.ChildElements)
+        {
+            var name = child.LocalName;
+            if (string.IsNullOrEmpty(name)) continue;
+            if (CuratedStyleLocalNames.Contains(name)) continue;
+            if (node.Format.ContainsKey(name)) continue;
+            if (child.ChildElements.Count > 0) continue;
+
+            string? valAttr = null;
+            int attrCount = 0;
+            foreach (var a in child.GetAttributes())
+            {
+                attrCount++;
+                if (a.LocalName.Equals("val", System.StringComparison.OrdinalIgnoreCase))
+                    valAttr = a.Value;
+            }
+            if (valAttr != null)
+                node.Format[name] = valAttr;
+            else if (attrCount == 0)
+                node.Format[name] = true;
+            // else: complex multi-attribute element — skip, curated reader
+            // is expected to cover it (e.g. rFonts is in CuratedStyleLocalNames).
+        }
+    }
 }

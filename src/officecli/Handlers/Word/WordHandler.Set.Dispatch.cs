@@ -613,8 +613,20 @@ public partial class WordHandler
                     break;
                 }
                 default:
+                {
+                    // Long-tail OOXML fallback — symmetric with the Get-side
+                    // FillUnknownChildProps. Try rPr first (run-level toggles
+                    // like w:rtl, w:cs), then pPr (paragraph-level toggles
+                    // like w:kinsoku, w:snapToGrid). SDK schema validation
+                    // happens inside TryCreateTypedChild; non-OOXML keys
+                    // still fall through to `unsupported`.
+                    var rPrGen = style.StyleRunProperties ?? style.AppendChild(new StyleRunProperties());
+                    if (Core.GenericXmlQuery.TryCreateTypedChild(rPrGen, key, value)) break;
+                    var pPrGen = style.StyleParagraphProperties ?? EnsureStyleParagraphProperties(style);
+                    if (Core.GenericXmlQuery.TryCreateTypedChild(pPrGen, key, value)) break;
                     unsupported.Add(key);
                     break;
+                }
             }
         }
         styles.Save();
