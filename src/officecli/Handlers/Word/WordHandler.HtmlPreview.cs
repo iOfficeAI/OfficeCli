@@ -117,6 +117,19 @@ public partial class WordHandler
         sb.AppendLine("<style>");
         sb.AppendLine(GenerateWordCss(pgLayout, docDef));
         sb.AppendLine("</style>");
+
+        // Per-(numId, ilvl) marker CSS — picks up abstractNum level rPr
+        // (color/font/size/bold/italic) and the actual lvlText glyph for
+        // bullets. Without this every list marker rendered in the preview is
+        // black, normal, and uses CSS's default disc/decimal — diverging from
+        // what real Word renders.
+        var markerCss = BuildListMarkerCss(body);
+        if (!string.IsNullOrEmpty(markerCss))
+        {
+            sb.AppendLine("<style>");
+            sb.AppendLine(markerCss);
+            sb.AppendLine("</style>");
+        }
         // Load document fonts: @font-face with metric overrides for all fonts,
         // Google Fonts only for non-system fonts.
         var docFonts = CollectDocumentFonts();
@@ -1529,8 +1542,12 @@ public partial class WordHandler
                 var listStyle = GetParagraphListStyle(para);
                 if (listStyle != null)
                 {
-                    var ilvl = para.ParagraphProperties?.NumberingProperties?.NumberingLevelReference?.Val?.Value ?? 0;
-                    var numId = para.ParagraphProperties?.NumberingProperties?.NumberingId?.Val?.Value ?? 0;
+                    // Resolve numPr through the pStyle chain so style-borne
+                    // numbering (the canonical Heading1..9 pattern) renders
+                    // identically to direct-numPr paragraphs.
+                    var resolvedNumPr = ResolveNumPrFromStyle(para);
+                    var ilvl = resolvedNumPr?.Ilvl ?? 0;
+                    var numId = resolvedNumPr?.NumId ?? 0;
                     // Clamp ilvl to the OOXML-legal range [0, 8]. Malformed
                     // docs with huge ilvl (observed via raw-zip fuzz: 10000
                     // or Int32.MaxValue) otherwise explode the nested <ul>
@@ -1674,6 +1691,11 @@ public partial class WordHandler
                     currentNumId = numId;
                     sb.Append("<li");
                     sb.Append($" data-path=\"/body/p[{wParaCount}]\"");
+                    // Marker class wires up the ::marker rule emitted by
+                    // BuildListMarkerCss so this <li> picks up the abstractNum
+                    // level rPr (color/font/size/bold/italic) for ul, plus
+                    // a custom list-style-type string when applicable.
+                    sb.Append($" class=\"marker-{numId}-{ilvl}\"");
                     var paraStyle = GetParagraphInlineCss(para, isListItem: true);
                     if (!string.IsNullOrEmpty(paraStyle))
                         sb.Append($" style=\"{paraStyle}\"");
@@ -1699,7 +1721,16 @@ public partial class WordHandler
                             _ => "0.5em" // tab
                         };
                         var align = jc switch { "right" => "right", "center" => "center", _ => "left" };
-                        sb.Append($"<span style=\"display:inline-block;min-width:{markerWidth};padding-right:{markerPadding};text-align:{align}\">{HtmlEncode(marker)}</span>");
+                        // Pull in marker-level rPr (color/font/size/bold/italic) so
+                        // the ol marker span matches the styling emitted globally
+                        // for ul ::marker. Word lets per-level rPr restyle markers
+                        // independent of the body run; mirroring that here keeps
+                        // sections like "red bold 1." parallel between ol/ul.
+                        var inlineMarkerCss = GetMarkerInlineCss(numId, ilvl);
+                        var markerStyle = $"display:inline-block;min-width:{markerWidth};padding-right:{markerPadding};text-align:{align}";
+                        if (!string.IsNullOrEmpty(inlineMarkerCss))
+                            markerStyle = inlineMarkerCss + ";" + markerStyle;
+                        sb.Append($"<span style=\"{markerStyle}\">{HtmlEncode(marker)}</span>");
                     }
                     RenderParagraphContentHtml(sb, para);
                     pendingLiClose = true; // defer </li> in case next item nests
