@@ -71,7 +71,7 @@ internal class ExcelStyleManager
     /// Apply style properties to a cell. Merges with any existing cell style.
     /// Returns the style index to assign to the cell.
     /// </summary>
-    public uint ApplyStyle(Cell cell, Dictionary<string, string> styleProps)
+    public uint ApplyStyle(Cell cell, Dictionary<string, string> styleProps, List<string>? unsupportedOut = null)
     {
         // Normalize keys to lowercase for case-insensitive matching; skip null values
         var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -116,7 +116,39 @@ internal class ExcelStyleManager
             fontProps["strike"] = stVal;
         if (fontProps.Count > 0)
         {
-            fontId = GetOrCreateFont(stylesheet, fontId, fontProps);
+            // Split into curated (handled by GetOrCreateFont's typed builder)
+            // and long-tail (raw OOXML children appended via SDK schema-aware
+            // AddChild, force-new in the dedup table).
+            var longTailFontProps = fontProps
+                .Where(kv => !CuratedFontKeys.Contains(kv.Key))
+                .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+            var curatedFontProps = fontProps
+                .Where(kv => CuratedFontKeys.Contains(kv.Key))
+                .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+            // Preserve baseFont's existing long-tail children (charset, family,
+            // outline, shadow, ...) — without this they'd be silently dropped
+            // every time the cell's style is touched, since GetOrCreateFont
+            // rebuilds Font from curated fields only.
+            var baseFonts = stylesheet.Fonts;
+            if (baseFonts != null && fontId < (uint)baseFonts.Elements<Font>().Count())
+            {
+                var baseFont = baseFonts.Elements<Font>().ElementAt((int)fontId);
+                foreach (var child in baseFont.ChildElements)
+                {
+                    var name = child.LocalName;
+                    if (CuratedFontChildLocalNames.Contains(name)) continue;
+                    if (longTailFontProps.ContainsKey(name)) continue; // caller wins
+                    string? valStr = null;
+                    foreach (var a in child.GetAttributes())
+                    {
+                        if (a.LocalName.Equals("val", StringComparison.OrdinalIgnoreCase))
+                        { valStr = a.Value; break; }
+                    }
+                    if (valStr != null)
+                        longTailFontProps[name] = valStr;
+                }
+            }
+            fontId = GetOrCreateFont(stylesheet, fontId, curatedFontProps, longTailFontProps, unsupportedOut);
             applyFont = true;
         }
 
@@ -226,7 +258,21 @@ internal class ExcelStyleManager
                         // 0=context, 1=ltr, 2=rtl. Accept numeric or string forms.
                         alignment.ReadingOrder = ParseReadingOrder(value);
                         break;
+                    // Long-tail keys handled below (case-preserving) — see the
+                    // styleProps walk after this loop. Skip in the lowered
+                    // switch to avoid double-write.
                 }
+            }
+            // Long-tail Alignment attributes (e.g. justifyLastLine,
+            // relativeIndent). Walk styleProps directly to preserve original
+            // case — OOXML attribute names are case-sensitive (Excel rejects
+            // `justifylastline`, only accepts `justifyLastLine`).
+            foreach (var (origKey, value) in styleProps)
+            {
+                if (!origKey.StartsWith("alignment.", StringComparison.OrdinalIgnoreCase)) continue;
+                var subKey = origKey.Substring(10); // preserve case after "alignment."
+                if (CuratedAlignmentSubKeysLower.Contains(subKey.ToLowerInvariant())) continue;
+                alignment.SetAttribute(new DocumentFormat.OpenXml.OpenXmlAttribute("", subKey, "", value));
             }
             applyAlignment = true;
         }
@@ -243,14 +289,37 @@ internal class ExcelStyleManager
         // --- protection ---
         Protection? protection = baseXf.Protection?.CloneNode(true) as Protection;
         bool applyProtection = baseXf.ApplyProtection?.Value ?? false;
+        var protectionLongTail = styleProps
+            .Where(kv => kv.Key.StartsWith("protection.", StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(kv => kv.Key[11..].ToLowerInvariant(), kv => kv.Value);
         if (styleProps.TryGetValue("locked", out var lockedVal) ||
-            styleProps.TryGetValue("formulahidden", out var fhVal))
+            styleProps.TryGetValue("formulahidden", out var fhVal) ||
+            protectionLongTail.Count > 0)
         {
             protection ??= new Protection();
             if (styleProps.TryGetValue("locked", out var lv))
                 protection.Locked = IsTruthy(lv);
             if (styleProps.TryGetValue("formulahidden", out var fv))
                 protection.Hidden = IsTruthy(fv);
+            // protection.locked and protection.hidden as canonical dotted keys
+            // (mirror Get's `protection.locked` / `protection.hidden` output).
+            if (protectionLongTail.TryGetValue("locked", out var pLocked))
+                protection.Locked = IsTruthy(pLocked);
+            if (protectionLongTail.TryGetValue("hidden", out var pHidden))
+                protection.Hidden = IsTruthy(pHidden);
+            // Anything else under protection.* is a raw long-tail attribute on
+            // the Protection element. CT_CellProtection only has locked/hidden
+            // today, but stay symmetric with Get's fallback if the schema grows.
+            // Walk styleProps directly to preserve original case — OOXML
+            // attributes are case-sensitive.
+            foreach (var (origKey, value) in styleProps)
+            {
+                if (!origKey.StartsWith("protection.", StringComparison.OrdinalIgnoreCase)) continue;
+                var subKey = origKey.Substring(11);
+                if (subKey.Equals("locked", StringComparison.OrdinalIgnoreCase)) continue;
+                if (subKey.Equals("hidden", StringComparison.OrdinalIgnoreCase)) continue;
+                protection.SetAttribute(new DocumentFormat.OpenXml.OpenXmlAttribute("", subKey, "", value));
+            }
             applyProtection = true;
         }
 
@@ -404,7 +473,8 @@ internal class ExcelStyleManager
             || lower == "quoteprefix"
             || lower.StartsWith("font.")
             || lower.StartsWith("alignment.")
-            || lower.StartsWith("border.");
+            || lower.StartsWith("border.")
+            || lower.StartsWith("protection.");
     }
 
     // DEFERRED(xlsx/cell-reading-order) CE10: Parse readingOrder values.
@@ -468,7 +538,42 @@ internal class ExcelStyleManager
 
     // ==================== Font ====================
 
-    private static uint GetOrCreateFont(Stylesheet stylesheet, uint baseFontId, Dictionary<string, string> fontProps)
+    // Font property keys handled by the curated builder in GetOrCreateFont
+    // (matches the FontMatches dedup keyset). Anything else falls into the
+    // long-tail bucket: raw OOXML children appended via SDK schema-aware
+    // AddChild on a force-new Font record (skips dedup since the dedup
+    // table doesn't track long-tail children).
+    private static readonly HashSet<string> CuratedFontKeys =
+        new(StringComparer.OrdinalIgnoreCase)
+    {
+        "bold", "italic", "strike", "underline",
+        "superscript", "subscript", "vertalign",
+        "size", "name", "color",
+    };
+
+    // Lowercased curated sub-key set for alignment.* dispatch — used by the
+    // case-preserving long-tail walk to skip keys already handled by the
+    // curated switch above.
+    private static readonly HashSet<string> CuratedAlignmentSubKeysLower =
+        new(StringComparer.Ordinal)
+    {
+        "horizontal", "vertical", "wraptext", "rotation", "textrotation",
+        "indent", "shrinktofit", "shrink", "readingorder",
+    };
+
+    // OOXML local-names of Font children produced by the curated GetOrCreateFont
+    // builder. baseFont long-tail preservation skips these (they'll be
+    // rebuilt from current curated values).
+    private static readonly HashSet<string> CuratedFontChildLocalNames =
+        new(StringComparer.Ordinal)
+    {
+        "b", "i", "strike", "u", "vertAlign", "sz", "color", "name",
+    };
+
+    private static uint GetOrCreateFont(Stylesheet stylesheet, uint baseFontId,
+        Dictionary<string, string> fontProps,
+        Dictionary<string, string>? longTailFontProps = null,
+        List<string>? unsupportedLongTail = null)
     {
         var fonts = stylesheet.Fonts;
         if (fonts == null)
@@ -557,13 +662,21 @@ internal class ExcelStyleManager
             colorTheme = baseFont.Color?.Theme?.Value;
         }
 
-        // Search for existing match
-        int idx = 0;
-        foreach (var f in fonts.Elements<Font>())
+        // Search for existing match (skip dedup when long-tail children are
+        // present — FontMatches only compares curated fields, so a match here
+        // would silently lose any long-tail children the caller intends to
+        // attach. Force-new in that case; dedup-table bloat is bounded by the
+        // number of distinct long-tail combinations per file.)
+        bool hasLongTail = longTailFontProps != null && longTailFontProps.Count > 0;
+        if (!hasLongTail)
         {
-            if (FontMatches(f, bold, italic, strike, underline, vertAlign, size, name, color, colorTheme))
-                return (uint)idx;
-            idx++;
+            int idx = 0;
+            foreach (var f in fonts.Elements<Font>())
+            {
+                if (FontMatches(f, bold, italic, strike, underline, vertAlign, size, name, color, colorTheme))
+                    return (uint)idx;
+                idx++;
+            }
         }
 
         // Create new font (element order: b, i, strike, u, vertAlign, sz, color, name)
@@ -593,6 +706,21 @@ internal class ExcelStyleManager
         else if (color != null)
             newFont.Append(new Color { Rgb = color });
         newFont.Append(new FontName { Val = name });
+
+        // Append long-tail children (charset, family, outline, shadow, condense,
+        // extend, scheme, ...) via SDK schema-aware AddChild — orders correctly
+        // per CT_Font even though the curated chain above used Append. Keys
+        // the SDK doesn't recognize as typed Font children flow back to the
+        // caller via unsupportedLongTail (so e.g. `font.bogus=xyz` is reported
+        // instead of silently producing a duplicate Font with no extra data).
+        if (hasLongTail)
+        {
+            foreach (var (key, value) in longTailFontProps!)
+            {
+                if (!OfficeCli.Core.GenericXmlQuery.TryCreateTypedChild(newFont, key, value))
+                    unsupportedLongTail?.Add($"font.{key}");
+            }
+        }
 
         fonts.Append(newFont);
         fonts.Count = (uint)fonts.Elements<Font>().Count();

@@ -616,7 +616,7 @@ public partial class ExcelHandler
             var workbookPart = _doc.WorkbookPart
                 ?? throw new InvalidOperationException("Workbook not found");
             var styleManager = new ExcelStyleManager(workbookPart);
-            cell.StyleIndex = styleManager.ApplyStyle(cell, styleProps);
+            cell.StyleIndex = styleManager.ApplyStyle(cell, styleProps, unsupported);
             _dirtyStylesheet = true;
 
             // R24-1: numberformat="@" → force text storage. See ExcelHandler.Add.Cells.cs

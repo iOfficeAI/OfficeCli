@@ -1258,6 +1258,11 @@ public partial class ExcelHandler
                             if (font.FontSize?.Val?.Value != null)
                                 node.Format["font.size"] = $"{font.FontSize.Val.Value:0.##}pt";
                             if (font.FontName?.Val?.Value != null) node.Format["font.name"] = font.FontName.Val.Value;
+                            // Long-tail Font children (charset, family, outline,
+                            // shadow, condense, extend, scheme, ...). Emit as
+                            // `font.<localName>` symmetric with the Set-side
+                            // GetOrCreateFont longTailFontProps path.
+                            FillUnknownDottedProps(font, node, "font.", CuratedFontChildren);
                         }
                     }
 
@@ -1367,6 +1372,20 @@ public partial class ExcelHandler
                                 _ => "context"
                             };
                         }
+                        // Long-tail Alignment attributes (justifyLastLine,
+                        // relativeIndent, ...). Symmetric with Set's default
+                        // branch in ExcelStyleManager.ApplyStyle alignment loop.
+                        FillUnknownAttrProps(alignment, node, "alignment.", CuratedAlignmentAttrs);
+                    }
+
+                    // Protection readback — both curated locked/hidden and any
+                    // long-tail Protection attribute symmetric with Set.
+                    var xfProt = xf.Protection;
+                    if (xfProt != null)
+                    {
+                        if (xfProt.Locked?.Value != null) node.Format["protection.locked"] = xfProt.Locked.Value;
+                        if (xfProt.Hidden?.Value != null) node.Format["protection.hidden"] = xfProt.Hidden.Value;
+                        FillUnknownAttrProps(xfProt, node, "protection.", CuratedProtectionAttrs);
                     }
 
                     // R29: quotePrefix readback (set by leading apostrophe text mode)
@@ -3862,5 +3881,78 @@ public partial class ExcelHandler
                 return true;
         }
         return false;
+    }
+
+    // OOXML local-names already mapped to canonical Format keys by the curated
+    // Font reader. Skip in the long-tail fallback so we don't double-emit
+    // (e.g. avoid `font.b: "1"` alongside `font.bold: true`).
+    private static readonly System.Collections.Generic.HashSet<string> CuratedFontChildren =
+        new(System.StringComparer.Ordinal)
+    {
+        "b", "i", "strike", "u", "vertAlign", "sz", "name", "color",
+    };
+
+    // CT_CellAlignment curated attribute set (handled by the alignment Get
+    // reader above). Long-tail = anything else (justifyLastLine, relativeIndent).
+    private static readonly System.Collections.Generic.HashSet<string> CuratedAlignmentAttrs =
+        new(System.StringComparer.Ordinal)
+    {
+        "horizontal", "vertical", "wrapText", "textRotation",
+        "indent", "shrinkToFit", "readingOrder",
+    };
+
+    // CT_CellProtection curated attribute set.
+    private static readonly System.Collections.Generic.HashSet<string> CuratedProtectionAttrs =
+        new(System.StringComparer.Ordinal)
+    {
+        "locked", "hidden",
+    };
+
+    // Long-tail OOXML fallback for sub-elements with rich child structure
+    // (Font: `<charset val="1"/>`, `<family val="2"/>`, ...). Mirrors Word's
+    // FillUnknownChildProps but emits keys with a dotted prefix
+    // (`font.charset`) so they slot into Excel's existing canonical scheme.
+    private static void FillUnknownDottedProps(DocumentFormat.OpenXml.OpenXmlElement? container,
+        DocumentNode node, string prefix, System.Collections.Generic.HashSet<string> curatedNames)
+    {
+        if (container == null) return;
+        foreach (var child in container.ChildElements)
+        {
+            var name = child.LocalName;
+            if (string.IsNullOrEmpty(name)) continue;
+            if (curatedNames.Contains(name)) continue;
+            var key = prefix + name;
+            if (node.Format.ContainsKey(key)) continue;
+            if (child.ChildElements.Count > 0) continue;
+
+            string? valAttr = null;
+            int attrCount = 0;
+            foreach (var a in child.GetAttributes())
+            {
+                attrCount++;
+                if (a.LocalName.Equals("val", System.StringComparison.OrdinalIgnoreCase))
+                    valAttr = a.Value;
+            }
+            if (valAttr != null) node.Format[key] = valAttr;
+            else if (attrCount == 0) node.Format[key] = true;
+        }
+    }
+
+    // Long-tail OOXML fallback for attribute-only elements (Alignment,
+    // Protection — CT_CellAlignment / CT_CellProtection). Walks attributes
+    // on the element itself, prefix-qualifying each.
+    private static void FillUnknownAttrProps(DocumentFormat.OpenXml.OpenXmlElement? element,
+        DocumentNode node, string prefix, System.Collections.Generic.HashSet<string> curatedNames)
+    {
+        if (element == null) return;
+        foreach (var attr in element.GetAttributes())
+        {
+            var name = attr.LocalName;
+            if (string.IsNullOrEmpty(name)) continue;
+            if (curatedNames.Contains(name)) continue;
+            var key = prefix + name;
+            if (node.Format.ContainsKey(key)) continue;
+            node.Format[key] = attr.Value;
+        }
     }
 }
