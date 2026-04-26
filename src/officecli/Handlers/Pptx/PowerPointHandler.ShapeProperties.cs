@@ -499,6 +499,11 @@ public partial class PowerPointHandler
                     if (!double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var opacityVal) || double.IsNaN(opacityVal) || double.IsInfinity(opacityVal))
                         throw new ArgumentException($"Invalid 'opacity' value: '{value}'. Expected a finite decimal 0.0-1.0 (e.g. 0.5 = 50% opacity).");
                     if (opacityVal > 1.0) opacityVal /= 100.0; // treat >1 as percentage (e.g. 30 → 0.30)
+                    // R10: reject out-of-range opacity instead of writing invalid OOXML
+                    // (a:alpha/@val must be in [0, 100000]). Negative input was producing
+                    // <a:alpha val="-100000"/> which corrupts the file.
+                    if (opacityVal < 0.0 || opacityVal > 1.0)
+                        throw new ArgumentException($"Invalid 'opacity' value: '{value}'. Expected 0.0-1.0 (or 0-100 as percent).");
                     var alphaPct = (int)(opacityVal * 100000); // 0.0-1.0 → 0-100000
 
                     // Apply alpha to gradient fill stops if present
