@@ -829,20 +829,31 @@ public partial class ExcelHandler
                 {
                     // Set or remove AutoFilter (like POI's XSSFSheet.setAutoFilter)
                     var existingAf = ws.GetFirstChild<AutoFilter>();
-                    if (string.IsNullOrEmpty(value) || value.Equals("none", StringComparison.OrdinalIgnoreCase)
-                        || value.Equals("false", StringComparison.OrdinalIgnoreCase))
+                    var trimmed = (value ?? "").Trim();
+                    var lower = trimmed.ToLowerInvariant();
+                    if (string.IsNullOrEmpty(trimmed) || lower is "none" or "false" or "0" or "no" or "off")
                     {
                         existingAf?.Remove();
+                    }
+                    else if (lower is "true" or "1" or "yes" or "on")
+                    {
+                        // Reject bare bool — autoFilter requires an explicit range. Otherwise
+                        // we'd write Reference="TRUE" as raw text and Get would return "TRUE",
+                        // which is invalid OOXML and confuses round-trip. Mirrors Add's
+                        // "AutoFilter requires 'range' property" rule.
+                        throw new ArgumentException(
+                            "autoFilter requires an explicit range (e.g. 'A1:F100'). " +
+                            "Use 'false'/'none' to remove an existing autoFilter.");
                     }
                     else
                     {
                         if (existingAf != null)
                         {
-                            existingAf.Reference = value.ToUpperInvariant();
+                            existingAf.Reference = trimmed.ToUpperInvariant();
                         }
                         else
                         {
-                            var af = new AutoFilter { Reference = value.ToUpperInvariant() };
+                            var af = new AutoFilter { Reference = trimmed.ToUpperInvariant() };
                             var sheetData = ws.GetFirstChild<SheetData>();
                             if (sheetData != null)
                                 sheetData.InsertAfterSelf(af);
