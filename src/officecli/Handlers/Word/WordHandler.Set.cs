@@ -430,7 +430,7 @@ public partial class WordHandler
     /// Apply a paragraph-level property. Returns true if handled, false if not recognized.
     /// Handles: style, alignment, indent, spacing, keepNext, keepLines, pageBreakBefore, widowControl, shading, pbdr.
     /// </summary>
-    private static bool ApplyParagraphLevelProperty(ParagraphProperties pProps, string key, string? value)
+    private bool ApplyParagraphLevelProperty(ParagraphProperties pProps, string key, string? value)
     {
         if (value is null) return false;
         switch (key.ToLowerInvariant())
@@ -508,6 +508,16 @@ public partial class WordHandler
                 var numIdVal = ParseHelpers.SafeParseInt(value, "numId");
                 if (numIdVal < 0)
                     throw new ArgumentException($"numId must be >= 0 (got {numIdVal}). Use numId=0 to remove numbering.");
+                if (numIdVal > 0)
+                {
+                    var numbering = _doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering;
+                    var numExists = numbering?.Elements<NumberingInstance>()
+                        .Any(n => n.NumberID?.Value == numIdVal) ?? false;
+                    if (!numExists)
+                        throw new ArgumentException(
+                            $"numId={numIdVal} not found in /numbering. " +
+                            "Create the num first (add /numbering --type num), or use numId=0 to remove numbering.");
+                }
                 numPr.NumberingId = new NumberingId { Val = numIdVal };
                 return true;
             case "numLevel" or "numlevel" or "ilvl":

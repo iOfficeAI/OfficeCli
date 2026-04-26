@@ -58,6 +58,19 @@ public partial class WordHandler
             var numIdVal = ParseHelpers.SafeParseInt(numId, "numid");
             if (numIdVal < 0)
                 throw new ArgumentException($"numId must be >= 0 (got {numIdVal}).");
+            // numId=0 is OOXML's way of saying "remove numbering" (no-list sentinel).
+            // Positive numIds must reference an existing <w:num> to avoid silent dangling
+            // references — Word renders such paragraphs without any list marker.
+            if (numIdVal > 0)
+            {
+                var numbering = _doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering;
+                var numExists = numbering?.Elements<NumberingInstance>()
+                    .Any(n => n.NumberID?.Value == numIdVal) ?? false;
+                if (!numExists)
+                    throw new ArgumentException(
+                        $"numId={numIdVal} not found in /numbering. " +
+                        "Create the num first (add /numbering --type num), or use numId=0 to remove numbering.");
+            }
             var numPr = pProps.NumberingProperties ?? (pProps.NumberingProperties = new NumberingProperties());
             numPr.NumberingId = new NumberingId { Val = numIdVal };
         }
