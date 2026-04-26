@@ -97,6 +97,19 @@ public partial class ExcelHandler
             if (cfTypeLower is "dateoccurring" or "timeperiod") return Add(parentPath, "dateoccurring", position, properties);
             if (cfTypeLower is "belowaverage" or "containsblanks" or "notcontainsblanks" or "containserrors" or "notcontainserrors" or "contains" or "notcontains" or "beginswith" or "endswith")
                 return Add(parentPath, "cfextended", position, properties);
+            // R10: Reject unknown CF types instead of silently falling through to
+            // dataBar. The `cf` alias (AddCf) already throws on unknowns; mirror
+            // the behavior here so both `--type cf` and `--type conditionalformatting`
+            // share the same allowlist (CONSISTENCY(cf-type-allowlist)). `databar`
+            // is the documented default for this alias, so allow it explicitly.
+            if (cfTypeLower is not "databar")
+            {
+                throw new ArgumentException(
+                    $"Unknown CF type '{cfTypeProp}'. Valid: databar, iconset, colorscale, formula, cellIs, "
+                    + "top10, topPercent, bottom, bottomPercent, aboveAverage, belowAverage, "
+                    + "uniqueValues, duplicateValues, containsText, notContains, beginsWith, endsWith, "
+                    + "containsBlanks, notContainsBlanks, containsErrors, notContainsErrors, dateOccurring.");
+            }
         }
         var cfSegments = parentPath.TrimStart('/').Split('/', 2);
         var cfSheetName = cfSegments[0];
