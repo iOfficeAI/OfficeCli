@@ -445,6 +445,58 @@ public partial class WordHandler
         }
         if (hasRPr) newStyle.AppendChild(styleRPr);
 
+        // CONSISTENCY(add-set-symmetry): mirror SetStylePath's ApplyRunFormatting
+        // + generic OOXML fallback so `add` accepts the same prop surface as
+        // `set` for any single-Val style property. Without this sweep, props
+        // like underline/strike/highlight/contextualSpacing/kinsoku/snapToGrid
+        // would be silently dropped on add (schema preflight lets them
+        // through; AddStyle's TryGetValue list only covers ~13 keys).
+        var addStyleConsumed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "id", "name", "type", "basedon", "basedOn", "next",
+            "alignment", "align", "spacebefore", "spaceBefore",
+            "spaceafter", "spaceAfter", "font", "size", "bold", "italic", "color",
+        };
+        foreach (var (key, value) in properties)
+        {
+            if (addStyleConsumed.Contains(key)) continue;
+
+            // 1) Run-formatting helper (covers underline/strike/highlight/caps/
+            //    smallCaps/dstrike/vanish/shadow/emboss/imprint/noProof/rtl/
+            //    superscript/subscript/charSpacing/shading/...).
+            var rPrProbeAdd = new StyleRunProperties();
+            if (ApplyRunFormatting(rPrProbeAdd, key, value))
+            {
+                ApplyRunFormatting(
+                    newStyle.StyleRunProperties ?? newStyle.AppendChild(new StyleRunProperties()),
+                    key, value);
+                continue;
+            }
+
+            // 2) Generic OOXML single-Val fallback — pPr first, rPr second,
+            //    matching SetStylePath's default branch. Detached probes
+            //    avoid leaking empty containers on misses.
+            var pPrProbeAdd = new StyleParagraphProperties();
+            if (Core.GenericXmlQuery.TryCreateTypedChild(pPrProbeAdd, key, value))
+            {
+                Core.GenericXmlQuery.TryCreateTypedChild(
+                    newStyle.StyleParagraphProperties ?? EnsureStyleParagraphProperties(newStyle),
+                    key, value);
+                continue;
+            }
+            var rPrProbeAdd2 = new StyleRunProperties();
+            if (Core.GenericXmlQuery.TryCreateTypedChild(rPrProbeAdd2, key, value))
+            {
+                Core.GenericXmlQuery.TryCreateTypedChild(
+                    newStyle.StyleRunProperties ?? newStyle.AppendChild(new StyleRunProperties()),
+                    key, value);
+                continue;
+            }
+            // Anything still unconsumed is a genuine silent drop — composites
+            // (font.eastAsia, ind.firstLine, tabs, numId, ...) handled by
+            // the curated additions in the follow-up commit.
+        }
+
         stylesPart.Styles.AppendChild(newStyle);
         stylesPart.Styles.Save();
 
