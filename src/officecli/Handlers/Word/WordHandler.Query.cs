@@ -263,8 +263,13 @@ public partial class WordHandler
             return nNode;
         }
 
+        // Accept three child-path forms for a level:
+        //   /level[L]            (positional 1-based, legacy)
+        //   /lvl[@ilvl=L]        (canonical OOXML attribute)
+        //   /lvl[L]              (positional 1-based on the lvl alias)
+        // All translate to the same lvl element (matched by LevelIndex.Value).
         var absMatch = System.Text.RegularExpressions.Regex.Match(
-            path, @"^/numbering/abstractNum\[@id=(\d+)\](?:/level\[(\d+)\])?$");
+            path, @"^/numbering/abstractNum\[@id=(\d+)\](?:/(?:level|lvl)\[(?:@ilvl=)?(\d+)\])?$");
         if (absMatch.Success)
         {
             var aid = int.Parse(absMatch.Groups[1].Value);
@@ -279,9 +284,14 @@ public partial class WordHandler
                 if (lvl == null)
                     return new DocumentNode { Path = path, Type = "error", Text = $"level[{lvlIdx}] not found in abstractNum {aid}" };
                 var lNode = new DocumentNode { Path = path, Type = "level" };
+                lNode.Format["ilvl"] = lvlIdx.ToString();
                 if (lvl.StartNumberingValue?.Val?.Value != null) lNode.Format["start"] = lvl.StartNumberingValue.Val.Value.ToString()!;
                 if (lvl.NumberingFormat?.Val?.HasValue == true) lNode.Format["format"] = lvl.NumberingFormat.Val.InnerText;
-                if (lvl.LevelText?.Val?.Value != null) lNode.Format["text"] = lvl.LevelText.Val.Value;
+                if (lvl.LevelText?.Val?.Value != null)
+                {
+                    lNode.Format["text"] = lvl.LevelText.Val.Value;
+                    lNode.Format["lvlText"] = lvl.LevelText.Val.Value;
+                }
                 if (lvl.LevelJustification?.Val?.HasValue == true) lNode.Format["justification"] = lvl.LevelJustification.Val.InnerText;
                 if (lvl.LevelSuffix?.Val?.HasValue == true) lNode.Format["suff"] = lvl.LevelSuffix.Val.InnerText;
                 var ind = lvl.PreviousParagraphProperties?.Indentation;

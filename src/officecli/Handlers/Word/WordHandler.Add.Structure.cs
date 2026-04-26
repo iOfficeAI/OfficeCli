@@ -926,6 +926,143 @@ public partial class WordHandler
             numbering.AppendChild(abstractNum);
     }
 
+    /// <summary>
+    /// Add a single &lt;w:lvl&gt; under an existing &lt;w:abstractNum&gt;. Distinct from
+    /// AddDefault → TryCreateTypedElement, which uses schema-aware AddChild and
+    /// silently REPLACES any existing lvl in the same parent (data loss when a
+    /// caller adds ilvl=0 then ilvl=1 — only ilvl=1 survives). This helper uses
+    /// AppendChild so multiple levels coexist, validates ilvl ∈ 0..8 and
+    /// start as Int32, and accepts the same per-lvl props (lvlText/format/start/
+    /// indent/...) the abstractNum builder accepts via levelN.* prefix.
+    /// </summary>
+    private string AddLvl(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)
+    {
+        if (parent is not AbstractNum abstractNum)
+            throw new ArgumentException(
+                $"--type lvl requires parent /numbering/abstractNum[@id=N], got {parentPath}.");
+
+        if (!properties.TryGetValue("ilvl", out var ilvlRaw) || string.IsNullOrEmpty(ilvlRaw))
+            throw new ArgumentException("--type lvl requires --prop ilvl=N (0..8).");
+
+        // ilvl: must be integer in 0..8 (OOXML ST_DecimalNumber for lvl is 0..8).
+        if (!int.TryParse(ilvlRaw, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var ilvl))
+            throw new ArgumentException($"ilvl must be an integer 0..8 (got '{ilvlRaw}').");
+        if (ilvl < 0 || ilvl > 8)
+            throw new ArgumentException($"ilvl must be in range 0..8 (got {ilvl}).");
+
+        // If a lvl with this ilvl already exists (typically from
+        // AddAbstractNum's default lvl[0..8] pre-population), replace it in
+        // place. New ilvl values are appended. The schema-aware AddChild path
+        // in AddDefault collapsed every lvl onto a single slot; this dedicated
+        // helper keeps siblings distinct and only swaps when ilvl matches.
+        var existing = abstractNum.Elements<Level>().FirstOrDefault(l => l.LevelIndex?.Value == ilvl);
+
+        // start: integer (no float, no overflow). Default 1.
+        int start = 1;
+        if (properties.TryGetValue("start", out var startRaw) && !string.IsNullOrEmpty(startRaw))
+        {
+            if (!int.TryParse(startRaw, System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out start))
+                throw new ArgumentException(
+                    $"start must be a 32-bit integer (got '{startRaw}'). Floats and values outside Int32 range are not accepted.");
+        }
+
+        var level = new Level { LevelIndex = ilvl };
+
+        // numFmt: default decimal. Also accept 'numFmt' alias.
+        var fmtRaw = properties.GetValueOrDefault("format",
+            properties.GetValueOrDefault("numFmt", "decimal"));
+        var numFmt = ParseNumberingFormat(fmtRaw);
+
+        level.AppendChild(new StartNumberingValue { Val = start });
+        level.AppendChild(new NumberingFormat { Val = numFmt });
+
+        // suff (optional)
+        if (properties.TryGetValue("suff", out var suffRaw) && !string.IsNullOrEmpty(suffRaw))
+        {
+            var suffVal = suffRaw.ToLowerInvariant() switch
+            {
+                "tab" => LevelSuffixValues.Tab,
+                "space" => LevelSuffixValues.Space,
+                "nothing" or "none" => LevelSuffixValues.Nothing,
+                _ => throw new ArgumentException($"Invalid suff '{suffRaw}'. Valid: tab, space, nothing.")
+            };
+            level.AppendChild(new LevelSuffix { Val = suffVal });
+        }
+
+        // lvlText: accept both 'text' and 'lvlText' aliases. Default: %{ilvl+1}. for
+        // ordered, • for bullet.
+        string lvlText;
+        if (properties.TryGetValue("lvlText", out var ltRaw) && !string.IsNullOrEmpty(ltRaw))
+            lvlText = ltRaw;
+        else if (properties.TryGetValue("text", out var tRaw) && !string.IsNullOrEmpty(tRaw))
+            lvlText = tRaw;
+        else
+            lvlText = numFmt.Equals(NumberFormatValues.Bullet) ? "•" : $"%{ilvl + 1}.";
+        level.AppendChild(new LevelText { Val = lvlText });
+
+        // jc (optional)
+        if (properties.TryGetValue("justification", out var jcRaw) ||
+            properties.TryGetValue("jc", out jcRaw))
+        {
+            var jcVal = jcRaw.ToLowerInvariant() switch
+            {
+                "left" or "start" => LevelJustificationValues.Left,
+                "center" => LevelJustificationValues.Center,
+                "right" or "end" => LevelJustificationValues.Right,
+                _ => throw new ArgumentException($"Invalid justification '{jcRaw}'. Valid: left, center, right.")
+            };
+            level.AppendChild(new LevelJustification { Val = jcVal });
+        }
+
+        // pPr/ind (optional)
+        int? leftIndent = null;
+        if (properties.TryGetValue("indent", out var indRaw))
+        {
+            if (!int.TryParse(indRaw, System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out var lv))
+                throw new ArgumentException($"indent must be an integer in twips (got '{indRaw}').");
+            leftIndent = lv;
+        }
+        int? hanging = null;
+        if (properties.TryGetValue("hanging", out var hangRaw))
+        {
+            if (!int.TryParse(hangRaw, System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out var hv))
+                throw new ArgumentException($"hanging must be an integer in twips (got '{hangRaw}').");
+            hanging = hv;
+        }
+        if (leftIndent.HasValue || hanging.HasValue)
+        {
+            var ind = new Indentation();
+            if (leftIndent.HasValue) ind.Left = leftIndent.Value.ToString();
+            if (hanging.HasValue) ind.Hanging = hanging.Value.ToString();
+            level.AppendChild(new PreviousParagraphProperties(ind));
+        }
+
+        // CRITICAL: AppendChild — NOT AddChild. Schema-aware AddChild treats
+        // <w:lvl> as a single-instance child slot (the SDK's metadata says
+        // "lvl[0..8]" but its schema model still flags them all as the same
+        // child kind), so it would silently replace whatever lvl already
+        // exists. AppendChild keeps every level distinct.
+        if (existing != null)
+        {
+            existing.InsertBeforeSelf(level);
+            existing.Remove();
+        }
+        else
+        {
+            abstractNum.AppendChild(level);
+        }
+
+        var numberingPart = _doc.MainDocumentPart?.NumberingDefinitionsPart;
+        numberingPart?.Numbering?.Save();
+
+        var absId = abstractNum.AbstractNumberId?.Value ?? 0;
+        return $"/numbering/abstractNum[@id={absId}]/lvl[@ilvl={ilvl}]";
+    }
+
     private static NumberFormatValues ParseNumberingFormat(string raw)
     {
         return raw.ToLowerInvariant() switch

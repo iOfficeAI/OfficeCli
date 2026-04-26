@@ -142,6 +142,7 @@ public partial class WordHandler
             "style" => AddStyle(parent, parentPath, index, properties),
             "num" => AddNum(parent, parentPath, index, properties),
             "abstractnum" => AddAbstractNum(parent, parentPath, index, properties),
+            "lvl" or "level" => AddLvl(parent, parentPath, index, properties),
             "header" => AddHeader(parent, parentPath, index, properties),
             "footer" => AddFooter(parent, parentPath, index, properties),
             "field" or "pagenum" or "pagenumber" or "page" or "numpages" or "sectionpages" or "section"
