@@ -2197,16 +2197,17 @@ public partial class ExcelHandler
             case "x":
                 if (anchor.FromMarker != null)
                 {
-                    var xVal = ParseHelpers.SafeParseInt(value, "x");
-                    if (xVal < 0) throw new ArgumentException($"Invalid 'x' value: '{value}'. Column index must be >= 0.");
+                    // CONSISTENCY(ole-width-units): mirror Add — accept bare
+                    // cell index OR unit-qualified offset ("2cm", "1in", "72pt").
+                    var xVal = ParseAnchorOrigin(value, "x");
                     anchor.FromMarker.ColumnId!.Text = xVal.ToString();
                 }
                 return true;
             case "y":
                 if (anchor.FromMarker != null)
                 {
-                    var yVal = ParseHelpers.SafeParseInt(value, "y");
-                    if (yVal < 0) throw new ArgumentException($"Invalid 'y' value: '{value}'. Row index must be >= 0.");
+                    // CONSISTENCY(ole-width-units): see x case above.
+                    var yVal = ParseAnchorOrigin(value, "y");
                     anchor.FromMarker.RowId!.Text = yVal.ToString();
                 }
                 return true;
@@ -2570,11 +2571,46 @@ public partial class ExcelHandler
             ?? properties.GetValueOrDefault("h")
             ?? defH;
         return (
-            ParseHelpers.SafeParseInt(properties.GetValueOrDefault("x", defX) ?? defX, "x"),
-            ParseHelpers.SafeParseInt(properties.GetValueOrDefault("y", defY) ?? defY, "y"),
+            ParseAnchorOrigin(properties.GetValueOrDefault("x", defX) ?? defX, "x"),
+            ParseAnchorOrigin(properties.GetValueOrDefault("y", defY) ?? defY, "y"),
             ParseAnchorDimension(widthRaw, "width"),
             ParseAnchorDimension(heightRaw, "height")
         );
+    }
+
+    /// <summary>
+    /// Parse an anchor origin value (x/y) that is either a plain non-negative
+    /// integer cell index ("0", "5") or a unit-qualified offset ("2cm", "1in",
+    /// "72pt"). Unit-qualified values are converted to a cell index using the
+    /// same approximate EMU/column and EMU/row factors as ParseAnchorDimension.
+    /// CONSISTENCY(ole-width-units): symmetric with width/height units.
+    /// </summary>
+    private static int ParseAnchorOrigin(string value, string name)
+    {
+        if (int.TryParse(value, out var plainInt))
+        {
+            if (plainInt < 0)
+                throw new ArgumentException($"Picture/shape {name} must be non-negative (got '{value}').");
+            return plainInt;
+        }
+
+        long emu;
+        try
+        {
+            emu = OfficeCli.Core.EmuConverter.ParseEmu(value);
+        }
+        catch
+        {
+            throw new ArgumentException($"Expected a non-negative cell index or a unit-qualified offset (e.g. '2cm', '1in') for {name}, got '{value}'.");
+        }
+        if (emu < 0)
+            throw new ArgumentException($"Picture/shape {name} must be non-negative (got '{value}').");
+
+        const long emuPerColApprox = 609600;
+        const long emuPerRowApprox = 190500;
+        if (name == "y")
+            return (int)(emu / emuPerRowApprox);
+        return (int)(emu / emuPerColApprox);
     }
 
     /// <summary>
