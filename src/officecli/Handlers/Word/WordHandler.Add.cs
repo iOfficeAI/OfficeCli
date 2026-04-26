@@ -141,6 +141,7 @@ public partial class WordHandler
             "toc" or "tableofcontents" => AddToc(parent, parentPath, index, properties),
             "style" => AddStyle(parent, parentPath, index, properties),
             "num" => AddNum(parent, parentPath, index, properties),
+            "abstractnum" => AddAbstractNum(parent, parentPath, index, properties),
             "header" => AddHeader(parent, parentPath, index, properties),
             "footer" => AddFooter(parent, parentPath, index, properties),
             "field" or "pagenum" or "pagenumber" or "page" or "numpages" or "sectionpages" or "section"
@@ -356,11 +357,13 @@ public partial class WordHandler
                 $"Cannot add 'style' under {parentPath}: styles belong under /styles.");
         }
 
-        // Global: 'num' belongs only under /numbering. Mirrors the 'style'/'styles' pairing.
-        if (t == "num" && parent is not Numbering)
+        // Global: 'num' / 'abstractNum' belong only under /numbering. Mirrors
+        // the 'style'/'styles' pairing — definition parts have a single allowed
+        // parent path so users don't have to guess where they go.
+        if ((t == "num" || t == "abstractnum") && parent is not Numbering)
         {
             throw new ArgumentException(
-                $"Cannot add 'num' under {parentPath}: numbering instances belong under /numbering.");
+                $"Cannot add '{type}' under {parentPath}: numbering definitions belong under /numbering.");
         }
 
         // /numbering only accepts numbering definitions (num, abstractNum). Reject everything else

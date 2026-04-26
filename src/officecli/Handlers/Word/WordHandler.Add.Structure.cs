@@ -646,7 +646,9 @@ public partial class WordHandler
         }
         else
         {
-            abstractNumId = CreateAbstractNumFromProps(numbering, properties);
+            abstractNumId = numbering.Elements<AbstractNum>()
+                .Select(a => a.AbstractNumberId?.Value ?? 0).DefaultIfEmpty(-1).Max() + 1;
+            BuildAbstractNumElement(numbering, abstractNumId, properties);
         }
 
         // numId assignment: explicit collides → throw; otherwise max+1.
@@ -704,20 +706,205 @@ public partial class WordHandler
     }
 
     /// <summary>
-    /// Mode A helper: build an AbstractNum element from --prop format/text/indent/type
-    /// inputs and append it to the Numbering element in correct schema order
-    /// (AbstractNum before NumberingInstance). Returns the assigned abstractNumId.
+    /// Add an AbstractNum (numbering template) under /numbering. This is the
+    /// definition layer — what a list "looks like": 9 levels with their
+    /// own format, marker text, indent, start, justification, marker font, etc.
     ///
-    /// Level 0 uses the caller's format/text/indent. Levels 1..8 are auto-filled
-    /// with sensible cycling defaults (bullet glyph cycle for bullet format,
-    /// decimal/lowerLetter/lowerRoman cycle otherwise) — same convention as
-    /// the high-level liststyle path in WordHandler.StyleList.cs.
+    /// Per-level customization via dotted keys: --prop level0.format=decimal
+    /// --prop level0.text=%1. --prop level0.indent=720 ... up through level8.
+    /// Bare keys (format/text/indent/start) are aliases for level0.* for
+    /// backward compatibility with --type num mode A.
+    ///
+    /// Levels not explicitly set fall back to a sensible cycle: bullet glyphs
+    /// (•/◦/▪) for bullet types, decimal/lowerLetter/lowerRoman cycle for ordered.
     /// </summary>
-    private static int CreateAbstractNumFromProps(Numbering numbering, Dictionary<string, string> properties)
+    private string AddAbstractNum(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)
     {
-        var formatRaw = properties.GetValueOrDefault("format", "decimal").ToLowerInvariant();
-        var isBullet = formatRaw is "bullet" or "unordered" or "ul";
-        var lvl0Format = formatRaw switch
+        var mainPart = _doc.MainDocumentPart!;
+        var numberingPart = mainPart.NumberingDefinitionsPart
+            ?? mainPart.AddNewPart<NumberingDefinitionsPart>();
+        numberingPart.Numbering ??= new Numbering();
+        var numbering = numberingPart.Numbering;
+
+        int abstractNumId;
+        if (properties.ContainsKey("id"))
+        {
+            abstractNumId = ParseHelpers.SafeParseInt(properties["id"], "id");
+            if (abstractNumId < 0)
+                throw new ArgumentException($"abstractNumId must be >= 0 (got {abstractNumId}).");
+            if (numbering.Elements<AbstractNum>().Any(a => a.AbstractNumberId?.Value == abstractNumId))
+                throw new ArgumentException(
+                    $"abstractNumId {abstractNumId} already exists. Pick a unique --prop id, or omit --prop id for auto-assignment.");
+        }
+        else
+        {
+            abstractNumId = numbering.Elements<AbstractNum>()
+                .Select(a => a.AbstractNumberId?.Value ?? 0).DefaultIfEmpty(-1).Max() + 1;
+        }
+
+        BuildAbstractNumElement(numbering, abstractNumId, properties);
+        numbering.Save();
+        return $"/numbering/abstractNum[@id={abstractNumId}]";
+    }
+
+    /// <summary>
+    /// Build a fully-populated AbstractNum and insert it into Numbering in
+    /// schema-correct order. Used by both the dedicated AddAbstractNum and
+    /// AddNum mode A (auto-create template). Returns nothing — caller already
+    /// chose abstractNumId and just needs the side effect.
+    /// </summary>
+    private static void BuildAbstractNumElement(Numbering numbering, int abstractNumId, Dictionary<string, string> properties)
+    {
+        var abstractNum = new AbstractNum { AbstractNumberId = abstractNumId };
+
+        // Schema order inside abstractNum:
+        // nsid → multiLevelType → tmpl → name → styleLink → numStyleLink → lvl[0..8]
+        var multiLevelType = properties.GetValueOrDefault("type", "hybridMultilevel").ToLowerInvariant() switch
+        {
+            "hybridmultilevel" or "hybrid" => MultiLevelValues.HybridMultilevel,
+            "multilevel" or "multi" => MultiLevelValues.Multilevel,
+            "singlelevel" or "single" => MultiLevelValues.SingleLevel,
+            _ => throw new ArgumentException($"Unknown multiLevelType '{properties["type"]}'. Valid: hybridMultilevel, multilevel, singleLevel.")
+        };
+        abstractNum.AppendChild(new MultiLevelType { Val = multiLevelType });
+
+        if (properties.TryGetValue("name", out var anName) && !string.IsNullOrEmpty(anName))
+            abstractNum.AppendChild(new AbstractNumDefinitionName { Val = anName });
+        if (properties.TryGetValue("styleLink", out var anSL) && !string.IsNullOrEmpty(anSL))
+            abstractNum.AppendChild(new StyleLink { Val = anSL });
+        if (properties.TryGetValue("numStyleLink", out var anNSL) && !string.IsNullOrEmpty(anNSL))
+            abstractNum.AppendChild(new NumberingStyleLink { Val = anNSL });
+
+        // Top-level format determines level fallback cycle. Bare keys map to level0
+        // (backward compat: format=bullet, text=•, indent=720, start=N).
+        var topFormatRaw = properties.GetValueOrDefault("format", "decimal").ToLowerInvariant();
+        var topIsBullet = topFormatRaw is "bullet" or "unordered" or "ul";
+        var bulletChars = new[] { "•", "◦", "▪" };
+
+        for (int lvl = 0; lvl < 9; lvl++)
+        {
+            var level = new Level { LevelIndex = lvl };
+            var prefix = $"level{lvl}.";
+
+            // Per-level format with fallback cycle
+            string levelFormatRaw;
+            if (lvl == 0 && properties.TryGetValue("format", out var bareFmt))
+                levelFormatRaw = bareFmt;
+            else if (properties.TryGetValue(prefix + "format", out var perLvlFmt))
+                levelFormatRaw = perLvlFmt;
+            else if (topIsBullet)
+                levelFormatRaw = "bullet";
+            else
+                levelFormatRaw = (lvl % 3) switch { 0 => "decimal", 1 => "lowerLetter", _ => "lowerRoman" };
+            var numFmt = ParseNumberingFormat(levelFormatRaw);
+            var isBulletAtThisLvl = numFmt.Equals(NumberFormatValues.Bullet);
+
+            // start (default 1)
+            int start = 1;
+            if (lvl == 0 && properties.TryGetValue("start", out var bareStart))
+                start = ParseHelpers.SafeParseInt(bareStart, "start");
+            else if (properties.TryGetValue(prefix + "start", out var perLvlStart))
+                start = ParseHelpers.SafeParseInt(perLvlStart, prefix + "start");
+            level.AppendChild(new StartNumberingValue { Val = start });
+            level.AppendChild(new NumberingFormat { Val = numFmt });
+
+            // suff (tab|space|nothing) — default tab in OOXML, omit unless overridden
+            if (properties.TryGetValue(prefix + "suff", out var suffRaw) && !string.IsNullOrEmpty(suffRaw))
+            {
+                var suffVal = suffRaw.ToLowerInvariant() switch
+                {
+                    "tab" => LevelSuffixValues.Tab,
+                    "space" => LevelSuffixValues.Space,
+                    "nothing" or "none" => LevelSuffixValues.Nothing,
+                    _ => throw new ArgumentException($"Invalid {prefix}suff '{suffRaw}'. Valid: tab, space, nothing.")
+                };
+                level.AppendChild(new LevelSuffix { Val = suffVal });
+            }
+
+            // lvlText
+            string lvlText;
+            if (lvl == 0 && properties.TryGetValue("text", out var bareText))
+                lvlText = bareText;
+            else if (properties.TryGetValue(prefix + "text", out var perLvlText))
+                lvlText = perLvlText;
+            else if (isBulletAtThisLvl)
+                lvlText = bulletChars[lvl % bulletChars.Length];
+            else
+                lvlText = $"%{lvl + 1}.";
+            level.AppendChild(new LevelText { Val = lvlText });
+
+            // lvlJc (justification): left|center|right (default left)
+            var jcRaw = properties.GetValueOrDefault(prefix + "justification",
+                properties.GetValueOrDefault(prefix + "jc", "left")).ToLowerInvariant();
+            var jcVal = jcRaw switch
+            {
+                "left" or "start" => LevelJustificationValues.Left,
+                "center" => LevelJustificationValues.Center,
+                "right" or "end" => LevelJustificationValues.Right,
+                _ => throw new ArgumentException($"Invalid {prefix}justification '{jcRaw}'. Valid: left, center, right.")
+            };
+            level.AppendChild(new LevelJustification { Val = jcVal });
+
+            // pPr/ind (indent + hanging)
+            int leftIndent;
+            if (lvl == 0 && properties.TryGetValue("indent", out var bareIndent))
+                leftIndent = ParseHelpers.SafeParseInt(bareIndent, "indent");
+            else if (properties.TryGetValue(prefix + "indent", out var perLvlIndent))
+                leftIndent = ParseHelpers.SafeParseInt(perLvlIndent, prefix + "indent");
+            else
+                leftIndent = (lvl + 1) * 720;
+            int hanging = properties.TryGetValue(prefix + "hanging", out var hangingRaw)
+                ? ParseHelpers.SafeParseInt(hangingRaw, prefix + "hanging")
+                : 360;
+            level.AppendChild(new PreviousParagraphProperties(
+                new Indentation { Left = leftIndent.ToString(), Hanging = hanging.ToString() }
+            ));
+
+            // rPr — marker font/size/color/bold/italic. Only emit when caller
+            // supplied at least one rPr-relevant prop, otherwise let Word use
+            // defaults (don't write a stray empty <w:rPr/>).
+            bool hasRpr = properties.ContainsKey(prefix + "font")
+                       || properties.ContainsKey(prefix + "size")
+                       || properties.ContainsKey(prefix + "color")
+                       || properties.ContainsKey(prefix + "bold")
+                       || properties.ContainsKey(prefix + "italic");
+            if (hasRpr)
+            {
+                var nspr = new NumberingSymbolRunProperties();
+                if (properties.TryGetValue(prefix + "font", out var fontRaw) && !string.IsNullOrEmpty(fontRaw))
+                {
+                    nspr.AppendChild(new RunFonts { Ascii = fontRaw, HighAnsi = fontRaw, EastAsia = fontRaw });
+                }
+                if (properties.TryGetValue(prefix + "size", out var sizeRaw) && !string.IsNullOrEmpty(sizeRaw))
+                {
+                    var halfPt = (int)Math.Round(ParseFontSize(sizeRaw) * 2, MidpointRounding.AwayFromZero);
+                    nspr.AppendChild(new FontSize { Val = halfPt.ToString() });
+                }
+                if (properties.TryGetValue(prefix + "color", out var colorRaw) && !string.IsNullOrEmpty(colorRaw))
+                {
+                    nspr.AppendChild(new Color { Val = SanitizeHex(colorRaw) });
+                }
+                if (properties.TryGetValue(prefix + "bold", out var boldRaw) && IsTruthy(boldRaw))
+                    nspr.AppendChild(new Bold());
+                if (properties.TryGetValue(prefix + "italic", out var italRaw) && IsTruthy(italRaw))
+                    nspr.AppendChild(new Italic());
+                level.AppendChild(nspr);
+            }
+
+            abstractNum.AppendChild(level);
+        }
+
+        // Schema requires AbstractNum before NumberingInstance.
+        var firstNumInstance = numbering.GetFirstChild<NumberingInstance>();
+        if (firstNumInstance != null)
+            numbering.InsertBefore(abstractNum, firstNumInstance);
+        else
+            numbering.AppendChild(abstractNum);
+    }
+
+    private static NumberFormatValues ParseNumberingFormat(string raw)
+    {
+        return raw.ToLowerInvariant() switch
         {
             "decimal" => NumberFormatValues.Decimal,
             "bullet" or "unordered" or "ul" => NumberFormatValues.Bullet,
@@ -733,68 +920,12 @@ public partial class WordHandler
             "chinesecountingthousand" => NumberFormatValues.ChineseCountingThousand,
             "ideographdigital" => NumberFormatValues.IdeographDigital,
             "japanesecounting" => NumberFormatValues.JapaneseCounting,
+            "decimalzero" => NumberFormatValues.DecimalZero,
+            "decimalenclosedcircle" => NumberFormatValues.DecimalEnclosedCircle,
+            "decimalfullwidth" => NumberFormatValues.DecimalFullWidth,
             "none" => NumberFormatValues.None,
-            _ => throw new ArgumentException($"Unknown numbering format '{formatRaw}'. Common values: decimal, bullet, lowerLetter, upperLetter, lowerRoman, upperRoman, chineseCounting.")
+            _ => throw new ArgumentException($"Unknown numbering format '{raw}'. Common values: decimal, bullet, lowerLetter, upperLetter, lowerRoman, upperRoman, chineseCounting.")
         };
-        var lvl0Text = properties.GetValueOrDefault("text", isBullet ? "•" : "%1.");
-        var lvl0Indent = properties.TryGetValue("indent", out var indStr)
-            ? ParseHelpers.SafeParseInt(indStr, "indent")
-            : 720;
-        var multiLevelType = properties.GetValueOrDefault("type", "hybridMultilevel").ToLowerInvariant() switch
-        {
-            "hybridmultilevel" or "hybrid" => MultiLevelValues.HybridMultilevel,
-            "multilevel" or "multi" => MultiLevelValues.Multilevel,
-            "singlelevel" or "single" => MultiLevelValues.SingleLevel,
-            _ => throw new ArgumentException($"Unknown multiLevelType '{properties["type"]}'. Valid: hybridMultilevel, multilevel, singleLevel.")
-        };
-
-        var nextAbstractId = numbering.Elements<AbstractNum>()
-            .Select(a => a.AbstractNumberId?.Value ?? 0).DefaultIfEmpty(-1).Max() + 1;
-
-        var abstractNum = new AbstractNum { AbstractNumberId = nextAbstractId };
-        abstractNum.AppendChild(new MultiLevelType { Val = multiLevelType });
-
-        var bulletChars = new[] { "•", "◦", "▪" };
-        for (int lvl = 0; lvl < 9; lvl++)
-        {
-            var level = new Level { LevelIndex = lvl };
-            level.AppendChild(new StartNumberingValue { Val = 1 });
-            if (lvl == 0)
-            {
-                level.AppendChild(new NumberingFormat { Val = lvl0Format });
-                level.AppendChild(new LevelText { Val = lvl0Text });
-            }
-            else if (isBullet)
-            {
-                level.AppendChild(new NumberingFormat { Val = NumberFormatValues.Bullet });
-                level.AppendChild(new LevelText { Val = bulletChars[lvl % bulletChars.Length] });
-            }
-            else
-            {
-                var fmt = (lvl % 3) switch
-                {
-                    0 => NumberFormatValues.Decimal,
-                    1 => NumberFormatValues.LowerLetter,
-                    _ => NumberFormatValues.LowerRoman,
-                };
-                level.AppendChild(new NumberingFormat { Val = fmt });
-                level.AppendChild(new LevelText { Val = $"%{lvl + 1}." });
-            }
-            level.AppendChild(new LevelJustification { Val = LevelJustificationValues.Left });
-            level.AppendChild(new PreviousParagraphProperties(
-                new Indentation { Left = ((lvl == 0 ? lvl0Indent : (lvl + 1) * 720)).ToString(), Hanging = "360" }
-            ));
-            abstractNum.AppendChild(level);
-        }
-
-        // Schema requires AbstractNum before NumberingInstance.
-        var firstNumInstance = numbering.GetFirstChild<NumberingInstance>();
-        if (firstNumInstance != null)
-            numbering.InsertBefore(abstractNum, firstNumInstance);
-        else
-            numbering.AppendChild(abstractNum);
-
-        return nextAbstractId;
     }
 
     private string AddHeader(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)

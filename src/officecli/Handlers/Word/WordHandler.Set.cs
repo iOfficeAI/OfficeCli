@@ -131,6 +131,14 @@ public partial class WordHandler
             return SetFormField(target, properties);
         }
 
+        // Numbering paths: /numbering/abstractNum[@id=N] and
+        // /numbering/abstractNum[@id=N]/level[L]. Intercept BEFORE the generic
+        // ParsePath call below — those paths use [@id=...] / [N starting at 0]
+        // predicates that ParsePath's 1-based positional rule rejects.
+        var absNumSetMatchEarly = System.Text.RegularExpressions.Regex.Match(
+            path, @"^/numbering/abstractNum\[@id=(\d+)\](?:/level\[(\d+)\])?$");
+        if (absNumSetMatchEarly.Success) return SetAbstractNumPath(absNumSetMatchEarly, properties);
+
         // Handle header/footer paths
         var hfParts = ParsePath(path);
         if (hfParts.Count >= 1)

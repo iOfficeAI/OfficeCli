@@ -204,6 +204,91 @@ public partial class WordHandler
             }
         }
 
+        // Numbering paths: /numbering/num[@id=N], /numbering/abstractNum[@id=N],
+        // /numbering/abstractNum[@id=N]/level[L]. Routed BEFORE ParsePath because
+        // these use [@id=...] / [N starting at 0] predicates ParsePath rejects.
+        var numMatch = System.Text.RegularExpressions.Regex.Match(
+            path, @"^/numbering/num\[@id=(\d+)\]$");
+        if (numMatch.Success)
+        {
+            var nid = int.Parse(numMatch.Groups[1].Value);
+            var nb = _doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering;
+            var inst = nb?.Elements<NumberingInstance>().FirstOrDefault(n => n.NumberID?.Value == nid);
+            if (inst == null)
+                return new DocumentNode { Path = path, Type = "error", Text = $"num with id={nid} not found" };
+            var nNode = new DocumentNode { Path = path, Type = "num" };
+            if (inst.AbstractNumId?.Val?.Value != null)
+                nNode.Format["abstractNumId"] = inst.AbstractNumId.Val.Value.ToString();
+            foreach (var ovr in inst.Elements<LevelOverride>())
+            {
+                var lvl = ovr.LevelIndex?.Value;
+                var startV = ovr.StartOverrideNumberingValue?.Val?.Value;
+                if (lvl != null && startV != null)
+                    nNode.Format[$"startOverride.{lvl}"] = startV.ToString()!;
+            }
+            return nNode;
+        }
+
+        var absMatch = System.Text.RegularExpressions.Regex.Match(
+            path, @"^/numbering/abstractNum\[@id=(\d+)\](?:/level\[(\d+)\])?$");
+        if (absMatch.Success)
+        {
+            var aid = int.Parse(absMatch.Groups[1].Value);
+            var nb = _doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering;
+            var abs = nb?.Elements<AbstractNum>().FirstOrDefault(a => a.AbstractNumberId?.Value == aid);
+            if (abs == null)
+                return new DocumentNode { Path = path, Type = "error", Text = $"abstractNum with id={aid} not found" };
+            if (absMatch.Groups[2].Success)
+            {
+                int lvlIdx = int.Parse(absMatch.Groups[2].Value);
+                var lvl = abs.Elements<Level>().FirstOrDefault(l => l.LevelIndex?.Value == lvlIdx);
+                if (lvl == null)
+                    return new DocumentNode { Path = path, Type = "error", Text = $"level[{lvlIdx}] not found in abstractNum {aid}" };
+                var lNode = new DocumentNode { Path = path, Type = "level" };
+                if (lvl.StartNumberingValue?.Val?.Value != null) lNode.Format["start"] = lvl.StartNumberingValue.Val.Value.ToString()!;
+                if (lvl.NumberingFormat?.Val?.HasValue == true) lNode.Format["format"] = lvl.NumberingFormat.Val.InnerText;
+                if (lvl.LevelText?.Val?.Value != null) lNode.Format["text"] = lvl.LevelText.Val.Value;
+                if (lvl.LevelJustification?.Val?.HasValue == true) lNode.Format["justification"] = lvl.LevelJustification.Val.InnerText;
+                if (lvl.LevelSuffix?.Val?.HasValue == true) lNode.Format["suff"] = lvl.LevelSuffix.Val.InnerText;
+                var ind = lvl.PreviousParagraphProperties?.Indentation;
+                if (ind?.Left?.Value != null) lNode.Format["indent"] = ind.Left.Value;
+                if (ind?.Hanging?.Value != null) lNode.Format["hanging"] = ind.Hanging.Value;
+                var rpr = lvl.NumberingSymbolRunProperties;
+                if (rpr != null)
+                {
+                    var rfn = rpr.GetFirstChild<RunFonts>();
+                    if (rfn?.Ascii?.Value != null) lNode.Format["font"] = rfn.Ascii.Value;
+                    var fsz = rpr.GetFirstChild<FontSize>();
+                    if (fsz?.Val?.Value != null) lNode.Format["size"] = $"{int.Parse(fsz.Val.Value) / 2.0:0.##}pt";
+                    var clr = rpr.GetFirstChild<Color>();
+                    if (clr?.Val?.Value != null) lNode.Format["color"] = ParseHelpers.FormatHexColor(clr.Val.Value);
+                    if (rpr.GetFirstChild<Bold>() != null) lNode.Format["bold"] = true;
+                    if (rpr.GetFirstChild<Italic>() != null) lNode.Format["italic"] = true;
+                }
+                return lNode;
+            }
+            else
+            {
+                var aNode = new DocumentNode { Path = path, Type = "abstractNum" };
+                aNode.Format["id"] = aid.ToString();
+                var mlt = abs.GetFirstChild<MultiLevelType>();
+                if (mlt?.Val?.HasValue == true) aNode.Format["type"] = mlt.Val.InnerText;
+                var nm = abs.GetFirstChild<AbstractNumDefinitionName>();
+                if (nm?.Val?.Value != null) aNode.Format["name"] = nm.Val.Value;
+                var sl = abs.GetFirstChild<StyleLink>();
+                if (sl?.Val?.Value != null) aNode.Format["styleLink"] = sl.Val.Value;
+                var nsl = abs.GetFirstChild<NumberingStyleLink>();
+                if (nsl?.Val?.Value != null) aNode.Format["numStyleLink"] = nsl.Val.Value;
+                foreach (var lvl in abs.Elements<Level>())
+                {
+                    var li = lvl.LevelIndex?.Value;
+                    if (li.HasValue)
+                        aNode.Children.Add(new DocumentNode { Path = $"{path}/level[{li}]", Type = "level" });
+                }
+                return aNode;
+            }
+        }
+
         // Handle header/footer paths
         var segments = ParsePath(path);
         if (segments.Count >= 1)

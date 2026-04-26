@@ -527,6 +527,180 @@ public partial class WordHandler
         return unsupported;
     }
 
+    /// <summary>
+    /// Set props on a numbering definition.
+    /// Path /numbering/abstractNum[@id=N] targets top-level template props
+    /// (name, styleLink, numStyleLink, multiLevelType).
+    /// Path /numbering/abstractNum[@id=N]/level[L] targets a specific level
+    /// (numFmt, lvlText, start, justification, indent, hanging, suff, font,
+    ///  size, color, bold, italic).
+    /// CONSISTENCY(set-no-create): never auto-creates the abstractNum or
+    /// level — Add owns creation. See SetStylePath for the same rule.
+    /// </summary>
+    private List<string> SetAbstractNumPath(System.Text.RegularExpressions.Match absNumSetMatch, Dictionary<string, string> properties)
+    {
+        var unsupported = new List<string>();
+        var abstractNumId = int.Parse(absNumSetMatch.Groups[1].Value);
+        var levelGroup = absNumSetMatch.Groups[2];
+        int? targetLevel = levelGroup.Success ? int.Parse(levelGroup.Value) : (int?)null;
+
+        var numbering = _doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering
+            ?? throw new ArgumentException("No numbering part. Use `add /numbering --type abstractNum` first.");
+        var abstractNum = numbering.Elements<AbstractNum>()
+            .FirstOrDefault(a => a.AbstractNumberId?.Value == abstractNumId)
+            ?? throw new ArgumentException(
+                $"abstractNum with id={abstractNumId} not found. Use `add /numbering --type abstractNum --prop id={abstractNumId}` first.");
+
+        Level? level = null;
+        if (targetLevel.HasValue)
+        {
+            level = abstractNum.Elements<Level>()
+                .FirstOrDefault(l => l.LevelIndex?.Value == targetLevel.Value)
+                ?? throw new ArgumentException(
+                    $"level[{targetLevel}] not found in abstractNum {abstractNumId}.");
+        }
+
+        foreach (var (key, value) in properties)
+        {
+            if (level != null)
+            {
+                // Level-scope props
+                switch (key.ToLowerInvariant())
+                {
+                    case "format" or "numfmt":
+                        var fmtV = ParseNumberingFormat(value);
+                        var nf = level.GetFirstChild<NumberingFormat>();
+                        if (nf == null) level.AppendChild(new NumberingFormat { Val = fmtV });
+                        else nf.Val = fmtV;
+                        break;
+                    case "text" or "lvltext":
+                        var lt = level.GetFirstChild<LevelText>();
+                        if (lt == null) level.AppendChild(new LevelText { Val = value });
+                        else lt.Val = value;
+                        break;
+                    case "start":
+                        var sn = level.GetFirstChild<StartNumberingValue>();
+                        if (sn == null) level.AppendChild(new StartNumberingValue { Val = ParseHelpers.SafeParseInt(value, "start") });
+                        else sn.Val = ParseHelpers.SafeParseInt(value, "start");
+                        break;
+                    case "justification" or "jc" or "lvljc":
+                        var jcV = value.ToLowerInvariant() switch
+                        {
+                            "left" or "start" => LevelJustificationValues.Left,
+                            "center" => LevelJustificationValues.Center,
+                            "right" or "end" => LevelJustificationValues.Right,
+                            _ => throw new ArgumentException($"Invalid justification '{value}'. Valid: left, center, right.")
+                        };
+                        var jc = level.GetFirstChild<LevelJustification>();
+                        if (jc == null) level.AppendChild(new LevelJustification { Val = jcV });
+                        else jc.Val = jcV;
+                        break;
+                    case "suff":
+                        var sV = value.ToLowerInvariant() switch
+                        {
+                            "tab" => LevelSuffixValues.Tab,
+                            "space" => LevelSuffixValues.Space,
+                            "nothing" or "none" => LevelSuffixValues.Nothing,
+                            _ => throw new ArgumentException($"Invalid suff '{value}'. Valid: tab, space, nothing.")
+                        };
+                        var su = level.GetFirstChild<LevelSuffix>();
+                        if (su == null) level.AppendChild(new LevelSuffix { Val = sV });
+                        else su.Val = sV;
+                        break;
+                    case "indent":
+                        var ppr = level.PreviousParagraphProperties ?? level.AppendChild(new PreviousParagraphProperties());
+                        var indL = ppr.Indentation ?? ppr.AppendChild(new Indentation());
+                        indL.Left = ParseHelpers.SafeParseInt(value, "indent").ToString();
+                        break;
+                    case "hanging":
+                        var pprH = level.PreviousParagraphProperties ?? level.AppendChild(new PreviousParagraphProperties());
+                        var indH = pprH.Indentation ?? pprH.AppendChild(new Indentation());
+                        indH.Hanging = ParseHelpers.SafeParseInt(value, "hanging").ToString();
+                        break;
+                    case "font":
+                        var rpFont = level.NumberingSymbolRunProperties ?? level.AppendChild(new NumberingSymbolRunProperties());
+                        var rf = rpFont.GetFirstChild<RunFonts>() ?? rpFont.AppendChild(new RunFonts());
+                        rf.Ascii = value;
+                        rf.HighAnsi = value;
+                        rf.EastAsia = value;
+                        break;
+                    case "size":
+                        var rpSize = level.NumberingSymbolRunProperties ?? level.AppendChild(new NumberingSymbolRunProperties());
+                        var halfPt = (int)Math.Round(ParseFontSize(value) * 2, MidpointRounding.AwayFromZero);
+                        var fs = rpSize.GetFirstChild<FontSize>();
+                        if (fs == null) rpSize.AppendChild(new FontSize { Val = halfPt.ToString() });
+                        else fs.Val = halfPt.ToString();
+                        break;
+                    case "color":
+                        var rpColor = level.NumberingSymbolRunProperties ?? level.AppendChild(new NumberingSymbolRunProperties());
+                        var c = rpColor.GetFirstChild<Color>();
+                        if (c == null) rpColor.AppendChild(new Color { Val = SanitizeHex(value) });
+                        else c.Val = SanitizeHex(value);
+                        break;
+                    case "bold":
+                        var rpBold = level.NumberingSymbolRunProperties ?? level.AppendChild(new NumberingSymbolRunProperties());
+                        if (IsTruthy(value))
+                        {
+                            if (rpBold.GetFirstChild<Bold>() == null) rpBold.AppendChild(new Bold());
+                        }
+                        else rpBold.GetFirstChild<Bold>()?.Remove();
+                        break;
+                    case "italic":
+                        var rpItal = level.NumberingSymbolRunProperties ?? level.AppendChild(new NumberingSymbolRunProperties());
+                        if (IsTruthy(value))
+                        {
+                            if (rpItal.GetFirstChild<Italic>() == null) rpItal.AppendChild(new Italic());
+                        }
+                        else rpItal.GetFirstChild<Italic>()?.Remove();
+                        break;
+                    default:
+                        unsupported.Add(key);
+                        break;
+                }
+            }
+            else
+            {
+                // abstractNum-scope props (top level)
+                switch (key.ToLowerInvariant())
+                {
+                    case "name":
+                        var nm = abstractNum.GetFirstChild<AbstractNumDefinitionName>();
+                        if (nm == null) abstractNum.AppendChild(new AbstractNumDefinitionName { Val = value });
+                        else nm.Val = value;
+                        break;
+                    case "stylelink":
+                        var sl = abstractNum.GetFirstChild<StyleLink>();
+                        if (sl == null) abstractNum.AppendChild(new StyleLink { Val = value });
+                        else sl.Val = value;
+                        break;
+                    case "numstylelink":
+                        var nsl = abstractNum.GetFirstChild<NumberingStyleLink>();
+                        if (nsl == null) abstractNum.AppendChild(new NumberingStyleLink { Val = value });
+                        else nsl.Val = value;
+                        break;
+                    case "type" or "multileveltype":
+                        var mltV = value.ToLowerInvariant() switch
+                        {
+                            "hybridmultilevel" or "hybrid" => MultiLevelValues.HybridMultilevel,
+                            "multilevel" or "multi" => MultiLevelValues.Multilevel,
+                            "singlelevel" or "single" => MultiLevelValues.SingleLevel,
+                            _ => throw new ArgumentException($"Unknown multiLevelType '{value}'. Valid: hybridMultilevel, multilevel, singleLevel.")
+                        };
+                        var mlt = abstractNum.GetFirstChild<MultiLevelType>();
+                        if (mlt == null) abstractNum.AppendChild(new MultiLevelType { Val = mltV });
+                        else mlt.Val = mltV;
+                        break;
+                    default:
+                        unsupported.Add(key);
+                        break;
+                }
+            }
+        }
+
+        numbering.Save();
+        return unsupported;
+    }
+
     private List<string> SetStylePath(System.Text.RegularExpressions.Match styleSetMatch, Dictionary<string, string> properties)
     {
         var unsupported = new List<string>();
