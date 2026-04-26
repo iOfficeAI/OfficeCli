@@ -164,8 +164,14 @@ public partial class WordHandler
         // /numbering/abstractNum[@id=N]/level[L]. Intercept BEFORE the generic
         // ParsePath call below — those paths use [@id=...] / [N starting at 0]
         // predicates that ParsePath's 1-based positional rule rejects.
+        // Accept both /level[N] (positional, 0-based ilvl) and /lvl[@ilvl=N]
+        // (canonical form returned by Get/Query — see R2 commit 48ee8c8c, R3
+        // commit 2a634aeb). Without the @ilvl branch, Set silently no-ops on
+        // the canonical path: the CLI prints "Updated" but numbering.Save()
+        // never runs because the path falls through to generic Navigation
+        // which has no Level branch in SetElement.
         var absNumSetMatchEarly = System.Text.RegularExpressions.Regex.Match(
-            path, @"^/numbering/abstractNum\[@id=(\d+)\](?:/level\[(\d+)\])?$");
+            path, @"^/numbering/abstractNum\[@id=(\d+)\](?:/(?:level|lvl)\[(?:@ilvl=)?(\d+)\])?$");
         if (absNumSetMatchEarly.Success) return SetAbstractNumPath(absNumSetMatchEarly, properties);
 
         // /numbering/num[@id=N] — set abstractNumId on a NumberingInstance.
