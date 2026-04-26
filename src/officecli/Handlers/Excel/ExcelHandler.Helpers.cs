@@ -2025,6 +2025,20 @@ public partial class ExcelHandler
                 node.Format["flip"] = "v";
         }
 
+        // CONSISTENCY(picture-crop): mirror PowerPointHandler.NodeBuilder.cs
+        // crop readback. <a:srcRect l/t/r/b> stores values in 1000ths of a
+        // percent (10000 = 10%); emit as comma-separated percent string.
+        var picSrcRect = picture.BlipFill?.GetFirstChild<Drawing.SourceRectangle>();
+        if (picSrcRect != null)
+        {
+            var cl = picSrcRect.Left?.Value ?? 0;
+            var ct = picSrcRect.Top?.Value ?? 0;
+            var cr = picSrcRect.Right?.Value ?? 0;
+            var cb = picSrcRect.Bottom?.Value ?? 0;
+            if (cl != 0 || ct != 0 || cr != 0 || cb != 0)
+                node.Format["crop"] = $"{cl / 1000.0:0.##},{ct / 1000.0:0.##},{cr / 1000.0:0.##},{cb / 1000.0:0.##}";
+        }
+
         return node;
     }
 
