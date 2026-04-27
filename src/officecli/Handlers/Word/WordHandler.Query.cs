@@ -379,7 +379,7 @@ public partial class WordHandler
             if (en == null)
                 throw new ArgumentException($"Endnote {enId} not found");
             var enNode = new DocumentNode { Path = $"/endnote[@endnoteId={enId}]", Type = "endnote" };
-            enNode.Text = string.Join("", en.Descendants<Text>().Select(t => t.Text));
+            enNode.Text = GetFootnoteText(en);
             if (en.Id?.Value != null) enNode.Format["id"] = en.Id.Value;
             return enNode;
         }
