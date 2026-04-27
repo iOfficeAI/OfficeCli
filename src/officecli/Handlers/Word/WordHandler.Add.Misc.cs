@@ -549,7 +549,13 @@ public partial class WordHandler
                 fieldPara.AppendChild(fieldRunSep);
                 fieldPara.AppendChild(fieldRunResult);
                 fieldPara.AppendChild(fieldRunEnd);
-                var runIdx = GetAllRuns(fieldPara).Count - 4;
+                // tester-1: the 5 field runs are appended in order
+                // [Begin, Instr, Sep, Result, End]; to point at the Result run
+                // (1-based path index) we want Count - 1, not Count - 4 which
+                // returned the Begin run. Mirrors the indexed-insert branch
+                // above, which correctly resolves to Result.
+                var runs = GetAllRuns(fieldPara);
+                var runIdx = runs.IndexOf(fieldRunResult) + 1;
                 resultPath = $"{parentPath}/r[{runIdx}]";
             }
         }
