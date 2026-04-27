@@ -754,6 +754,7 @@ public partial class WordHandler
                     InsertRunPropInSchemaOrder(props, new VerticalTextAlignment { Val = VerticalPositionValues.Subscript });
                 return true;
             case "caps":
+            case "allcaps":
                 props.RemoveAllChildren<Caps>();
                 if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Caps());
                 return true;

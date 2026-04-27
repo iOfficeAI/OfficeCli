@@ -172,6 +172,7 @@
     "caps": {
       "type": "bool",
       "description": "run-level all caps. On Add only (no paragraph-level Set wrapper).",
+      "aliases": ["allCaps"],
       "add": true, "set": false, "get": false,
       "examples": ["--prop caps=true --prop text=\"Hi\""],
       "enforcement": "strict"

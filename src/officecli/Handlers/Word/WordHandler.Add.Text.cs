@@ -203,7 +203,10 @@ public partial class WordHandler
                 rProps.Strike = new Strike();
             if (properties.TryGetValue("highlight", out var pHighlight))
                 rProps.Highlight = new Highlight { Val = ParseHighlightColor(pHighlight) };
-            if (properties.TryGetValue("caps", out var pCaps) && IsTruthy(pCaps))
+            if ((properties.TryGetValue("caps", out var pCaps)
+                    || properties.TryGetValue("allcaps", out pCaps)
+                    || properties.TryGetValue("allCaps", out pCaps))
+                && IsTruthy(pCaps))
                 rProps.Caps = new Caps();
             if (properties.TryGetValue("smallcaps", out var pSmallCaps) || properties.TryGetValue("smallCaps", out pSmallCaps))
             {
@@ -450,7 +453,10 @@ public partial class WordHandler
             newRProps.Strike = new Strike();
         if (properties.TryGetValue("highlight", out var rHighlight))
             newRProps.Highlight = new Highlight { Val = ParseHighlightColor(rHighlight) };
-        if (properties.TryGetValue("caps", out var rCaps) && IsTruthy(rCaps))
+        if ((properties.TryGetValue("caps", out var rCaps)
+                || properties.TryGetValue("allcaps", out rCaps)
+                || properties.TryGetValue("allCaps", out rCaps))
+            && IsTruthy(rCaps))
             newRProps.Caps = new Caps();
         if (properties.TryGetValue("smallcaps", out var rSmallCaps) || properties.TryGetValue("smallCaps", out rSmallCaps))
         {

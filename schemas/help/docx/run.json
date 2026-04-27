@@ -96,6 +96,7 @@
     "caps": {
       "type": "bool",
       "description": "render text in all caps (display only; underlying text unchanged).",
+      "aliases": ["allCaps"],
       "add": true, "set": true, "get": true,
       "examples": ["--prop caps=true"],
       "readback": "true | false",
