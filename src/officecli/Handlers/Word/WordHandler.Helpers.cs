@@ -15,6 +15,10 @@ namespace OfficeCli.Handlers;
 
 public partial class WordHandler
 {
+    // BUG-TESTER fuzz-2: bound regex match time on user-supplied find patterns to
+    // prevent catastrophic-backtracking DoS (e.g. "(a+)+b" against long inputs).
+    private static readonly TimeSpan FindRegexMatchTimeout = TimeSpan.FromSeconds(5);
+
     // ==================== Private Helpers ====================
 
     /// <summary>
@@ -900,8 +904,15 @@ public partial class WordHandler
         {
             try
             {
+                // BUG-TESTER fuzz-2: bound matching with a hard timeout so
+                // catastrophic-backtracking patterns (e.g. "(a+)+b") fail fast
+                // instead of hanging the CLI / process.
                 foreach (System.Text.RegularExpressions.Match m in
-                    System.Text.RegularExpressions.Regex.Matches(fullText, pattern))
+                    System.Text.RegularExpressions.Regex.Matches(
+                        fullText,
+                        pattern,
+                        System.Text.RegularExpressions.RegexOptions.None,
+                        FindRegexMatchTimeout))
                 {
                     if (m.Length > 0) // skip zero-length matches
                         ranges.Add((m.Index, m.Length));
@@ -910,6 +921,12 @@ public partial class WordHandler
             catch (System.Text.RegularExpressions.RegexParseException ex)
             {
                 throw new ArgumentException($"Invalid regex pattern '{pattern}': {ex.Message}", ex);
+            }
+            catch (System.Text.RegularExpressions.RegexMatchTimeoutException ex)
+            {
+                throw new ArgumentException(
+                    $"Regex pattern '{pattern}' exceeded {FindRegexMatchTimeout.TotalSeconds}s match timeout (catastrophic backtracking?)",
+                    ex);
             }
         }
         else
@@ -1112,7 +1129,11 @@ public partial class WordHandler
         // match captures, and unlike re-running Regex.Replace on the substring, correctly
         // handles lookaround anchors (e.g. r"foo(?=bar)") whose context is lost in isolation.
         var matchObjs = isRegex
-            ? System.Text.RegularExpressions.Regex.Matches(fullText, pattern)
+            ? System.Text.RegularExpressions.Regex.Matches(
+                    fullText,
+                    pattern,
+                    System.Text.RegularExpressions.RegexOptions.None,
+                    FindRegexMatchTimeout)
                 .Cast<System.Text.RegularExpressions.Match>()
                 .Where(m => m.Length > 0)
                 .ToList()

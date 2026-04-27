@@ -13,6 +13,10 @@ namespace OfficeCli.Handlers;
 
 public partial class PowerPointHandler
 {
+    // BUG-TESTER fuzz-2: bound regex match time on user-supplied find patterns to
+    // prevent catastrophic-backtracking DoS (e.g. "(a+)+b" against long inputs).
+    private static readonly TimeSpan FindRegexMatchTimeout = TimeSpan.FromSeconds(5);
+
     private static bool IsTruthy(string? value) =>
         ParseHelpers.IsTruthy(value);
 
@@ -1263,7 +1267,9 @@ public partial class PowerPointHandler
         {
             try
             {
-                foreach (Match m in Regex.Matches(fullText, pattern))
+                // BUG-TESTER fuzz-2: bound matching with hard timeout to prevent
+                // catastrophic-backtracking DoS.
+                foreach (Match m in Regex.Matches(fullText, pattern, RegexOptions.None, FindRegexMatchTimeout))
                 {
                     if (m.Length > 0)
                         ranges.Add((m.Index, m.Length));
@@ -1272,6 +1278,12 @@ public partial class PowerPointHandler
             catch (RegexParseException ex)
             {
                 throw new ArgumentException($"Invalid regex pattern '{pattern}': {ex.Message}", ex);
+            }
+            catch (RegexMatchTimeoutException ex)
+            {
+                throw new ArgumentException(
+                    $"Regex pattern '{pattern}' exceeded {FindRegexMatchTimeout.TotalSeconds}s match timeout (catastrophic backtracking?)",
+                    ex);
             }
         }
         else
@@ -1441,7 +1453,11 @@ public partial class PowerPointHandler
         var fullText = string.Concat(runTexts.Select(rt => rt.TextElement.Text));
         // CONSISTENCY(regex-backref-expand): mirror Word ProcessFindInParagraph.
         var matchObjs = isRegex
-            ? System.Text.RegularExpressions.Regex.Matches(fullText, pattern)
+            ? System.Text.RegularExpressions.Regex.Matches(
+                    fullText,
+                    pattern,
+                    System.Text.RegularExpressions.RegexOptions.None,
+                    FindRegexMatchTimeout)
                 .Cast<System.Text.RegularExpressions.Match>()
                 .Where(m => m.Length > 0)
                 .ToList()
