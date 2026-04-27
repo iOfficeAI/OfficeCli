@@ -78,9 +78,18 @@ internal static class ParseHelpers
         if (rawValue.StartsWith('#')) return rawValue.ToUpperInvariant();
         if (rawValue.Length == 6 && rawValue.All(char.IsAsciiHexDigit))
             return "#" + rawValue.ToUpperInvariant();
-        // 8-char ARGB (e.g. "FFFF0000") → strip alpha prefix → "#FF0000"
+        // 8-char ARGB (e.g. "FFFF0000"). When alpha == FF (fully opaque), strip the
+        // prefix and emit the canonical 6-digit form (#FF0000). When alpha < FF,
+        // preserve the 8-digit form (#80FF0000) so partial transparency survives
+        // round-tripping through Get. PPTX fill paths already preserve alpha via
+        // a:alpha; this plug closes the Excel-side gap.
         if (rawValue.Length == 8 && rawValue.All(char.IsAsciiHexDigit))
-            return "#" + rawValue[2..].ToUpperInvariant();
+        {
+            var alpha = rawValue[..2];
+            if (string.Equals(alpha, "FF", StringComparison.OrdinalIgnoreCase))
+                return "#" + rawValue[2..].ToUpperInvariant();
+            return "#" + rawValue.ToUpperInvariant();
+        }
         // Try resolving named colors (e.g. "silver" → "#C0C0C0")
         var resolved = TryResolveColorInput(rawValue);
         if (resolved != null)
