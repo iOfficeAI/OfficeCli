@@ -475,6 +475,7 @@ public partial class ExcelHandler
             ?? properties.GetValueOrDefault("value1")
             ?? throw new ArgumentException("cellIs conditional formatting requires 'value' property (e.g. value=50).");
         var secondary = properties.GetValueOrDefault("value2")
+            ?? properties.GetValueOrDefault("formula2")
             ?? properties.GetValueOrDefault("maxvalue");
 
         // Build DifferentialFormat (dxf)

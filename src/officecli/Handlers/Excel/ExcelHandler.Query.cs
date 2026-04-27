@@ -562,6 +562,20 @@ public partial class ExcelHandler
                     if (rule.FormatId?.Value != null) cfNode.Format["dxfId"] = rule.FormatId.Value;
                 }
 
+                // CellIs (operator-based comparison: between/equal/greaterThan/...)
+                if (rule.Type?.Value == ConditionalFormatValues.CellIs)
+                {
+                    cfNode.Format["cfType"] = "cellIs";
+                    if (rule.Operator?.HasValue == true)
+                        cfNode.Format["operator"] = rule.Operator.InnerText;
+                    var cellIsFormulas = rule.Elements<Formula>().ToList();
+                    if (cellIsFormulas.Count >= 1)
+                        cfNode.Format["formula"] = cellIsFormulas[0].Text ?? "";
+                    if (cellIsFormulas.Count >= 2)
+                        cfNode.Format["formula2"] = cellIsFormulas[1].Text ?? "";
+                    if (rule.FormatId?.Value != null) cfNode.Format["dxfId"] = rule.FormatId.Value;
+                }
+
                 // Time Period (date occurring)
                 if (rule.Type?.Value == ConditionalFormatValues.TimePeriod)
                 {
