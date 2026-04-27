@@ -757,8 +757,11 @@ public partial class ExcelHandler
             };
             tcNode.Format["name"] = tCol.Name?.Value ?? "";
             if (tCol.Id?.Value != null) tcNode.Format["id"] = tCol.Id.Value;
-            if (tCol.TotalsRowFunction?.Value != null)
-                tcNode.Format["totalFunction"] = tCol.TotalsRowFunction.Value.ToString().ToLowerInvariant();
+            if (tCol.TotalsRowFunction?.HasValue == true)
+                // Open XML SDK v3 EnumValue<T>.ToString() returns
+                // "TotalsRowFunctionValues { }" — use InnerText for the
+                // OOXML-canonical lowercase token. CONSISTENCY(enum-innertext).
+                tcNode.Format["totalFunction"] = tCol.TotalsRowFunction.InnerText;
             if (tCol.TotalsRowLabel?.Value != null)
                 tcNode.Format["totalLabel"] = tCol.TotalsRowLabel.Value;
             var ccf = tCol.CalculatedColumnFormula?.Text;
