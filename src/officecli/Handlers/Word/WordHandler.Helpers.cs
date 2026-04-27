@@ -1324,6 +1324,13 @@ public partial class WordHandler
     /// Resolve paragraphs for a find operation based on path.
     /// "/" or "/body" → body paragraphs; "/header[N]" → header N; "/footer[N]" → footer N;
     /// "/paragraph[N]" → specific paragraph; selector → query results.
+    ///
+    /// BUG-TESTER+FUZZER R33: out-of-bound indices and unrecognized Word
+    /// roots (e.g. /slide[1]) must throw ArgumentException instead of
+    /// silently returning an empty paragraph list. Mirrors the PPTX
+    /// ResolvePptParagraphsForFind contract — see commit 898f9284.
+    /// CONSISTENCY(find-strict-path): Word + PPTX share this strict-path
+    /// behaviour; if the contract is relaxed, update both sites in one pass.
     /// </summary>
     private List<Paragraph> ResolveParagraphsForFind(string path)
     {
@@ -1334,59 +1341,81 @@ public partial class WordHandler
         {
             if (mainPart?.Document?.Body != null)
                 paragraphs.AddRange(mainPart.Document.Body.Descendants<Paragraph>());
+            return paragraphs;
         }
-        else if (path.StartsWith("/header[", StringComparison.OrdinalIgnoreCase))
+
+        if (path.StartsWith("/header[", StringComparison.OrdinalIgnoreCase))
         {
             var idx = ParseHelpers.SafeParseInt(path.Split('[', ']')[1], "header index") - 1;
-            var headerPart = mainPart?.HeaderParts.ElementAtOrDefault(idx);
-            if (headerPart?.Header != null)
+            var headers = mainPart?.HeaderParts.ToList() ?? new List<HeaderPart>();
+            if (idx < 0 || idx >= headers.Count)
+                throw new ArgumentException($"Header index out of range: {idx + 1} (have {headers.Count} header(s)).");
+            var headerPart = headers[idx];
+            if (headerPart.Header != null)
                 paragraphs.AddRange(headerPart.Header.Descendants<Paragraph>());
+            return paragraphs;
         }
-        else if (path.StartsWith("/footer[", StringComparison.OrdinalIgnoreCase))
+
+        if (path.StartsWith("/footer[", StringComparison.OrdinalIgnoreCase))
         {
             var idx = ParseHelpers.SafeParseInt(path.Split('[', ']')[1], "footer index") - 1;
-            var footerPart = mainPart?.FooterParts.ElementAtOrDefault(idx);
-            if (footerPart?.Footer != null)
+            var footers = mainPart?.FooterParts.ToList() ?? new List<FooterPart>();
+            if (idx < 0 || idx >= footers.Count)
+                throw new ArgumentException($"Footer index out of range: {idx + 1} (have {footers.Count} footer(s)).");
+            var footerPart = footers[idx];
+            if (footerPart.Footer != null)
                 paragraphs.AddRange(footerPart.Footer.Descendants<Paragraph>());
+            return paragraphs;
         }
-        else if (path.StartsWith("/"))
+
+        if (path.StartsWith("/"))
         {
-            // Specific element path — navigate to it and collect its paragraphs
+            // Specific element path — navigate to it. NavigateToElement returns
+            // null for both unknown roots (e.g. /slide[1]) and out-of-bound
+            // indices (e.g. /body/p[999]); both must throw, never silently
+            // resolve to zero paragraphs.
             var element = NavigateToElement(ParsePath(path));
+            if (element == null)
+                throw new ArgumentException(
+                    $"Cannot resolve find scope path: '{path}'. "
+                    + "Expected /, /body, /body/p[N], /body/p[N]/r[K], /body/tbl[N], "
+                    + "/body/tbl[N]/tr[R]/tc[C], /header[N], or /footer[N]; "
+                    + "or a CSS-style selector (e.g. paragraph, run).");
+
             if (element is Paragraph p)
+            {
                 paragraphs.Add(p);
-            else if (element != null)
-            {
-                // BUG-BT-1: when path resolves to an inline element (e.g. a Run
-                // under /body/p[N]/r[K], or a Hyperlink), Descendants<Paragraph>()
-                // is empty — the find would silently match nothing. Walk up to
-                // the containing paragraph instead so /run paths still work,
-                // and also harvest any paragraphs nested inside (e.g. tables).
-                var nestedParas = element.Descendants<Paragraph>().ToList();
-                if (nestedParas.Count > 0)
-                {
-                    paragraphs.AddRange(nestedParas);
-                }
-                else
-                {
-                    var ancestorPara = element.Ancestors<Paragraph>().FirstOrDefault();
-                    if (ancestorPara != null)
-                        paragraphs.Add(ancestorPara);
-                }
+                return paragraphs;
             }
+
+            // BUG-BT-1: when path resolves to an inline element (e.g. a Run
+            // under /body/p[N]/r[K], or a Hyperlink), Descendants<Paragraph>()
+            // is empty — the find would silently match nothing. Walk up to
+            // the containing paragraph instead so /run paths still work,
+            // and also harvest any paragraphs nested inside (e.g. tables).
+            var nestedParas = element.Descendants<Paragraph>().ToList();
+            if (nestedParas.Count > 0)
+            {
+                paragraphs.AddRange(nestedParas);
+            }
+            else
+            {
+                var ancestorPara = element.Ancestors<Paragraph>().FirstOrDefault();
+                if (ancestorPara != null)
+                    paragraphs.Add(ancestorPara);
+            }
+            return paragraphs;
         }
-        else
+
+        // Selector — query and resolve each result's paragraphs
+        var targets = Query(path);
+        foreach (var target in targets)
         {
-            // Selector — query and resolve each result's paragraphs
-            var targets = Query(path);
-            foreach (var target in targets)
-            {
-                var elem = NavigateToElement(ParsePath(target.Path));
-                if (elem is Paragraph tp)
-                    paragraphs.Add(tp);
-                else if (elem != null)
-                    paragraphs.AddRange(elem.Descendants<Paragraph>());
-            }
+            var elem = NavigateToElement(ParsePath(target.Path));
+            if (elem is Paragraph tp)
+                paragraphs.Add(tp);
+            else if (elem != null)
+                paragraphs.AddRange(elem.Descendants<Paragraph>());
         }
 
         return paragraphs;
