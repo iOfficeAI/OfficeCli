@@ -436,6 +436,23 @@ public partial class ExcelHandler
                             new Drawing.SolidFill(new Drawing.RgbColorModelHex { Val = cRgb }));
                     }
                     break;
+                case "underline":
+                    foreach (var run in shape.Descendants<Drawing.Run>())
+                    {
+                        var rPr = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
+                        rPr.Underline = value.ToLowerInvariant() switch
+                        {
+                            "true" or "single" or "sng" => Drawing.TextUnderlineValues.Single,
+                            "double" or "dbl" => Drawing.TextUnderlineValues.Double,
+                            "heavy" => Drawing.TextUnderlineValues.Heavy,
+                            "dotted" => Drawing.TextUnderlineValues.Dotted,
+                            "dash" => Drawing.TextUnderlineValues.Dash,
+                            "wavy" => Drawing.TextUnderlineValues.Wavy,
+                            "false" or "none" => Drawing.TextUnderlineValues.None,
+                            _ => throw new ArgumentException($"Invalid underline value: '{value}'. Valid values: single, double, heavy, dotted, dash, wavy, none.")
+                        };
+                    }
+                    break;
                 case "fill":
                 {
                     var spPr = shape.ShapeProperties;

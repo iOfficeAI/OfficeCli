@@ -86,6 +86,33 @@
       "readback": "#RRGGBB uppercase",
       "enforcement": "report"
     },
+    "strike": {
+      "type": "bool",
+      "description": "single strikethrough on the cell text.",
+      "aliases": ["strikethrough", "font.strike"],
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop strike=true"],
+      "readback": "true | false",
+      "enforcement": "report"
+    },
+    "underline": {
+      "type": "enum",
+      "values": ["single", "double", "singleAccounting", "doubleAccounting", "none"],
+      "description": "underline style on the cell text.",
+      "aliases": ["font.underline"],
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop underline=single"],
+      "readback": "underline style name",
+      "enforcement": "report"
+    },
+    "locked": {
+      "type": "bool",
+      "description": "cell protection: lock the cell against edits when the sheet is protected. Default Excel behavior is locked=true.",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop locked=false"],
+      "readback": "true | false",
+      "enforcement": "report"
+    },
     "alignment.horizontal": {
       "type": "enum",
       "values": ["left", "center", "right", "justify", "fill", "distributed"],
