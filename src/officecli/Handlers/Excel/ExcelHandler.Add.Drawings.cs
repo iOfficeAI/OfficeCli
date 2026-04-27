@@ -870,12 +870,17 @@ public partial class ExcelHandler
             ?? throw new ArgumentException("Sparkline requires 'dataRange' (or 'range'/'data') property (e.g. A1:E1)");
 
         // Determine sparkline type
+        // bt-2: reject invalid types (e.g. "bar") instead of silently mapping
+        // to Line. Sparkline OOXML has exactly three types: line/column/stacked
+        // (winloss is an alias for stacked).
         var spkTypeStr = properties.GetValueOrDefault("type", "line").ToLowerInvariant();
         var spkType = spkTypeStr switch
         {
+            "line" => X14.SparklineTypeValues.Line,
             "column" => X14.SparklineTypeValues.Column,
             "stacked" or "winloss" or "win-loss" => X14.SparklineTypeValues.Stacked,
-            _ => X14.SparklineTypeValues.Line
+            _ => throw new ArgumentException(
+                $"Invalid sparkline type: '{spkTypeStr}'. Valid values: line, column, stacked (alias: winloss/win-loss).")
         };
 
         // Build the SparklineGroup

@@ -31,11 +31,17 @@ public partial class ExcelHandler
             switch (key.ToLowerInvariant())
             {
                 case "type":
+                    // tester-2 / bt-2: accept the same alias set as Add (winloss
+                    // / win-loss → stacked) and reject unknown values instead of
+                    // silently dropping the Type attr (which falls back to line).
+                    // CONSISTENCY(sparkline-type-alias): mirrors AddSparkline.
                     spkGroup.Type = value.ToLowerInvariant() switch
                     {
+                        "line" => null,  // null Type attr = line (OOXML default)
                         "column" => X14.SparklineTypeValues.Column,
-                        "stacked" => X14.SparklineTypeValues.Stacked,
-                        _ => null
+                        "stacked" or "winloss" or "win-loss" => X14.SparklineTypeValues.Stacked,
+                        _ => throw new ArgumentException(
+                            $"Invalid sparkline type: '{value}'. Valid values: line, column, stacked (alias: winloss/win-loss).")
                     };
                     break;
                 case "color":
