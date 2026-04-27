@@ -1974,6 +1974,15 @@ public partial class ExcelHandler
         if (!string.IsNullOrEmpty(dv.Prompt?.Value))
             node.Format["prompt"] = dv.Prompt!.Value!;
 
+        if (dv.ErrorStyle?.HasValue == true)
+            node.Format["errorStyle"] = dv.ErrorStyle.InnerText;
+
+        // CONSISTENCY(validation-incelldropdown): Add accepts inCellDropdown
+        // (user-friendly sense; OOXML stores the inverse showDropDown).
+        // Get must surface the same key so help-doc [add/get] is honored.
+        if (dv.ShowDropDown?.HasValue == true)
+            node.Format["inCellDropdown"] = !dv.ShowDropDown.Value;
+
         return node;
     }
 
