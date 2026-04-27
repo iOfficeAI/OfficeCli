@@ -409,6 +409,11 @@ internal static class OutputFormatter
     {
         if (val == null) return "";
         if (val is string s) return s;
+        // Lower-case bool to match the canonical-value convention
+        // ("true"/"false"); .NET's default Boolean.ToString() returns
+        // "True"/"False", which leaks PascalCase into Format readbacks
+        // (header bold/italic, toc hyperlinks, validation flags, etc.).
+        if (val is bool b) return b ? "true" : "false";
         if (val is System.Collections.IEnumerable e and not string)
         {
             var parts = new List<string>();
