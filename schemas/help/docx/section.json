@@ -20,12 +20,13 @@
       "description": "section break type",
       "values": ["nextPage", "continuous", "evenPage", "oddPage"],
       "aliases": {
-        "nextPage": ["next", "nextpage"],
+        "nextPage": ["next", "nextpage", "newPage", "newpage", "page"],
         "evenPage": ["even", "evenpage"],
         "oddPage":  ["odd",  "oddpage"]
       },
+      "propAliases": ["break"],
       "add": true, "set": true, "get": true,
-      "examples": ["--prop type=nextPage"],
+      "examples": ["--prop type=nextPage", "--prop break=newPage"],
       "readback": "one of values (innerText)",
       "enforcement": "strict"
     },

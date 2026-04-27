@@ -399,6 +399,20 @@ internal static class SchemaHelpLoader
                             if (!string.IsNullOrEmpty(s)) allowed.Add(s!);
                         }
                     }
+                    // Some enum-typed schemas use object-form `aliases` for
+                    // value-level synonyms and reserve a separate `propAliases`
+                    // array for prop-name aliases (e.g. section.type accepts
+                    // --prop break=… as a more intuitive name). bt-4.
+                    if (prop.Value.ValueKind == JsonValueKind.Object
+                        && prop.Value.TryGetProperty("propAliases", out var propAliases)
+                        && propAliases.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var a in propAliases.EnumerateArray())
+                        {
+                            var s = a.GetString();
+                            if (!string.IsNullOrEmpty(s)) allowed.Add(s!);
+                        }
+                    }
                 }
             }
             else

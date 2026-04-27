@@ -379,15 +379,20 @@ public partial class WordHandler
         {
             switch (key.ToLowerInvariant())
             {
+                // bt-4: 'break' is the natural prop users reach for ("section
+                // break = new page"). Treat it as an alias for 'type' and
+                // accept the common 'newPage' synonym for nextPage.
+                // CONSISTENCY(section-type-alias).
                 case "type":
+                case "break":
                     var st = sectPr.GetFirstChild<SectionType>() ?? sectPr.PrependChild(new SectionType());
                     st.Val = value.ToLowerInvariant() switch
                     {
-                        "nextpage" or "next" => SectionMarkValues.NextPage,
+                        "nextpage" or "next" or "newpage" or "page" => SectionMarkValues.NextPage,
                         "continuous" => SectionMarkValues.Continuous,
                         "evenpage" or "even" => SectionMarkValues.EvenPage,
                         "oddpage" or "odd" => SectionMarkValues.OddPage,
-                        _ => throw new ArgumentException($"Invalid section break type: '{value}'. Valid values: nextPage, continuous, evenPage, oddPage.")
+                        _ => throw new ArgumentException($"Invalid section break type: '{value}'. Valid values: nextPage (alias: newPage/page), continuous, evenPage, oddPage.")
                     };
                     break;
                 case "pagewidth" or "pageWidth":
