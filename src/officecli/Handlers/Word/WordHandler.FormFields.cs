@@ -51,7 +51,7 @@ public partial class WordHandler
 
         if (textInput != null)
         {
-            node.Format["formfieldType"] = "text";
+            node.Format["type"] = "text";
             var defaultVal = textInput.GetFirstChild<DefaultTextBoxFormFieldString>()?.Val?.Value;
             if (defaultVal != null) node.Format["default"] = defaultVal;
             var maxLen = textInput.GetFirstChild<MaxLength>()?.Val?.Value;
@@ -62,7 +62,7 @@ public partial class WordHandler
         }
         else if (checkBox != null)
         {
-            node.Format["formfieldType"] = "checkbox";
+            node.Format["type"] = "checkbox";
             var checkedEl = checkBox.GetFirstChild<Checked>();
             var defaultEl = checkBox.GetFirstChild<DefaultCheckBoxFormFieldState>();
             var isChecked = checkedEl?.Val?.Value ?? defaultEl?.Val?.Value ?? false;
@@ -71,7 +71,7 @@ public partial class WordHandler
         }
         else if (dropDown != null)
         {
-            node.Format["formfieldType"] = "dropdown";
+            node.Format["type"] = "dropdown";
             var items = dropDown.Elements<ListEntryFormField>().Select(li => li.Val?.Value ?? "").ToList();
             if (items.Count > 0) node.Format["items"] = string.Join(",", items);
             var defaultIdx = dropDown.GetFirstChild<DropDownListSelection>()?.Val?.Value ?? 0;

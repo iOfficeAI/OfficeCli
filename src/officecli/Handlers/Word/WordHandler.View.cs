@@ -1410,7 +1410,7 @@ public partial class WordHandler
             var ffPath = $"/formfield[{i + 1}]";
             var ffNode = FormFieldToNode(ff, ffPath);
 
-            var ffType = ffNode.Format.TryGetValue("formfieldType", out var ftObj) ? ftObj?.ToString() ?? "text" : "text";
+            var ffType = ffNode.Format.TryGetValue("type", out var ftObj) ? ftObj?.ToString() ?? "text" : "text";
             var ffName = ffNode.Format.TryGetValue("name", out var nameObj) ? nameObj?.ToString() : null;
             var ffEditable = ffNode.Format.TryGetValue("editable", out var edObj) && edObj is true;
 
