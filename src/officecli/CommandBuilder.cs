@@ -109,6 +109,7 @@ static partial class CommandBuilder
         rootCommand.Add(BuildMarkCommand(jsonOption));
         rootCommand.Add(BuildUnmarkMarkCommand(jsonOption));
         rootCommand.Add(BuildGetMarksCommand(jsonOption));
+        rootCommand.Add(BuildGotoCommand(jsonOption));
         rootCommand.Add(BuildViewCommand(jsonOption));
         rootCommand.Add(BuildGetCommand(jsonOption));
         rootCommand.Add(BuildQueryCommand(jsonOption));
