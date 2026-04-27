@@ -1038,7 +1038,14 @@ internal static partial class ChartHelper
                         "min" => C.CrossesValues.Minimum,
                         _ => C.CrossesValues.AutoZero
                     };
-                    valAx.AppendChild(new C.Crosses { Val = crossVal });
+                    // CONSISTENCY(chart/crosses-schema-order): CT_ValAx requires
+                    // crossAx → crosses → crossBetween. BuildValueAxis emits
+                    // CrossBetween last; AppendChild here would land after it and
+                    // PowerPoint silently rejects the file. Insert before CrossBetween.
+                    var newCrosses = new C.Crosses { Val = crossVal };
+                    var cbBefore = valAx.GetFirstChild<C.CrossBetween>();
+                    if (cbBefore != null) valAx.InsertBefore(newCrosses, cbBefore);
+                    else valAx.AppendChild(newCrosses);
                     break;
                 }
 
@@ -1049,7 +1056,11 @@ internal static partial class ChartHelper
                     if (valAx == null) { unsupported.Add(key); break; }
                     valAx.RemoveAllChildren<C.Crosses>();
                     valAx.RemoveAllChildren<C.CrossesAt>();
-                    valAx.AppendChild(new C.CrossesAt { Val = ParseHelpers.SafeParseDouble(value, "crossesAt") });
+                    // CONSISTENCY(chart/crosses-schema-order): same as crosses above.
+                    var newCrossesAt = new C.CrossesAt { Val = ParseHelpers.SafeParseDouble(value, "crossesAt") };
+                    var cbBefore2 = valAx.GetFirstChild<C.CrossBetween>();
+                    if (cbBefore2 != null) valAx.InsertBefore(newCrossesAt, cbBefore2);
+                    else valAx.AppendChild(newCrossesAt);
                     break;
                 }
 
