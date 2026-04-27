@@ -1260,6 +1260,39 @@ public partial class ExcelHandler
                 }
                 case "fittopage":
                 {
+                    // Treat "false"/"none"/"0" as a clear: drop FitToPage flag and any
+                    // FitToWidth/FitToHeight overrides so readback no longer reports
+                    // a fittopage value.
+                    var fitParts = value.Split('x', 'X');
+                    uint fw = 0, fh = 0;
+                    bool isWxH = fitParts.Length == 2
+                        && uint.TryParse(fitParts[0], out fw)
+                        && uint.TryParse(fitParts[1], out fh);
+                    bool clearing = !isWxH
+                        && (string.IsNullOrEmpty(value)
+                            || value.Equals("none", StringComparison.OrdinalIgnoreCase)
+                            || !ParseHelpers.IsTruthy(value));
+
+                    if (clearing)
+                    {
+                        var spExisting = ws.GetFirstChild<SheetProperties>();
+                        var pspExisting = spExisting?.GetFirstChild<PageSetupProperties>();
+                        if (pspExisting != null)
+                        {
+                            pspExisting.FitToPage = null;
+                            // Drop the wrapper if it has no other attributes/children
+                            if (!pspExisting.GetAttributes().Any() && !pspExisting.HasChildren)
+                                pspExisting.Remove();
+                        }
+                        var psExisting = ws.GetFirstChild<PageSetup>();
+                        if (psExisting != null)
+                        {
+                            psExisting.FitToWidth = null;
+                            psExisting.FitToHeight = null;
+                        }
+                        break;
+                    }
+
                     var sheetPr = ws.GetFirstChild<SheetProperties>();
                     if (sheetPr == null)
                     {
@@ -1280,14 +1313,12 @@ public partial class ExcelHandler
                         pageSetup = new PageSetup();
                         ws.AppendChild(pageSetup);
                     }
-                    // Parse "WxH" format (e.g., "1x2" for 1 page wide, 2 pages tall)
-                    var fitParts = value.Split('x', 'X');
-                    if (fitParts.Length == 2 && uint.TryParse(fitParts[0], out var fw) && uint.TryParse(fitParts[1], out var fh))
+                    if (isWxH)
                     {
                         pageSetup.FitToWidth = fw;
                         pageSetup.FitToHeight = fh;
                     }
-                    else if (ParseHelpers.IsTruthy(value))
+                    else
                     {
                         pageSetup.FitToWidth = 1;
                         pageSetup.FitToHeight = 1;
