@@ -162,6 +162,17 @@ public partial class WordHandler
         foreach (var (key, rawVal) in attrs)
         {
             if (key == "__empty") continue;
+            // BUG-R34-03: `text` and `type` are not paragraph XML attributes — they are
+            // node-level metadata populated post-construction (DocumentNode.Text / .Type).
+            // Pre-filter cannot resolve them, so falling through to GenericXmlQuery
+            // returned null and silently zero-filtered the result. Skip these keys here
+            // and let the CLI-level AttributeFilter post-filter handle them against the
+            // populated DocumentNode (which already has .Text / .Type).
+            // CONSISTENCY(query-pre-vs-post-filter): mirrors how `~=` is intentionally
+            // not parsed by the Word selector regex so AttributeFilter handles it.
+            if (key.Equals("text", StringComparison.OrdinalIgnoreCase) ||
+                key.Equals("type", StringComparison.OrdinalIgnoreCase))
+                continue;
             bool negate = rawVal.StartsWith("!");
             var val = negate ? rawVal[1..] : rawVal;
 
@@ -224,6 +235,12 @@ public partial class WordHandler
 
         foreach (var (key, rawVal) in selector.Attributes)
         {
+            // CONSISTENCY(query-pre-vs-post-filter): see MatchesParagraphAttrs above.
+            // `text` / `type` are not XML attributes — let AttributeFilter post-filter
+            // resolve them against DocumentNode.Text / .Type.
+            if (key.Equals("text", StringComparison.OrdinalIgnoreCase) ||
+                key.Equals("type", StringComparison.OrdinalIgnoreCase))
+                continue;
             bool negate = rawVal.StartsWith("!");
             var val = negate ? rawVal[1..] : rawVal;
 
