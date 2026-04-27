@@ -434,6 +434,13 @@ public partial class ExcelHandler
                     }
                     break;
                 case "formula":
+                    // BUG-R36-03 fix: reject empty/whitespace formula strings.
+                    // Storing an empty CellFormula (<x:f/>) is invalid OOXML and causes
+                    // Get() to return "=" as the cell text. Treat as clear-formula intent.
+                    if (string.IsNullOrWhiteSpace(value))
+                        throw new ArgumentException(
+                            "Formula cannot be empty or whitespace. " +
+                            "To clear a formula use --prop value= (set to a plain value) or --prop clear=true.");
                     RejectCrossWorkbookFormula(value);
                     cell.CellFormula = new CellFormula(Core.ModernFunctionQualifier.Qualify(Core.ModernFunctionQualifier.AutoQuoteSheetRefs(value.TrimStart('='))));
                     // Try to evaluate and cache the result immediately
@@ -889,6 +896,19 @@ public partial class ExcelHandler
                                 if (f.Text != null && f.Text.Contains(oldRef, StringComparison.OrdinalIgnoreCase))
                                 {
                                     f.Text = f.Text.Replace(oldRef, newRef, StringComparison.OrdinalIgnoreCase);
+                                    wsChanged = true;
+                                }
+                            }
+                            // Internal hyperlinks: <x:hyperlink ref="A1"
+                            // location="SheetName!A1"/>. Update the
+                            // location attribute when it points at the
+                            // renamed sheet.
+                            foreach (var hl in wsRoot.Descendants<Hyperlink>())
+                            {
+                                var loc = hl.Location?.Value;
+                                if (loc != null && loc.Contains(oldRef, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    hl.Location = loc.Replace(oldRef, newRef, StringComparison.OrdinalIgnoreCase);
                                     wsChanged = true;
                                 }
                             }

@@ -156,6 +156,16 @@ public partial class ExcelHandler
                         throw new ArgumentException(
                             $"Cannot remove sheet '{sheetName}': it is referenced by a conditional formatting rule. " +
                             $"Remove or repoint the rule first.");
+
+                // Internal hyperlinks: <x:hyperlink ref="A1"
+                // location="SheetName!A1"/>. Same "external links"
+                // class — Excel reads the orphan SheetName! as a
+                // pointer to a separate workbook.
+                foreach (var hl in wsRoot.Descendants<DocumentFormat.OpenXml.Spreadsheet.Hyperlink>())
+                    if (MatchesRef(hl.Location?.Value))
+                        throw new ArgumentException(
+                            $"Cannot remove sheet '{sheetName}': it is referenced by a hyperlink in this workbook. " +
+                            $"Remove or repoint the hyperlink first.");
             }
 
             // R10-2: capture pivot cache definitions referenced by this
