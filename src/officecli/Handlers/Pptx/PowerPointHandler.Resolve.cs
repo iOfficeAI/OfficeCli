@@ -192,9 +192,12 @@ public partial class PowerPointHandler
         return name.ToLowerInvariant() switch
         {
             "title" => PlaceholderValues.Title,
-            "centertitle" or "centeredtitle" or "ctitle" => PlaceholderValues.CenteredTitle,
+            // 'ctrTitle' is the OOXML serialization (ECMA-376 §19.7.10);
+            // accept it alongside the human-readable aliases so the
+            // type-name returned by query placeholder round-trips.
+            "centertitle" or "centeredtitle" or "ctitle" or "ctrtitle" => PlaceholderValues.CenteredTitle,
             "body" or "content" => PlaceholderValues.Body,
-            "subtitle" or "sub" => PlaceholderValues.SubTitle,
+            "subtitle" or "sub" or "subtitlepres" => PlaceholderValues.SubTitle,
             "date" or "datetime" or "dt" => PlaceholderValues.DateAndTime,
             "footer" => PlaceholderValues.Footer,
             "slidenum" or "slidenumber" or "sldnum" => PlaceholderValues.SlideNumber,

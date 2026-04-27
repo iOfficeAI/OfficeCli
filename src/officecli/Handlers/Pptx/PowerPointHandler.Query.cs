@@ -1407,12 +1407,16 @@ public partial class PowerPointHandler
             if (parsed.ElementType == "placeholder")
             {
                 int phIdx = 0;
+                // Track placeholder identity (type+idx pair) so we can skip
+                // layout-inherited entries already materialized on the slide.
+                var seenSlidePh = new HashSet<string>();
                 foreach (var shape in shapeTree.Elements<Shape>())
                 {
                     var ph = shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
                         ?.GetFirstChild<PlaceholderShape>();
                     if (ph == null) continue;
                     phIdx++;
+                    seenSlidePh.Add($"{ph.Type?.InnerText ?? ""}|{ph.Index?.Value.ToString() ?? ""}");
 
                     if (parsed.TextContains != null)
                     {
@@ -1427,6 +1431,47 @@ public partial class PowerPointHandler
                     if (ph.Type?.HasValue == true) node.Format["phType"] = ph.Type.InnerText;
                     if (ph.Index?.HasValue == true) node.Format["phIndex"] = ph.Index.Value;
                     results.Add(node);
+                }
+
+                // Surface layout-inherited placeholders the slide hasn't
+                // overridden — query previously skipped them entirely
+                // because they live in the layout's shapeTree, not the
+                // slide's. set/get of a layout-inherited placeholder
+                // materializes a slide shape on demand (see
+                // ResolvePlaceholderShape), so callers need a way to
+                // discover them through query.
+                var layoutShapeTree = slidePart.SlideLayoutPart?.SlideLayout?.CommonSlideData?.ShapeTree;
+                if (layoutShapeTree != null)
+                {
+                    foreach (var layoutShape in layoutShapeTree.Elements<Shape>())
+                    {
+                        var lph = layoutShape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
+                            ?.GetFirstChild<PlaceholderShape>();
+                        if (lph == null) continue;
+                        var key = $"{lph.Type?.InnerText ?? ""}|{lph.Index?.Value.ToString() ?? ""}";
+                        if (seenSlidePh.Contains(key)) continue;
+                        phIdx++;
+
+                        if (parsed.TextContains != null)
+                        {
+                            var lShapeText = GetShapeText(layoutShape);
+                            if (!lShapeText.Contains(parsed.TextContains, StringComparison.OrdinalIgnoreCase))
+                                continue;
+                        }
+
+                        var lNode = ShapeToNode(layoutShape, slideNum, phIdx, 0, slidePart);
+                        // Stable selector: type-name path resolves through
+                        // ResolvePlaceholderShape's layout fallback at get/set.
+                        var phTypeName = lph.Type?.InnerText;
+                        lNode.Path = !string.IsNullOrEmpty(phTypeName)
+                            ? $"/slide[{slideNum}]/placeholder[{phTypeName}]"
+                            : $"/slide[{slideNum}]/placeholder[{phIdx}]";
+                        lNode.Type = "placeholder";
+                        if (lph.Type?.HasValue == true) lNode.Format["phType"] = lph.Type.InnerText;
+                        if (lph.Index?.HasValue == true) lNode.Format["phIndex"] = lph.Index.Value;
+                        lNode.Format["inheritedFrom"] = "layout";
+                        results.Add(lNode);
+                    }
                 }
             }
         }
