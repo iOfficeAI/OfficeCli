@@ -367,16 +367,35 @@ public partial class PowerPointHandler
         int delayMs = 0, easingAccel = 0, easingDecel = 0;
         var unrecognized = new List<string>();
 
+        // bt-1 / fuzz-1 fix: top-level animation= prop bypasses the
+        // ParseEffectClassSuffix gate that effect= goes through. Detect
+        // contradictory class tokens (fly-in-out / fly-out-in) here so
+        // the user is told instead of silently getting the last-wins class.
+        // CONSISTENCY(animation-class-suffix).
+        string? seenClassToken = null;
+        TimeNodePresetClassValues? seenClassValue = null;
+        void RecordClass(string token, TimeNodePresetClassValues v)
+        {
+            if (seenClassValue.HasValue && seenClassValue.Value != v)
+                throw new ArgumentException(
+                    $"Animation '{value}' has contradictory class tokens "
+                    + $"'{seenClassToken}' and '{token}'. "
+                    + "Pass exactly one of: in/out/entrance/exit/emphasis.");
+            seenClassToken = token;
+            seenClassValue = v;
+            presetClass = v;
+        }
+
         for (int i = 1; i < parts.Length; i++)
         {
             var seg = parts[i].ToLowerInvariant();
             // Class?
             if (seg is "entrance" or "in" or "entr")
-                presetClass = TimeNodePresetClassValues.Entrance;
+                RecordClass(seg, TimeNodePresetClassValues.Entrance);
             else if (seg is "exit" or "out")
-                presetClass = TimeNodePresetClassValues.Exit;
+                RecordClass(seg, TimeNodePresetClassValues.Exit);
             else if (seg is "emphasis" or "emph")
-                presetClass = TimeNodePresetClassValues.Emphasis;
+                RecordClass(seg, TimeNodePresetClassValues.Emphasis);
             // Trigger?
             else if (seg is "after" or "afterprevious" or "afterprev")
                 explicitTrigger = AnimTrigger.AfterPrevious;
