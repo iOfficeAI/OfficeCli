@@ -961,7 +961,10 @@ public partial class WordHandler
             node.Format["alignment"] = firstPara.ParagraphProperties.Justification.Val.InnerText;
 
         node.ChildCount = header.Elements<Paragraph>().Count();
-        if (depth > 0)
+        // CONSISTENCY(header-footer-get): default depth (=1) returns the
+        // single header/footer node, mirroring `query header` / `query footer`.
+        // Paragraph children only expand at explicit depth >= 2.
+        if (depth >= 2)
         {
             int pIdx = 0;
             foreach (var para in header.Elements<Paragraph>())
@@ -1018,7 +1021,8 @@ public partial class WordHandler
             node.Format["alignment"] = firstPara.ParagraphProperties.Justification.Val.InnerText;
 
         node.ChildCount = footer.Elements<Paragraph>().Count();
-        if (depth > 0)
+        // CONSISTENCY(header-footer-get): see GetHeaderNode.
+        if (depth >= 2)
         {
             int pIdx = 0;
             foreach (var para in footer.Elements<Paragraph>())
