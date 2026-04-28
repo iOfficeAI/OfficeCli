@@ -179,9 +179,16 @@ public partial class WordHandler
         var fldCharEl = run.GetFirstChild<FieldChar>();
         var instrEl = run.GetFirstChild<FieldCode>();
         var breakElInline = run.GetFirstChild<Break>();
+        var tabElInline = run.GetFirstChild<TabChar>();
         var hasText = run.GetFirstChild<Text>() != null;
+        // CONSISTENCY(run-special-content): mirror the 5-way type upgrade
+        // in Navigation.cs — ptab / fieldChar / instrText / tab / break.
+        // Round 11 caught that `tab` was missing from this judgment:
+        // Get strips typography from tab runs, but Set silently accepted
+        // bold/color/font writes onto them, breaking read/write symmetry.
         bool isSpecialRun = ptabEl != null || fldCharEl != null || instrEl != null
-                            || (breakElInline != null && !hasText);
+                            || (breakElInline != null && !hasText)
+                            || (tabElInline != null && !hasText);
 
         foreach (var (key, value) in properties)
         {
