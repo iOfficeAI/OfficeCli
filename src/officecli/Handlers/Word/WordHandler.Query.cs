@@ -986,6 +986,7 @@ public partial class WordHandler
             if (rp.Italic != null) node.Format["italic"] = true;
             if (rp.Color?.Val?.Value != null) node.Format["color"] = ParseHelpers.FormatHexColor(rp.Color.Val.Value);
             else if (rp.Color?.ThemeColor?.HasValue == true) node.Format["color"] = rp.Color.ThemeColor.InnerText;
+            if (rp.Underline?.Val != null) node.Format["underline"] = rp.Underline.Val.InnerText;
         }
 
         var firstPara = header.Elements<Paragraph>().FirstOrDefault();
@@ -1046,6 +1047,7 @@ public partial class WordHandler
             if (rp.Italic != null) node.Format["italic"] = true;
             if (rp.Color?.Val?.Value != null) node.Format["color"] = ParseHelpers.FormatHexColor(rp.Color.Val.Value);
             else if (rp.Color?.ThemeColor?.HasValue == true) node.Format["color"] = rp.Color.ThemeColor.InnerText;
+            if (rp.Underline?.Val != null) node.Format["underline"] = rp.Underline.Val.InnerText;
         }
 
         var firstPara = footer.Elements<Paragraph>().FirstOrDefault();
