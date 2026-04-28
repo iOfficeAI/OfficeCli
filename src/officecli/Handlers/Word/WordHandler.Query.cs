@@ -1442,9 +1442,18 @@ public partial class WordHandler
             return results;
         }
 
-        // Determine if main selector targets runs directly (no > parent)
+        // Determine if main selector targets runs directly (no > parent).
+        // CONSISTENCY(run-special-content): the specialized run-kind types
+        // exposed by Get (ptab/fieldChar/instrText/tab/break) all live as
+        // <w:r> children of a paragraph — they reuse the run-walk dispatch
+        // and let MatchesRunSelector type-filter on the actual inline payload.
         bool isRunSelector = parsed.ChildSelector == null &&
-            (parsed.Element == "r" || parsed.Element == "run");
+            (parsed.Element == "r" || parsed.Element == "run"
+             || parsed.Element == "ptab" || parsed.Element == "positionaltab"
+             || parsed.Element == "fieldchar" || parsed.Element == "fldchar"
+             || parsed.Element == "instrtext"
+             || parsed.Element == "tab"
+             || parsed.Element == "break" || parsed.Element == "br");
         bool isPictureSelector = parsed.ChildSelector == null &&
             (parsed.Element == "picture" || parsed.Element == "image" || parsed.Element == "img");
         bool isOleSelector = parsed.ChildSelector == null &&
@@ -1487,7 +1496,17 @@ public partial class WordHandler
                 or "media"
                 or "hyperlink"
                 or "section"
-                or "ole" or "oleobject" or "object" or "embed";
+                or "ole" or "oleobject" or "object" or "embed"
+                // CONSISTENCY(run-special-content): specialized run-kind
+                // types are dispatched via the run-walk above; treat them
+                // as known so they don't fall through to GenericXmlQuery,
+                // which would emit non-canonical OOXML-element paths
+                // (/p[N]/r[N]/br[1] etc.) that don't pipe back to set/get.
+                or "ptab" or "positionaltab"
+                or "fieldchar" or "fldchar"
+                or "instrtext"
+                or "tab"
+                or "break" or "br";
         if (!isKnownType && parsed.ChildSelector == null)
         {
             var root = _doc.MainDocumentPart?.Document;

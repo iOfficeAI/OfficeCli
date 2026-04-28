@@ -386,8 +386,14 @@ internal class WatchMessage
             path, @"^/body/table\[\d+\]/tr\[\d+\]$");
         if (rowMatch.Success) return $"[data-path=\"{path}\"]";
 
-        // Paragraph / table — the original anchor-based selector.
-        var match = System.Text.RegularExpressions.Regex.Match(path, @"/(p|paragraph|table)\[(\d+)\]");
+        // Paragraph / table — the original anchor-based selector. Anchor
+        // the regex to `^/body/...` so a header/footer/cell sub-path that
+        // happens to contain `/p[N]` (e.g. /footer[2]/p[1]/r[2]) doesn't
+        // silently fall through to `#w-p-1` (body's first paragraph).
+        // BUG-BT-R34-3 follow-up: that regression would scroll the watcher
+        // to the wrong location while reporting success.
+        var match = System.Text.RegularExpressions.Regex.Match(
+            path, @"^/body/(p|paragraph|table)\[(\d+)\]$");
         if (!match.Success) return null;
         var type = match.Groups[1].Value;
         if (type == "paragraph") type = "p";

@@ -209,6 +209,15 @@ public partial class WordHandler
                     break;
                 case "instr" when instrEl != null:
                     instrEl.Text = value;
+                    // CONSISTENCY(field-cache-stale): rewriting a field
+                    // instruction (e.g. PAGE → DATE) without invalidating
+                    // the cached result run leaves Word displaying the
+                    // stale value until the user manually presses F9.
+                    // Walk to the owning field's begin <w:fldChar> and set
+                    // dirty="true" so Word recomputes the field on next
+                    // open. Mirrors Word's own behavior when the user edits
+                    // a field code via toggle-codes.
+                    MarkOwningFieldDirty(run);
                     break;
                 case "breaktype" when breakElInline != null:
                     breakElInline.Type = ParseBreakType(value);

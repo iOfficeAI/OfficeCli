@@ -1711,6 +1711,12 @@ public partial class WordHandler
         .hyphen-leader {{ flex: 1; border-bottom: 1px dashed #000; margin: 0 4px; min-width: 2em; align-self: flex-end; margin-bottom: 0.25em; }}
         .underscore-leader {{ flex: 1; border-bottom: 1px solid #000; margin: 0 4px; min-width: 2em; align-self: flex-end; margin-bottom: 0.25em; }}
         .middledot-leader {{ flex: 1; border-bottom: 2px dotted #555; margin: 0 4px; min-width: 2em; align-self: flex-end; margin-bottom: 0.25em; }}
+        /* CONSISTENCY(run-special-content): w:ptab anchors header/footer
+           left/center/right alignment regions. The paragraph carrying
+           ptabs becomes a flex container so .ptab-spacer (and the leader
+           variants above) can flex-grow to push siblings apart. */
+        p.has-ptab, div.has-ptab {{ display: flex; align-items: baseline; flex-wrap: wrap; }}
+        .ptab-spacer {{ flex: 1; min-width: 1em; }}
         ul, ol {{ padding-left: 2em; margin: 0.2em 0; }}
         ul {{ list-style-type: disc; }}
         li {{ margin: 0.1em 0; }}

@@ -235,8 +235,50 @@ public partial class WordHandler
 
     private static bool MatchesRunSelector(Run run, Paragraph parent, SelectorPart selector)
     {
-        if (selector.Element != null && selector.Element != "r" && selector.Element != "run")
+        // CONSISTENCY(run-special-content): query elements ptab / fieldChar /
+        // instrText / tab / break each select runs whose primary inline
+        // payload is the matching structural element. Mirrors Get's type
+        // upgrade (WordHandler.Navigation.cs run branch) and AttributeFilter's
+        // dual-key matching — the canonical name written by Get is the same
+        // name accepted here on Query so users don't have to translate
+        // between OOXML local-names (br/fldChar) and DOM types (break/fieldChar).
+        var elementLower = selector.Element?.ToLowerInvariant();
+        if (elementLower != null
+            && elementLower != "r" && elementLower != "run"
+            && elementLower != "ptab" && elementLower != "positionaltab"
+            && elementLower != "fieldchar" && elementLower != "fldchar"
+            && elementLower != "instrtext"
+            && elementLower != "tab"
+            && elementLower != "break" && elementLower != "br")
             return false;
+
+        // Type filter: when element names a specialized run kind, the run's
+        // actual content must match. Otherwise the run-walk would return
+        // every paragraph child indiscriminately.
+        if (elementLower is "ptab" or "positionaltab")
+        {
+            if (run.GetFirstChild<PositionalTab>() == null) return false;
+        }
+        else if (elementLower is "fieldchar" or "fldchar")
+        {
+            if (run.GetFirstChild<FieldChar>() == null) return false;
+        }
+        else if (elementLower == "instrtext")
+        {
+            if (run.GetFirstChild<FieldCode>() == null) return false;
+        }
+        else if (elementLower == "tab")
+        {
+            // Only match runs whose primary content is a tab (no <w:t>); a
+            // run with text + tab still surfaces as type=run, not type=tab.
+            if (run.GetFirstChild<TabChar>() == null) return false;
+            if (run.GetFirstChild<Text>() != null) return false;
+        }
+        else if (elementLower is "break" or "br")
+        {
+            if (run.GetFirstChild<Break>() == null) return false;
+            if (run.GetFirstChild<Text>() != null) return false;
+        }
 
         foreach (var (key, rawVal) in selector.Attributes)
         {
@@ -255,6 +297,19 @@ public partial class WordHandler
                 "size" => GetRunFontSize(run),
                 "bold" => run.RunProperties?.Bold != null ? "true" : "false",
                 "italic" => run.RunProperties?.Italic != null ? "true" : "false",
+                // CONSISTENCY(run-special-content): structural inline-element
+                // attributes mirror what Get exposes in node.Format.
+                "alignment" => run.GetFirstChild<PositionalTab>()?.Alignment?.HasValue == true
+                    ? run.GetFirstChild<PositionalTab>()!.Alignment!.InnerText : null,
+                "relativeto" => run.GetFirstChild<PositionalTab>()?.RelativeTo?.HasValue == true
+                    ? run.GetFirstChild<PositionalTab>()!.RelativeTo!.InnerText : null,
+                "leader" => run.GetFirstChild<PositionalTab>()?.Leader?.HasValue == true
+                    ? run.GetFirstChild<PositionalTab>()!.Leader!.InnerText : null,
+                "fieldchartype" => run.GetFirstChild<FieldChar>()?.FieldCharType?.HasValue == true
+                    ? run.GetFirstChild<FieldChar>()!.FieldCharType!.InnerText : null,
+                "instr" => run.GetFirstChild<FieldCode>()?.Text,
+                "breaktype" => run.GetFirstChild<Break>()?.Type?.HasValue == true
+                    ? run.GetFirstChild<Break>()!.Type!.InnerText : null,
                 _ => GenericXmlQuery.GetAttributeValue(run, key)
                      ?? (run.RunProperties != null ? GenericXmlQuery.GetAttributeValue(run.RunProperties, key) : null)
             };

@@ -1385,10 +1385,31 @@ public partial class WordHandler
                 catch { }
             }
 
-            // Populate effective.* properties from style inheritance
+            // Populate effective.* properties from style inheritance.
+            // CONSISTENCY(run-special-content): runs whose primary payload
+            // is a structural inline element (ptab/fieldChar/instrText/tab/
+            // break) carry no glyph for font/size/color to apply to;
+            // emitting effective.size / effective.font.* on them only
+            // floods output with noise and primes audit tools to misread
+            // cosmetic styles on a "fldChar end" marker as meaningful.
+            // Picture/ole runs are gated for the same reason — their
+            // typography is irrelevant to the embedded media.
             var parentPara = run.Ancestors<Paragraph>().FirstOrDefault();
-            if (parentPara != null)
+            if (parentPara != null && node.Type == "run")
                 PopulateEffectiveRunProperties(node, run, parentPara);
+
+            // Same noise-suppression for direct rPr-level keys read before
+            // the type upgrade above (font.*/size/bold/...): they are valid
+            // OOXML but irrelevant to special-content runs, where node.Type
+            // already conveys the semantic role. Strip them for ptab /
+            // fieldChar / instrText / tab / break so audit tools see a
+            // clean property bag (alignment, fieldCharType, instr,
+            // breakType, etc.).
+            if (node.Type is "ptab" or "fieldChar" or "instrText" or "tab" or "break")
+            {
+                foreach (var noiseKey in TypographyOnlyKeys)
+                    node.Format.Remove(noiseKey);
+            }
         }
         else if (element is Hyperlink hyperlink)
         {

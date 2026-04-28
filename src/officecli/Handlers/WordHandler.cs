@@ -110,6 +110,14 @@ public partial class WordHandler : IDocumentHandler
 
         var affected = RawXmlHelper.Execute(rootElement, xpath, action, xml);
         rootElement.Save();
+        // CONSISTENCY(paraid-global-uniqueness): RawSet may inject paragraphs
+        // carrying paraIds the handler hasn't seen — without re-scanning,
+        // _usedParaIds and _nextParaId stay stale and the next AddBreak /
+        // AddParagraph could allocate a colliding paraId. Especially
+        // dangerous in resident mode where one process serves many commands
+        // across the same _usedParaIds set. Re-run EnsureAllParaIds after
+        // every successful raw mutation so the global pool stays accurate.
+        EnsureAllParaIds();
         Console.WriteLine($"raw-set: {affected} element(s) affected");
     }
 

@@ -30,8 +30,18 @@ public partial class WordHandler
         sb.Append($"<{tag}");
         // Add CSS class for TOC paragraphs (suppress hyperlink styling)
         var styleId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+        var classes = new List<string>();
         if (styleId != null && styleId.StartsWith("TOC", StringComparison.OrdinalIgnoreCase))
-            sb.Append(" class=\"toc\"");
+            classes.Add("toc");
+        // CONSISTENCY(run-special-content): paragraphs containing w:ptab
+        // (header/footer left/center/right alignment) need a flex container
+        // for the .ptab-spacer / .*-leader children to actually push their
+        // siblings apart. The has-ptab class enables display:flex without
+        // affecting paragraphs that don't need it.
+        if (para.Descendants<PositionalTab>().Any())
+            classes.Add("has-ptab");
+        if (classes.Count > 0)
+            sb.Append($" class=\"{string.Join(" ", classes)}\"");
         var pStyle = GetParagraphInlineCss(para);
         if (!string.IsNullOrEmpty(pStyle))
             sb.Append($" style=\"{pStyle}\"");
@@ -379,6 +389,32 @@ public partial class WordHandler
                     }
                     _ctx.CurrentParagraphTabIndex++;
                 }
+            }
+            else if (child is PositionalTab ptabChild)
+            {
+                // CONSISTENCY(run-special-content): w:ptab is the OOXML
+                // primitive Word emits in headers/footers to anchor
+                // left/center/right alignment regions. Without a render
+                // branch the html preview silently dropped these and the
+                // three header segments collapsed into a single line.
+                // Emit a flex-grow spacer (uses existing leader CSS classes
+                // when a leader is set, otherwise a plain ptab-spacer with
+                // fallback min-width so the gap is still visible inside
+                // non-flex paragraphs). For paragraphs hosting ptabs the
+                // outer container is already widened to flex via the
+                // has-ptab class added in RenderParagraphHtml.
+                if (needsSpan) { sb.Append("</span>"); needsSpan = false; }
+                var ptabLeader = ptabChild.Leader?.HasValue == true
+                    ? ptabChild.Leader.InnerText : null;
+                var ptabClass = ptabLeader switch
+                {
+                    "dot" => "dot-leader",
+                    "hyphen" or "dash" => "hyphen-leader",
+                    "underscore" or "heavy" => "underscore-leader",
+                    "middleDot" => "middledot-leader",
+                    _ => "ptab-spacer",
+                };
+                sb.Append($"<span class=\"{ptabClass}\"></span>");
             }
             else if (child is CarriageReturn)
                 sb.Append("<br>");

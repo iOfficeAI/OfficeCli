@@ -430,6 +430,67 @@ public partial class WordHandler
         return string.Concat(run.Elements<Text>().Select(t => t.Text));
     }
 
+    // CONSISTENCY(field-cache-stale): walk back from a run carrying an
+    // <w:instrText> to the nearest preceding <w:fldChar fldCharType="begin">
+    // in the same paragraph and set its dirty="true" attribute, so Word
+    // recomputes the field on next open. Used by Set when the instruction
+    // text is rewritten — without dirty, the cached result run keeps the
+    // old display value (e.g. "PAGE → DATE" still shows the old page
+    // number) until the user manually presses F9.
+    private static void MarkOwningFieldDirty(Run run)
+    {
+        var para = run.Parent;
+        if (para == null) return;
+        // Walk siblings backward from this run looking for the nearest
+        // <w:fldChar w:fldCharType="begin">. Use InnerText for the
+        // comparison: SDK v3 enum equality on FieldCharValues is
+        // unreliable (same trap as LineSpacingRuleValues — see WordHandler
+        // CLAUDE.md), and InnerText returns the actual XML attribute
+        // value ("begin"/"separate"/"end").
+        OpenXmlElement? sibling = run.PreviousSibling();
+        while (sibling != null)
+        {
+            if (sibling is Run sibRun)
+            {
+                var fld = sibRun.GetFirstChild<FieldChar>();
+                if (fld?.FieldCharType?.HasValue == true
+                    && fld.FieldCharType.InnerText == "begin")
+                {
+                    fld.Dirty = true;
+                    return;
+                }
+            }
+            sibling = sibling.PreviousSibling();
+        }
+    }
+
+    // CONSISTENCY(run-special-content): typography-only Format keys that
+    // get scrubbed from runs whose Type was upgraded to ptab / fieldChar /
+    // instrText / tab / break. These properties are valid in the underlying
+    // <w:rPr> but have no glyph to apply to on these specialized runs, so
+    // surfacing them is noise that primes audit tools to misread cosmetic
+    // styling on a structural marker as meaningful.
+    private static readonly string[] TypographyOnlyKeys =
+    {
+        "font.ascii", "font.eastAsia", "font.hAnsi", "font.cs",
+        "size", "bold", "italic", "color",
+        "underline", "underline.color",
+        "strike", "dstrike", "highlight",
+        "caps", "smallcaps", "vanish",
+        "outline", "shadow", "emboss", "imprint",
+        "noproof", "rtl", "superscript", "subscript",
+        "charSpacing", "shading",
+        "effective.size", "effective.size.src",
+        "effective.font.ascii", "effective.font.ascii.src",
+        "effective.font.eastAsia", "effective.font.eastAsia.src",
+        "effective.font.hAnsi", "effective.font.hAnsi.src",
+        "effective.font.cs", "effective.font.cs.src",
+        "effective.bold", "effective.bold.src",
+        "effective.italic", "effective.italic.src",
+        "effective.color", "effective.color.src",
+        "effective.underline", "effective.underline.src",
+    };
+
     // CONSISTENCY(run-special-content): canonical parsers for the run-internal
     // structural types (ptab / fldChar / break) shared by Add and Set.
     // Lowercase XML attribute values are the canonical input; legacy
