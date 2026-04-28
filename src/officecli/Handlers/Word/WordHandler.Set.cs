@@ -323,16 +323,44 @@ public partial class WordHandler
             {
                 case "text":
                 {
+                    // Only replace non-field static text runs. Complex fields are
+                    // a multi-run sequence: [Begin][Instr]([Separate][Result])[End].
+                    // Runs carrying <w:fldChar>/<w:instrText> AND any run nested
+                    // between Separate and End (the field "result" run) must all
+                    // survive — otherwise PAGE/DATE/etc. embedded in header/footer
+                    // are silently destroyed.
+                    var paraRuns = firstPara.Elements<Run>().ToList();
+                    var inField = false;
+                    var fieldRunSet = new HashSet<Run>();
+                    foreach (var r in paraRuns)
+                    {
+                        var fldChar = r.Elements<FieldChar>().FirstOrDefault();
+                        var hasInstr = r.Elements<FieldCode>().Any();
+                        if (fldChar != null || hasInstr)
+                        {
+                            fieldRunSet.Add(r);
+                            if (fldChar?.FieldCharType?.Value == FieldCharValues.Begin) inField = true;
+                            else if (fldChar?.FieldCharType?.Value == FieldCharValues.End) inField = false;
+                        }
+                        else if (inField)
+                        {
+                            fieldRunSet.Add(r);
+                        }
+                    }
                     RunProperties? existingRProps = null;
-                    var existingRun = firstPara.Elements<Run>().FirstOrDefault();
-                    if (existingRun?.RunProperties != null)
-                        existingRProps = (RunProperties)existingRun.RunProperties.CloneNode(true);
-                    foreach (var r in firstPara.Elements<Run>().ToList()) r.Remove();
+                    var firstStaticRun = paraRuns.FirstOrDefault(r => !fieldRunSet.Contains(r));
+                    if (firstStaticRun?.RunProperties != null)
+                        existingRProps = (RunProperties)firstStaticRun.RunProperties.CloneNode(true);
+                    var firstFieldRun = paraRuns.FirstOrDefault(fieldRunSet.Contains);
+                    foreach (var r in paraRuns.Where(r => !fieldRunSet.Contains(r))) r.Remove();
                     var newRun = new Run();
                     if (existingRProps != null)
                         newRun.AppendChild(existingRProps);
                     newRun.AppendChild(new Text(value) { Space = SpaceProcessingModeValues.Preserve });
-                    firstPara.AppendChild(newRun);
+                    if (firstFieldRun != null)
+                        firstPara.InsertBefore(newRun, firstFieldRun);
+                    else
+                        firstPara.AppendChild(newRun);
                     break;
                 }
                 case "size" or "font" or "bold" or "italic" or "color" or "highlight" or "underline" or "strike":
