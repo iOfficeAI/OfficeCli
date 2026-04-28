@@ -407,6 +407,24 @@ public partial class PowerPointHandler
         var blipFill = shape.ShapeProperties?.GetFirstChild<Drawing.BlipFill>();
         if (blipFill != null) node.Format["image"] = "true";
 
+        // Pattern fill on shape — round-trip the input form "preset:fg:bg".
+        var patternFill = shape.ShapeProperties?.GetFirstChild<Drawing.PatternFill>();
+        if (patternFill != null)
+        {
+            var preset = patternFill.Preset?.InnerText ?? "";
+            var fgEl = patternFill.GetFirstChild<Drawing.ForegroundColor>();
+            var bgEl = patternFill.GetFirstChild<Drawing.BackgroundColor>();
+            var fgHex = fgEl?.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
+            var fgScheme = fgEl?.GetFirstChild<Drawing.SchemeColor>()?.Val?.Value.ToString();
+            var bgHex = bgEl?.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
+            var bgScheme = bgEl?.GetFirstChild<Drawing.SchemeColor>()?.Val?.Value.ToString();
+            var fg = fgHex != null ? ParseHelpers.FormatHexColor(fgHex) : (fgScheme ?? "");
+            var bg = bgHex != null ? ParseHelpers.FormatHexColor(bgHex) : (bgScheme ?? "");
+            node.Format["pattern"] = string.IsNullOrEmpty(bg) ? $"{preset}:{fg}" : $"{preset}:{fg}:{bg}";
+            if (!node.Format.ContainsKey("fill"))
+                node.Format["fill"] = "pattern";
+        }
+
         // List style (from first paragraph)
         var firstParaBullet = shape.TextBody?.Elements<Drawing.Paragraph>().FirstOrDefault()?.ParagraphProperties;
         if (firstParaBullet != null)
