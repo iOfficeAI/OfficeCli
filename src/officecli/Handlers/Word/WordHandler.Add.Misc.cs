@@ -513,6 +513,15 @@ public partial class WordHandler
         if (properties.TryGetValue("instruction", out var instr))
             fieldInstr = instr.StartsWith(" ") ? instr : $" {instr} ";
 
+        // CONSISTENCY(field-prop-applicability): the schema in field.json
+        // declares per-fieldType-specific props (expression/trueText/
+        // falseText for IF, identifier for SEQ, hyperlink for REF, etc.)
+        // as universal field-level keys for ergonomic CLI completion.
+        // Warn on stderr when a prop that only matters for one fieldType
+        // is supplied alongside a different fieldType — Add was silently
+        // dropping these per-type props without feedback (Round 5 audit).
+        WarnInapplicableFieldProps(properties, effectiveType);
+
         var fieldPlaceholder = properties.ContainsKey("text")
             ? properties["text"]
             : effectiveType switch
@@ -632,6 +641,60 @@ public partial class WordHandler
             }
         }
         return resultPath;
+    }
+
+    // CONSISTENCY(field-prop-applicability): map each fieldType to the
+    // per-type props the Add path actually reads. Anything outside the
+    // universal set + this map's value is unused for that fieldType and
+    // should surface as a warning so the user notices the typo / wrong
+    // assumption (e.g. supplying bookmarkName=... with fieldType=if).
+    private static readonly Dictionary<string, string[]> FieldTypeProps =
+        new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["mergefield"] = new[] { "name", "fieldname" },
+        ["ref"] = new[] { "name", "fieldname", "bookmarkname", "bookmark", "hyperlink" },
+        ["pageref"] = new[] { "name", "fieldname", "bookmarkname", "bookmark", "hyperlink" },
+        ["noteref"] = new[] { "name", "fieldname", "bookmarkname", "bookmark", "hyperlink" },
+        ["seq"] = new[] { "identifier", "id", "name" },
+        ["styleref"] = new[] { "stylename", "name" },
+        ["docproperty"] = new[] { "propertyname", "name" },
+        ["if"] = new[] { "expression", "condition", "truetext", "falsetext" },
+        ["date"] = new[] { "format" },
+        ["time"] = new[] { "format" },
+        ["createdate"] = new[] { "format" },
+        ["savedate"] = new[] { "format" },
+        ["printdate"] = new[] { "format" },
+    };
+
+    // Universal props every fieldType accepts: routing keys, run rPr,
+    // raw-instruction override, anchor placement, cached display text.
+    private static readonly HashSet<string> FieldUniversalProps =
+        new(StringComparer.OrdinalIgnoreCase)
+    {
+        "fieldtype", "type", "instr", "instruction", "code",
+        "text", "font", "size", "bold", "color",
+        "index", "after", "before",
+    };
+
+    private static void WarnInapplicableFieldProps(
+        Dictionary<string, string> properties, string effectiveType)
+    {
+        var typeProps = FieldTypeProps.GetValueOrDefault(effectiveType)
+            ?? Array.Empty<string>();
+        var typeSet = new HashSet<string>(typeProps, StringComparer.OrdinalIgnoreCase);
+        foreach (var key in properties.Keys)
+        {
+            if (FieldUniversalProps.Contains(key)) continue;
+            if (typeSet.Contains(key)) continue;
+            // Any other prop is known to no fieldType-specific consumer —
+            // the BuildXxxFieldInstruction path won't read it. Surface a
+            // warning so silent-ignore (Round 5 R5-T1 / R5-F2) becomes
+            // visible. Use stderr, exit code stays 0 (consistent with
+            // other Add warning paths via Console.Error.WriteLine).
+            Console.Error.WriteLine(
+                $"Warning: prop '{key}' is not applicable to field type '{effectiveType}' — silently ignored. " +
+                $"Applicable to '{effectiveType}': {(typeProps.Length > 0 ? string.Join(", ", typeProps) : "none beyond universal")}.");
+        }
     }
 
     private static string BuildIfFieldInstruction(Dictionary<string, string> properties)

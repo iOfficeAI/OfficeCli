@@ -754,14 +754,30 @@ public partial class WordHandler
             else if (seg.StringIndex != null && seg.StringIndex.StartsWith("@paraId=", StringComparison.OrdinalIgnoreCase))
             {
                 var targetId = seg.StringIndex["@paraId=".Length..];
+                // CONSISTENCY(paraid-global-uniqueness): paraId is globally
+                // unique across body/headers/footers/footnotes/endnotes/
+                // comments (EnsureAllParaIds scans every part). Resolve by
+                // descendants too — direct-child-only scan made cell paras
+                // unreachable from the canonical /body/p[@paraId=...] form
+                // that AddPtab/AddBreak/AddField return for cell parents.
                 next = childList.OfType<Paragraph>()
                     .FirstOrDefault(p => string.Equals(p.ParagraphId?.Value, targetId, StringComparison.OrdinalIgnoreCase));
+                if (next == null)
+                {
+                    next = (current as OpenXmlElement)?.Descendants<Paragraph>()
+                        .FirstOrDefault(p => string.Equals(p.ParagraphId?.Value, targetId, StringComparison.OrdinalIgnoreCase));
+                }
             }
             else if (seg.StringIndex != null && seg.StringIndex.StartsWith("@textId=", StringComparison.OrdinalIgnoreCase))
             {
                 var targetId = seg.StringIndex["@textId=".Length..];
                 next = childList.OfType<Paragraph>()
                     .FirstOrDefault(p => string.Equals(p.TextId?.Value, targetId, StringComparison.OrdinalIgnoreCase));
+                if (next == null)
+                {
+                    next = (current as OpenXmlElement)?.Descendants<Paragraph>()
+                        .FirstOrDefault(p => string.Equals(p.TextId?.Value, targetId, StringComparison.OrdinalIgnoreCase));
+                }
             }
             else if (seg.StringIndex != null && seg.StringIndex.StartsWith("@commentId=", StringComparison.OrdinalIgnoreCase))
             {
