@@ -326,6 +326,15 @@
       "readback": "n/a",
       "enforcement": "report"
     },
+    "image": {
+      "type": "string",
+      "description": "image (blip) fill: path to a local image file used as the shape fill.",
+      "aliases": ["imagefill"],
+      "add": true, "set": true, "get": false,
+      "examples": ["--prop image=/path/to/photo.png"],
+      "readback": "n/a",
+      "enforcement": "report"
+    },
     "line": {
       "type": "color",
       "description": "outline (border) color.",
