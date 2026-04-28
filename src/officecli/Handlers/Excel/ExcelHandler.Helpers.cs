@@ -2152,8 +2152,10 @@ public partial class ExcelHandler
         // CONSISTENCY(validation-incelldropdown): Add accepts inCellDropdown
         // (user-friendly sense; OOXML stores the inverse showDropDown).
         // Get must surface the same key so help-doc [add/get] is honored.
-        if (dv.ShowDropDown?.HasValue == true)
-            node.Format["inCellDropdown"] = !dv.ShowDropDown.Value;
+        // OOXML default: showDropDown attribute absent => dropdown is shown
+        // (inCellDropdown=true). showDropDown=true means hide arrow
+        // (inCellDropdown=false). Always emit so round-trip is symmetric.
+        node.Format["inCellDropdown"] = !(dv.ShowDropDown?.Value ?? false);
 
         return node;
     }
