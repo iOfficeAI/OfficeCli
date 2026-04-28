@@ -170,7 +170,7 @@ public partial class WordHandler
 
         // CONSISTENCY(run-special-content): mirror Get's per-kind type
         // upgrade in WordHandler.Navigation.cs. When a run carries inline
-        // structure (ptab/fldChar/instrText/break) instead of <w:t>,
+        // structure (ptab/fldChar/instrText/tab/break) instead of <w:t>,
         // expose its settable surface — alignment / fieldCharType / instr
         // / breakType — so audit→fix workflows can correct PAGE→DATE
         // field codes, flip header alignment regions, etc., without
@@ -194,8 +194,8 @@ public partial class WordHandler
         {
             // CONSISTENCY(run-special-content): typography props (font.* /
             // size / bold / color / underline …) are noise on ptab /
-            // fieldChar / instrText / break runs because there is no glyph
-            // to apply them to. Get strips them on readback (Round 2);
+            // fieldChar / instrText / tab / break runs because there is no
+            // glyph to apply them to. Get strips them on readback (Round 2);
             // accepting them on Set would write to <w:rPr> anyway and
             // diverge between the read and write surfaces. Reject so the
             // caller sees a clean unsupported notice and the OOXML stays
