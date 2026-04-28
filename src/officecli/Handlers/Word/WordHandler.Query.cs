@@ -533,6 +533,18 @@ public partial class WordHandler
             return BuildSectionNode(sectPr, path);
         }
 
+        // /docDefaults — root-level access to docDefaults rPr/pPr. Mirrors
+        // PopulateDocDefaults output but as a standalone node so the
+        // effective.X.src = "/docDefaults" pointer (run/paragraph
+        // provenance) is directly Get-able without retrieving the whole
+        // document root node.
+        if (path == "/docDefaults")
+        {
+            var ddNode = new DocumentNode { Path = path, Type = "docDefaults" };
+            PopulateDocDefaults(ddNode);
+            return ddNode;
+        }
+
         // Style paths: /styles/StyleId (read the style itself).
         // Restrict to a single segment so deeper paths like /styles/<id>/tab[N]
         // fall through to generic Navigation.
@@ -551,7 +563,11 @@ public partial class WordHandler
             styleNode.Format["id"] = style.StyleId?.Value ?? "";
             styleNode.Format["name"] = style.StyleName?.Val?.Value ?? "";
             if (style.Type?.Value != null) styleNode.Format["type"] = style.Type.InnerText;
-            if (style.BasedOn?.Val?.Value != null) styleNode.Format["basedOn"] = style.BasedOn.Val.Value;
+            if (style.BasedOn?.Val?.Value != null)
+            {
+                styleNode.Format["basedOn"] = style.BasedOn.Val.Value;
+                styleNode.Format["basedOn.path"] = $"/styles/{style.BasedOn.Val.Value}";
+            }
             if (style.NextParagraphStyle?.Val?.Value != null) styleNode.Format["next"] = style.NextParagraphStyle.Val.Value;
 
             // Read run properties
@@ -1159,7 +1175,11 @@ public partial class WordHandler
                     styleNode.Format["id"] = styleId;
                     styleNode.Format["name"] = styleName;
                     if (style.Type?.Value != null) styleNode.Format["type"] = style.Type.InnerText;
-                    if (style.BasedOn?.Val?.Value != null) styleNode.Format["basedOn"] = style.BasedOn.Val.Value;
+                    if (style.BasedOn?.Val?.Value != null)
+            {
+                styleNode.Format["basedOn"] = style.BasedOn.Val.Value;
+                styleNode.Format["basedOn.path"] = $"/styles/{style.BasedOn.Val.Value}";
+            }
 
                     // Filter by :contains
                     if (parsed.ContainsText != null && !(styleName.Contains(parsed.ContainsText, StringComparison.OrdinalIgnoreCase) == true))

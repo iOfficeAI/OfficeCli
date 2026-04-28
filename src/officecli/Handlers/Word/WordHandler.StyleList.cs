@@ -13,6 +13,26 @@ public partial class WordHandler
     // ==================== Style Inheritance ====================
 
     private RunProperties ResolveEffectiveRunProperties(Run run, Paragraph para)
+        => ResolveEffectiveRunPropertiesCore(run, para, sources: null);
+
+    /// <summary>
+    /// Same as <see cref="ResolveEffectiveRunProperties"/> but also returns
+    /// a per-property provenance map: key = property name (e.g. "size",
+    /// "font.eastAsia", "color"), value = path-form layer label
+    /// ("/docDefaults", "/styles/Heading1", "/direct"). The "/direct" source
+    /// is recorded for completeness; PopulateEffectiveRunProperties suppresses
+    /// effective.* keys when the base key is set, so direct never surfaces.
+    /// </summary>
+    private (RunProperties Effective, Dictionary<string, string> Sources)
+        ResolveEffectiveRunPropertiesWithSources(Run run, Paragraph para)
+    {
+        var sources = new Dictionary<string, string>();
+        var effective = ResolveEffectiveRunPropertiesCore(run, para, sources);
+        return (effective, sources);
+    }
+
+    private RunProperties ResolveEffectiveRunPropertiesCore(
+        Run run, Paragraph para, Dictionary<string, string>? sources)
     {
         var effective = new RunProperties();
 
@@ -20,7 +40,7 @@ public partial class WordHandler
         var docDefaults = _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles?.DocDefaults;
         var defaultRPr = docDefaults?.RunPropertiesDefault?.RunPropertiesBaseStyle;
         if (defaultRPr != null)
-            MergeRunProperties(effective, defaultRPr);
+            MergeRunProperties(effective, defaultRPr, "/docDefaults", sources);
 
         // 2. Walk paragraph style basedOn chain (collect in order, apply from base to derived)
         var styleId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
@@ -37,12 +57,16 @@ public partial class WordHandler
                 chain.Add(style);
                 currentStyleId = style.BasedOn?.Val?.Value;
             }
-            // Apply from base to derived (reverse order)
+            // Apply from base to derived (reverse order). Source label is the
+            // styleId that actually wrote the property — not the chain top —
+            // so agents can jump straight to the writer instead of walking
+            // basedOn themselves.
             for (int i = chain.Count - 1; i >= 0; i--)
             {
                 var styleRPr = chain[i].StyleRunProperties;
                 if (styleRPr != null)
-                    MergeRunProperties(effective, styleRPr);
+                    MergeRunProperties(effective, styleRPr,
+                        $"/styles/{chain[i].StyleId?.Value}", sources);
             }
         }
 
@@ -65,43 +89,108 @@ public partial class WordHandler
             {
                 var sRPr = rStyleChain[i].StyleRunProperties;
                 if (sRPr != null)
-                    MergeRunProperties(effective, sRPr);
+                    MergeRunProperties(effective, sRPr,
+                        $"/styles/{rStyleChain[i].StyleId?.Value}", sources);
             }
         }
 
         // 4. Apply run's own direct rPr (highest priority, excluding rStyle which was resolved above)
         if (run.RunProperties != null)
-            MergeRunProperties(effective, run.RunProperties);
+            MergeRunProperties(effective, run.RunProperties, "/direct", sources);
 
         return effective;
     }
 
-    private static void MergeRunProperties(RunProperties target, OpenXmlElement source)
+    private static void MergeRunProperties(
+        RunProperties target,
+        OpenXmlElement source,
+        string? layer = null,
+        Dictionary<string, string>? sources = null)
     {
-        // Merge each known property: source overwrites target
+        // Helper: record provenance only when both layer + sources provided.
+        void Tag(string prop)
+        {
+            if (layer != null && sources != null) sources[prop] = layer;
+        }
+
+        // RunFonts is an attribute container — OOXML spec semantics is
+        // per-slot inheritance, NOT whole-element overwrite. Previously we
+        // cloned the whole rFonts element which silently dropped slots set
+        // by lower-priority layers. Common Chinese-doc breakage:
+        // docDefaults sets eastAsia=宋体, Heading1 only sets ascii=Calibri,
+        // and the eastAsia slot would vanish from the effective merge.
         var srcFonts = source.GetFirstChild<RunFonts>();
         if (srcFonts != null)
-            target.RunFonts = srcFonts.CloneNode(true) as RunFonts;
+        {
+            target.RunFonts ??= new RunFonts();
+            if (srcFonts.Ascii?.Value != null)
+            {
+                target.RunFonts.Ascii = srcFonts.Ascii.Value;
+                Tag("font.ascii");
+            }
+            if (srcFonts.EastAsia?.Value != null)
+            {
+                target.RunFonts.EastAsia = srcFonts.EastAsia.Value;
+                Tag("font.eastAsia");
+            }
+            if (srcFonts.HighAnsi?.Value != null)
+            {
+                target.RunFonts.HighAnsi = srcFonts.HighAnsi.Value;
+                Tag("font.hAnsi");
+            }
+            if (srcFonts.ComplexScript?.Value != null)
+            {
+                target.RunFonts.ComplexScript = srcFonts.ComplexScript.Value;
+                Tag("font.cs");
+            }
+            // Theme variants and hint propagate alongside their slot but are
+            // not currently exposed in Get output, so they get no source tag.
+            if (srcFonts.AsciiTheme?.HasValue == true)
+                target.RunFonts.AsciiTheme = srcFonts.AsciiTheme.Value;
+            if (srcFonts.EastAsiaTheme?.HasValue == true)
+                target.RunFonts.EastAsiaTheme = srcFonts.EastAsiaTheme.Value;
+            if (srcFonts.HighAnsiTheme?.HasValue == true)
+                target.RunFonts.HighAnsiTheme = srcFonts.HighAnsiTheme.Value;
+            if (srcFonts.ComplexScriptTheme?.HasValue == true)
+                target.RunFonts.ComplexScriptTheme = srcFonts.ComplexScriptTheme.Value;
+            if (srcFonts.Hint?.HasValue == true)
+                target.RunFonts.Hint = srcFonts.Hint.Value;
+        }
 
         var srcSize = source.GetFirstChild<FontSize>();
         if (srcSize != null)
+        {
             target.FontSize = srcSize.CloneNode(true) as FontSize;
+            Tag("size");
+        }
 
         var srcBold = source.GetFirstChild<Bold>();
         if (srcBold != null)
+        {
             target.Bold = srcBold.CloneNode(true) as Bold;
+            Tag("bold");
+        }
 
         var srcItalic = source.GetFirstChild<Italic>();
         if (srcItalic != null)
+        {
             target.Italic = srcItalic.CloneNode(true) as Italic;
+            Tag("italic");
+        }
 
         var srcUnderline = source.GetFirstChild<Underline>();
         if (srcUnderline != null)
+        {
             target.Underline = srcUnderline.CloneNode(true) as Underline;
+            Tag("underline");
+        }
 
         var srcStrike = source.GetFirstChild<Strike>();
         if (srcStrike != null)
+        {
             target.Strike = srcStrike.CloneNode(true) as Strike;
+            Tag("strike");
+        }
 
         var srcDStrike = source.GetFirstChild<DoubleStrike>();
         if (srcDStrike != null)
@@ -109,11 +198,17 @@ public partial class WordHandler
 
         var srcColor = source.GetFirstChild<Color>();
         if (srcColor != null)
+        {
             target.Color = srcColor.CloneNode(true) as Color;
+            Tag("color");
+        }
 
         var srcHighlight = source.GetFirstChild<Highlight>();
         if (srcHighlight != null)
+        {
             target.Highlight = srcHighlight.CloneNode(true) as Highlight;
+            Tag("highlight");
+        }
 
         var srcVertAlign = source.GetFirstChild<VerticalTextAlignment>();
         if (srcVertAlign != null)
@@ -220,47 +315,8 @@ public partial class WordHandler
         // Resolve effective run properties from the first run (or an empty run for style-only resolution)
         var firstRun = para.Elements<Run>().FirstOrDefault(r => r.GetFirstChild<Text>() != null)
             ?? new Run();
-        var effective = ResolveEffectiveRunProperties(firstRun, para);
-
-        // font.size
-        if (!node.Format.ContainsKey("size") && effective.FontSize?.Val?.Value != null)
-        {
-            var sz = int.Parse(effective.FontSize.Val.Value) / 2.0;
-            node.Format["effective.size"] = $"{sz:0.##}pt";
-        }
-
-        // font.name — CONSISTENCY(canonical-keys): check per-script slot keys, not legacy "font".
-        if (!node.Format.ContainsKey("font.ascii") && !node.Format.ContainsKey("font.eastAsia")
-            && !node.Format.ContainsKey("font.hAnsi") && !node.Format.ContainsKey("font.cs")
-            && !node.Format.ContainsKey("font"))
-        {
-            var font = effective.RunFonts?.Ascii?.Value ?? effective.RunFonts?.HighAnsi?.Value
-                ?? effective.RunFonts?.EastAsia?.Value;
-            if (font != null)
-                node.Format["effective.font"] = font;
-        }
-
-        // bold
-        if (!node.Format.ContainsKey("bold") && effective.Bold != null)
-            node.Format["effective.bold"] = true;
-
-        // italic
-        if (!node.Format.ContainsKey("italic") && effective.Italic != null)
-            node.Format["effective.italic"] = true;
-
-        // color
-        if (!node.Format.ContainsKey("color"))
-        {
-            if (effective.Color?.Val?.Value != null)
-                node.Format["effective.color"] = ParseHelpers.FormatHexColor(effective.Color.Val.Value);
-            else if (effective.Color?.ThemeColor?.HasValue == true)
-                node.Format["effective.color"] = effective.Color.ThemeColor.InnerText;
-        }
-
-        // underline
-        if (!node.Format.ContainsKey("underline") && effective.Underline?.Val != null)
-            node.Format["effective.underline"] = effective.Underline.Val.InnerText;
-
+        var (effective, sources) = ResolveEffectiveRunPropertiesWithSources(firstRun, para);
+        EmitEffectiveRunProperties(node, effective, sources);
         // Resolve effective paragraph properties from style chain
         ResolveEffectiveParagraphStyleProperties(node, para);
     }
@@ -270,47 +326,109 @@ public partial class WordHandler
     /// </summary>
     private void PopulateEffectiveRunProperties(DocumentNode node, Run run, Paragraph para)
     {
-        var effective = ResolveEffectiveRunProperties(run, para);
+        var (effective, sources) = ResolveEffectiveRunPropertiesWithSources(run, para);
+        EmitEffectiveRunProperties(node, effective, sources);
+    }
 
+    /// <summary>
+    /// Shared emit logic for run-level effective.* properties. Each property
+    /// is suppressed when the corresponding base key is already set (run
+    /// owns it directly). When emitted, also writes effective.X.src pointing
+    /// to the path of the writing layer (e.g. "/styles/Heading1",
+    /// "/docDefaults"). Per-slot RunFonts surface as effective.font.ascii /
+    /// .eastAsia / .hAnsi / .cs — each independently sourced.
+    /// </summary>
+    private static void EmitEffectiveRunProperties(
+        DocumentNode node,
+        RunProperties effective,
+        Dictionary<string, string> sources)
+    {
+        void EmitSrc(string effectiveKey, string sourceKey)
+        {
+            if (sources.TryGetValue(sourceKey, out var src) && src != "/direct")
+                node.Format[effectiveKey + ".src"] = src;
+        }
+
+        // size
         if (!node.Format.ContainsKey("size") && effective.FontSize?.Val?.Value != null)
         {
             var sz = int.Parse(effective.FontSize.Val.Value) / 2.0;
             node.Format["effective.size"] = $"{sz:0.##}pt";
+            EmitSrc("effective.size", "size");
         }
 
-        // CONSISTENCY(canonical-keys): check per-script slot keys, not legacy "font".
-        if (!node.Format.ContainsKey("font.ascii") && !node.Format.ContainsKey("font.eastAsia")
-            && !node.Format.ContainsKey("font.hAnsi") && !node.Format.ContainsKey("font.cs")
-            && !node.Format.ContainsKey("font"))
+        // Per-slot font: each slot independently honors style cascade and
+        // is suppressed only when that specific slot is set on the run.
+        // CONSISTENCY(canonical-keys): mirrors the 4-slot direct readback in
+        // Navigation.cs:1186-1192.
+        if (!node.Format.ContainsKey("font.ascii") && !node.Format.ContainsKey("font")
+            && effective.RunFonts?.Ascii?.Value != null)
         {
-            var font = effective.RunFonts?.Ascii?.Value ?? effective.RunFonts?.HighAnsi?.Value
-                ?? effective.RunFonts?.EastAsia?.Value;
-            if (font != null)
-                node.Format["effective.font"] = font;
+            node.Format["effective.font.ascii"] = effective.RunFonts.Ascii.Value;
+            EmitSrc("effective.font.ascii", "font.ascii");
+        }
+        if (!node.Format.ContainsKey("font.eastAsia") && !node.Format.ContainsKey("font")
+            && effective.RunFonts?.EastAsia?.Value != null)
+        {
+            node.Format["effective.font.eastAsia"] = effective.RunFonts.EastAsia.Value;
+            EmitSrc("effective.font.eastAsia", "font.eastAsia");
+        }
+        if (!node.Format.ContainsKey("font.hAnsi") && !node.Format.ContainsKey("font")
+            && effective.RunFonts?.HighAnsi?.Value != null)
+        {
+            node.Format["effective.font.hAnsi"] = effective.RunFonts.HighAnsi.Value;
+            EmitSrc("effective.font.hAnsi", "font.hAnsi");
+        }
+        if (!node.Format.ContainsKey("font.cs") && !node.Format.ContainsKey("font")
+            && effective.RunFonts?.ComplexScript?.Value != null)
+        {
+            node.Format["effective.font.cs"] = effective.RunFonts.ComplexScript.Value;
+            EmitSrc("effective.font.cs", "font.cs");
         }
 
         if (!node.Format.ContainsKey("bold") && effective.Bold != null)
+        {
             node.Format["effective.bold"] = true;
+            EmitSrc("effective.bold", "bold");
+        }
 
         if (!node.Format.ContainsKey("italic") && effective.Italic != null)
+        {
             node.Format["effective.italic"] = true;
+            EmitSrc("effective.italic", "italic");
+        }
 
         if (!node.Format.ContainsKey("color"))
         {
             if (effective.Color?.Val?.Value != null)
+            {
                 node.Format["effective.color"] = ParseHelpers.FormatHexColor(effective.Color.Val.Value);
+                EmitSrc("effective.color", "color");
+            }
             else if (effective.Color?.ThemeColor?.HasValue == true)
+            {
                 node.Format["effective.color"] = effective.Color.ThemeColor.InnerText;
+                EmitSrc("effective.color", "color");
+            }
         }
 
         if (!node.Format.ContainsKey("underline") && effective.Underline?.Val != null)
+        {
             node.Format["effective.underline"] = effective.Underline.Val.InnerText;
+            EmitSrc("effective.underline", "underline");
+        }
 
         if (!node.Format.ContainsKey("strike") && effective.Strike != null)
+        {
             node.Format["effective.strike"] = true;
+            EmitSrc("effective.strike", "strike");
+        }
 
         if (!node.Format.ContainsKey("highlight") && effective.Highlight?.Val != null)
+        {
             node.Format["effective.highlight"] = effective.Highlight.Val.InnerText;
+            EmitSrc("effective.highlight", "highlight");
+        }
     }
 
     /// <summary>
@@ -333,40 +451,66 @@ public partial class WordHandler
             currentStyleId = style.BasedOn?.Val?.Value;
         }
 
-        // Apply from base to derived (reverse order), collecting effective paragraph properties
-        string? alignment = null;
-        string? spaceBefore = null;
-        string? spaceAfter = null;
-        string? lineSpacing = null;
+        // Apply from base to derived (reverse order), collecting effective
+        // paragraph properties + provenance. Source label is the styleId
+        // that actually wrote the property (the most-derived layer that
+        // touched it), not the chain top.
+        string? alignment = null, alignSrc = null;
+        string? spaceBefore = null, spaceBeforeSrc = null;
+        string? spaceAfter = null, spaceAfterSrc = null;
+        string? lineSpacing = null, lineSpacingSrc = null;
 
         for (int i = chain.Count - 1; i >= 0; i--)
         {
             var ppr = chain[i].StyleParagraphProperties;
             if (ppr == null) continue;
+            var layer = $"/styles/{chain[i].StyleId?.Value}";
 
             if (ppr.Justification?.Val != null)
             {
                 var txt = ppr.Justification.Val.InnerText;
                 alignment = txt == "both" ? "justify" : txt;
+                alignSrc = layer;
             }
             if (ppr.SpacingBetweenLines?.Before?.Value != null)
+            {
                 spaceBefore = SpacingConverter.FormatWordSpacing(ppr.SpacingBetweenLines.Before.Value);
+                spaceBeforeSrc = layer;
+            }
             if (ppr.SpacingBetweenLines?.After?.Value != null)
+            {
                 spaceAfter = SpacingConverter.FormatWordSpacing(ppr.SpacingBetweenLines.After.Value);
+                spaceAfterSrc = layer;
+            }
             if (ppr.SpacingBetweenLines?.Line?.Value != null)
+            {
                 lineSpacing = SpacingConverter.FormatWordLineSpacing(
                     ppr.SpacingBetweenLines.Line.Value,
                     ppr.SpacingBetweenLines.LineRule?.InnerText);
+                lineSpacingSrc = layer;
+            }
         }
 
         if (!node.Format.ContainsKey("alignment") && alignment != null)
+        {
             node.Format["effective.alignment"] = alignment;
+            if (alignSrc != null) node.Format["effective.alignment.src"] = alignSrc;
+        }
         if (!node.Format.ContainsKey("spaceBefore") && spaceBefore != null)
+        {
             node.Format["effective.spaceBefore"] = spaceBefore;
+            if (spaceBeforeSrc != null) node.Format["effective.spaceBefore.src"] = spaceBeforeSrc;
+        }
         if (!node.Format.ContainsKey("spaceAfter") && spaceAfter != null)
+        {
             node.Format["effective.spaceAfter"] = spaceAfter;
+            if (spaceAfterSrc != null) node.Format["effective.spaceAfter.src"] = spaceAfterSrc;
+        }
         if (!node.Format.ContainsKey("lineSpacing") && lineSpacing != null)
+        {
             node.Format["effective.lineSpacing"] = lineSpacing;
+            if (lineSpacingSrc != null) node.Format["effective.lineSpacing.src"] = lineSpacingSrc;
+        }
     }
 
     // ==================== List / Numbering ====================
