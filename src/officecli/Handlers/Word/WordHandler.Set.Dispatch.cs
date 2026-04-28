@@ -259,7 +259,12 @@ public partial class WordHandler
                 continue;
             switch (key.ToLowerInvariant())
             {
-                case "instruction" or "instr":
+                // CONSISTENCY(canonical-keys): mirror AddField's
+                // GetRawFieldInstruction (instr | instruction | code).
+                // Round 6 added the alias trio on Add; the Set side must
+                // accept the same set or `--prop code=...` becomes silent
+                // unsupported here while it succeeds on Add.
+                case "instruction" or "instr" or "code":
                     field.InstrCode.Text = value.StartsWith(" ") ? value : $" {value} ";
                     // Auto-mark dirty when instruction changes
                     var beginCharI = field.BeginRun.GetFirstChild<FieldChar>();

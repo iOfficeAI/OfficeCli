@@ -349,9 +349,23 @@ public partial class WordHandler
             ?? _doc.MainDocumentPart.AddNewPart<StyleDefinitionsPart>();
         stylesPart.Styles ??= new Styles();
 
-        var explicitId = properties.ContainsKey("id");
-        var styleId = properties.GetValueOrDefault("id", properties.GetValueOrDefault("name", "CustomStyle"));
-        var styleName = properties.GetValueOrDefault("name", styleId);
+        // CONSISTENCY(style-dual-key): Get exposes the canonical readback
+        // keys `styleId` and `styleName` on every paragraph (Round 2). Add
+        // must accept the same alias trio (id / styleId / name / styleName)
+        // or the readback writes back as `CustomStyle` — exactly the
+        // silent-ignore alias trap that 19b3dd5b banned.
+        var explicitId = properties.ContainsKey("id") || properties.ContainsKey("styleId") || properties.ContainsKey("styleid");
+        var styleId = properties.GetValueOrDefault("id")
+                   ?? properties.GetValueOrDefault("styleId")
+                   ?? properties.GetValueOrDefault("styleid")
+                   ?? properties.GetValueOrDefault("name")
+                   ?? properties.GetValueOrDefault("styleName")
+                   ?? properties.GetValueOrDefault("stylename")
+                   ?? "CustomStyle";
+        var styleName = properties.GetValueOrDefault("name")
+                     ?? properties.GetValueOrDefault("styleName")
+                     ?? properties.GetValueOrDefault("stylename")
+                     ?? styleId;
         var styleType = properties.GetValueOrDefault("type", "paragraph").ToLowerInvariant() switch
         {
             "character" or "char" => StyleValues.Character,
@@ -530,7 +544,14 @@ public partial class WordHandler
         // through; AddStyle's TryGetValue list only covers ~13 keys).
         var addStyleConsumed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "id", "name", "type", "basedon", "basedOn", "next",
+            // CONSISTENCY(style-dual-key): styleId / styleName are the
+            // canonical readback keys Get surfaces (Round 2). The id/name
+            // alias chain consumed them above; record both spellings here
+            // so the per-key 'silent drop' sweep doesn't flag them as
+            // unsupported even though they were honored.
+            "id", "styleId", "styleid",
+            "name", "styleName", "stylename",
+            "type", "basedon", "basedOn", "next",
             "alignment", "align", "spacebefore", "spaceBefore",
             "spaceafter", "spaceAfter", "font", "size", "bold", "italic", "color",
             "font.ascii", "font.hAnsi", "font.eastAsia", "font.cs",

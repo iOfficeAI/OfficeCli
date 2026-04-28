@@ -20,16 +20,18 @@
     "id": {
       "type": "string",
       "description": "w:styleId (unique, immutable identity). Aliases fall through to 'name' when 'id' is omitted. Renaming after Add would require rewriting every paragraph/run/basedOn reference in the document; not supported.",
+      "aliases": ["styleId", "styleid"],
       "add": true, "set": false, "get": true,
-      "examples": ["--prop id=MyAccent"],
+      "examples": ["--prop id=MyAccent", "--prop styleId=MyAccent"],
       "readback": "StyleId value",
       "enforcement": "strict"
     },
     "name": {
       "type": "string",
       "description": "display name. Defaults to 'id' when omitted.",
+      "aliases": ["styleName", "stylename"],
       "add": true, "set": true, "get": true,
-      "examples": ["--prop name=\"My Accent\""],
+      "examples": ["--prop name=\"My Accent\"", "--prop styleName=\"My Accent\""],
       "readback": "StyleName.Val",
       "enforcement": "report"
     },

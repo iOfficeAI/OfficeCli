@@ -655,9 +655,14 @@ public partial class WordHandler
     // adds them when missing.
     private static string? GetRawFieldInstruction(Dictionary<string, string> properties)
     {
-        return properties.GetValueOrDefault("instr")
-            ?? properties.GetValueOrDefault("instruction")
-            ?? properties.GetValueOrDefault("code");
+        // Treat empty / whitespace-only as absent so a placeholder
+        // `instr=""` doesn't short-circuit the alias chain and emit a
+        // degenerate empty <w:instrText> while a non-empty `instruction=`
+        // or `code=` is also supplied. Found via Round 7 fuzz BUG-R7-3.
+        static string? NotBlank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
+        return NotBlank(properties.GetValueOrDefault("instr"))
+            ?? NotBlank(properties.GetValueOrDefault("instruction"))
+            ?? NotBlank(properties.GetValueOrDefault("code"));
     }
 
     // CONSISTENCY(field-prop-applicability): map each fieldType to the
