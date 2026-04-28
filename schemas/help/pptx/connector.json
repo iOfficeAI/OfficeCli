@@ -73,6 +73,41 @@
       "examples": ["--prop color=#000000"],
       "readback": "#-prefixed uppercase hex",
       "enforcement": "report"
+    },
+    "lineWidth": {
+      "type": "length",
+      "add": true, "set": true, "get": true,
+      "aliases": ["linewidth", "line.width"],
+      "examples": ["--prop lineWidth=2pt"],
+      "readback": "pt-qualified string",
+      "enforcement": "report"
+    },
+    "lineDash": {
+      "type": "enum",
+      "values": ["solid", "dot", "dash", "dashDot", "longDash", "longDashDot", "sysDot", "sysDash"],
+      "add": true, "set": true, "get": true,
+      "aliases": ["linedash"],
+      "examples": ["--prop lineDash=dash"],
+      "readback": "OOXML preset dash name",
+      "enforcement": "report"
+    },
+    "headEnd": {
+      "type": "enum",
+      "values": ["none", "triangle", "arrow", "stealth", "diamond", "oval"],
+      "add": true, "set": true, "get": true,
+      "aliases": ["headend"],
+      "examples": ["--prop headEnd=triangle"],
+      "readback": "OOXML LineEndValues token (canonical)",
+      "enforcement": "report"
+    },
+    "tailEnd": {
+      "type": "enum",
+      "values": ["none", "triangle", "arrow", "stealth", "diamond", "oval"],
+      "add": true, "set": true, "get": true,
+      "aliases": ["tailend"],
+      "examples": ["--prop tailEnd=arrow"],
+      "readback": "OOXML LineEndValues token (canonical)",
+      "enforcement": "report"
     }
   }
 }
