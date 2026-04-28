@@ -459,6 +459,26 @@ public partial class PowerPointHandler
             RenderInheritedShapes(sb, masterPart.SlideMaster?.CommonSlideData?.ShapeTree, masterPart, slidePlaceholders, themeColors);
     }
 
+    // RenderInheritedShapes — render the layout/master shapes that the slide
+    // doesn't override. Two rules borrowed from Apache POI:
+    //
+    //   1. Layout/master placeholders never contribute TEXT — what's in their
+    //      <p:txBody> is edit-prompt boilerplate ("Click to add title", "单击
+    //      此处添加正文"). Real content always lives on the slide. The only
+    //      placeholders whose text IS legitimately layout/master-supplied are
+    //      the four metadata slots (date/footer/header/slide number); keep
+    //      those.
+    //
+    //   2. ECMA-376 §19.3.1.36: a <p:ph> with no `type` attribute defaults to
+    //      `obj`. Open XML SDK exposes this as `Type.HasValue == false`, so
+    //      type-based logic that hinges on HasValue silently misses these
+    //      shapes — that was the bug behind issue #79: a layout body
+    //      placeholder authored without an explicit type leaked its prompt
+    //      text onto the slide.
+    //
+    // Compare: POI's SlideShowExtractor.java:179-183 ("Ignoring boiler plate
+    // (placeholder) text on slide master") and XSLFShape.java:369-370 (the
+    // explicit `if (!ph.isSetType()) return INT_BODY;` default).
     private void RenderInheritedShapes(StringBuilder sb, ShapeTree? shapeTree, OpenXmlPart part,
         HashSet<string> skipIndices, Dictionary<string, string> themeColors)
     {
@@ -471,25 +491,26 @@ public partial class PowerPointHandler
             var ph = shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
                 ?.GetFirstChild<PlaceholderShape>();
 
-            // Skip title/body content placeholders (these are structural, not decorative)
-            if (ph?.Type?.HasValue == true)
+            bool suppressText = false;
+            if (ph != null)
             {
-                var t = ph.Type.Value;
-                if (t == PlaceholderValues.Title || t == PlaceholderValues.CenteredTitle ||
-                    t == PlaceholderValues.SubTitle || t == PlaceholderValues.Body ||
-                    t == PlaceholderValues.Object)
+                // Slide already supplies this slot — slide content wins.
+                if (ph.Index?.HasValue == true && skipIndices.Contains($"idx:{ph.Index.Value}"))
+                    continue;
+                if (ph.Type?.HasValue == true && skipIndices.Contains($"type:{ph.Type.InnerText}"))
                     continue;
 
-                // Skip if slide already has this placeholder type
-                if (skipIndices.Contains($"type:{ph.Type.InnerText}")) continue;
+                // ECMA-376 default: absent type == obj. Without this, a body
+                // placeholder authored without an explicit type sneaks past
+                // every type-based check.
+                var type = ph.Type?.HasValue == true ? ph.Type.Value : PlaceholderValues.Object;
+                suppressText = !IsLayoutSuppliedTextPlaceholder(type);
             }
 
-            // Skip if slide already has a shape with this placeholder index
-            if (ph?.Index?.HasValue == true && skipIndices.Contains($"idx:{ph.Index.Value}"))
-                continue;
-
-            // Skip shapes with no visual content (empty text, no fill, no picture)
-            var text = GetShapeText(shape);
+            // Skip shapes with no visual content. When text is suppressed, treat
+            // it as empty: a content placeholder with only prompt text and no
+            // fill/outline isn't worth an empty box on the slide.
+            var text = suppressText ? "" : GetShapeText(shape);
             var hasFill = shape.ShapeProperties?.GetFirstChild<Drawing.SolidFill>() != null
                 || shape.ShapeProperties?.GetFirstChild<Drawing.GradientFill>() != null
                 || shape.ShapeProperties?.GetFirstChild<Drawing.BlipFill>() != null;
@@ -498,8 +519,7 @@ public partial class PowerPointHandler
             if (string.IsNullOrWhiteSpace(text) && !hasFill && !hasLine)
                 continue;
 
-            // Render this inherited shape
-            RenderShape(sb, shape, part, themeColors);
+            RenderShape(sb, shape, part, themeColors, suppressText: suppressText);
         }
 
         // Also render pictures from layout/master (logos, decorative images)
@@ -508,5 +528,11 @@ public partial class PowerPointHandler
             RenderPicture(sb, pic, part, themeColors);
         }
     }
+
+    private static bool IsLayoutSuppliedTextPlaceholder(PlaceholderValues type) =>
+        type == PlaceholderValues.DateAndTime
+        || type == PlaceholderValues.Footer
+        || type == PlaceholderValues.Header
+        || type == PlaceholderValues.SlideNumber;
 
 }

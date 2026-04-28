@@ -20,7 +20,7 @@ public partial class PowerPointHandler
     /// </summary>
     private static void RenderShape(StringBuilder sb, Shape shape, OpenXmlPart part,
         Dictionary<string, string> themeColors, (long x, long y, long cx, long cy)? overridePos = null,
-        string? dataPath = null)
+        string? dataPath = null, bool suppressText = false)
     {
         var dataPathAttr = string.IsNullOrEmpty(dataPath) ? "" : $" data-path=\"{HtmlEncode(dataPath)}\"";
         var xfrm = shape.ShapeProperties?.Transform2D;
@@ -323,8 +323,11 @@ public partial class PowerPointHandler
             sb.Append($"    <div class=\"{shapeClass}\"{dataPathAttr} style=\"{string.Join(";", styles)}\">");
         }
 
-        // Text content
-        if (shape.TextBody != null)
+        // Text content. `suppressText` is set by RenderInheritedShapes for layout/master
+        // content placeholders: their <p:txBody> holds edit-prompt text ("Click to add
+        // title") that belongs to the slide, not the layout. We still render the shape
+        // chrome (fill/outline/geometry) so themed placeholder backgrounds survive.
+        if (shape.TextBody != null && !suppressText)
         {
             // Counter-flip text so it remains readable when shape is flipped
             var flipStyle = "";
