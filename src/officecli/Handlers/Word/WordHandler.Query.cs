@@ -2422,7 +2422,13 @@ public partial class WordHandler
         // `query paragraph` and `query run` silently skip any paragraph/run
         // that lives in a header or footer. Path prefix is /header[N] or
         // /footer[N], indexed by 1-based encounter order in the rels.
-        if (isParagraphSelector || isRunSelector)
+        // CONSISTENCY(query-combinator-headerfooter): combinator selectors
+        // (p > ptab / paragraph > fieldChar) also need to descend so the
+        // child runs in headers/footers are reachable; the dispatch inside
+        // CollectParaRunInHeaderFooter handles all three modes.
+        bool isCombinator = parsed.ChildSelector != null
+            && (parsed.Element == null || parsed.Element == "p" || parsed.Element == "paragraph");
+        if (isParagraphSelector || isRunSelector || isCombinator)
         {
             var mainPart = _doc.MainDocumentPart;
             if (mainPart != null)
@@ -2487,6 +2493,37 @@ public partial class WordHandler
                 {
                     runIdx++;
                     if (MatchesRunSelector(run, element, parsed))
+                    {
+                        results.Add(ElementToNode(run,
+                            $"{pathPrefix}/{BuildParaPathSegment(element, paraIdx)}/r[{runIdx}]", 0));
+                    }
+                }
+            }
+            else if (parsed.ChildSelector != null
+                && (parsed.Element == null || parsed.Element == "p" || parsed.Element == "paragraph"))
+            {
+                // CONSISTENCY(query-combinator-headerfooter): mirror the body
+                // dispatch's combinator branch (`p > X` / `p[...] > X`) so
+                // descendant selectors find runs inside header/footer too.
+                // Without this, `query "p > ptab"` returned 0 for documents
+                // whose ptabs all live in headers/footers (the typical case).
+                bool ok = true;
+                foreach (var (attrKey, rawVal) in parsed.Attributes)
+                {
+                    bool negate = rawVal.StartsWith("!");
+                    var aval = negate ? rawVal[1..] : rawVal;
+                    var paraNode = ElementToNode(element,
+                        $"{pathPrefix}/{BuildParaPathSegment(element, paraIdx)}", 0);
+                    var has = paraNode.Format.TryGetValue(attrKey, out var fv);
+                    bool m = has && string.Equals(fv?.ToString(), aval, StringComparison.OrdinalIgnoreCase);
+                    if (negate ? m : !m) { ok = false; break; }
+                }
+                if (!ok) continue;
+                int runIdx = 0;
+                foreach (var run in GetAllRuns(element))
+                {
+                    runIdx++;
+                    if (MatchesRunSelector(run, element, parsed.ChildSelector))
                     {
                         results.Add(ElementToNode(run,
                             $"{pathPrefix}/{BuildParaPathSegment(element, paraIdx)}/r[{runIdx}]", 0));

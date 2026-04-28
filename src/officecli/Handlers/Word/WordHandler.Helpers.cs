@@ -437,27 +437,79 @@ public partial class WordHandler
     // text is rewritten — without dirty, the cached result run keeps the
     // old display value (e.g. "PAGE → DATE" still shows the old page
     // number) until the user manually presses F9.
-    private static void MarkOwningFieldDirty(Run run)
+    // CONSISTENCY(field-cache-stale): true when <paramref name="run"/> sits
+    // between an owning field's <w:fldChar w:fldCharType="separate"/> and
+    // <w:fldChar w:fldCharType="end"/> — i.e. it is the cached result run
+    // that Word will overwrite when it recomputes the field. Used by the
+    // Set "text=" path to decide whether the caller needs the field marked
+    // dirty so their manual edit is preserved on next Word open.
+    private static bool IsFieldCachedRun(Run run)
     {
-        var para = run.Parent;
-        if (para == null) return;
-        // Walk siblings backward from this run looking for the nearest
-        // <w:fldChar w:fldCharType="begin">. Use InnerText for the
-        // comparison: SDK v3 enum equality on FieldCharValues is
-        // unreliable (same trap as LineSpacingRuleValues — see WordHandler
-        // CLAUDE.md), and InnerText returns the actual XML attribute
-        // value ("begin"/"separate"/"end").
+        // Walk backward; the most recent field-char we hit must be a
+        // `separate` (with no closing `end` between us and it). Track depth
+        // to ignore fully-closed nested fields.
+        int closedDepth = 0;
         OpenXmlElement? sibling = run.PreviousSibling();
         while (sibling != null)
         {
             if (sibling is Run sibRun)
             {
                 var fld = sibRun.GetFirstChild<FieldChar>();
-                if (fld?.FieldCharType?.HasValue == true
-                    && fld.FieldCharType.InnerText == "begin")
+                if (fld?.FieldCharType?.HasValue == true)
                 {
-                    fld.Dirty = true;
-                    return;
+                    var t = fld.FieldCharType.InnerText;
+                    if (t == "end")
+                        closedDepth++;
+                    else if (t == "begin")
+                    {
+                        if (closedDepth == 0) return false; // begin without separate → not cached
+                        closedDepth--;
+                    }
+                    else if (t == "separate" && closedDepth == 0)
+                        return true;
+                }
+            }
+            sibling = sibling.PreviousSibling();
+        }
+        return false;
+    }
+
+    private static void MarkOwningFieldDirty(Run run)
+    {
+        var para = run.Parent;
+        if (para == null) return;
+        // Walk siblings backward from this run looking for the OWNING
+        // field's <w:fldChar w:fldCharType="begin">. Track depth so that
+        // a fully-closed inner field does not get its begin mistaken for
+        // the owner of an outer instr. Each `end` we pass while walking
+        // means we entered a closed nested field (going backwards), so
+        // its `begin` is below us — skip past it. Only the begin at
+        // depth 0 is the owner. Use InnerText (not enum equality) since
+        // SDK v3 enum equality on FieldCharValues is unreliable (same
+        // trap as LineSpacingRuleValues — see WordHandler CLAUDE.md).
+        int closedDepth = 0;
+        OpenXmlElement? sibling = run.PreviousSibling();
+        while (sibling != null)
+        {
+            if (sibling is Run sibRun)
+            {
+                var fld = sibRun.GetFirstChild<FieldChar>();
+                if (fld?.FieldCharType?.HasValue == true)
+                {
+                    var t = fld.FieldCharType.InnerText;
+                    if (t == "end")
+                    {
+                        closedDepth++;
+                    }
+                    else if (t == "begin")
+                    {
+                        if (closedDepth == 0)
+                        {
+                            fld.Dirty = true;
+                            return;
+                        }
+                        closedDepth--;
+                    }
                 }
             }
             sibling = sibling.PreviousSibling();

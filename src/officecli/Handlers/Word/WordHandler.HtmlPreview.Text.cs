@@ -281,6 +281,12 @@ public partial class WordHandler
 
         var hasContent = run.ChildElements.Any(c =>
             c is Break || c is TabChar || c is SymbolChar || c is CarriageReturn
+            // CONSISTENCY(run-special-content): PositionalTab is rendered as
+            // a flex spacer (or leader span) by the ptab branch below — must
+            // pass the hasContent gate or the run gets silently early-
+            // returned, leaving header/footer left/center/right segments
+            // collapsed in the html preview.
+            || c is PositionalTab
             || c.LocalName is "noBreakHyphen" or "softHyphen"
             || (c is Text t && !string.IsNullOrEmpty(t.Text)));
 

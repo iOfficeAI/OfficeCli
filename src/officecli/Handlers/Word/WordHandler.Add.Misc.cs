@@ -653,8 +653,14 @@ public partial class WordHandler
             "columnbreak" => BreakValues.Column,
             _ => BreakValues.Page
         };
-        // Allow override via property
-        if (properties.TryGetValue("type", out var brType))
+        // CONSISTENCY(canonical-keys): accept both `type=` (legacy alias)
+        // and `breakType=` (Set/Get canonical key) on Add — silent-ignore
+        // of breakType= violates project red line (commit 19b3dd5b);
+        // forcing users to know that Add wants `type` while Set/Get want
+        // `breakType` is precisely the alias trap that policy bans.
+        if (properties.TryGetValue("type", out var brType)
+            || properties.TryGetValue("breakType", out brType)
+            || properties.TryGetValue("breaktype", out brType))
         {
             breakType = brType.ToLowerInvariant() switch
             {

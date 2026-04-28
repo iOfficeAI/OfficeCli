@@ -234,6 +234,15 @@ public partial class WordHandler
                     }
                     var textEl = run.GetFirstChild<Text>();
                     if (textEl != null) textEl.Text = value;
+                    // CONSISTENCY(field-cache-stale): if this run sits between
+                    // a field's `separate` and `end` fldChars, it is the
+                    // cached result of the field — Word will recompute it
+                    // (overwriting the user's edit) on the next field
+                    // refresh. Mark the owning field dirty so Word recomputes
+                    // proactively on next open, surfacing the divergence
+                    // instead of silently dropping the user's value.
+                    if (textEl != null && IsFieldCachedRun(run))
+                        MarkOwningFieldDirty(run);
                     break;
                 case "alt" or "alttext" or "description":
                     var drawingAlt = run.GetFirstChild<Drawing>();
