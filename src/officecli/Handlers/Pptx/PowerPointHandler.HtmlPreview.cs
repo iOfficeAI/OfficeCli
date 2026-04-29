@@ -83,7 +83,51 @@ public partial class PowerPointHandler
         var themeColors = ResolveThemeColorMap();
 
         sb.AppendLine("<!DOCTYPE html>");
-        sb.AppendLine("<html lang=\"en\">");
+        // i18n: emit lang from the first run's <a:rPr lang=...> when present
+        // (PPT carries no presentation-level language tag analogous to Word's
+        // themeFontLang; per-run lang is the closest signal). Emit dir="rtl"
+        // when any shape carries <a:bodyPr rtlCol="1"/> or any paragraph
+        // <a:pPr rtl="1"/>, so browsers activate BiDi layout document-wide.
+        string presLang = "en";
+        bool presHasRtl = false;
+        foreach (var sp in slideParts)
+        {
+            var slide = sp.Slide;
+            if (slide == null) continue;
+            if (presLang == "en")
+            {
+                var firstRunLang = slide.Descendants<DocumentFormat.OpenXml.Drawing.RunProperties>()
+                    .Select(rp => rp.Language?.Value)
+                    .FirstOrDefault(l => !string.IsNullOrEmpty(l));
+                if (!string.IsNullOrEmpty(firstRunLang)) presLang = firstRunLang!;
+            }
+            if (!presHasRtl)
+            {
+                if (slide.Descendants<DocumentFormat.OpenXml.Drawing.Paragraph>()
+                        .Any(p => p.ParagraphProperties?.RightToLeft?.Value == true))
+                {
+                    presHasRtl = true;
+                }
+                else
+                {
+                    foreach (var bp in slide.Descendants<DocumentFormat.OpenXml.Drawing.BodyProperties>())
+                    {
+                        foreach (var attr in bp.GetAttributes())
+                        {
+                            if (attr.LocalName == "rtlCol"
+                                && (attr.Value == "1" || string.Equals(attr.Value, "true", StringComparison.OrdinalIgnoreCase)))
+                            {
+                                presHasRtl = true; break;
+                            }
+                        }
+                        if (presHasRtl) break;
+                    }
+                }
+            }
+            if (presLang != "en" && presHasRtl) break;
+        }
+        var presDirAttr = presHasRtl ? " dir=\"rtl\"" : "";
+        sb.AppendLine($"<html lang=\"{HtmlEncode(presLang)}\"{presDirAttr}>");
         sb.AppendLine("<head>");
         sb.AppendLine("<meta charset=\"UTF-8\">");
         sb.AppendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">");

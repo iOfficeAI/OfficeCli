@@ -107,7 +107,16 @@ public partial class WordHandler
 
         var sb = new StringBuilder();
         sb.AppendLine("<!DOCTYPE html>");
-        sb.AppendLine("<html lang=\"en\">");
+        // i18n: emit lang from themeFontLang/docDefaults (ResolveThemeCjkFont
+        // populates _eastAsiaLang) and dir="rtl" when any section carries
+        // <w:bidi/>, so browsers activate the correct BiDi layout, default
+        // text direction, and font/hyphenation heuristics. Falls back to
+        // lang="en" with no dir for plain Latin documents.
+        var htmlLang = string.IsNullOrEmpty(_eastAsiaLang) ? "en" : _eastAsiaLang!;
+        var docHasBidi = body.Descendants<SectionProperties>()
+            .Any(sp => sp.GetFirstChild<BiDi>() != null);
+        var dirAttr = docHasBidi ? " dir=\"rtl\"" : "";
+        sb.AppendLine($"<html lang=\"{HtmlEncode(htmlLang)}\"{dirAttr}>");
         sb.AppendLine("<head>");
         sb.AppendLine("<meta charset=\"UTF-8\">");
         sb.AppendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">");
