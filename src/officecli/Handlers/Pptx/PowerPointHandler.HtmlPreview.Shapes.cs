@@ -340,8 +340,25 @@ public partial class PowerPointHandler
             else if (isFlipV)
                 flipStyle = "transform:scaleY(-1);";
 
-            var textStyle = !string.IsNullOrEmpty(flipStyle) || !string.IsNullOrEmpty(clipPathCss)
-                ? $" style=\"{flipStyle}{(string.IsNullOrEmpty(clipPathCss) ? "" : "position:relative;")}\""
+            // Shape-level RTL column flow: <a:bodyPr rtlCol="1"/> reverses
+            // the column flow for the whole text body. Mirror with CSS so
+            // Arabic / Hebrew shapes lay out the same way in HTML preview
+            // as in PowerPoint.
+            string rtlColStyle = "";
+            if (bodyPr != null)
+            {
+                foreach (var attr in bodyPr.GetAttributes())
+                {
+                    if (attr.LocalName == "rtlCol" && (attr.Value == "1" || string.Equals(attr.Value, "true", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        rtlColStyle = "direction:rtl;";
+                        break;
+                    }
+                }
+            }
+
+            var textStyle = !string.IsNullOrEmpty(flipStyle) || !string.IsNullOrEmpty(clipPathCss) || !string.IsNullOrEmpty(rtlColStyle)
+                ? $" style=\"{flipStyle}{rtlColStyle}{(string.IsNullOrEmpty(clipPathCss) ? "" : "position:relative;")}\""
                 : "";
             sb.Append($"<div class=\"shape-text valign-{valign}\"{textStyle}>");
 

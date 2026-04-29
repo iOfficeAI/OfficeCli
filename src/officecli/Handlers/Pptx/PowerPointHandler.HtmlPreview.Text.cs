@@ -65,6 +65,13 @@ public partial class PowerPointHandler
             if (pProps?.LeftMargin?.HasValue == true)
                 paraStyles.Add($"margin-left:{Units.EmuToPt(pProps.LeftMargin.Value)}pt");
 
+            // RTL paragraph (Arabic / Hebrew). <a:pPr rtl="1"/> reverses
+            // character order; emit CSS so the browser does the same. Without
+            // this, Arabic PPT slides rendered visually mirrored in HTML
+            // preview compared to PowerPoint itself.
+            if (pProps?.RightToLeft?.Value == true)
+                paraStyles.Add("direction:rtl;unicode-bidi:embed");
+
             // Bullet
             var bulletChar = pProps?.GetFirstChild<Drawing.CharacterBullet>()?.Char?.Value;
             var bulletAuto = pProps?.GetFirstChild<Drawing.AutoNumberedBullet>();
