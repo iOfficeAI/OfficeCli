@@ -231,6 +231,33 @@
       "readback": "unit-qualified, e.g. \"14pt\"",
       "enforcement": "strict"
     },
+    "lang.latin": {
+      "type": "string",
+      "description": "Latin-script language tag (<w:lang w:val=.../>). e.g. en-US, fr-FR.",
+      "aliases": ["lang", "lang.val"],
+      "add": false, "set": true, "get": true,
+      "examples": ["--prop lang.latin=en-US"],
+      "readback": "BCP-47 / xml:lang tag, e.g. \"en-US\"",
+      "enforcement": "lenient"
+    },
+    "lang.ea": {
+      "type": "string",
+      "description": "EastAsian-script language tag (<w:lang w:eastAsia=.../>). e.g. zh-CN, ja-JP.",
+      "aliases": ["lang.eastAsia", "lang.eastAsian"],
+      "add": false, "set": true, "get": true,
+      "examples": ["--prop lang.ea=zh-CN"],
+      "readback": "BCP-47 / xml:lang tag",
+      "enforcement": "lenient"
+    },
+    "lang.cs": {
+      "type": "string",
+      "description": "ComplexScript language tag (<w:lang w:bidi=.../>). e.g. ar-SA, he-IL.",
+      "aliases": ["lang.complexScript", "lang.bidi"],
+      "add": false, "set": true, "get": true,
+      "examples": ["--prop lang.cs=ar-SA"],
+      "readback": "BCP-47 / xml:lang tag",
+      "enforcement": "lenient"
+    },
     "superscript": {
       "type": "bool",
       "description": "vertical alignment = superscript. Mutually exclusive with subscript.",

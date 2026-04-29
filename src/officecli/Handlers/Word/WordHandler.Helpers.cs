@@ -1134,6 +1134,39 @@ public partial class WordHandler
                 props.RemoveAllChildren<Vanish>();
                 if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Vanish());
                 return true;
+            case "lang" or "lang.latin" or "lang.val":
+            case "lang.ea" or "lang.eastasia" or "lang.eastasian":
+            case "lang.cs" or "lang.complexscript" or "lang.bidi":
+            {
+                // <w:lang w:val=".." w:eastAsia=".." w:bidi=".."/> — three slots
+                // for Latin / EastAsian / ComplexScript scripts. Mirrors the
+                // font.latin/font.ea/font.cs vocabulary.
+                var lang = props.GetFirstChild<Languages>();
+                if (lang == null)
+                {
+                    lang = new Languages();
+                    InsertRunPropInSchemaOrder(props, lang);
+                }
+                switch (key.ToLowerInvariant())
+                {
+                    case "lang":
+                    case "lang.latin":
+                    case "lang.val":
+                        lang.Val = value;
+                        break;
+                    case "lang.ea":
+                    case "lang.eastasia":
+                    case "lang.eastasian":
+                        lang.EastAsia = value;
+                        break;
+                    case "lang.cs":
+                    case "lang.complexscript":
+                    case "lang.bidi":
+                        lang.Bidi = value;
+                        break;
+                }
+                return true;
+            }
             default:
                 return false;
         }
@@ -1173,7 +1206,8 @@ public partial class WordHandler
             Shading => 27,
             // fitText = 28
             VerticalTextAlignment => 29,
-            // rtl, cs, em, lang, ...
+            // rtl = 30, cs = 31, em = 32
+            Languages => 33,
             _ => 100,
         };
 

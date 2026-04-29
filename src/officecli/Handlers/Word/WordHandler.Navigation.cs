@@ -1323,6 +1323,15 @@ public partial class WordHandler
                 if (rFonts.EastAsia?.Value != null) node.Format["font.ea"] = rFonts.EastAsia.Value;
                 if (rFonts.ComplexScript?.Value != null) node.Format["font.cs"] = rFonts.ComplexScript.Value;
             }
+            // <w:lang/> three slots: val (latin) / eastAsia / bidi (cs).
+            // CONSISTENCY(canonical-keys): mirror font.latin/font.ea/font.cs vocabulary.
+            var rLang = run.RunProperties?.GetFirstChild<Languages>();
+            if (rLang != null)
+            {
+                if (rLang.Val?.Value != null) node.Format["lang.latin"] = rLang.Val.Value;
+                if (rLang.EastAsia?.Value != null) node.Format["lang.ea"] = rLang.EastAsia.Value;
+                if (rLang.Bidi?.Value != null) node.Format["lang.cs"] = rLang.Bidi.Value;
+            }
             var size = GetRunFontSize(run);
             if (size != null) node.Format["size"] = size;
             // Complex-script font size (<w:szCs/>) — half-points like <w:sz/>.
