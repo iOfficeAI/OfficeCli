@@ -472,8 +472,11 @@ public partial class WordHandler
     /// </summary>
     private void ResolveEffectiveParagraphStyleProperties(DocumentNode node, Paragraph para)
     {
+        // R9-1: do NOT early-return when the paragraph has no style. Numbering
+        // lvl pPr.bidi is a separate cascade layer that applies even when the
+        // paragraph is style-less, and table/docDefaults fallbacks downstream
+        // also apply unconditionally.
         var styleId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
-        if (styleId == null) return;
 
         var chain = new List<Style>();
         var visited = new HashSet<string>();
@@ -561,6 +564,40 @@ public partial class WordHandler
         {
             node.Format["effective.lineSpacing"] = lineSpacing;
             if (lineSpacingSrc != null) node.Format["effective.lineSpacing.src"] = lineSpacingSrc;
+        }
+        // R9-1: numbering lvl pPr.bidi layer. A list-bound paragraph that
+        // does not have a direct or style-chain bidi must still inherit
+        // pPr.bidi from its abstractNum.lvl[ilvl]. This sits between the
+        // style chain and the table-style fallback because Word's
+        // numbering definition layers between paragraph style and the
+        // enclosing table — see CT_PPr semantics.
+        if (!node.Format.ContainsKey("direction") && direction == null)
+        {
+            var resolved = ResolveNumPrFromStyle(para);
+            if (resolved != null)
+            {
+                var (numId, ilvl) = resolved.Value;
+                var numbering = _doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering;
+                var inst = numbering?.Elements<NumberingInstance>()
+                    .FirstOrDefault(n => n.NumberID?.Value == numId);
+                var absId = inst?.AbstractNumId?.Val?.Value;
+                var abs = absId != null
+                    ? numbering!.Elements<AbstractNum>()
+                        .FirstOrDefault(a => a.AbstractNumberId?.Value == absId.Value)
+                    : null;
+                var lvl = abs?.Elements<Level>()
+                    .FirstOrDefault(l => l.LevelIndex?.Value == ilvl);
+                var lvlBidi = lvl?.PreviousParagraphProperties?.GetFirstChild<BiDi>();
+                if (lvlBidi != null)
+                {
+                    var on = TryReadOnOff(lvlBidi.Val);
+                    if (on.HasValue)
+                    {
+                        direction = on.Value ? "rtl" : "ltr";
+                        directionSrc = $"/numbering/abstractNum[@id={absId}]/level[{ilvl}]";
+                    }
+                }
+            }
         }
         // R8-1: paragraph-scope effective.direction. After the paragraph-style
         // chain, fall back to the enclosing table style's pPr.bidi (paragraphs

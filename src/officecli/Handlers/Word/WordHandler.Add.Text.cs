@@ -104,7 +104,10 @@ public partial class WordHandler
         // Numbering properties. Parallel branches so `ilvl` alone still
         // emits <w:ilvl> (matching `set --prop ilvl=N` behaviour); both
         // inputs are range-checked so schema-invalid values never reach XML.
-        if (properties.TryGetValue("numid", out var numId) || properties.TryGetValue("numId", out numId))
+        if (properties.TryGetValue("numid", out var numId)
+            || properties.TryGetValue("numId", out numId)
+            || properties.TryGetValue("listId", out numId)
+            || properties.TryGetValue("listid", out numId))
         {
             var numIdVal = ParseHelpers.SafeParseInt(numId, "numid");
             if (numIdVal < 0)
@@ -128,7 +131,9 @@ public partial class WordHandler
         // Accept both "numlevel" and "ilvl" (the OOXML name); works with or
         // without numId to stay in sync with `set --prop ilvl=N`.
         if (properties.TryGetValue("numlevel", out var numLevel)
-            || properties.TryGetValue("ilvl", out numLevel))
+            || properties.TryGetValue("ilvl", out numLevel)
+            || properties.TryGetValue("listLevel", out numLevel)
+            || properties.TryGetValue("listlevel", out numLevel))
         {
             var ilvlVal = ParseHelpers.SafeParseInt(numLevel, "ilvl");
             if (ilvlVal < 0 || ilvlVal > 8)
