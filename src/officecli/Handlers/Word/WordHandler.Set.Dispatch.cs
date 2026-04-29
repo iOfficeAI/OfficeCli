@@ -476,14 +476,58 @@ public partial class WordHandler
                     contentRuns[i].Remove();
             }
         }
-        // Report any keys besides "text" as unsupported
-        foreach (var k in properties.Keys)
-        {
-            if (!k.Equals("text", StringComparison.OrdinalIgnoreCase))
-                unsupported.Add(k);
-        }
+        // i18n: route paragraph-level and run-level format keys through the
+        // same helpers SetHeaderFooter uses so direction / font.cs / bold.cs
+        // / italic.cs / size.cs etc. work on footnote content. Mirrors the
+        // R2-4 footer/header fix.
+        ApplyFootnoteEndnoteFormatKeys(fn, properties, unsupported);
         _doc.MainDocumentPart?.FootnotesPart?.Footnotes?.Save();
         return unsupported;
+    }
+
+    /// <summary>
+    /// Apply paragraph-level and run-level format keys to a footnote /
+    /// endnote content body. Skips 'text' (handled separately by the
+    /// caller) and silently consumes keys that ApplyParagraphLevelProperty
+    /// or ApplyRunFormatting accept. Anything left over is reported as
+    /// unsupported.
+    /// </summary>
+    private void ApplyFootnoteEndnoteFormatKeys(
+        OpenXmlElement noteBody,
+        Dictionary<string, string> properties,
+        List<string> unsupported)
+    {
+        var firstPara = noteBody.Descendants<Paragraph>().FirstOrDefault();
+        if (firstPara == null) return;
+        var pProps = firstPara.ParagraphProperties ?? firstPara.PrependChild(new ParagraphProperties());
+        // Run targets: skip the reference-mark run so cosmetic styling
+        // (bold/italic/font/etc.) doesn't accidentally clobber the
+        // footnote/endnote ref mark, which Word renders as a superscript
+        // marker outside the authored text.
+        var contentRuns = noteBody.Descendants<Run>()
+            .Where(r => r.GetFirstChild<FootnoteReferenceMark>() == null
+                     && r.GetFirstChild<EndnoteReferenceMark>() == null)
+            .ToList();
+        var markRPr = pProps.ParagraphMarkRunProperties ?? pProps.AppendChild(new ParagraphMarkRunProperties());
+        foreach (var (key, value) in properties)
+        {
+            if (key.Equals("text", StringComparison.OrdinalIgnoreCase)) continue;
+            if (ApplyParagraphLevelProperty(pProps, key, value)) continue;
+            bool runApplied = false;
+            foreach (var run in contentRuns)
+            {
+                if (ApplyRunFormatting(EnsureRunProperties(run), key, value))
+                    runApplied = true;
+            }
+            if (runApplied)
+            {
+                // Keep paragraph-mark rPr in sync so later runs inherit.
+                ApplyRunFormatting(markRPr, key, value);
+                continue;
+            }
+            unsupported.Add(key);
+        }
+        if (markRPr.ChildElements.Count == 0) markRPr.Remove();
     }
 
     private List<string> SetEndnotePath(System.Text.RegularExpressions.Match enSetMatch, Dictionary<string, string> properties)
@@ -531,12 +575,9 @@ public partial class WordHandler
                     contentRuns[i].Remove();
             }
         }
-        // Report any keys besides "text" as unsupported
-        foreach (var k in properties.Keys)
-        {
-            if (!k.Equals("text", StringComparison.OrdinalIgnoreCase))
-                unsupported.Add(k);
-        }
+        // i18n: route paragraph-level and run-level format keys through the
+        // same helpers as SetFootnotePath. See ApplyFootnoteEndnoteFormatKeys.
+        ApplyFootnoteEndnoteFormatKeys(en, properties, unsupported);
         _doc.MainDocumentPart?.EndnotesPart?.Endnotes?.Save();
         return unsupported;
     }
