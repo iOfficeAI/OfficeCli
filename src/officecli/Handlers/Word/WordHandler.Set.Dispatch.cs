@@ -1221,8 +1221,20 @@ public partial class WordHandler
             if (keyLower is "direction" or "dir" or "bidi")
             {
                 var dPPr = style.StyleParagraphProperties ?? EnsureStyleParagraphProperties(style);
-                if (ParseDirectionRtl(value)) dPPr.BiDi = new BiDi();
+                bool styleRtl = ParseDirectionRtl(value);
+                if (styleRtl) dPPr.BiDi = new BiDi();
                 else dPPr.RemoveAllChildren<BiDi>();
+                // CONSISTENCY(rtl-cascade): paragraph styles must also stamp
+                // <w:rtl/> on StyleRunProperties so runs inheriting the style
+                // pick up character-level RTL (mirrors AddStyle direction=rtl
+                // path and what Word's UI writes when toggling paragraph-style
+                // direction).
+                if (style.Type?.Value == StyleValues.Paragraph)
+                {
+                    var dRPr = style.StyleRunProperties ?? style.AppendChild(new StyleRunProperties());
+                    dRPr.RemoveAllChildren<RightToLeftText>();
+                    if (styleRtl) dRPr.AppendChild(new RightToLeftText());
+                }
                 continue;
             }
 

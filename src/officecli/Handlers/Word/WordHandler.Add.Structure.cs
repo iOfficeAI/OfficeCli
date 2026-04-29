@@ -458,11 +458,13 @@ public partial class WordHandler
         // Without this, `add /styles --prop direction=rtl` either fell through
         // to the dotted-key probe (which writes <w:rtl/> on rPr but skips
         // pPr) or surfaced as UNSUPPORTED.
+        bool? sStyleRtlFlag = null;
         if (properties.TryGetValue("direction", out var sDirRaw)
             || properties.TryGetValue("dir", out sDirRaw)
             || properties.TryGetValue("bidi", out sDirRaw))
         {
             var sRtl = ParseDirectionRtl(sDirRaw);
+            sStyleRtlFlag = sRtl;
             if (sRtl) stylePPr.BiDi = new BiDi();
             hasPPr = true;
         }
@@ -471,6 +473,15 @@ public partial class WordHandler
         // Style run properties
         var styleRPr = new StyleRunProperties();
         bool hasRPr = false;
+        // CONSISTENCY(rtl-cascade): paragraph-style direction=rtl must also
+        // synthesize StyleRunProperties carrying <w:rtl/> so runs inheriting
+        // this style pick up character-level RTL — mirrors what Word's UI
+        // writes when toggling paragraph-style direction.
+        if (sStyleRtlFlag == true && styleType == StyleValues.Paragraph)
+        {
+            styleRPr.AppendChild(new RightToLeftText());
+            hasRPr = true;
+        }
         if (properties.TryGetValue("font", out var sFont))
         {
             styleRPr.RunFonts = new RunFonts { Ascii = sFont, HighAnsi = sFont, EastAsia = sFont };
