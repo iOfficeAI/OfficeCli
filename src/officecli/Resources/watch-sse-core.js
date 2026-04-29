@@ -17,6 +17,26 @@
         if (typeof window._watchReapplyHook === 'function') window._watchReapplyHook();
     }
 
+    // innerHTML does not execute <script> tags, and re-creating scripts without
+    // preserving the type attribute breaks ES modules (e.g. model3d / three.js).
+    // Walks the subtree, replaces each <script> with a fresh element that copies
+    // every attribute + textContent (or src) so the browser actually runs it.
+    function _executeScripts(root) {
+        if (!root) return;
+        var scripts = root.querySelectorAll ? root.querySelectorAll('script') : [];
+        for (var i = 0; i < scripts.length; i++) {
+            var s = scripts[i];
+            var ns = document.createElement('script');
+            for (var j = 0; j < s.attributes.length; j++) {
+                var a = s.attributes[j];
+                ns.setAttribute(a.name, a.value);
+            }
+            if (s.src) ns.src = s.src;
+            else ns.textContent = s.textContent;
+            s.parentNode.replaceChild(ns, s);
+        }
+    }
+
     function _replaceDocumentBody(msg) {
         fetch('/').then(function(r) { return r.text(); }).then(function(html) {
             var doc = new DOMParser().parseFromString(html, 'text/html');
@@ -56,7 +76,12 @@
             doc.body.querySelectorAll('script').forEach(function(s) {
                 if (s.textContent.indexOf('EventSource') >= 0) return;
                 var ns = document.createElement('script');
-                ns.textContent = s.textContent;
+                for (var j = 0; j < s.attributes.length; j++) {
+                    var a = s.attributes[j];
+                    ns.setAttribute(a.name, a.value);
+                }
+                if (s.src) ns.src = s.src;
+                else ns.textContent = s.textContent;
                 document.body.appendChild(ns);
             });
             if (msg.scrollTo && targetSheetIdx < 0) {
@@ -397,6 +422,7 @@
                 tmp.innerHTML = msg.html;
                 var newEl = tmp.firstElementChild;
                 el.parentNode.replaceChild(newEl, el);
+                _executeScripts(newEl);
                 if (typeof scaleSlides === 'function') scaleSlides();
                 syncThumbs();
                 scrollToSlide(slideNum);
@@ -420,6 +446,7 @@
                 tmp.innerHTML = msg.html;
                 var newEl = tmp.firstElementChild;
                 main.appendChild(newEl);
+                _executeScripts(newEl);
                 if (typeof scaleSlides === 'function') scaleSlides();
             }
             syncThumbs();
