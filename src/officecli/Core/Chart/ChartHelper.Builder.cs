@@ -1092,7 +1092,13 @@ internal static partial class ChartHelper
             tp = new C.TextProperties(
                 new Drawing.BodyProperties { Rotation = int.Parse(rotAttrVal) },
                 new Drawing.ListStyle(),
-                new Drawing.Paragraph(new Drawing.ParagraphProperties(new Drawing.EndParagraphRunProperties { Language = "en-US" }))
+                // CT_TextParagraph: pPr?, (br|r|fld)*, endParaRPr? — endParaRPr
+                // is a sibling of pPr, NOT a child. Nesting it inside pPr
+                // produces a schema-invalid file (pPr does not allow
+                // endParaRPr as a child).
+                new Drawing.Paragraph(
+                    new Drawing.ParagraphProperties(),
+                    new Drawing.EndParagraphRunProperties { Language = "en-US" })
             );
             var crossAxis = axis.GetFirstChild<C.CrossingAxis>();
             if (crossAxis != null)
