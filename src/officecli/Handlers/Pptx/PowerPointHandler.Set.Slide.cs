@@ -23,6 +23,25 @@ public partial class PowerPointHandler
             throw new ArgumentException($"Slide {slideIdx} not found (total: {slidePartsN.Count})");
         var notesPart = EnsureNotesSlidePart(slidePartsN[slideIdx - 1]);
         var unsupportedN = new List<string>();
+        // Pull the notes body shape (idx=1 placeholder) so run-level keys
+        // (lang, lang.*, font, size, color, …) route through the same
+        // SetRunOrShapeProperties pipeline as regular slide shapes.
+        // CONSISTENCY(notes-shape-set): notes had its own bespoke key
+        // handling that recognised only text/direction; other run keys
+        // surfaced as UNSUPPORTED. The notes body is just a Shape — it
+        // should accept the full run-attr surface.
+        Shape? notesBody = null;
+        var notesShapeTree = notesPart.NotesSlide?.CommonSlideData?.ShapeTree;
+        if (notesShapeTree != null)
+        {
+            foreach (var sh in notesShapeTree.Elements<Shape>())
+            {
+                var ph = sh.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties?.GetFirstChild<PlaceholderShape>();
+                if (ph?.Index?.Value == 1) { notesBody = sh; break; }
+            }
+        }
+
+        var deferredRunProps = new Dictionary<string, string>();
         foreach (var (key, value) in properties)
         {
             if (key.Equals("text", StringComparison.OrdinalIgnoreCase))
@@ -32,7 +51,19 @@ public partial class PowerPointHandler
                   || key.Equals("rtl", StringComparison.OrdinalIgnoreCase))
                 ApplyNotesDirection(notesPart, value);
             else
-                unsupportedN.Add(key);
+                // Defer to SetRunOrShapeProperties — handles lang, lang.*,
+                // sz, b, i, u, font, color, etc. on the notes body shape.
+                deferredRunProps[key] = value;
+        }
+        if (deferredRunProps.Count > 0)
+        {
+            if (notesBody == null)
+                unsupportedN.AddRange(deferredRunProps.Keys);
+            else
+            {
+                var notesRuns = notesBody.Descendants<Drawing.Run>().ToList();
+                unsupportedN.AddRange(SetRunOrShapeProperties(deferredRunProps, notesRuns, notesBody));
+            }
         }
         notesPart.NotesSlide!.Save();
         return unsupportedN;

@@ -117,6 +117,27 @@ public partial class PowerPointHandler
             }
         }
 
+        // CONSISTENCY(lang-aliases): Word run rPr has three per-script lang slots
+        // (lang.latin / lang.ea / lang.cs). DrawingML CT_TextCharacterProperties
+        // exposes only `lang` (and `altLang`) — a single primary-language slot
+        // per ECMA-376 §21.1.2.3.9, no per-script split. To keep the surface
+        // vocabulary consistent across handlers, we accept lang.latin/lang.ea/
+        // lang.cs as aliases that all funnel into the single `lang` attribute.
+        // Limitation: setting two different per-script lang values on the same
+        // run collapses to last-write-wins (matches the schema; users wanting
+        // distinct primary/secondary should use lang + altLang explicitly).
+        foreach (var langKey in new[] { "lang.cs", "lang.ea", "lang.latin" })
+        {
+            string? matched = properties.Keys.FirstOrDefault(k => k.Equals(langKey, StringComparison.OrdinalIgnoreCase));
+            if (matched != null)
+            {
+                var v = properties[matched];
+                properties = new Dictionary<string, string>(properties, properties.Comparer);
+                properties.Remove(matched);
+                if (!properties.ContainsKey("lang")) properties["lang"] = v;
+            }
+        }
+
         // CONSISTENCY(prop-order): fill carriers (fill/gradient/pattern) must run
         // before modifier props (opacity attaches alpha to the resulting solidFill);
         // otherwise opacity auto-creates a white fill that fill= then overwrites.
