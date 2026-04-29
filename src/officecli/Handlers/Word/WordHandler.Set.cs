@@ -353,6 +353,22 @@ public partial class WordHandler
             var k = key.ToLowerInvariant();
             if (ApplyParagraphLevelProperty(pProps, key, value))
             {
+                // CONSISTENCY(rtl-cascade): mirror SetElementParagraph
+                // (Set.Element.cs ~951-961). direction=rtl on header/footer
+                // must also stamp <w:rtl/> on the paragraph mark and on
+                // every existing run so character-level RTL reaches the
+                // rendered run, not just paragraph layout.
+                if (k is "direction" or "dir" or "bidi")
+                {
+                    bool runRtl = ParseDirectionRtl(value);
+                    var markRPr = pProps.ParagraphMarkRunProperties ?? pProps.AppendChild(new ParagraphMarkRunProperties());
+                    ApplyRunFormatting(markRPr, "rtl", runRtl ? "true" : "false");
+                    foreach (var pRun in firstPara.Descendants<Run>())
+                    {
+                        var pRunProps = EnsureRunProperties(pRun);
+                        ApplyRunFormatting(pRunProps, "rtl", runRtl ? "true" : "false");
+                    }
+                }
                 // handled by paragraph-level helper
             }
             else switch (k)

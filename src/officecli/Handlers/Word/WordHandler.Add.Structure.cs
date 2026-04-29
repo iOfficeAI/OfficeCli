@@ -1200,11 +1200,13 @@ public partial class WordHandler
         // Reading direction (Arabic / Hebrew). Mirrors AddParagraph: 'rtl'
         // writes <w:bidi/> on pPr AND <w:rtl/> on the paragraph mark rPr so
         // any later runs added via Set inherit the run-level direction.
+        bool? hRtlFlag = null;
         if (properties.TryGetValue("direction", out var hDirRaw)
             || properties.TryGetValue("dir", out hDirRaw)
             || properties.TryGetValue("bidi", out hDirRaw))
         {
             var hRtl = ParseDirectionRtl(hDirRaw);
+            hRtlFlag = hRtl;
             if (hRtl) hPProps.BiDi = new BiDi();
             var hMarkRPr = hPProps.ParagraphMarkRunProperties ?? hPProps.AppendChild(new ParagraphMarkRunProperties());
             ApplyRunFormatting(hMarkRPr, "rtl", hRtl ? "true" : "false");
@@ -1233,6 +1235,11 @@ public partial class WordHandler
         {
             var hRun = new Run();
             if (hSharedRProps != null) hRun.AppendChild((RunProperties)hSharedRProps.CloneNode(true));
+            if (hRtlFlag.HasValue)
+            {
+                var hRunRPr = hRun.GetFirstChild<RunProperties>() ?? hRun.PrependChild(new RunProperties());
+                ApplyRunFormatting(hRunRPr, "rtl", hRtlFlag.Value ? "true" : "false");
+            }
             hRun.AppendChild(new Text(hText) { Space = SpaceProcessingModeValues.Preserve });
             hPara.AppendChild(hRun);
         }
@@ -1357,11 +1364,13 @@ public partial class WordHandler
         if (properties.TryGetValue("alignment", out var fAlign) || properties.TryGetValue("align", out fAlign))
             fPProps.Justification = new Justification { Val = ParseJustification(fAlign) };
         // Reading direction (Arabic / Hebrew) — mirrors AddHeader.
+        bool? fRtlFlag = null;
         if (properties.TryGetValue("direction", out var fDirRaw)
             || properties.TryGetValue("dir", out fDirRaw)
             || properties.TryGetValue("bidi", out fDirRaw))
         {
             var fRtl = ParseDirectionRtl(fDirRaw);
+            fRtlFlag = fRtl;
             if (fRtl) fPProps.BiDi = new BiDi();
             var fMarkRPr = fPProps.ParagraphMarkRunProperties ?? fPProps.AppendChild(new ParagraphMarkRunProperties());
             ApplyRunFormatting(fMarkRPr, "rtl", fRtl ? "true" : "false");
@@ -1390,6 +1399,11 @@ public partial class WordHandler
         {
             var fRun = new Run();
             if (sharedRProps != null) fRun.AppendChild((RunProperties)sharedRProps.CloneNode(true));
+            if (fRtlFlag.HasValue)
+            {
+                var fRunRPr = fRun.GetFirstChild<RunProperties>() ?? fRun.PrependChild(new RunProperties());
+                ApplyRunFormatting(fRunRPr, "rtl", fRtlFlag.Value ? "true" : "false");
+            }
             fRun.AppendChild(new Text(fText) { Space = SpaceProcessingModeValues.Preserve });
             fPara.AppendChild(fRun);
         }
