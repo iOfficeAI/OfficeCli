@@ -815,6 +815,19 @@ public partial class WordHandler
                     if (ParseDirectionRtl(value)) InsertSectPrChildInOrder(sectPr, new BiDi());
                     break;
                 }
+                case "rtlgutter":
+                {
+                    // CONSISTENCY(section-layout-fallback): mirrors
+                    // TrySetSectionLayout's rtlgutter case — places the binding
+                    // gutter on the right (used with RTL page layout). Without
+                    // this, /section[N] users were forced to fall back to
+                    // raw-set despite the property being supported on the
+                    // /body/sectPr[N] path.
+                    sectPr.RemoveAllChildren<GutterOnRight>();
+                    if (IsTruthy(value))
+                        InsertSectPrChildInOrder(sectPr, new GutterOnRight());
+                    break;
+                }
                 case "titlepage" or "titlepg":
                 {
                     if (IsTruthy(value))
