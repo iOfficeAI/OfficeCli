@@ -16,9 +16,11 @@
   "properties": {
     "name": {
       "type": "string",
+      "description": "series name shown in legend and data labels.",
       "aliases": ["title"],
       "add": true, "set": true, "get": true,
       "examples": ["--prop name=\"Revenue\"", "--prop series1.name=\"Revenue\""],
+      "readback": "series name string",
       "enforcement": "report"
     },
     "values": {
@@ -48,9 +50,11 @@
     },
     "smooth": {
       "type": "bool",
+      "description": "smooth line interpolation for line/scatter series.",
       "appliesWhen": { "parent.chartType": ["line", "scatter"] },
       "set": true, "get": true,
       "examples": ["--prop smooth=true"],
+      "readback": "true | false",
       "enforcement": "report"
     }
   }

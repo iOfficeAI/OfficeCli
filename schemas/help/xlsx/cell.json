@@ -43,23 +43,29 @@
     },
     "font.bold": {
       "type": "bool",
+      "description": "bold font weight on the cell.",
       "aliases": ["bold"],
       "add": true, "set": true, "get": true,
       "examples": ["--prop bold=true"],
+      "readback": "true | false",
       "enforcement": "strict"
     },
     "font.italic": {
       "type": "bool",
+      "description": "italic style on the cell.",
       "aliases": ["italic"],
       "add": true, "set": true, "get": true,
       "examples": ["--prop italic=true"],
+      "readback": "true | false",
       "enforcement": "strict"
     },
     "font.name": {
       "type": "string",
+      "description": "font family name. Aliases: font, fontname.",
       "aliases": ["font", "fontname"],
       "add": true, "set": true, "get": true,
       "examples": ["--prop font=\"Calibri\""],
+      "readback": "font family name string",
       "enforcement": "strict"
     },
     "font.size": {
@@ -123,24 +129,30 @@
     "alignment.horizontal": {
       "type": "enum",
       "values": ["left", "center", "right", "justify", "fill", "distributed"],
+      "description": "horizontal text alignment. Alias: halign.",
       "aliases": ["halign"],
       "add": true, "set": true, "get": true,
       "examples": ["--prop alignment.horizontal=center"],
+      "readback": "one of values",
       "enforcement": "report"
     },
     "alignment.vertical": {
       "type": "enum",
       "values": ["top", "center", "bottom"],
+      "description": "vertical text alignment. Alias: valign.",
       "aliases": ["valign"],
       "add": true, "set": true, "get": true,
       "examples": ["--prop alignment.vertical=center"],
+      "readback": "one of values",
       "enforcement": "report"
     },
     "alignment.wrapText": {
       "type": "bool",
+      "description": "wrap text within the cell. Aliases: wrap, wrapText.",
       "aliases": ["wrap", "wrapText"],
       "add": true, "set": true, "get": true,
       "examples": ["--prop alignment.wrapText=true"],
+      "readback": "true | false",
       "enforcement": "report"
     },
     "alignment.readingOrder": {

@@ -66,16 +66,17 @@
     },
     "accent1": {
       "type": "color",
+      "description": "theme accent color 1.",
       "add": false, "set": true, "get": true,
       "examples": ["--prop accent1=#4472C4"],
       "readback": "#-prefixed uppercase hex",
       "enforcement": "report"
     },
-    "accent2": { "type": "color", "add": false, "set": true, "get": true, "examples": ["--prop accent2=#ED7D31"], "enforcement": "report" },
-    "accent3": { "type": "color", "add": false, "set": true, "get": true, "examples": ["--prop accent3=#A5A5A5"], "enforcement": "report" },
-    "accent4": { "type": "color", "add": false, "set": true, "get": true, "examples": ["--prop accent4=#FFC000"], "enforcement": "report" },
-    "accent5": { "type": "color", "add": false, "set": true, "get": true, "examples": ["--prop accent5=#5B9BD5"], "enforcement": "report" },
-    "accent6": { "type": "color", "add": false, "set": true, "get": true, "examples": ["--prop accent6=#70AD47"], "enforcement": "report" },
+    "accent2": { "type": "color", "description": "theme accent color 2.", "add": false, "set": true, "get": true, "examples": ["--prop accent2=#ED7D31"], "readback": "#-prefixed uppercase hex", "enforcement": "report" },
+    "accent3": { "type": "color", "description": "theme accent color 3.", "add": false, "set": true, "get": true, "examples": ["--prop accent3=#A5A5A5"], "readback": "#-prefixed uppercase hex", "enforcement": "report" },
+    "accent4": { "type": "color", "description": "theme accent color 4.", "add": false, "set": true, "get": true, "examples": ["--prop accent4=#FFC000"], "readback": "#-prefixed uppercase hex", "enforcement": "report" },
+    "accent5": { "type": "color", "description": "theme accent color 5.", "add": false, "set": true, "get": true, "examples": ["--prop accent5=#5B9BD5"], "readback": "#-prefixed uppercase hex", "enforcement": "report" },
+    "accent6": { "type": "color", "description": "theme accent color 6.", "add": false, "set": true, "get": true, "examples": ["--prop accent6=#70AD47"], "readback": "#-prefixed uppercase hex", "enforcement": "report" },
     "hyperlink": {
       "type": "color",
       "description": "theme hyperlink color.",
