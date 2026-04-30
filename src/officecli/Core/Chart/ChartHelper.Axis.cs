@@ -74,7 +74,14 @@ internal static partial class ChartHelper
                 node.Format["min"] = minEl.Val.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
             if (maxEl?.Val?.HasValue == true)
                 node.Format["max"] = maxEl.Val.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var logBaseEl = scaling?.GetFirstChild<C.LogBase>();
+            if (logBaseEl?.Val?.HasValue == true)
+                node.Format["logBase"] = logBaseEl.Val.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
+
+        // NumberingFormat — applies to any axis role per schema (chart-axis.json `format`)
+        var numFmt = axis.GetFirstChild<C.NumberingFormat>()?.FormatCode?.Value;
+        if (numFmt != null && numFmt != "General") node.Format["format"] = numFmt;
 
         // Gridline presence
         node.Format["majorGridlines"] = (axis.GetFirstChild<C.MajorGridlines>() != null)
@@ -257,6 +264,59 @@ internal static partial class ChartHelper
                             axTick.RemoveAllChildren<C.MinorTickMark>();
                             InsertAxisChildInOrder(axTick, new C.MinorTickMark { Val = tickVal });
                         }
+                    }
+                    directlyHandled.Add(key);
+                    break;
+                }
+
+                case "logbase":
+                {
+                    // Schema: logBase only valid on role=value/value2; category/series → ignore.
+                    if (normalizedRole is not ("value" or "value2"))
+                    {
+                        directlyHandled.Add(key);
+                        break;
+                    }
+                    if (targetAxis is OpenXmlCompositeElement axLb)
+                    {
+                        var scaling = axLb.GetFirstChild<C.Scaling>();
+                        if (scaling != null)
+                        {
+                            scaling.RemoveAllChildren<C.LogBase>();
+                            if (value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                                value.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
+                                value.Equals("log", StringComparison.OrdinalIgnoreCase) ||
+                                value == "1")
+                            {
+                                scaling.PrependChild(new C.LogBase { Val = 10d });
+                            }
+                            else if (!value.Equals("none", StringComparison.OrdinalIgnoreCase) &&
+                                     !value.Equals("linear", StringComparison.OrdinalIgnoreCase) &&
+                                     !value.Equals("false", StringComparison.OrdinalIgnoreCase) &&
+                                     !value.Equals("no", StringComparison.OrdinalIgnoreCase) &&
+                                     value != "0")
+                            {
+                                var logVal = ParseHelpers.SafeParseDouble(value, "logBase");
+                                scaling.PrependChild(new C.LogBase { Val = logVal });
+                            }
+                        }
+                    }
+                    directlyHandled.Add(key);
+                    break;
+                }
+
+                case "format":
+                {
+                    // Number-format string written as the axis's NumberingFormat child.
+                    // Schema declares format on all roles; apply directly on the resolved axis.
+                    if (targetAxis is OpenXmlCompositeElement axNf)
+                    {
+                        axNf.RemoveAllChildren<C.NumberingFormat>();
+                        var nf = new C.NumberingFormat { FormatCode = value, SourceLinked = false };
+                        // Schema order: ...title, numFmt, majorTickMark... — insert before majorTickMark
+                        var nfBefore = axNf.GetFirstChild<C.MajorTickMark>();
+                        if (nfBefore != null) axNf.InsertBefore(nf, nfBefore);
+                        else axNf.AppendChild(nf);
                     }
                     directlyHandled.Add(key);
                     break;
