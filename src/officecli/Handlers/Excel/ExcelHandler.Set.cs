@@ -1149,7 +1149,7 @@ public partial class ExcelHandler
                         {
                             "rtl" or "righttoleft" or "right-to-left" or "true" or "1" => true,
                             "ltr" or "lefttoright" or "left-to-right" or "false" or "0" or "" => false,
-                            _ => throw new ArgumentException($"Invalid direction value: '{value}'. Valid: rtl, ltr.")
+                            _ => throw new ArgumentException($"Invalid direction value: '{value}'. Valid values: rtl, ltr (also accepts true/false, 1/0, righttoleft/lefttoright, right-to-left/left-to-right; case-insensitive).")
                         },
                         _ => ParseHelpers.IsTruthy(value),
                     };
