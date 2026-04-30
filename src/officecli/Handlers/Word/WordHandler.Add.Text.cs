@@ -868,6 +868,16 @@ public partial class WordHandler
             newRProps.NoProof = new NoProof();
         if (properties.TryGetValue("rtl", out var rRtl) && IsTruthy(rRtl))
             ApplyRunFormatting(newRProps, "rtl", "true");
+        // CONSISTENCY(canonical-key): accept "direction"=rtl|ltr as the
+        // canonical alias for run-level rtl, matching paragraph/section
+        // input vocabulary and the symmetric Get readback (R16-bt-1).
+        else if (properties.TryGetValue("direction", out var rDir)
+            || properties.TryGetValue("dir", out rDir))
+        {
+            var v = rDir?.Trim().ToLowerInvariant();
+            if (v == "rtl") ApplyRunFormatting(newRProps, "rtl", "true");
+            else if (v == "ltr") ApplyRunFormatting(newRProps, "rtl", "false");
+        }
         if (properties.TryGetValue("vertAlign", out var rVertAlign) || properties.TryGetValue("vertalign", out rVertAlign))
         {
             newRProps.VerticalTextAlignment = new VerticalTextAlignment

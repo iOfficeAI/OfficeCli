@@ -167,19 +167,19 @@
     },
     "rtl": {
       "type": "bool",
-      "description": "right-to-left text.",
-      "add": true, "set": true, "get": true,
+      "description": "right-to-left text (legacy alias of 'direction'). Get surfaces this as direction=rtl|ltr.",
+      "add": true, "set": true, "get": false,
       "examples": ["--prop rtl=true"],
-      "readback": "true | false",
       "enforcement": "strict"
     },
     "direction": {
       "type": "enum",
       "values": ["ltr", "rtl"],
-      "description": "run reading direction (alias of rtl). Use 'rtl' for Arabic / Hebrew, 'ltr' to clear. Get exposes the canonical 'rtl=true|false' readback for run direction.",
+      "description": "run reading direction. Use 'rtl' for Arabic / Hebrew, 'ltr' to clear. Canonical key for run direction; matches paragraph/section vocabulary.",
       "aliases": ["dir"],
-      "add": true, "set": true, "get": false,
+      "add": true, "set": true, "get": true,
       "examples": ["--prop direction=rtl"],
+      "readback": "rtl | ltr",
       "enforcement": "strict"
     },
     "font.cs": {

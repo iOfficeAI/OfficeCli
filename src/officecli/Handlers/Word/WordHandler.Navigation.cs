@@ -1374,8 +1374,12 @@ public partial class WordHandler
             {
                 // <w:rtl/> with no Val attribute implies true; <w:rtl w:val="0"/>
                 // is an explicit off-override (overrides inherited docDefaults).
+                // CONSISTENCY(canonical-key): paragraphs and sections surface
+                // this property as Format["direction"]="rtl"|"ltr"; runs must
+                // match so users see one canonical key across scopes (R16-bt-1).
                 var rtlVal = run.RunProperties.RightToLeftText.Val;
-                node.Format["rtl"] = rtlVal == null ? true : rtlVal.Value;
+                var on = rtlVal == null ? true : rtlVal.Value;
+                node.Format["direction"] = on ? "rtl" : "ltr";
             }
             if (run.RunProperties?.VerticalTextAlignment?.Val?.Value == VerticalPositionValues.Superscript)
                 node.Format["superscript"] = true;
