@@ -1666,6 +1666,11 @@ public partial class WordHandler
                 // Layout
                 if (tp.TableLayout?.Type?.Value != null)
                     node.Format["layout"] = tp.TableLayout.Type.Value == TableLayoutValues.Fixed ? "fixed" : "auto";
+                // Direction (CT_TblPrBase / w:bidiVisual). Mirrors paragraph
+                // direction vocabulary; presence-only readback (no bidiVisual
+                // means no key — LTR is the default).
+                if (tp.GetFirstChild<BiDiVisual>() != null)
+                    node.Format["direction"] = "rtl";
                 // Default cell margin (padding)
                 var dcm = tp.TableCellMarginDefault;
                 if (dcm?.TopMargin?.Width?.Value != null)
