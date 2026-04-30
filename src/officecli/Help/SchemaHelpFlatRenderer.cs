@@ -24,10 +24,23 @@ internal static class SchemaHelpFlatRenderer
 {
     private static readonly string[] Verbs = { "add", "set", "get", "query", "remove" };
 
-    internal static string RenderAll()
+    /// <summary>
+    /// Render the flat dump. When <paramref name="onlyFormat"/> is non-null,
+    /// the dump is restricted to that single format (e.g. "docx") so callers
+    /// can do `help <fmt> all | grep ...` without piping through `grep ^fmt `.
+    /// The caller is responsible for passing a canonical format string.
+    /// </summary>
+    internal static string RenderAll(string? onlyFormat = null)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("# officecli help all — grep-friendly schema dump");
+        if (onlyFormat == null)
+        {
+            sb.AppendLine("# officecli help all — grep-friendly schema dump");
+        }
+        else
+        {
+            sb.AppendLine($"# officecli help {onlyFormat} all — grep-friendly schema dump (filtered to {onlyFormat})");
+        }
         sb.AppendLine("# Columns: <format> <element> <ELEM|PROP> <name> <type> ops:[asgqr] <details> <description> ex:<example>");
         sb.AppendLine("# ops letters: a=add s=set g=get q=query r=remove (- = not supported)");
         // Use placeholder tokens (<PROP>, <ELEM>) instead of bare PROP/ELEM
@@ -38,6 +51,9 @@ internal static class SchemaHelpFlatRenderer
 
         foreach (var format in SchemaHelpLoader.ListFormats())
         {
+            if (onlyFormat != null && !string.Equals(format, onlyFormat, StringComparison.OrdinalIgnoreCase))
+                continue;
+
             foreach (var element in SchemaHelpLoader.ListElements(format))
             {
                 JsonDocument doc;

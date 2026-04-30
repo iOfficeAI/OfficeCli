@@ -197,6 +197,19 @@ static partial class CommandBuilder
             return 0;
         }
 
+        // Case 0b: `help <format> all` — same flat dump but filtered to one
+        // format. "all" isn't a CRUD verb so it lands in `element` after the
+        // upstream disambiguation. Saves the user a `| grep ^<format>`.
+        if (format != null
+            && SchemaHelpLoader.IsKnownFormat(format)
+            && verb == null
+            && string.Equals(element, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            var canonical = SchemaHelpLoader.NormalizeFormat(format);
+            Console.Write(SchemaHelpFlatRenderer.RenderAll(canonical));
+            return 0;
+        }
+
         if (format == null)
         {
             if (rootCommand != null)
