@@ -50,6 +50,7 @@
     },
     "basedOn": {
       "type": "string",
+      "description": "parent style id to inherit from. Must be an existing w:styleId (not display name). Inherited properties are overridden by properties defined on this style.",
       "aliases": ["basedon"],
       "add": true, "set": true, "get": true,
       "examples": ["--prop basedOn=Normal"],

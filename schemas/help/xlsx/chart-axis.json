@@ -16,12 +16,12 @@
     "keyValues": ["category", "value", "value2", "series"]
   },
   "properties": {
-    "title":          { "type": "string", "set": true, "get": true, "examples": ["--prop title=\"Revenue\""], "enforcement": "report" },
-    "visible":        { "type": "bool",   "set": true, "get": true, "examples": ["--prop visible=false"], "enforcement": "report" },
-    "min":            { "type": "number", "set": true, "get": true, "appliesWhen": { "role": ["value","value2"] }, "examples": ["--prop min=0"], "enforcement": "report" },
-    "max":            { "type": "number", "set": true, "get": true, "appliesWhen": { "role": ["value","value2"] }, "examples": ["--prop max=1000"], "enforcement": "report" },
+    "title":          { "type": "string", "description": "axis title text. Applies to all roles (category, value). Pass 'none' to remove.", "set": true, "get": true, "examples": ["--prop title=\"Revenue\""], "enforcement": "report" },
+    "visible":        { "type": "bool",   "description": "show or hide the axis. Applies to all roles.", "set": true, "get": true, "examples": ["--prop visible=false"], "enforcement": "report" },
+    "min":            { "type": "number", "description": "minimum scale of the value axis. Only valid for role=value or role=value2; ignored on category axes.", "set": true, "get": true, "appliesWhen": { "role": ["value","value2"] }, "examples": ["--prop min=0"], "enforcement": "report" },
+    "max":            { "type": "number", "description": "maximum scale of the value axis. Only valid for role=value or role=value2; ignored on category axes.", "set": true, "get": true, "appliesWhen": { "role": ["value","value2"] }, "examples": ["--prop max=1000"], "enforcement": "report" },
     "labelRotation":  { "type": "number", "description": "tick label rotation in degrees", "set": true, "get": true, "examples": ["--prop labelRotation=-45"], "enforcement": "report" },
-    "majorGridlines": { "type": "bool",   "set": true, "get": true, "examples": ["--prop majorGridlines=true"], "enforcement": "report" },
-    "minorGridlines": { "type": "bool",   "set": true, "get": true, "examples": ["--prop minorGridlines=false"], "enforcement": "report" }
+    "majorGridlines": { "type": "bool",   "description": "show or hide major gridlines. Applies to all roles.", "set": true, "get": true, "examples": ["--prop majorGridlines=true"], "enforcement": "report" },
+    "minorGridlines": { "type": "bool",   "description": "show or hide minor gridlines. Applies to all roles.", "set": true, "get": true, "examples": ["--prop minorGridlines=false"], "enforcement": "report" }
   }
 }
