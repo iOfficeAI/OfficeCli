@@ -237,7 +237,7 @@
       "aliases": ["dir", "rtl"],
       "add": true, "set": true, "get": true,
       "examples": ["--prop direction=rtl"],
-      "readback": "rtl | ltr (only emitted when explicitly set)",
+      "readback": "rtl (ltr is the default and is suppressed; clearing direction removes the attribute)",
       "enforcement": "report"
     },
     "underline": {
