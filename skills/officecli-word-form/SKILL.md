@@ -178,6 +178,7 @@ Two SDT text fields, one checkbox, protection. Paste and adapt; this is the smal
 
 ```bash
 FILE=intake.docx
+officecli close "$FILE" 2>/dev/null; rm -f "$FILE"   # preflight: clear stale resident / prior file (cold-start after CLI upgrade commonly leaks a resident)
 officecli create "$FILE"
 officecli open "$FILE"
 

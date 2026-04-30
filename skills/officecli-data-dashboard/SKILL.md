@@ -47,7 +47,7 @@ Help pins to the installed CLI (v1.0.63). When this skill and help disagree, **h
 
 ## Mental Model & Inheritance
 
-This skill **inherits every xlsx hard rule** from `officecli-xlsx` — shell quoting, zero formula errors, visual delivery floor, batch JSON dotted-name rule, chart data-feed forms, batch+resident limits, `validate` discipline. Read officecli-xlsx first; honour those rules, do not re-teach them here.
+This skill **inherits every xlsx hard rule** from `officecli-xlsx` — shell quoting, zero formula errors, visual delivery floor, batch JSON shape (`{"command":"set"|"add","path":...,"props":{...}}` — key is `command`, NOT `action`), batch JSON dotted-name rule, chart data-feed forms, batch+resident limits, `validate` discipline. Read officecli-xlsx first; honour those rules, do not re-teach them here.
 
 **Reverse handoff — do NOT use this skill when:**
 

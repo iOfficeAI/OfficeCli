@@ -293,7 +293,7 @@ Slide 3 is an explicit intermediate keyframe. Do NOT attempt to fake staggering 
 
 **Good-enough variety heuristic (Best Practice — creative flexibility).** For a morph to read as "motion", change at least 3 of {x, y, width, height, rotation, fill, opacity} on the dominant paired shape, with displacement ≥ 5cm OR rotation ≥ 15° OR size delta ≥ 30%. One shape × 3 props is a valid creative pattern (focus on one hero element).
 
-**Delivery Gate 5b-morph-2 is stricter.** The gate hard-asserts ≥ 3 DIFFERENT `!!`-prefixed shapes each vary by ≥ 1 of {x, y, width, height, rotation, font-size} across the pair — integrity check for "is this really a morph or a pretend-morph". Heuristic informs creative intent; Gate decides delivery. When in doubt, satisfy the stricter Gate.
+**Delivery Gate 5b-morph-2 is stricter.** The gate hard-asserts ≥ 3 DIFFERENT `!!`-prefixed shapes each vary by ≥ 1 of {x, y, width, height, rotation, font-size} across the pair — integrity check for "is this really a morph or a pretend-morph". Heuristic informs creative intent; Gate decides delivery. **Brand-constant scenery (pinned header strip, footer bar, logo badge) does NOT count toward the 3-shape quota** — these are supposed to stay put; motion must come from 3 other named shapes. When in doubt, satisfy the stricter Gate.
 
 **Deck-length rhythm.** Filling every transition with morph reads as anxious, not cinematic. Pace morph moments to deck length:
 - **8-10 slides (dense):** 3-5 morph moments; motion can cluster.

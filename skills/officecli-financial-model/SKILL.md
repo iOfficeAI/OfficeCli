@@ -80,11 +80,11 @@ Every model in this skill builds on three zones. **Name them, tab-color them, an
 **Executable zone audit** (run before Gate 4):
 
 ```bash
-# Calc zone: zero numeric hardcodes allowed.
-HARDCODE=$(officecli query "$FILE" 'cell[type=Number]:not(:has(formula))' --json | jq '[.data.results[] | select(.path | test("/(P&L|Balance Sheet|Cash Flow|DCF|Debt|ARR)/"))] | length')
+# Calc zone: zero numeric hardcodes allowed. NOTE: `:not(:has(formula))` pseudo doesn't filter on v1.0.63+ — filter via jq on .format.formula == null.
+HARDCODE=$(officecli query "$FILE" 'cell[type=Number]' --json | jq '[.data.results[] | select(.format.formula == null) | select(.path | test("/(P&L|Balance Sheet|Cash Flow|DCF|Debt|ARR)/"))] | length')
 [ "$HARDCODE" -eq 0 ] && echo "Zone audit OK" || { echo "REJECT: $HARDCODE hardcoded numeric cells on Calc sheets — move to Assumptions"; exit 1; }
 # Assumptions zone: should be non-zero.
-INPUTS=$(officecli query "$FILE" '/Assumptions/cell[type=Number]:not(:has(formula))' --json | jq '.data.results | length')
+INPUTS=$(officecli query "$FILE" '/Assumptions/cell[type=Number]' --json | jq '[.data.results[] | select(.format.formula == null)] | length')
 [ "$INPUTS" -ge 5 ] && echo "Assumptions has $INPUTS hardcoded drivers" || echo "WARN: Assumptions has only $INPUTS inputs"
 ```
 
@@ -112,7 +112,7 @@ Three facts cause silent wrong numbers: (1) new formulas ship without cached val
 **Discipline (every recipe):**
 - Build order follows the data chain: `P&L → BS → CF` (3-statement); `FCF → WACC → NPV → Sensitivity` (DCF); `S&U → Debt → P&L → CF → Returns` (LBO).
 - After the cross-sheet chain, **cache-refresh pass:** re-issue `set` on every summary / valuation / balance-check cell, non-resident.
-- Spot-check: `officecli get "$FILE" /Summary/B2 --json | jq .format.cachedValue` returns non-zero non-null. If `0` persists: close residents, re-set; still `0` → cache-fallback (§Financial function patterns).
+- Spot-check: `officecli get "$FILE" /Summary/B2 --json | jq .format.cachedValue` returns non-zero non-null. `null` ≠ `0`: `null` means Excel will compute on open (OK for delivery); `0` is a cached lie. If `0` persists: close residents, re-set; still `0` → cache-fallback (§Financial function patterns).
 
 ## Recipes — three model types
 
