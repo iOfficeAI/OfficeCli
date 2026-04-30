@@ -13,7 +13,7 @@
   "paths": {
     "positional": ["/SheetName/chart[N]"]
   },
-  "note": "Source of truth: Core/Chart/ChartHelper.Builder.cs (DeferredAddKeys + DeferredPrefixes) and ChartHelper.Setter.cs (case branches). Adding a new property MUST update both the handler and this file. Validator is also lenient about dotted sub-property namespaces (axis., series., trendline., errbars., datatable., displayunitslabel., trendlinelabel., combo., area., style., title., plotArea., chartArea., legend., datalabels., font., border., fill., shadow., glow., alignment.) and indexed namespaces (series{N}., dataLabel{N}., point{N}., legendEntry{N}.).",
+  "note": "Source of truth: Core/Chart/ChartHelper.Builder.cs (DeferredAddKeys + DeferredPrefixes) and ChartHelper.Setter.cs (case branches). Adding a new property MUST update both the handler and this file. Validator is also lenient about dotted sub-property namespaces (axis., series., trendline., errbars., datatable., displayunitslabel., trendlinelabel., combo., area., style., title., plotArea., chartArea., legend., datalabels., font., border., fill., shadow., glow., alignment.) and indexed namespaces (series{N}., dataLabel{N}., point{N}., legendEntry{N}.). Axis configuration: chart-level axis* props (axismin, axismax, axistitle, axisfont, ...) are Add-time only; for post-creation axis Set/Get use the chart-axis element.",
   "properties": {
     "chartType": {
       "type": "enum",

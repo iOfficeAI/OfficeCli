@@ -9,7 +9,7 @@
     "get": true,
     "remove": false
   },
-  "note": "Axes are created/destroyed implicitly by chartType changes, not via Add/Remove on axis directly. Set/Get only operate on axes that already exist.",
+  "note": "Axes are created/destroyed implicitly by chartType changes, not via Add/Remove on axis directly. Set/Get only operate on axes that already exist. Add-time configuration: use the chart element's axis* props (axismin, axismax, axistitle, axisfont, ...) when creating the chart; chart-axis covers post-creation Set/Get.",
   "addressing": {
     "key": "role",
     "pathForm": "/slide[N]/chart[N]/axis[@role=ROLE]",

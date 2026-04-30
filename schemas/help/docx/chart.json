@@ -13,7 +13,7 @@
   "paths": {
     "positional": ["/body/p[N]/chart[M]"]
   },
-  "note": "Embedded as inline DrawingML chart (c:chart) or extended chart (cx:chart) depending on chartType. Data via inline spec or per-series props. Mirrors pptx/chart surface.",
+  "note": "Embedded as inline DrawingML chart (c:chart) or extended chart (cx:chart) depending on chartType. Data via inline spec or per-series props. Mirrors pptx/chart surface. Axis configuration: chart-level axis* props (axismin, axismax, axistitle, axisfont, ...) are Add-time only; for post-creation axis Set/Get use the chart-axis element.",
   "properties": {
     "chartType": {
       "type": "enum",
