@@ -497,8 +497,26 @@ public partial class WordHandler
         {
             var sRtl = ParseDirectionRtl(sDirRaw);
             sStyleRtlFlag = sRtl;
-            if (sRtl) stylePPr.BiDi = new BiDi();
-            hasPPr = true;
+            if (sRtl)
+            {
+                stylePPr.BiDi = new BiDi();
+                hasPPr = true;
+            }
+            else
+            {
+                // R19-fuzz-1/2: explicit ltr on Add. If the basedOn chain
+                // has bidi=true, emit <w:bidi w:val="0"/> to cancel
+                // inheritance; otherwise no element (canonical clean state).
+                if (properties.TryGetValue("basedOn", out var bOnRaw)
+                    || properties.TryGetValue("basedon", out bOnRaw))
+                {
+                    if (!string.IsNullOrEmpty(bOnRaw) && StyleChainHasBidi(bOnRaw))
+                    {
+                        stylePPr.BiDi = new BiDi { Val = new DocumentFormat.OpenXml.OnOffValue(false) };
+                        hasPPr = true;
+                    }
+                }
+            }
         }
         if (hasPPr) newStyle.AppendChild(stylePPr);
 

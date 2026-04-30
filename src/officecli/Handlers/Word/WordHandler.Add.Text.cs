@@ -50,10 +50,16 @@ public partial class WordHandler
             }
             else
             {
-                // Clear semantics: direction=ltr removes any prior bidi marker
-                // and does not emit <w:rtl w:val="0"/> (that would pollute every
-                // freshly-added paragraph; LTR is the default).
+                // Clear semantics: direction=ltr removes any prior bidi marker.
+                // R19-fuzz-1/2: if the paragraph's linked style chain carries
+                // bidi=true, simply clearing pPr.bidi re-inherits RTL — emit
+                // <w:bidi w:val="0"/> to cancel. Mirrors paragraph Set/cascade.
                 pProps.RemoveAllChildren<BiDi>();
+                var addStyleId = pProps.ParagraphStyleId?.Val?.Value;
+                if (addStyleId != null && StyleChainHasBidi(addStyleId))
+                {
+                    pProps.BiDi = new BiDi { Val = new DocumentFormat.OpenXml.OnOffValue(false) };
+                }
                 var markRPr = pProps.ParagraphMarkRunProperties;
                 markRPr?.RemoveAllChildren<RightToLeftText>();
             }

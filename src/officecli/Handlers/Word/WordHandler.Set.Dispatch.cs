@@ -1265,8 +1265,23 @@ public partial class WordHandler
             {
                 var dPPr = style.StyleParagraphProperties ?? EnsureStyleParagraphProperties(style);
                 bool styleRtl = ParseDirectionRtl(value);
-                if (styleRtl) dPPr.BiDi = new BiDi();
-                else dPPr.RemoveAllChildren<BiDi>();
+                if (styleRtl)
+                {
+                    dPPr.BiDi = new BiDi();
+                }
+                else
+                {
+                    // R19-fuzz-1/2: walking the basedOn chain — if any
+                    // ancestor style carries bidi=true, simply clearing this
+                    // style's pPr.bidi re-inherits RTL. Emit <w:bidi w:val="0"/>
+                    // to cancel. Mirrors paragraph-level R18-fuzz-2 idiom.
+                    dPPr.RemoveAllChildren<BiDi>();
+                    var basedOnId = style.BasedOn?.Val?.Value;
+                    if (basedOnId != null && StyleChainHasBidi(basedOnId))
+                    {
+                        dPPr.BiDi = new BiDi { Val = new DocumentFormat.OpenXml.OnOffValue(false) };
+                    }
+                }
                 // CONSISTENCY(rtl-cascade): style direction lives ONLY on
                 // pPr/<w:bidi/>. We do NOT stamp <w:rtl/> on StyleRunProperties:
                 // CT_RPr requires <w:rFonts> first, and a bare <w:rtl/> there

@@ -61,15 +61,15 @@ public partial class WordHandler
         }
         else
         {
-            // R18-fuzz-2: when the enclosing section is RTL (sectPr has
-            // <w:bidi/>), simply removing pPr.bidi leaves the paragraph
+            // R18-fuzz-2 + R19-fuzz-1/2: when ANY inherited source carries
+            // bidi=true (enclosing section, paragraph-style chain, docDefaults,
+            // numbering lvl pPr), simply removing pPr.bidi leaves the paragraph
             // inheriting RTL — the user's explicit ltr override would be
             // silently lost. Emit <w:bidi w:val="false"/> to override
-            // section inheritance. When the section is default LTR, just
-            // remove pPr.bidi (canonical clean state).
+            // inheritance. When no inherited bidi exists, just remove pPr.bidi
+            // (canonical clean state).
             pProps.RemoveAllChildren<BiDi>();
-            var owningSect = FindOwningSectionProperties(paragraph);
-            if (owningSect?.GetFirstChild<BiDi>() != null)
+            if (HasInheritedBidi(paragraph))
             {
                 pProps.BiDi = new BiDi { Val = new OnOffValue(false) };
             }
@@ -84,6 +84,88 @@ public partial class WordHandler
             var rPr = EnsureRunProperties(run);
             ApplyRunFormatting(rPr, "direction", rtl ? "rtl" : "ltr");
         }
+    }
+
+    /// <summary>
+    /// True iff <paramref name="paragraph"/> would inherit RTL from any
+    /// source above its direct pPr.bidi: the enclosing section's sectPr,
+    /// the linked paragraph-style basedOn chain, docDefaults pPrDefault,
+    /// or its numbering lvl pPr. Used by direction=ltr handlers to decide
+    /// whether to emit <w:bidi w:val="0"/> (cancel inheritance) or simply
+    /// clear (no inherited RTL — canonical clean state).
+    /// </summary>
+    private bool HasInheritedBidi(Paragraph paragraph)
+    {
+        // Section
+        var owningSect = FindOwningSectionProperties(paragraph);
+        if (BidiOnOffOrDefaultTrue(owningSect?.GetFirstChild<BiDi>()) == true) return true;
+
+        // Paragraph-style chain (basedOn walk)
+        var styleId = paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+        if (styleId != null && StyleChainHasBidi(styleId)) return true;
+
+        // docDefaults pPrDefault.bidi
+        var pPrDefault = _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles?.DocDefaults
+            ?.ParagraphPropertiesDefault?.ParagraphPropertiesBaseStyle;
+        if (BidiOnOffOrDefaultTrue(pPrDefault?.GetFirstChild<BiDi>()) == true) return true;
+
+        // Numbering lvl pPr.bidi (R9-1 layer)
+        var numPr = paragraph.ParagraphProperties?.NumberingProperties;
+        var numId = numPr?.NumberingId?.Val?.Value;
+        var ilvl = numPr?.NumberingLevelReference?.Val?.Value;
+        if (numId.HasValue && ilvl.HasValue)
+        {
+            var numbering = _doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering;
+            var inst = numbering?.Elements<NumberingInstance>()
+                .FirstOrDefault(n => n.NumberID?.Value == numId.Value);
+            var absId = inst?.AbstractNumId?.Val?.Value;
+            var abs = absId.HasValue
+                ? numbering!.Elements<AbstractNum>().FirstOrDefault(a => a.AbstractNumberId?.Value == absId.Value)
+                : null;
+            var lvl = abs?.Elements<Level>().FirstOrDefault(l => l.LevelIndex?.Value == ilvl.Value);
+            var lvlBidi = lvl?.PreviousParagraphProperties?.GetFirstChild<BiDi>();
+            if (BidiOnOffOrDefaultTrue(lvlBidi) == true) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// True iff the basedOn chain rooted at <paramref name="styleId"/>
+    /// contains a style whose pPr.bidi resolves to true (CT_OnOff defaults
+    /// true when no Val is set). Returns false on cycles, missing styles,
+    /// or explicit bidi=false.
+    /// </summary>
+    private bool StyleChainHasBidi(string styleId)
+    {
+        var stylesPart = _doc.MainDocumentPart?.StyleDefinitionsPart;
+        var styles = stylesPart?.Styles?.Elements<Style>().ToList();
+        if (styles == null) return false;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var current = styleId;
+        while (current != null && seen.Add(current))
+        {
+            var s = styles.FirstOrDefault(x => x.StyleId?.Value == current);
+            if (s == null) return false;
+            var bidi = s.StyleParagraphProperties?.GetFirstChild<BiDi>();
+            var on = BidiOnOffOrDefaultTrue(bidi);
+            if (on == true) return true;
+            // Explicit false on a closer style does NOT cancel further-up
+            // inheritance walking (Word's resolver picks the nearest explicit
+            // value); but for our purposes, an explicit false anywhere in the
+            // chain means the paragraph inheriting from that style does not
+            // get RTL via this chain — short-circuit.
+            if (on == false) return false;
+            current = s.BasedOn?.Val?.Value;
+        }
+        return false;
+    }
+
+    private static bool? BidiOnOffOrDefaultTrue(BiDi? bidi)
+    {
+        if (bidi == null) return null;
+        var on = TryReadOnOff(bidi.Val);
+        // <w:bidi/> with no Val defaults to true under CT_OnOff.
+        return on ?? true;
     }
 
     /// <summary>
