@@ -490,6 +490,10 @@ public partial class WordHandler
         // Without this, `add /styles --prop direction=rtl` either fell through
         // to the dotted-key probe (which writes <w:rtl/> on rPr but skips
         // pPr) or surfaced as UNSUPPORTED.
+        // R21-fuzz-1: character styles must NOT carry pPr — w:CT_Style for
+        // type=character explicitly forbids <w:pPr>. Direction on a character
+        // style maps to <w:rtl/> in <w:rPr> (handled in the rPr block below
+        // via sStyleRtlFlag), not <w:bidi/> in pPr.
         bool? sStyleRtlFlag = null;
         if (properties.TryGetValue("direction", out var sDirRaw)
             || properties.TryGetValue("dir", out sDirRaw)
@@ -497,7 +501,11 @@ public partial class WordHandler
         {
             var sRtl = ParseDirectionRtl(sDirRaw);
             sStyleRtlFlag = sRtl;
-            if (sRtl)
+            if (styleType == StyleValues.Character)
+            {
+                // Defer to the rPr block; nothing to write on pPr.
+            }
+            else if (sRtl)
             {
                 stylePPr.BiDi = new BiDi();
                 hasPPr = true;
@@ -525,14 +533,28 @@ public partial class WordHandler
         bool hasRPr = false;
         // CONSISTENCY(rtl-cascade): paragraph-style direction=rtl is carried
         // ONLY on style pPr (<w:bidi/>). We deliberately do NOT stamp
-        // <w:rtl/> on StyleRunProperties — CT_RPr in styleRPr requires
-        // <w:rFonts> as the first child (schema order), and a bare <w:rtl/>
-        // there yields a 100-error validator storm in real Office. The
-        // effective.direction reduction already walks pPr/bidi via the style
-        // chain (see ResolveEffectiveParagraphStyleProperties), so runs in
-        // paragraphs that inherit the style still resolve RTL correctly.
-        // (Suppresses R7-5 regression: invalid child element 'w:rtl'.)
-        _ = sStyleRtlFlag;
+        // <w:rtl/> on StyleRunProperties for paragraph styles — CT_RPr in
+        // styleRPr requires <w:rFonts> as the first child (schema order),
+        // and a bare <w:rtl/> there yields a 100-error validator storm in
+        // real Office. The effective.direction reduction already walks
+        // pPr/bidi via the style chain (see ResolveEffectiveParagraphStyleProperties),
+        // so runs in paragraphs that inherit the style still resolve RTL
+        // correctly. (Suppresses R7-5 regression: invalid child element 'w:rtl'.)
+        //
+        // R21-fuzz-1: character styles ARE the rPr-only carrier — they have
+        // no pPr surface at all. <w:rtl/> goes here for type=character.
+        // Insertion order is handled by sorting the rPr children at the end
+        // of this block (see schema-order pass), so emitting <w:rtl/> first
+        // is safe; we do not need rFonts to come first.
+        if (styleType == StyleValues.Character && sStyleRtlFlag.HasValue)
+        {
+            // Use InsertRunPropInSchemaOrder so <w:rtl/> lands at its CT_RPr
+            // position regardless of insertion order with sibling rPr children.
+            InsertRunPropInSchemaOrder(styleRPr, sStyleRtlFlag.Value
+                ? new RightToLeftText()
+                : new RightToLeftText { Val = DocumentFormat.OpenXml.OnOffValue.FromBoolean(false) });
+            hasRPr = true;
+        }
         if (properties.TryGetValue("font", out var sFont))
         {
             styleRPr.RunFonts = new RunFonts { Ascii = sFont, HighAnsi = sFont, EastAsia = sFont };

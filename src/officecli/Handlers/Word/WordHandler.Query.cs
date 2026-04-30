@@ -650,7 +650,19 @@ public partial class WordHandler
                 if (rPr.GetFirstChild<Caps>() != null) styleNode.Format["caps"] = true;
                 if (rPr.GetFirstChild<SmallCaps>() != null) styleNode.Format["smallCaps"] = true;
                 if (rPr.GetFirstChild<Vanish>() != null) styleNode.Format["vanish"] = true;
-                if (rPr.GetFirstChild<RightToLeftText>() != null) styleNode.Format["rtl"] = true;
+                // R21-fuzz-1: character-style direction lives in rPr/<w:rtl/>
+                // (character styles cannot carry pPr). Surface as canonical
+                // 'direction' key for character styles; keep legacy `rtl` flag
+                // for other style types where rPr.rtl decorates paragraph mark.
+                var sRtlEl = rPr.GetFirstChild<RightToLeftText>();
+                if (sRtlEl != null)
+                {
+                    var on = TryReadOnOff(sRtlEl.Val);
+                    if (style.Type?.Value == StyleValues.Character)
+                        styleNode.Format["direction"] = on == true ? "rtl" : "ltr";
+                    else if (on == true)
+                        styleNode.Format["rtl"] = true;
+                }
                 var hl = rPr.GetFirstChild<Highlight>();
                 if (hl?.Val != null) styleNode.Format["highlight"] = hl.Val.InnerText;
                 var shd = rPr.GetFirstChild<Shading>();

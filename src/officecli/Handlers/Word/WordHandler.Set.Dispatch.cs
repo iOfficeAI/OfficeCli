@@ -1279,8 +1279,25 @@ public partial class WordHandler
             var keyLower = key.ToLowerInvariant();
             if (keyLower is "direction" or "dir" or "bidi")
             {
-                var dPPr = style.StyleParagraphProperties ?? EnsureStyleParagraphProperties(style);
                 bool styleRtl = ParseDirectionRtl(value);
+                // R21-fuzz-1: character styles cannot carry pPr — direction
+                // lives in rPr/<w:rtl/>. Mirrors AddStyle's character branch.
+                if (style.Type?.Value == StyleValues.Character)
+                {
+                    var rpr = style.StyleRunProperties ?? style.AppendChild(new StyleRunProperties());
+                    rpr.RemoveAllChildren<RightToLeftText>();
+                    InsertRunPropInSchemaOrder(rpr, styleRtl
+                        ? new RightToLeftText()
+                        : new RightToLeftText { Val = DocumentFormat.OpenXml.OnOffValue.FromBoolean(false) });
+                    // Strip any stray pPr stub left over from a pre-fix doc.
+                    if (style.StyleParagraphProperties is { } strayPPr)
+                    {
+                        strayPPr.RemoveAllChildren<BiDi>();
+                        if (!strayPPr.HasChildren) strayPPr.Remove();
+                    }
+                    continue;
+                }
+                var dPPr = style.StyleParagraphProperties ?? EnsureStyleParagraphProperties(style);
                 if (styleRtl)
                 {
                     dPPr.BiDi = new BiDi();
