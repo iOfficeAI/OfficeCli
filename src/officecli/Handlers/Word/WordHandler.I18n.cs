@@ -76,7 +76,7 @@ public partial class WordHandler
         }
 
         var markRPr = pProps.ParagraphMarkRunProperties
-            ?? pProps.AppendChild(new ParagraphMarkRunProperties());
+            ?? EnsureParagraphMarkRunPropertiesInSchemaOrder(pProps);
         ApplyRunFormatting(markRPr, "direction", rtl ? "rtl" : "ltr");
 
         foreach (var run in paragraph.Descendants<Run>())
@@ -84,6 +84,33 @@ public partial class WordHandler
             var rPr = EnsureRunProperties(run);
             ApplyRunFormatting(rPr, "direction", rtl ? "rtl" : "ltr");
         }
+    }
+
+    /// <summary>
+    /// Insert a fresh <see cref="ParagraphMarkRunProperties"/> into
+    /// <paramref name="pProps"/> at the schema-correct position. CT_PPrBase
+    /// places rPr after the body of pPr children but before <c>sectPr</c> and
+    /// <c>pPrChange</c>. Naively appending makes Word's validator reject the
+    /// document when a pPrChange is already present (R18-bt-2).
+    /// </summary>
+    private static ParagraphMarkRunProperties EnsureParagraphMarkRunPropertiesInSchemaOrder(ParagraphProperties pProps)
+    {
+        var rPr = new ParagraphMarkRunProperties();
+        // Insert before the first sectPr / pPrChange child if any; otherwise append.
+        OpenXmlElement? successor = null;
+        foreach (var child in pProps.ChildElements)
+        {
+            if (child is SectionProperties || child is ParagraphPropertiesChange)
+            {
+                successor = child;
+                break;
+            }
+        }
+        if (successor != null)
+            successor.InsertBeforeSelf(rPr);
+        else
+            pProps.AppendChild(rPr);
+        return rPr;
     }
 
     /// <summary>
