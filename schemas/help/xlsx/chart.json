@@ -31,7 +31,7 @@
     "title.bold":  { "type": "bool",      "add": false, "set": false, "get": true, "description": "title bold flag (readback only)", "readback": "true | false" },
     "data":       { "type": "string", "add": true, "set": false, "get": false, "description": "inline series spec 'Name:1,2,3;...'.", "examples": ["--prop data=\"Sales:10,20,30\""] },
     "dataRange":  { "type": "string", "aliases": ["datarange", "range"], "add": true, "set": false, "get": false, "examples": ["--prop dataRange=Sheet1!A1:D5"] },
-    "categories": { "type": "string", "add": true, "set": true,  "get": false, "examples": ["--prop categories=A,B,C"] },
+    "categories": { "type": "string", "add": true, "set": true,  "get": true, "examples": ["--prop categories=A,B,C"], "readback": "comma-separated category labels" },
     "anchor":     { "type": "string", "add": true, "set": true,  "get": true, "examples": ["--prop anchor=D2:J18"], "description": "cell range anchor; overrides x/y/width/height." },
     "x":          { "type": "length", "add": true, "set": true,  "get": true, "description": "absolute X position from sheet origin; accepts cm/in/pt/EMU. Ignored if anchor= is set.", "examples": ["--prop x=2cm"] },
     "y":          { "type": "length", "add": true, "set": true,  "get": true, "description": "absolute Y position from sheet origin; accepts cm/in/pt/EMU. Ignored if anchor= is set.", "examples": ["--prop y=3cm"] },

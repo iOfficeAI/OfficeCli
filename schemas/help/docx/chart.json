@@ -47,9 +47,9 @@
     "categories": {
       "type": "string",
       "description": "comma-separated category labels (x-axis tick text) for all series.",
-      "add": true, "set": false, "get": false,
+      "add": true, "set": false, "get": true,
       "examples": ["--prop categories=A,B,C", "--prop categories=\"Q1,Q2,Q3,Q4\""],
-      "readback": "n/a",
+      "readback": "comma-separated category labels",
       "enforcement": "report"
     },
     "width": {

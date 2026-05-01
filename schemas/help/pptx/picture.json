@@ -120,6 +120,23 @@
       "add": false, "set": false, "get": true,
       "readback": "integer shape id",
       "enforcement": "report"
+    },
+    "name": {
+      "type": "string",
+      "description": "shape name (DocProperties.Name).",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop name=\"Hero Image\""],
+      "readback": "shape name string",
+      "enforcement": "report"
+    },
+    "alt": {
+      "type": "string",
+      "description": "alt text (DocProperties.Description) for accessibility.",
+      "aliases": ["alttext", "description"],
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop alt=\"Company logo\""],
+      "readback": "alt text string (description); returns \"(missing)\" when absent",
+      "enforcement": "report"
     }
   }
 }

@@ -66,11 +66,12 @@
       "description": "comma-separated category labels, OR a cell range reference (e.g. Sheet1!A2:A5)",
       "add": true,
       "set": true,
-      "get": false,
+      "get": true,
       "examples": [
         "--prop categories=\"Q1,Q2,Q3,Q4\"",
         "--prop categories=\"Sheet1!$A$2:$A$5\""
       ],
+      "readback": "comma-separated category labels",
       "enforcement": "strict"
     },
     "data": {
@@ -219,7 +220,9 @@
     "increaseColor":  { "type": "color", "add": true, "set": false, "get": false, "description": "waterfall: positive bar color. Add-time only.", "examples": ["--prop increaseColor=00AA00"] },
     "decreaseColor":  { "type": "color", "add": true, "set": false, "get": false, "description": "waterfall: negative bar color. Add-time only.", "examples": ["--prop decreaseColor=FF0000"] },
     "totalColor":     { "type": "color", "add": true, "set": false, "get": false, "description": "waterfall: subtotal/total bar color. Add-time only.", "examples": ["--prop totalColor=4472C4"] },
-    "combosplit":     { "type": "number", "add": true, "set": false, "get": false, "description": "combo chart split index: first N series use primary chart type, rest use secondary. Add-time only.", "examples": ["--prop combosplit=2"] }
+    "combosplit":     { "type": "number", "add": true, "set": false, "get": false, "description": "combo chart split index: first N series use primary chart type, rest use secondary. Add-time only.", "examples": ["--prop combosplit=2"] },
+    "id":             { "type": "number", "add": false, "set": false, "get": true, "description": "OOXML chart shape id; source of @id in the stable path /chart[@id=ID].", "readback": "integer chart shape id", "enforcement": "report" },
+    "name":           { "type": "string", "add": true, "set": false, "get": true, "description": "shape name (DocProperties.Name).", "examples": ["--prop name=\"Sales Chart\""], "readback": "shape name string", "enforcement": "report" }
   },
   "children": [
     { "element": "chart-title",    "pathSegment": "title",    "cardinality": "0..1" },
