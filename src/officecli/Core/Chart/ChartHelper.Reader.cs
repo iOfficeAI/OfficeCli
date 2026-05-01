@@ -470,7 +470,7 @@ internal static partial class ChartHelper
                     // Alpha/transparency
                     var alphaEl = serColor.Descendants<Drawing.Alpha>().FirstOrDefault();
                     if (alphaEl?.Val?.HasValue == true)
-                        seriesNode.Format["alpha"] = alphaEl.Val.Value;
+                        seriesNode.Format["transparency"] = 100000 - (int)alphaEl.Val.Value;
                 }
                 // Gradient
                 var gradFill = serSpPr?.GetFirstChild<Drawing.GradientFill>();

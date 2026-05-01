@@ -194,7 +194,7 @@ public partial class PowerPointHandler
         if (pres.FirstSlideNum?.Value != null && pres.FirstSlideNum.Value != 1)
             node.Format["firstSlideNum"] = pres.FirstSlideNum.Value;
         if (pres.RightToLeft?.Value == true)
-            node.Format["rtl"] = true;
+            node.Format["direction"] = "rtl";
         if (pres.CompatibilityMode?.Value == true)
             node.Format["compatMode"] = true;
         if (pres.RemovePersonalInfoOnSave?.Value == true)

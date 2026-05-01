@@ -661,7 +661,7 @@ public partial class WordHandler
                     if (style.Type?.Value == StyleValues.Character)
                         styleNode.Format["direction"] = on == true ? "rtl" : "ltr";
                     else if (on == true)
-                        styleNode.Format["rtl"] = true;
+                        styleNode.Format["direction"] = "rtl";
                 }
                 var hl = rPr.GetFirstChild<Highlight>();
                 if (hl?.Val != null) styleNode.Format["highlight"] = hl.Val.InnerText;
