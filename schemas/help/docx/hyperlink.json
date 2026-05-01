@@ -69,7 +69,7 @@
       "examples": [
         "--prop color=#0000FF"
       ],
-      "readback": "#-prefixed uppercase hex",
+      "readback": "#-prefixed uppercase hex, or scheme color name (e.g. 'hyperlink', 'followedhyperlink') when using theme default",
       "enforcement": "report"
     },
     "font": {
