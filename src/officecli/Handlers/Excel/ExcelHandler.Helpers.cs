@@ -2405,11 +2405,11 @@ public partial class ExcelHandler
         }
 
         // Geometry preset (rect, ellipse, etc.) — `preset` is the canonical
-        // key per shape help schema; `shape`/`geometry` are accepted as
-        // Add/Set aliases. Match PPTX shape readback which also uses `preset`.
+        // key per shape help schema; `preset`/`shape` are accepted as
+        // Add/Set aliases. Aligns with PPTX shape readback (commit 9f72712a).
         var presetGeom = shape.ShapeProperties?.GetFirstChild<Drawing.PresetGeometry>();
         if (presetGeom?.Preset?.HasValue == true)
-            node.Format["preset"] = presetGeom.Preset.InnerText;
+            node.Format["geometry"] = presetGeom.Preset.InnerText;
 
         // Fill
         var spPr = shape.ShapeProperties;

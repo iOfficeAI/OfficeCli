@@ -43,17 +43,18 @@
       ],
       "enforcement": "report"
     },
-    "preset": {
+    "geometry": {
       "type": "string",
       "description": "geometry preset name (rect, ellipse, roundRect, triangle, rightArrow, etc.). Unknown presets fall back to rect with a stderr warning. Set replaces the existing PresetGeometry preserving fill/line/effects.",
       "aliases": [
+        "preset",
         "shape"
       ],
       "add": true,
       "set": true,
       "get": true,
       "examples": [
-        "--prop preset=ellipse"
+        "--prop geometry=ellipse"
       ],
       "enforcement": "report"
     },
