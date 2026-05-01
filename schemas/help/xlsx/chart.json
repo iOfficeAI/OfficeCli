@@ -369,7 +369,7 @@
       "add": true,
       "set": true,
       "get": false,
-      "description": "value (Y) axis title; pass 'none' to remove.",
+      "description": "convenience shortcut for /chart[N]/axis[@role=...] title (value-axis); see chart-axis schema for full axis-level options",
       "examples": [
         "--prop axistitle=\"Revenue\""
       ]
@@ -382,7 +382,7 @@
       "add": true,
       "set": true,
       "get": false,
-      "description": "value-axis minimum scale.",
+      "description": "convenience shortcut for /chart[N]/axis[@role=...] min (on value/value2); see chart-axis schema for full axis-level options",
       "examples": [
         "--prop axismin=0"
       ]
@@ -395,7 +395,7 @@
       "add": true,
       "set": true,
       "get": false,
-      "description": "value-axis maximum scale.",
+      "description": "convenience shortcut for /chart[N]/axis[@role=...] max (on value/value2); see chart-axis schema for full axis-level options",
       "examples": [
         "--prop axismax=1000"
       ]
@@ -428,10 +428,9 @@
       "add": true,
       "set": true,
       "get": false,
-      "description": "value-axis number format code (Excel format string).",
+      "description": "convenience shortcut for /chart[N]/axis[@role=...] axisNumFmt / format; see chart-axis schema for full axis-level options",
       "examples": [
-        "--prop axisnumfmt=\"#,##0\"",
-        "--prop axisnumfmt=\"0.0%\""
+        "--prop axisnumfmt=\"#,##0\""
       ]
     },
     "axisfont": {
@@ -442,7 +441,7 @@
       "add": true,
       "set": true,
       "get": false,
-      "description": "tick-label font on every axis (category, value, date). Format: 'size:color:fontname' (any segment optional).",
+      "description": "convenience shortcut for /chart[N]/axis[@role=...] axisFont; see chart-axis schema for full axis-level options",
       "examples": [
         "--prop axisfont=10:8B949E:Helvetica"
       ]
@@ -468,7 +467,7 @@
       "add": true,
       "set": true,
       "get": false,
-      "description": "category-axis spine position. Values: top|t, bottom|b, left|l, right|r (default bottom).",
+      "description": "convenience shortcut for /chart[N]/axis[@role=...] tickLabelPos / crossBetween; see chart-axis schema for full axis-level options",
       "examples": [
         "--prop axisposition=top"
       ]
@@ -481,7 +480,7 @@
       "add": true,
       "set": true,
       "get": false,
-      "description": "value-axis direction. true|maxmin reverses (max at origin); false|minmax restores default.",
+      "description": "convenience shortcut for /chart[N]/axis[@role=...] axisOrientation; see chart-axis schema for full axis-level options",
       "examples": [
         "--prop axisorientation=true"
       ]
@@ -494,10 +493,9 @@
       "add": true,
       "set": true,
       "get": false,
-      "description": "axis spine line style applied to both axes. Format: 'color', 'color:width', or 'color:width:dash'; or 'none'.",
+      "description": "convenience shortcut for /chart[N]/axis[@role=...] lineWidth/lineDash; see chart-axis schema for full axis-level options",
       "examples": [
-        "--prop axisline=666666:1",
-        "--prop axisline=none"
+        "--prop axisline=666666:1"
       ]
     },
     "cataxisline": {
@@ -508,7 +506,7 @@
       "add": true,
       "set": true,
       "get": false,
-      "description": "category-axis spine line style; same format as axisline.",
+      "description": "convenience shortcut for /chart[N]/axis[@role=...] lineWidth/lineDash (on role=category); see chart-axis schema for full axis-level options",
       "examples": [
         "--prop cataxisline=333333:1"
       ]
@@ -521,7 +519,7 @@
       "add": true,
       "set": true,
       "get": false,
-      "description": "value-axis spine line style; same format as axisline.",
+      "description": "convenience shortcut for /chart[N]/axis[@role=...] lineWidth/lineDash (on role=value); see chart-axis schema for full axis-level options",
       "examples": [
         "--prop valaxisline=333333:1"
       ]
@@ -535,7 +533,7 @@
       "add": true,
       "set": true,
       "get": false,
-      "description": "show/hide both axes. axis.delete inverts the sense (true = hidden).",
+      "description": "convenience shortcut for /chart[N]/axis[@role=...] visible; see chart-axis schema for full axis-level options",
       "examples": [
         "--prop axisvisible=false"
       ]
@@ -1327,7 +1325,7 @@
       "add": true,
       "set": true,
       "get": true,
-      "description": "category axis visibility (false when deleted).",
+      "description": "convenience shortcut for /chart[N]/axis[@role=...] visible (on role=category); see chart-axis schema for full axis-level options",
       "readback": "true | false",
       "enforcement": "report",
       "aliases": [
@@ -1439,7 +1437,7 @@
       "add": true,
       "set": true,
       "get": true,
-      "description": "value axis visibility (false when the value axis is deleted).",
+      "description": "convenience shortcut for /chart[N]/axis[@role=...] visible (on role=value); see chart-axis schema for full axis-level options",
       "readback": "true|false",
       "enforcement": "report",
       "aliases": [
