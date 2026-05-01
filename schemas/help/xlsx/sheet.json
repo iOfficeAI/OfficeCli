@@ -172,9 +172,10 @@
     },
     "sort": {
       "type": "string",
-      "description": "active SortState description, comma-separated `Col:dir` entries (e.g. `A:asc,B:desc`). dir is `asc` or `desc`.",
+      "description": "sort the sheet by one or more columns. Set input: comma-separated `Col [dir]` tokens, direction optional, defaults to asc (e.g. `A`, `A asc`, `A asc,B desc`). Use `none` to clear. Get readback: comma-separated `Col:dir` entries (colon-separated, e.g. `A:asc`).",
       "add": false, "set": true, "get": true,
-      "readback": "comma-separated `Col:asc|desc` list",
+      "examples": ["--prop sort=A", "--prop sort=\"A asc,B desc\"", "--prop sort=none"],
+      "readback": "comma-separated `Col:asc|desc` list (e.g. `A:asc`)",
       "enforcement": "report"
     },
     "rowBreaks": {
