@@ -109,29 +109,29 @@
       "readback": "true/false",
       "enforcement": "report"
     },
-    "above": {
+    "aboveAverage": {
       "type": "bool",
-      "description": "aboveAverage rule: true=above, false=below. Alias: aboveAverage.",
-      "aliases": ["aboveAverage"],
+      "description": "aboveAverage rule: true=above, false=below. Alias: above.",
+      "aliases": ["above"],
       "add": true, "set": false, "get": true,
-      "examples": ["--prop type=aboveAverage --prop above=true"],
+      "examples": ["--prop type=aboveAverage --prop aboveAverage=true"],
       "readback": "true/false",
       "enforcement": "report"
     },
     "stdDev": {
       "type": "number",
-      "description": "stdDev offset for aboveAverage rules (1 = 1σ above mean).",
-      "add": true, "set": false, "get": true,
+      "description": "stdDev offset for aboveAverage rules (1 = 1σ above mean). Add-time only — Get does not surface this back today.",
+      "add": true, "set": false, "get": false,
       "examples": ["--prop stdDev=1"],
-      "readback": "number",
+      "readback": "n/a",
       "enforcement": "report"
     },
     "equalAverage": {
       "type": "bool",
-      "description": "include the mean in aboveAverage matching.",
-      "add": true, "set": false, "get": true,
+      "description": "include the mean in aboveAverage matching. Add-time only — Get does not surface this back today.",
+      "add": true, "set": false, "get": false,
       "examples": ["--prop equalAverage=true"],
-      "readback": "true/false",
+      "readback": "n/a",
       "enforcement": "report"
     },
     "period": {
@@ -187,10 +187,10 @@
     "axisPosition": {
       "type": "enum",
       "values": ["automatic", "middle", "none"],
-      "description": "data-bar axis position. Default: automatic.",
-      "add": true, "set": false, "get": true,
+      "description": "data-bar axis position. Default: automatic. Add-time only — Get does not surface this back today.",
+      "add": true, "set": false, "get": false,
       "examples": ["--prop axisPosition=middle"],
-      "readback": "automatic|middle|none",
+      "readback": "n/a",
       "enforcement": "report"
     },
     "minColor": {
@@ -222,11 +222,11 @@
     },
     "midPoint": {
       "type": "string",
-      "description": "color-scale midpoint value (numeric or percentile). Alias: midpoint.",
+      "description": "color-scale midpoint value (numeric or percentile). Alias: midpoint. Add-time only — Get does not surface this back today.",
       "aliases": ["midpoint"],
-      "add": true, "set": false, "get": true,
+      "add": true, "set": false, "get": false,
       "examples": ["--prop midPoint=50"],
-      "readback": "midpoint expression",
+      "readback": "n/a",
       "enforcement": "report"
     },
     "iconset": {

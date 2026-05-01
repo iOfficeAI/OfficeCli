@@ -98,6 +98,11 @@
     "categoriesRef":   { "type":"string", "add":false, "set":false, "get":true, "description":"A1 cell range backing the category labels.", "readback":"A1 range string", "enforcement":"report" },
     "nameRef":         { "type":"string", "add":false, "set":false, "get":true, "description":"A1 cell reference backing the series name.", "readback":"A1 cell reference", "enforcement":"report" },
     "secondaryAxis":   { "type":"bool",   "add":false, "set":false, "get":true, "description":"true when the chart has more than one value axis (this series uses the secondary).", "readback":"true | false", "enforcement":"report" },
-    "scatterStyle":    { "type":"string", "add":false, "set":false, "get":true, "description":"scatter sub-style (line/lineMarker/marker/smooth/smoothMarker/none).", "readback":"OOXML scatterStyle token", "enforcement":"report" }
+    "scatterStyle":    { "type":"string", "add":false, "set":false, "get":true, "description":"scatter sub-style (line/lineMarker/marker/smooth/smoothMarker/none).", "readback":"OOXML scatterStyle token", "enforcement":"report" },
+    "outlineColor":         { "type":"color",  "add":false, "set":false, "get":true, "description":"per-series outline color readback.", "readback":"#RRGGBB or scheme reference", "enforcement":"report" },
+    "valuesRef":            { "type":"string", "add":false, "set":false, "get":true, "description":"A1 cell range backing the series values.", "readback":"A1 range string", "enforcement":"report" },
+    "trendline.dispEq":     { "type":"bool",   "add":false, "set":false, "get":true, "description":"trendline displayEquation flag.", "readback":"true when shown", "enforcement":"report" },
+    "trendline.dispRSqr":   { "type":"bool",   "add":false, "set":false, "get":true, "description":"trendline displayRSquaredValue flag.", "readback":"true when shown", "enforcement":"report" },
+    "alpha":                { "type":"number", "add":false, "set":false, "get":true, "description":"series fill alpha readback in OOXML units (0..100000 = 0..100%). Distinct from chart-level `transparency` which is the percent input on Add/Set.", "readback":"integer 0..100000 (OOXML alpha units)", "enforcement":"report" }
   }
 }

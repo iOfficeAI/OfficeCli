@@ -273,6 +273,21 @@
       "add": false, "set": false, "get": true,
       "readback": "cached display value for formula cells; absent on plain-value cells",
       "enforcement": "report"
-    }
+    },
+    "alignment.indent":         { "type":"number", "add":false, "set":false, "get":true, "description":"cell alignment indent units (CT_CellAlignment @indent). Use the flat `indent` key on Add/Set.", "readback":"integer indent units", "enforcement":"report" },
+    "alignment.shrinkToFit":    { "type":"bool",   "add":false, "set":false, "get":true, "description":"cell alignment shrinkToFit flag.", "readback":"true|false", "enforcement":"report" },
+    "alignment.textRotation":   { "type":"number", "add":false, "set":false, "get":true, "description":"cell alignment text rotation in degrees (CT_CellAlignment @textRotation).", "readback":"integer degrees", "enforcement":"report" },
+    "font.subscript":           { "type":"bool",   "add":false, "set":false, "get":true, "description":"font vertical-alignment subscript flag (legacy alias of cell-level `subscript`).", "readback":"true|false", "enforcement":"report" },
+    "font.superscript":         { "type":"bool",   "add":false, "set":false, "get":true, "description":"font vertical-alignment superscript flag (legacy alias of cell-level `superscript`).", "readback":"true|false", "enforcement":"report" },
+    "border.diagonal":          { "type":"string", "add":false, "set":false, "get":true, "description":"diagonal border line style (CT_Border/diagonal @style — thin, medium, thick, dashed, etc.).", "readback":"line-style token", "enforcement":"report" },
+    "border.diagonal.color":    { "type":"color",  "add":false, "set":false, "get":true, "description":"diagonal border color.", "readback":"#RRGGBB uppercase", "enforcement":"report" },
+    "border.diagonalDown":      { "type":"bool",   "add":false, "set":false, "get":true, "description":"true when the cell shows a top-left → bottom-right diagonal border.", "readback":"true|false", "enforcement":"report" },
+    "border.diagonalUp":        { "type":"bool",   "add":false, "set":false, "get":true, "description":"true when the cell shows a bottom-left → top-right diagonal border.", "readback":"true|false", "enforcement":"report" },
+    "arrayref":                 { "type":"string", "add":false, "set":false, "get":true, "description":"array-formula spill range (CellFormula @ref). Surfaces on the master cell of an array formula.", "readback":"A1 range string", "enforcement":"report" },
+    "mergeAnchor":              { "type":"bool",   "add":false, "set":false, "get":true, "description":"true when this cell is the top-left anchor of a merged range. Empty merged-region cells receive mergeAnchor=false; the anchor receives true.", "readback":"true|false", "enforcement":"report" },
+    "empty":                    { "type":"bool",   "add":false, "set":false, "get":true, "description":"true when the cell has neither display text nor a formula. Useful for distinguishing styled-but-empty cells from data cells.", "readback":"true|false", "enforcement":"report" },
+    "richtext":                 { "type":"bool",   "add":false, "set":false, "get":true, "description":"true when the cell stores rich-text runs (multi-format text). Surfaces alongside `runs` in Get output.", "readback":"true|false", "enforcement":"report" },
+    "subscript":                { "type":"bool",   "add":false, "set":false, "get":true, "description":"cell-level run subscript flag (when cell is rich text with a single run).", "readback":"true|false", "enforcement":"report" },
+    "superscript":              { "type":"bool",   "add":false, "set":false, "get":true, "description":"cell-level run superscript flag (when cell is rich text with a single run).", "readback":"true|false", "enforcement":"report" }
   }
 }

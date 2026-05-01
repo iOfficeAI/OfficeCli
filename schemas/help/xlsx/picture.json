@@ -250,6 +250,10 @@
       "enforcement": "report"
     },
     "fileSize":    { "type":"number", "add":false, "set":false, "get":true, "description":"embedded image bytes.", "readback":"integer byte count", "enforcement":"report" },
-    "contentType": { "type":"string", "add":false, "set":false, "get":true, "description":"MIME type (e.g. image/png).", "readback":"MIME type string", "enforcement":"report" }
+    "contentType": { "type":"string", "add":false, "set":false, "get":true, "description":"MIME type (e.g. image/png).", "readback":"MIME type string", "enforcement":"report" },
+    "crop":        { "type":"string", "add":false, "set":false, "get":true, "description":"compound crop readback in `l,t,r,b` percent form (e.g. `10,5,10,5`). Use crop.l/crop.t/crop.r/crop.b on Add/Set; this key is the merged Get readback.", "readback":"comma-separated `l,t,r,b` percent quad", "enforcement":"report" },
+    "anchoredTo":  { "type":"string", "add":false, "set":false, "get":true, "description":"anchor descriptor — sheet/cell-range path the picture is anchored to.", "readback":"`/SheetName/A1[:Z9]` anchor path", "enforcement":"report" },
+    "relId":       { "type":"string", "add":false, "set":false, "get":true, "description":"relationship id of the embedded image part (rId-style token).", "readback":"relationship id token", "enforcement":"report" },
+    "mergeAnchor": { "type":"bool",   "add":false, "set":false, "get":true, "description":"true when the picture is anchored to a merged-cell region.", "readback":"true|false", "enforcement":"report" }
   }
 }

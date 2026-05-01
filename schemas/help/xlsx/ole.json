@@ -34,7 +34,8 @@
     },
     "preview": {
       "type": "string",
-      "add": true, "set": true, "get": false,
+      "description": "preview thumbnail image source. Add-time only — Set ignores this key.",
+      "add": true, "set": false, "get": false,
       "examples": ["--prop preview=/path/to/thumb.png"],
       "readback": "n/a",
       "enforcement": "report"

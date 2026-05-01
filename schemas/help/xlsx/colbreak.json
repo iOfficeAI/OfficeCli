@@ -19,9 +19,9 @@
       "type": "string",
       "description": "column index or letter. Aliases: column, index.",
       "aliases": ["column", "index"],
-      "add": true, "set": true, "get": true,
+      "add": true, "set": false, "get": false,
       "examples": ["--prop col=F"],
-      "readback": "column index",
+      "readback": "n/a (see sheet.colBreaks)",
       "enforcement": "report"
     }
   }

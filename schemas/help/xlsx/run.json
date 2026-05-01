@@ -56,6 +56,8 @@
       "examples": ["--prop color=#FF0000"],
       "readback": "#-prefixed uppercase hex",
       "enforcement": "report"
-    }
+    },
+    "subscript":   { "type":"bool", "add":false, "set":false, "get":true, "description":"run vertical-alignment subscript flag (CT_RPrElt @vertAlign=subscript).", "readback":"true|false", "enforcement":"report" },
+    "superscript": { "type":"bool", "add":false, "set":false, "get":true, "description":"run vertical-alignment superscript flag (CT_RPrElt @vertAlign=superscript).", "readback":"true|false", "enforcement":"report" }
   }
 }

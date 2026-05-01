@@ -181,6 +181,20 @@
       "readback": "margin in inches",
       "enforcement": "report"
     },
+    "margin.header": {
+      "type": "string",
+      "description": "PageMargins header margin in inches (distance from top edge to header).",
+      "add": false, "set": false, "get": true,
+      "readback": "margin in inches",
+      "enforcement": "report"
+    },
+    "margin.footer": {
+      "type": "string",
+      "description": "PageMargins footer margin in inches (distance from bottom edge to footer).",
+      "add": false, "set": false, "get": true,
+      "readback": "margin in inches",
+      "enforcement": "report"
+    },
     "header": {
       "type": "string",
       "description": "odd-page header text (HeaderFooter/OddHeader). Excel format codes (&L, &C, &R, &P, &D, etc.) pass through verbatim.",

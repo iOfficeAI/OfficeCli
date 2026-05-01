@@ -19,9 +19,9 @@
       "type": "int",
       "description": "1-based row index where the break occurs. Alias: index.",
       "aliases": ["index"],
-      "add": true, "set": true, "get": true,
+      "add": true, "set": false, "get": false,
       "examples": ["--prop row=20"],
-      "readback": "row index",
+      "readback": "n/a (see sheet.rowBreaks)",
       "enforcement": "report"
     }
   }

@@ -125,6 +125,9 @@
       "examples": ["--prop totalsRowFunction=none,sum,average"],
       "readback": "per-column tokens",
       "enforcement": "report"
-    }
+    },
+    "id":            { "type":"number", "add":false, "set":false, "get":true, "description":"per-column @id readback (surfaces on the column child node, not the table itself).", "readback":"integer column id", "enforcement":"report" },
+    "totalFunction": { "type":"string", "add":false, "set":false, "get":true, "description":"per-column totals-row function readback (surfaces on the column child node).", "readback":"function token", "enforcement":"report" },
+    "totalLabel":    { "type":"string", "add":false, "set":false, "get":true, "description":"per-column totals-row label readback (surfaces on the column child node).", "readback":"label text", "enforcement":"report" }
   }
 }

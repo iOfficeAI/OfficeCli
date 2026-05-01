@@ -17,20 +17,20 @@
   "properties": {
     "defaultFont": {
       "type": "string",
-      "description": "default font for all cells (fontname alias).",
+      "description": "default font for all cells (fontname alias). Not implemented in ExcelHandler — Add/Set/Get all return n/a today; manage cell fonts directly.",
       "aliases": ["fontName", "fontname"],
-      "add": false, "set": true, "get": true,
+      "add": false, "set": false, "get": false,
       "examples": ["--prop defaultFont=Calibri"],
-      "readback": "font name",
+      "readback": "n/a",
       "enforcement": "report"
     },
     "defaultFontSize": {
       "type": "length",
-      "description": "default font size.",
+      "description": "default font size. Not implemented in ExcelHandler — Add/Set/Get all return n/a today; manage cell fonts directly.",
       "aliases": ["fontSize", "fontsize"],
-      "add": false, "set": true, "get": true,
+      "add": false, "set": false, "get": false,
       "examples": ["--prop defaultFontSize=11"],
-      "readback": "unit-qualified pt",
+      "readback": "n/a",
       "enforcement": "report"
     },
     "author": {
@@ -132,7 +132,18 @@
     "extended.characters":         { "type":"number", "add":false, "set":false, "get":true, "description":"docProps/app.xml Characters count.", "readback":"integer", "enforcement":"report" },
     "extended.lines":              { "type":"number", "add":false, "set":false, "get":true, "description":"docProps/app.xml Lines count.", "readback":"integer", "enforcement":"report" },
     "extended.paragraphs":         { "type":"number", "add":false, "set":false, "get":true, "description":"docProps/app.xml Paragraphs count.", "readback":"integer", "enforcement":"report" },
-    "extended.totalTime":          { "type":"number", "add":false, "set":false, "get":true, "description":"docProps/app.xml TotalTime field (minutes).", "readback":"integer minutes", "enforcement":"report" }
+    "extended.totalTime":          { "type":"number", "add":false, "set":false, "get":true, "description":"docProps/app.xml TotalTime field (minutes).", "readback":"integer minutes", "enforcement":"report" },
+    "category":   { "type":"string", "add":false, "set":true,  "get":true, "description":"docProps/core.xml Category field.", "examples":["--prop category=Reports"], "readback":"category string", "enforcement":"report" },
+    "description":{ "type":"string", "add":false, "set":true,  "get":true, "description":"docProps/core.xml Description field.", "examples":["--prop description=\"Annual revenue summary\""], "readback":"description string", "enforcement":"report" },
+    "keywords":   { "type":"string", "add":false, "set":true,  "get":true, "description":"docProps/core.xml Keywords field.", "examples":["--prop keywords=\"finance,2026\""], "readback":"keyword list string", "enforcement":"report" },
+    "revision":   { "type":"string", "add":false, "set":true,  "get":true, "description":"docProps/core.xml Revision field.", "examples":["--prop revision=3"], "readback":"revision number string", "enforcement":"report" },
+    "activeTab":  { "type":"number", "add":false, "set":false, "get":true, "description":"workbook BookViews activeTab — index of the sheet active when the file opens.", "readback":"integer (0-based)", "enforcement":"report" },
+    "firstSheet": { "type":"number", "add":false, "set":false, "get":true, "description":"workbook BookViews firstSheet — index of the leftmost visible sheet.", "readback":"integer (0-based)", "enforcement":"report" },
+    "calc.fullCalcOnLoad": { "type":"bool", "add":false, "set":false, "get":true, "description":"CalculationProperties FullCalculationOnLoad flag — force a full recalc when the workbook opens.", "readback":"true|false", "enforcement":"report" },
+    "calc.refMode":        { "type":"string", "add":false, "set":false, "get":true, "description":"CalculationProperties ReferenceMode (A1 or R1C1).", "readback":"reference mode string", "enforcement":"report" },
+    "workbook.backupFile": { "type":"bool", "add":false, "set":false, "get":true, "description":"WorkbookProperties BackupFile flag — Excel keeps a backup .bak alongside saves.", "readback":"true|false", "enforcement":"report" },
+    "workbook.codeName":   { "type":"string", "add":false, "set":false, "get":true, "description":"WorkbookProperties CodeName — VBA project workbook codename (e.g. ThisWorkbook).", "readback":"codename string", "enforcement":"report" },
+    "workbook.date1904":   { "type":"bool", "add":false, "set":false, "get":true, "description":"WorkbookProperties Date1904 flag — true means dates use the 1904 epoch (Mac legacy).", "readback":"true|false", "enforcement":"report" }
   },
   "children": [
     { "element": "sheet", "pathSegment": "{SheetName}", "cardinality": "1..n" }

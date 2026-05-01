@@ -62,6 +62,7 @@
       "examples": ["--prop collapsed=true"],
       "readback": "not surfaced by Get",
       "enforcement": "report"
-    }
+    },
+    "customHeight": { "type":"bool", "add":false, "set":false, "get":true, "description":"true when the row carries an explicit height (Row @customHeight). Get-only flag.", "readback":"true when row has a custom height", "enforcement":"report" }
   }
 }

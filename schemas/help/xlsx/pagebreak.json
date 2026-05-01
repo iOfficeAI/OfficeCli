@@ -17,19 +17,19 @@
   "properties": {
     "row": {
       "type": "int",
-      "description": "row index — routes to rowbreak.",
-      "add": true, "set": true, "get": true,
+      "description": "row index — routes to rowbreak. Add-time only — Set is not supported (re-add to relocate). Get does not surface this back today; use sheet.rowBreaks for the indexed list.",
+      "add": true, "set": false, "get": false,
       "examples": ["--prop row=20"],
-      "readback": "row index",
+      "readback": "n/a (see sheet.rowBreaks)",
       "enforcement": "report"
     },
     "col": {
       "type": "string",
-      "description": "column index/letter — routes to colbreak. Alias: column.",
+      "description": "column index/letter — routes to colbreak. Alias: column. Add-time only — Set is not supported (re-add to relocate). Get does not surface this back today; use sheet.colBreaks for the indexed list.",
       "aliases": ["column"],
-      "add": true, "set": true, "get": true,
+      "add": true, "set": false, "get": false,
       "examples": ["--prop col=F"],
-      "readback": "col index",
+      "readback": "n/a (see sheet.colBreaks)",
       "enforcement": "report"
     }
   }

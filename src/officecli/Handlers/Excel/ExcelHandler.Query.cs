@@ -524,7 +524,7 @@ public partial class ExcelHandler
                     if (iconSet.IconSetValue?.Value != null)
                         cfNode.Format["iconset"] = iconSet.IconSetValue.InnerText;
                     if (iconSet.ShowValue?.Value != null)
-                        cfNode.Format["showvalue"] = iconSet.ShowValue.Value;
+                        cfNode.Format["showValue"] = iconSet.ShowValue.Value;
                     if (iconSet.Reverse?.Value == true)
                         cfNode.Format["reverse"] = true;
                 }

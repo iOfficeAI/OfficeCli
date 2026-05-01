@@ -26,8 +26,8 @@
     },
     "criteria0": {
       "type": "string",
-      "description": "column 0 filter criterion. Use dotted key: --prop criteria0.OP=VAL. OP ∈ equals/notEquals/contains/doesNotContain/beginsWith/endsWith/gt/gte/lt/lte/between/notBetween/top/topPercent/bottom/bottomPercent/blanks/nonBlanks/values/dynamic. Use criteria1, criteria2, … for additional columns.",
-      "add": true, "set": true, "get": true,
+      "description": "column 0 filter criterion. Use dotted key: --prop criteria0.OP=VAL. OP ∈ equals/notEquals/contains/doesNotContain/beginsWith/endsWith/gt/gte/lt/lte/between/notBetween/top/topPercent/bottom/bottomPercent/blanks/nonBlanks/values/dynamic. Use criteria1, criteria2, … for additional columns. Add-time only — Set on /sheet/autofilter currently accepts only `range`, and Get does not surface stored criteria back today.",
+      "add": true, "set": false, "get": false,
       "examples": ["--prop criteria0.equals=Red", "--prop criteria2.gt=100"],
       "readback": "criterion spec",
       "enforcement": "report"

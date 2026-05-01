@@ -35,6 +35,7 @@
     "axisOrientation": { "type":"string", "add":false, "set":false, "get":true, "description":"axis scaling orientation (e.g. maxMin when reversed).", "readback":"orientation token", "enforcement":"report" },
     "axisNumFmt":      { "type":"string", "add":false, "set":false, "get":true, "description":"axis number format string.", "readback":"format code", "enforcement":"report" },
     "tickLabelSkip":   { "type":"number", "add":false, "set":false, "get":true, "description":"category axis label skip interval (>1 means tick labels are sparser).", "readback":"integer interval", "enforcement":"report" },
-    "labelOffset":     { "type":"number", "add":false, "set":false, "get":true, "description":"category axis label offset (% of default 100).", "readback":"integer percentage", "enforcement":"report" }
+    "labelOffset":     { "type":"number", "add":false, "set":false, "get":true, "description":"category axis label offset (% of default 100).", "readback":"integer percentage", "enforcement":"report" },
+    "role":            { "type":"string", "add":false, "set":false, "get":true, "description":"axis role token — value, value2, category, series. Surfaces on Get to identify which axis this node represents.", "readback":"axis role token (lowercase)", "enforcement":"report" }
   }
 }

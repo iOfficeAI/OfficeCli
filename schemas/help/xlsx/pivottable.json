@@ -104,9 +104,9 @@
     },
     "topN": {
       "type": "string",
-      "description": "keep only top-N row keys ranked by first value field's aggregate. Integer >= 1; filter applied to source rows pre-cache.",
+      "description": "keep only top-N row keys ranked by first value field's aggregate. Integer >= 1; filter applied to source rows pre-cache. Add-time only — Set ignores this key.",
       "aliases": ["topn"],
-      "add": true, "set": true, "get": false,
+      "add": true, "set": false, "get": false,
       "examples": ["--prop topN=10"],
       "readback": "n/a (filters source rows)",
       "enforcement": "report"
@@ -131,18 +131,18 @@
     },
     "labelFilter": {
       "type": "string",
-      "description": "row-level pre-cache label filter as 'field:type:value' (e.g. 'Region:beginsWith:N'). Type one of equals, notEquals, beginsWith, endsWith, contains, notContains, greaterThan, greaterThanEqual, lessThan, lessThanEqual, between, notBetween.",
+      "description": "row-level pre-cache label filter as 'field:type:value' (e.g. 'Region:beginsWith:N'). Type one of equals, notEquals, beginsWith, endsWith, contains, notContains, greaterThan, greaterThanEqual, lessThan, lessThanEqual, between, notBetween. Add-time only — Set ignores this key.",
       "aliases": ["labelfilter"],
-      "add": true, "set": true, "get": false,
+      "add": true, "set": false, "get": false,
       "examples": ["--prop labelFilter=Region:beginsWith:N"],
       "readback": "n/a (filters source rows)",
       "enforcement": "report"
     },
     "calculatedField": {
       "type": "string",
-      "description": "user-defined formula field as 'Name:=Formula' (e.g. 'Margin:=Sales-Cost'). Use calculatedField1, calculatedField2, ... for multiple. Alias: calculatedFields.",
+      "description": "user-defined formula field as 'Name:=Formula' (e.g. 'Margin:=Sales-Cost'). Use calculatedField1, calculatedField2, ... for multiple. Alias: calculatedFields. Add-time only — Set ignores this key.",
       "aliases": ["calculatedfield", "calculatedfields"],
-      "add": true, "set": true, "get": false,
+      "add": true, "set": false, "get": false,
       "examples": ["--prop calculatedField=Margin:=Sales-Cost", "--prop calculatedField1=Margin:=Sales-Cost --prop calculatedField2=Tax:=Sales*0.1"],
       "readback": "n/a",
       "enforcement": "report"
@@ -267,18 +267,18 @@
     },
     "showDrill": {
       "type": "bool",
-      "description": "show expand/collapse (+/-) buttons on every pivot field.",
+      "description": "show expand/collapse (+/-) buttons on every pivot field. Add-time only — Set ignores this key.",
       "aliases": ["showdrill"],
-      "add": true, "set": true, "get": false,
+      "add": true, "set": false, "get": false,
       "examples": ["--prop showDrill=false"],
       "readback": "n/a",
       "enforcement": "report"
     },
     "mergeLabels": {
       "type": "bool",
-      "description": "merge+center repeated outer-axis item cells (<pivotTableDefinition mergeItem='1'>).",
+      "description": "merge+center repeated outer-axis item cells (<pivotTableDefinition mergeItem='1'>). Add-time only — Set ignores this key.",
       "aliases": ["mergelabels"],
-      "add": true, "set": true, "get": false,
+      "add": true, "set": false, "get": false,
       "examples": ["--prop mergeLabels=true"],
       "readback": "n/a",
       "enforcement": "report"
