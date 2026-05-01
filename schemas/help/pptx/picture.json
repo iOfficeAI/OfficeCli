@@ -113,6 +113,13 @@
       "add": false, "set": false, "get": true,
       "readback": "byte length of the embedded image part",
       "enforcement": "report"
+    },
+    "id": {
+      "type": "number",
+      "description": "OOXML shape id; source of the @id in the stable path /picture[@id=ID].",
+      "add": false, "set": false, "get": true,
+      "readback": "integer shape id",
+      "enforcement": "report"
     }
   }
 }

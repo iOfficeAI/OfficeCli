@@ -172,6 +172,13 @@
       "examples": ["--prop border.vertical=\"1pt solid CCCCCC\""],
       "readback": "not aggregated at table level — inspect per-cell border.left/right",
       "enforcement": "report"
+    },
+    "id": {
+      "type": "number",
+      "description": "OOXML shape id; source of the @id in the stable path /table[@id=ID].",
+      "add": false, "set": false, "get": true,
+      "readback": "integer shape id",
+      "enforcement": "report"
     }
   },
   "children": [

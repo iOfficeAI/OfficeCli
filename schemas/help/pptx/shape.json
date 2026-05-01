@@ -321,9 +321,9 @@
       "type": "enum",
       "description": "auto-fit mode for shape text body.",
       "values": ["none", "normal", "shape", "noAutofit", "spAutoFit"],
-      "add": true, "set": true, "get": false,
+      "add": true, "set": true, "get": true,
       "examples": ["--prop autofit=shape"],
-      "readback": "n/a",
+      "readback": "one of: none | normal | shape",
       "enforcement": "report"
     },
     "lineSpacing": {
@@ -500,6 +500,20 @@
       "description": "resolved bold inherited from placeholder→layout→master→presentation defaults. Suppressed when 'bold' is set directly on the shape.",
       "add": false, "set": false, "get": true,
       "readback": "true/false",
+      "enforcement": "report"
+    },
+    "id": {
+      "type": "number",
+      "description": "OOXML shape id; source of the @id in the stable path /shape[@id=ID].",
+      "add": false, "set": false, "get": true,
+      "readback": "integer shape id",
+      "enforcement": "report"
+    },
+    "zorder": {
+      "type": "number",
+      "description": "1-based z-order in slide shape tree.",
+      "add": false, "set": false, "get": true,
+      "readback": "1-based integer (1 = back)",
       "enforcement": "report"
     }
   }

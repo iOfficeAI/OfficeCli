@@ -36,7 +36,7 @@
     "scope": {
       "type": "string",
       "description": "sheet name for local scope, or 'workbook' (default).",
-      "add": true, "set": false, "get": true,
+      "add": true, "set": true, "get": true,
       "examples": ["--prop scope=workbook"],
       "readback": "scope descriptor",
       "enforcement": "report"

@@ -30,6 +30,13 @@
       "examples": ["--prop name=\"Logos\""],
       "readback": "name string",
       "enforcement": "report"
+    },
+    "zorder": {
+      "type": "number",
+      "description": "1-based z-order in slide shape tree.",
+      "add": false, "set": false, "get": true,
+      "readback": "1-based integer (1 = back)",
+      "enforcement": "report"
     }
   }
 }

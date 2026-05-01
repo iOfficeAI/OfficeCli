@@ -109,6 +109,13 @@
       "examples": ["--prop tailEnd=arrow"],
       "readback": "OOXML LineEndValues token (canonical)",
       "enforcement": "report"
+    },
+    "id": {
+      "type": "number",
+      "description": "OOXML shape id; source of the @id in the stable path /connector[@id=ID].",
+      "add": false, "set": false, "get": true,
+      "readback": "integer shape id",
+      "enforcement": "report"
     }
   }
 }

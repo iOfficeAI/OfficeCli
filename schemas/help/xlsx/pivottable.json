@@ -308,7 +308,7 @@
       "type": "string",
       "description": "per-data-field readback (1-indexed: dataField1, dataField2, …) packed as 'name:aggFunc:fieldIdx'.",
       "add": false, "set": false, "get": true,
-      "readback": "packed as 'name:aggFunc:fieldIdx' (e.g. 'Revenue:sum:1')",
+      "readback": "packed as 'name:aggFunc:fieldIdx'; name reflects Excel's stored DataField/@name which includes auto-prefixes (e.g. 'Sum of Revenue:sum:1')",
       "enforcement": "report"
     }
   }
