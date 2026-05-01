@@ -2127,8 +2127,15 @@ public partial class PowerPointHandler
             // surfaced here but duplicated the unit-qualified width/height
             // emitted from the graphicFrame xfrm below. Kept internal only.
 
-            // Extents from the frame's own xfrm.
+            // Extents + offset from the frame's own xfrm.
             var xfrm = gf.Transform;
+            if (xfrm?.Offset != null)
+            {
+                if (xfrm.Offset.X?.Value != null)
+                    node.Format["x"] = OfficeCli.Core.EmuConverter.FormatEmu(xfrm.Offset.X.Value);
+                if (xfrm.Offset.Y?.Value != null)
+                    node.Format["y"] = OfficeCli.Core.EmuConverter.FormatEmu(xfrm.Offset.Y.Value);
+            }
             if (xfrm?.Extents != null)
             {
                 if (xfrm.Extents.Cx?.Value != null)
