@@ -11,63 +11,60 @@
     "remove": true
   },
   "paths": {
-    "positional": ["/body/p[N]/pic[M]"]
+    "positional": [
+      "/body/p[N]/pic[M]"
+    ]
   },
   "note": "Aliases: image, img. 'src' is required (alias 'path'). Image source resolved via ImageSource — accepts file path, URL, data-URI, or raw bytes. SVGs auto-generate a PNG fallback.",
+  "extends": "_shared/picture",
   "properties": {
-    "src": {
-      "type": "string",
-      "description": "image source (file path, URL, data-URI); accepted on add/set only. Get does NOT surface this key; the embedded relationship id is exposed under a separate Format[\"relId\"] key.",
-      "aliases": ["path"],
-      "add": true, "set": true, "get": false,
-      "examples": ["--prop src=/path/to/image.png"],
-      "readback": "add/set-only input; not echoed by Get. Use Format[\"relId\"] to inspect the embedded image relationship.",
-      "enforcement": "report"
-    },
-    "width": {
-      "type": "length",
-      "description": "EMU-parseable. If omitted, derived from height + native aspect ratio or defaults to 6in.",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop width=3in"],
-      "readback": "length in cm (e.g. \"5.1cm\")",
-      "enforcement": "report"
-    },
-    "height": {
-      "type": "length",
-      "description": "EMU-parseable. If omitted, derived from width + native aspect ratio or defaults to 4in.",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop height=2in"],
-      "readback": "length in cm (e.g. \"3.2cm\")",
-      "enforcement": "report"
-    },
     "fallback": {
       "type": "string",
       "description": "optional PNG fallback for SVG sources. When omitted, a 1x1 transparent PNG is generated.",
-      "add": true, "set": false, "get": false,
-      "examples": ["--prop fallback=/path/to/fallback.png"],
+      "add": true,
+      "set": false,
+      "get": false,
+      "examples": [
+        "--prop fallback=/path/to/fallback.png"
+      ],
       "readback": "n/a (SVG-only)",
-      "enforcement": "report"
-    },
-    "alt": {
-      "type": "string",
-      "description": "alternative text (DocProperties.Description). Defaults to the source file name on add. Aliases: alttext, description.",
-      "aliases": ["alttext", "description"],
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop alt=\"Company logo\""],
-      "readback": "string",
       "enforcement": "report"
     },
     "id": {
       "type": "number",
-      "description": "OOXML drawing id.",
-      "add": false, "set": false, "get": true,
-      "readback": "integer",
+      "description": "OOXML shape id; source of the @id in the stable path /picture[@id=ID].",
+      "add": false,
+      "set": false,
+      "get": true,
+      "readback": "integer shape id",
       "enforcement": "report"
     },
-    "fileSize":    { "type":"number", "add":false, "set":false, "get":true, "description":"embedded image bytes.", "readback":"integer byte count", "enforcement":"report" },
-    "contentType": { "type":"string", "add":false, "set":false, "get":true, "description":"MIME type (e.g. image/png).", "readback":"MIME type string", "enforcement":"report" },
-    "behindText":  { "type":"bool",   "add":false, "set":false, "get":true, "description":"true when the picture floats behind text (anchor @behindDoc=1).", "readback":"true on behind-text floats", "enforcement":"report" },
-    "hPosition":   { "type":"length", "add":false, "set":false, "get":true, "description":"absolute horizontal anchor position in cm (positionH/posOffset).", "readback":"length in cm (e.g. `5.0cm`)", "enforcement":"report" },
-    "hRelative":   { "type":"string", "add":false, "set":false, "get":true, "description":"horizontal anchor reference frame (e.g. page, margin, column, character).", "readback":"OOXML positionH @relativeFrom token", "enforcement":"report" }
+    "behindText": {
+      "type": "bool",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "true when the picture floats behind text (anchor @behindDoc=1).",
+      "readback": "true on behind-text floats",
+      "enforcement": "report"
+    },
+    "hPosition": {
+      "type": "length",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "absolute horizontal anchor position in cm (positionH/posOffset).",
+      "readback": "length in cm (e.g. `5.0cm`)",
+      "enforcement": "report"
+    },
+    "hRelative": {
+      "type": "string",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "horizontal anchor reference frame (e.g. page, margin, column, character).",
+      "readback": "OOXML positionH @relativeFrom token",
+      "enforcement": "report"
+    }
   }
 }

@@ -11,249 +11,363 @@
     "remove": true
   },
   "paths": {
-    "positional": ["/SheetName/picture[N]"]
+    "positional": [
+      "/SheetName/picture[N]"
+    ]
   },
   "note": "Aliases: image, img. Anchor via ParseAnchorBoundsEmu — accepts cell counts or unit-qualified lengths. SVG sources get a PNG fallback.",
+  "extends": "_shared/picture",
   "properties": {
-    "src": {
-      "type": "string",
-      "description": "image source — file path, HTTP(S) URL, or data URI (data:image/png;base64,...). Add/set-only input; the image is embedded as an ImagePart and not round-tripped, so Get does NOT surface this key.",
-      "aliases": ["path"],
-      "add": true, "set": true, "get": false,
-      "examples": ["--prop src=/path/to/image.png"],
-      "readback": "add/set-only input; Get does not surface this key.",
-      "enforcement": "report"
-    },
     "x": {
       "type": "length",
       "description": "anchor column index (0-based, e.g. x=2 means column C).",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop x=0"],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop x=0",
+        "--prop x=1in"
+      ],
       "readback": "anchor column index (0-based integer)",
       "enforcement": "report"
     },
     "y": {
       "type": "length",
       "description": "anchor row index (0-based, e.g. y=4 means row 5).",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop y=0"],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop y=0",
+        "--prop y=1in"
+      ],
       "readback": "anchor row index (0-based integer)",
-      "enforcement": "report"
-    },
-    "width": {
-      "type": "length",
-      "description": "column span — number of columns the picture spans.",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop width=5"],
-      "readback": "column span (integer)",
-      "enforcement": "report"
-    },
-    "height": {
-      "type": "length",
-      "description": "row span — number of rows the picture spans.",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop height=5"],
-      "readback": "row span (integer)",
-      "enforcement": "report"
-    },
-    "alt": {
-      "type": "string",
-      "description": "alt text. Aliases: altText, alttext.",
-      "aliases": ["altText", "alttext"],
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop alt=\"Logo\""],
-      "readback": "alt text",
       "enforcement": "report"
     },
     "title": {
       "type": "string",
       "description": "OOXML @title attribute on cNvPr (distinct from alt).",
-      "add": true, "set": false,
-      "examples": ["--prop title=\"Logo\""],
+      "add": true,
+      "set": false,
+      "examples": [
+        "--prop title=\"Logo\""
+      ],
       "enforcement": "report"
     },
     "name": {
       "type": "string",
       "description": "Override the auto-generated 'Picture {id}' label on cNvPr @name.",
-      "add": true, "set": false,
-      "examples": ["--prop name=\"hero-image\""],
+      "add": true,
+      "set": false,
+      "examples": [
+        "--prop name=\"hero-image\"",
+        "--prop name=\"Hero Image\""
+      ],
       "enforcement": "report"
     },
     "decorative": {
       "type": "bool",
       "description": "Mark the picture as decorative (a16:decorative ext under cNvPr). Excludes it from screen-reader alt-text traversal.",
-      "add": true, "set": false,
-      "examples": ["--prop decorative=true"],
+      "add": true,
+      "set": false,
+      "examples": [
+        "--prop decorative=true"
+      ],
       "enforcement": "report"
     },
     "rotation": {
       "type": "string",
       "description": "Rotation in degrees (positive = clockwise). Stored OOXML-internal as 60000ths of a degree on Transform2D @rot.",
-      "add": true, "set": true,
-      "examples": ["--prop rotation=45"],
+      "add": true,
+      "set": true,
+      "examples": [
+        "--prop rotation=45"
+      ],
       "enforcement": "report"
     },
     "flip": {
       "type": "string",
       "description": "Compact flip token: 'h' / 'v' / 'both' / 'hv' / 'vh' / 'horizontal' / 'vertical'.",
-      "add": true, "set": true,
-      "examples": ["--prop flip=h", "--prop flip=both"],
+      "add": true,
+      "set": true,
+      "examples": [
+        "--prop flip=h",
+        "--prop flip=both"
+      ],
       "enforcement": "report"
     },
     "flipH": {
       "type": "bool",
       "description": "Flip horizontally (Office-API-style alias of flip=h).",
-      "add": true, "set": true,
-      "examples": ["--prop flipH=true"],
+      "add": true,
+      "set": true,
+      "examples": [
+        "--prop flipH=true"
+      ],
       "enforcement": "report"
     },
     "flipV": {
       "type": "bool",
       "description": "Flip vertically (Office-API-style alias of flip=v).",
-      "add": true, "set": true,
-      "examples": ["--prop flipV=true"],
+      "add": true,
+      "set": true,
+      "examples": [
+        "--prop flipV=true"
+      ],
       "enforcement": "report"
     },
     "flipBoth": {
       "type": "bool",
       "description": "Flip both axes (alias of flip=both).",
-      "add": true, "set": false,
-      "examples": ["--prop flipBoth=true"],
+      "add": true,
+      "set": false,
+      "examples": [
+        "--prop flipBoth=true"
+      ],
       "enforcement": "report"
     },
     "opacity": {
       "type": "string",
       "description": "Picture opacity. Accepts percent (50, '50%') or fraction (0.5). 100 / 100% / 1.0 = fully opaque.",
-      "add": true, "set": false,
-      "examples": ["--prop opacity=50", "--prop opacity=0.5"],
+      "add": true,
+      "set": false,
+      "examples": [
+        "--prop opacity=50",
+        "--prop opacity=0.5"
+      ],
       "enforcement": "report"
     },
     "hyperlink": {
       "type": "string",
       "description": "Picture-level hyperlink. External URL (https://...) or in-document jump (#SheetName!A1).",
-      "aliases": ["link"],
-      "add": true, "set": false,
-      "examples": ["--prop hyperlink=https://example.com"],
+      "aliases": [
+        "link"
+      ],
+      "add": true,
+      "set": false,
+      "examples": [
+        "--prop hyperlink=https://example.com"
+      ],
       "enforcement": "report"
     },
     "anchor": {
       "type": "string",
       "description": "Cell-range anchor (e.g. 'B2:E6') or anchorMode token ('oneCell'/'twoCell'/'absolute'). Cell-range form implies twoCell mode.",
-      "add": true, "set": false,
-      "examples": ["--prop anchor=B2:E6", "--prop anchor=oneCell"],
+      "add": true,
+      "set": false,
+      "examples": [
+        "--prop anchor=B2:E6",
+        "--prop anchor=oneCell"
+      ],
       "enforcement": "report"
     },
     "anchorMode": {
       "type": "string",
       "description": "Explicit anchor mode: 'oneCell' / 'twoCell' / 'absolute'. Overrides any anchor= mode token.",
-      "add": true, "set": false,
-      "examples": ["--prop anchorMode=oneCell"],
+      "add": true,
+      "set": false,
+      "examples": [
+        "--prop anchorMode=oneCell"
+      ],
       "enforcement": "report"
     },
     "fallback": {
       "type": "string",
-      "description": "PNG fallback for SVG sources. When omitted, a 1x1 transparent PNG is used.",
-      "add": true, "set": false,
-      "examples": ["--prop fallback=/path/to/fallback.png"],
+      "description": "optional PNG fallback for SVG sources. When omitted, a 1x1 transparent PNG is generated.",
+      "add": true,
+      "set": false,
+      "get": false,
+      "examples": [
+        "--prop fallback=/path/to/fallback.png"
+      ],
+      "readback": "n/a (SVG-only)",
       "enforcement": "report"
     },
     "shadow": {
       "type": "string",
       "description": "Outer shadow effect. 'none' to clear, or a color/spec accepted by DrawingEffectsHelper.",
-      "add": false, "set": true,
-      "examples": ["--prop shadow=#808080"],
+      "add": false,
+      "set": true,
+      "examples": [
+        "--prop shadow=#808080"
+      ],
       "enforcement": "report"
     },
     "glow": {
       "type": "string",
       "description": "Glow effect color/spec. 'none' to clear.",
-      "add": false, "set": true,
-      "examples": ["--prop glow=#4472C4"],
+      "add": false,
+      "set": true,
+      "examples": [
+        "--prop glow=#4472C4"
+      ],
       "enforcement": "report"
     },
     "reflection": {
       "type": "string",
       "description": "Reflection effect. 'none' to clear.",
-      "add": false, "set": true,
-      "examples": ["--prop reflection=true"],
+      "add": false,
+      "set": true,
+      "examples": [
+        "--prop reflection=true"
+      ],
       "enforcement": "report"
     },
     "softEdge": {
       "type": "string",
-      "aliases": ["softedge"],
+      "aliases": [
+        "softedge"
+      ],
       "description": "Soft edge effect radius. 'none' to clear.",
-      "add": false, "set": true,
-      "examples": ["--prop softEdge=5"],
+      "add": false,
+      "set": true,
+      "examples": [
+        "--prop softEdge=5"
+      ],
       "enforcement": "report"
     },
     "crop.l": {
       "type": "string",
       "description": "Crop from left edge as a percentage (e.g. 10 = 10%, '10%' also accepted). Internally stored in 1/1000 percent units.",
-      "add": true, "set": true,
-      "examples": ["--prop crop.l=10", "--prop crop.l=50%"],
+      "add": true,
+      "set": true,
+      "examples": [
+        "--prop crop.l=10",
+        "--prop crop.l=50%"
+      ],
       "enforcement": "report"
     },
     "crop.r": {
       "type": "string",
       "description": "Crop from right edge as a percentage.",
-      "add": true, "set": true,
-      "examples": ["--prop crop.r=10"],
+      "add": true,
+      "set": true,
+      "examples": [
+        "--prop crop.r=10"
+      ],
       "enforcement": "report"
     },
     "crop.t": {
       "type": "string",
       "description": "Crop from top edge as a percentage.",
-      "add": true, "set": true,
-      "examples": ["--prop crop.t=10"],
+      "add": true,
+      "set": true,
+      "examples": [
+        "--prop crop.t=10"
+      ],
       "enforcement": "report"
     },
     "crop.b": {
       "type": "string",
       "description": "Crop from bottom edge as a percentage.",
-      "add": true, "set": true,
-      "examples": ["--prop crop.b=10"],
+      "add": true,
+      "set": true,
+      "examples": [
+        "--prop crop.b=10"
+      ],
       "enforcement": "report"
     },
     "srcRect": {
       "type": "string",
       "description": "Compound crop spec, e.g. 'l=10,r=10,t=5,b=5'. Equivalent to crop.l/crop.r/crop.t/crop.b.",
-      "add": true, "set": true,
-      "examples": ["--prop srcRect=l=10,r=10,t=5,b=5"],
+      "add": true,
+      "set": true,
+      "examples": [
+        "--prop srcRect=l=10,r=10,t=5,b=5"
+      ],
       "enforcement": "report"
     },
     "cropLeft": {
       "type": "string",
       "description": "Crop from left as fraction (<=1) or percent (>1). E.g. cropLeft=0.1 or cropLeft=10 both mean 10%.",
-      "add": true, "set": true,
-      "examples": ["--prop cropLeft=0.1", "--prop cropLeft=10"],
-      "enforcement": "report"
+      "add": true,
+      "set": true,
+      "examples": [
+        "--prop cropLeft=0.1",
+        "--prop cropLeft=10"
+      ],
+      "enforcement": "report",
+      "aliases": [
+        "cropleft"
+      ]
     },
     "cropRight": {
       "type": "string",
-      "description": "Crop from right as fraction (<=1) or percent (>1).",
-      "add": true, "set": true,
-      "examples": ["--prop cropRight=10"],
+      "description": "Crop from right edge as percent (0-100). Aliases: cropright.",
+      "aliases": [
+        "cropright"
+      ],
+      "add": true,
+      "set": true,
+      "examples": [
+        "--prop cropRight=10"
+      ],
       "enforcement": "report"
     },
     "cropTop": {
       "type": "string",
-      "description": "Crop from top as fraction (<=1) or percent (>1).",
-      "add": true, "set": true,
-      "examples": ["--prop cropTop=10"],
+      "description": "Crop from top edge as percent (0-100). Aliases: croptop.",
+      "aliases": [
+        "croptop"
+      ],
+      "add": true,
+      "set": true,
+      "examples": [
+        "--prop cropTop=10"
+      ],
       "enforcement": "report"
     },
     "cropBottom": {
       "type": "string",
-      "description": "Crop from bottom as fraction (<=1) or percent (>1).",
-      "add": true, "set": true,
-      "examples": ["--prop cropBottom=10"],
+      "description": "Crop from bottom edge as percent (0-100). Aliases: cropbottom.",
+      "aliases": [
+        "cropbottom"
+      ],
+      "add": true,
+      "set": true,
+      "examples": [
+        "--prop cropBottom=10"
+      ],
       "enforcement": "report"
     },
-    "fileSize":    { "type":"number", "add":false, "set":false, "get":true, "description":"embedded image bytes.", "readback":"integer byte count", "enforcement":"report" },
-    "contentType": { "type":"string", "add":false, "set":false, "get":true, "description":"MIME type (e.g. image/png).", "readback":"MIME type string", "enforcement":"report" },
-    "crop":        { "type":"string", "add":false, "set":false, "get":true, "description":"compound crop readback in `l,t,r,b` percent form (e.g. `10,5,10,5`). Use crop.l/crop.t/crop.r/crop.b on Add/Set; this key is the merged Get readback.", "readback":"comma-separated `l,t,r,b` percent quad", "enforcement":"report" },
-    "anchoredTo":  { "type":"string", "add":false, "set":false, "get":true, "description":"anchor descriptor — sheet/cell-range path the picture is anchored to.", "readback":"`/SheetName/A1[:Z9]` anchor path", "enforcement":"report" },
-    "relId":       { "type":"string", "add":false, "set":false, "get":true, "description":"relationship id of the embedded image part (rId-style token).", "readback":"relationship id token", "enforcement":"report" },
-    "mergeAnchor": { "type":"bool",   "add":false, "set":false, "get":true, "description":"true when the picture is anchored to a merged-cell region.", "readback":"true|false", "enforcement":"report" }
+    "crop": {
+      "type": "string",
+      "description": "Crop in percent (0-100). 1 value = symmetric, 2 values = vertical,horizontal, 4 values = left,top,right,bottom.",
+      "add": true,
+      "set": true,
+      "examples": [
+        "--prop crop=10",
+        "--prop crop=5,10",
+        "--prop crop=10,5,10,5"
+      ],
+      "enforcement": "report"
+    },
+    "anchoredTo": {
+      "type": "string",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "anchor descriptor — sheet/cell-range path the picture is anchored to.",
+      "readback": "`/SheetName/A1[:Z9]` anchor path",
+      "enforcement": "report"
+    },
+    "relId": {
+      "type": "string",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "relationship id of the embedded image part (rId-style token).",
+      "readback": "relationship id token",
+      "enforcement": "report"
+    },
+    "mergeAnchor": {
+      "type": "bool",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "true when the picture is anchored to a merged-cell region.",
+      "readback": "true|false",
+      "enforcement": "report"
+    }
   }
 }

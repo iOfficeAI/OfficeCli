@@ -1,0 +1,37 @@
+{
+  "$schema": "../_schema.json",
+  "element": "table",
+  "shared_base": true,
+  "properties": {
+    "style": {
+      "type": "string",
+      "description": "table style name or GUID (accepted aliases: tableStyle, tableStyleId). Valid names: medium1..4, light1..3, dark1..2, none, or a direct {GUID}.",
+      "values": [
+        "medium1",
+        "medium2",
+        "medium3",
+        "medium4",
+        "light1",
+        "light2",
+        "light3",
+        "dark1",
+        "dark2",
+        "none"
+      ],
+      "aliases": [
+        "tableStyle",
+        "tableStyleId"
+      ],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop style=TableStyleMedium2",
+        "--prop style=medium1",
+        "--prop style=TableGrid"
+      ],
+      "readback": "style name when resolvable, else GUID",
+      "enforcement": "strict"
+    }
+  }
+}

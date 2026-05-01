@@ -11,46 +11,62 @@
     "remove": true
   },
   "paths": {
-    "positional": ["/SheetName/ole[N]"]
+    "positional": [
+      "/SheetName/ole[N]"
+    ]
   },
   "note": "Aliases: oleobject, object, embed. Binary package + preview image. Anchor accepts cell range (B2:F7) or x/y/width/height in cell units.",
+  "extends": "_shared/ole",
   "properties": {
-    "src": {
-      "type": "string",
-      "description": "embedded payload source — file path, accepted on add/set only. Get does NOT surface this key; the embedded relationship id is exposed under a separate Format[\"relId\"] key (see note).",
-      "aliases": ["path"],
-      "add": true, "set": true, "get": false,
-      "examples": ["--prop src=/path/to/data.docx"],
-      "readback": "add/set-only input; not echoed by Get. Use Format[\"relId\"] to inspect the embedded relationship.",
-      "enforcement": "report"
-    },
-    "progId": {
-      "type": "string",
-      "aliases": ["progid"],
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop progId=Word.Document.12"],
-      "readback": "ProgID",
-      "enforcement": "report"
-    },
-    "preview": {
-      "type": "string",
-      "description": "preview thumbnail image source. Add-time only — Set ignores this key.",
-      "add": true, "set": false, "get": false,
-      "examples": ["--prop preview=/path/to/thumb.png"],
-      "readback": "n/a",
-      "enforcement": "report"
-    },
     "anchor": {
       "type": "string",
-      "aliases": ["ref"],
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop anchor=B2:F7"],
+      "aliases": [
+        "ref"
+      ],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop anchor=B2:F7"
+      ],
       "readback": "anchor descriptor",
       "enforcement": "report"
     },
-    "fileSize":    { "type":"number", "add":false, "set":false, "get":true, "description":"embedded payload bytes.", "readback":"integer byte count", "enforcement":"report" },
-    "contentType": { "type":"string", "add":false, "set":false, "get":true, "description":"MIME type of the embedded part.", "readback":"MIME type string", "enforcement":"report" },
-    "objectType":  { "type":"string", "add":false, "set":false, "get":true, "description":"OLE object type marker (always 'ole').", "readback":"literal string 'ole'", "enforcement":"report" },
-    "shapeId":     { "type":"number", "add":false, "set":false, "get":true, "description":"VML shape id of the OLE container (xlsx legacy drawing).", "readback":"integer shape id", "enforcement":"report" }
+    "fileSize": {
+      "type": "number",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "embedded payload bytes.",
+      "readback": "integer byte count",
+      "enforcement": "report"
+    },
+    "contentType": {
+      "type": "string",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "MIME type of the embedded part.",
+      "readback": "MIME type string",
+      "enforcement": "report"
+    },
+    "objectType": {
+      "type": "string",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "OLE object type marker (always 'ole').",
+      "readback": "literal string 'ole'",
+      "enforcement": "report"
+    },
+    "shapeId": {
+      "type": "number",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "VML shape id of the OLE container (xlsx legacy drawing).",
+      "readback": "integer shape id",
+      "enforcement": "report"
+    }
   }
 }

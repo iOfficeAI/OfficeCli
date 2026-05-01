@@ -11,64 +11,85 @@
     "remove": true
   },
   "paths": {
-    "positional": ["/slide[N]/ole[M]"]
+    "positional": [
+      "/slide[N]/ole[M]"
+    ]
   },
   "note": "Aliases: oleobject, object, embed. Binary package + preview image. Position via x/y/width/height (EMU-parseable; readback in cm).",
+  "extends": "_shared/ole",
   "properties": {
-    "src": {
-      "type": "string",
-      "description": "embedded payload source — file path, accepted on add/set only. Get does NOT surface this key; the embedded relationship id is exposed under a separate Format[\"relId\"] key (see note).",
-      "aliases": ["path"],
-      "add": true, "set": true, "get": false,
-      "examples": ["--prop src=/path/to/data.xlsx"],
-      "readback": "add/set-only input; not echoed by Get. Use Format[\"relId\"] to inspect the embedded relationship.",
-      "enforcement": "report"
-    },
-    "progId": {
-      "type": "string",
-      "aliases": ["progid"],
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop progId=Excel.Sheet.12"],
-      "readback": "ProgID",
-      "enforcement": "report"
-    },
-    "preview": {
-      "type": "string",
-      "add": true, "set": true, "get": false,
-      "examples": ["--prop preview=/path/to/thumb.png"],
-      "readback": "n/a",
-      "enforcement": "report"
-    },
     "x": {
       "type": "length",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop x=2cm"],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop x=2cm"
+      ],
       "readback": "length in cm (e.g. \"2cm\")",
       "enforcement": "report"
     },
     "y": {
       "type": "length",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop y=2cm"],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop y=2cm"
+      ],
       "readback": "length in cm (e.g. \"2cm\")",
       "enforcement": "report"
     },
     "width": {
       "type": "length",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop width=10cm"],
-      "readback": "length in cm (e.g. \"2cm\")",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop width=10cm",
+        "--prop width=3in"
+      ],
+      "readback": "unit-qualified length from inline style (e.g. \"5cm\")",
       "enforcement": "report"
     },
     "height": {
       "type": "length",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop height=8cm"],
-      "readback": "length in cm (e.g. \"2cm\")",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop height=8cm",
+        "--prop height=2in"
+      ],
+      "readback": "unit-qualified length from inline style (e.g. \"5cm\")",
       "enforcement": "report"
     },
-    "fileSize":    { "type":"number", "add":false, "set":false, "get":true, "description":"embedded payload bytes.", "readback":"integer byte count", "enforcement":"report" },
-    "contentType": { "type":"string", "add":false, "set":false, "get":true, "description":"MIME type of the embedded part.", "readback":"MIME type string", "enforcement":"report" },
-    "objectType":  { "type":"string", "add":false, "set":false, "get":true, "description":"OLE object type marker (always 'ole').", "readback":"literal string 'ole'", "enforcement":"report" }
+    "fileSize": {
+      "type": "number",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "embedded payload bytes.",
+      "readback": "integer byte count",
+      "enforcement": "report"
+    },
+    "contentType": {
+      "type": "string",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "MIME type of the embedded part.",
+      "readback": "MIME type string",
+      "enforcement": "report"
+    },
+    "objectType": {
+      "type": "string",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "OLE object type marker (always 'ole').",
+      "readback": "literal string 'ole'",
+      "enforcement": "report"
+    }
   }
 }

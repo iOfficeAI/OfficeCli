@@ -1,0 +1,51 @@
+{
+  "$schema": "../_schema.json",
+  "element": "ole",
+  "shared_base": true,
+  "properties": {
+    "preview": {
+      "type": "string",
+      "description": "preview thumbnail image source. Add-time only — Set ignores this key.",
+      "add": true,
+      "set": false,
+      "get": false,
+      "examples": [
+        "--prop preview=/path/to/thumb.png"
+      ],
+      "readback": "n/a",
+      "enforcement": "report"
+    },
+    "progId": {
+      "type": "string",
+      "description": "OLE ProgID (e.g. 'Excel.Sheet.12'). Usually inferred from src extension.",
+      "aliases": [
+        "progid"
+      ],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop progId=Word.Document.12",
+        "--prop progId=Excel.Sheet.12"
+      ],
+      "readback": "ProgID string",
+      "enforcement": "report"
+    },
+    "src": {
+      "type": "string",
+      "description": "embedded object source — file path, URL, or data-URI; accepted on add/set only. Get does NOT surface this key; the embedded relationship id is exposed under a separate Format[\"relId\"] key.",
+      "aliases": [
+        "path"
+      ],
+      "add": true,
+      "set": true,
+      "get": false,
+      "examples": [
+        "--prop src=/path/to/data.docx",
+        "--prop src=/path/to/data.xlsx"
+      ],
+      "readback": "add/set-only input; not echoed by Get. Use Format[\"relId\"] to inspect the embedded relationship.",
+      "enforcement": "report"
+    }
+  }
+}

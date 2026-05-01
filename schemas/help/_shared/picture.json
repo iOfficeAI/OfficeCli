@@ -1,0 +1,84 @@
+{
+  "$schema": "../_schema.json",
+  "element": "picture",
+  "shared_base": true,
+  "properties": {
+    "alt": {
+      "type": "string",
+      "description": "alternative text (DocProperties.Description). Defaults to the source file name on add. Aliases: alttext, description.",
+      "aliases": [
+        "altText",
+        "alttext",
+        "description"
+      ],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop alt=\"Logo\"",
+        "--prop alt=\"Company logo\""
+      ],
+      "readback": "string",
+      "enforcement": "report"
+    },
+    "contentType": {
+      "type": "string",
+      "description": "OOXML content-type of the embedded image part (e.g. `image/png`, `image/jpeg`). Read from the package part referenced by the BlipFill embed relationship.",
+      "add": false,
+      "set": false,
+      "get": true,
+      "readback": "MIME-style content-type string from the image part",
+      "enforcement": "report"
+    },
+    "fileSize": {
+      "type": "number",
+      "description": "embedded image file size in bytes (length of the image part stream).",
+      "add": false,
+      "set": false,
+      "get": true,
+      "readback": "byte length of the embedded image part",
+      "enforcement": "report"
+    },
+    "height": {
+      "type": "length",
+      "description": "EMU-parseable. If omitted, derived from width + native aspect ratio or defaults to 4in.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop height=5",
+        "--prop height=2in"
+      ],
+      "readback": "length in cm (e.g. \"3.2cm\")",
+      "enforcement": "report"
+    },
+    "src": {
+      "type": "string",
+      "description": "image source (file path, URL, data-URI); accepted on add/set only. Get does NOT surface this key; the embedded relationship id is exposed under a separate Format[\"relId\"] key.",
+      "aliases": [
+        "path"
+      ],
+      "add": true,
+      "set": true,
+      "get": false,
+      "examples": [
+        "--prop src=/path/to/image.png"
+      ],
+      "readback": "add/set-only input; not echoed by Get. Use Format[\"relId\"] to inspect the embedded image relationship.",
+      "enforcement": "report"
+    },
+    "width": {
+      "type": "length",
+      "description": "EMU-parseable. If omitted, derived from height + native aspect ratio or defaults to 6in.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop width=5",
+        "--prop width=3in"
+      ],
+      "readback": "length in cm (e.g. \"5.1cm\")",
+      "enforcement": "report"
+    }
+  }
+}

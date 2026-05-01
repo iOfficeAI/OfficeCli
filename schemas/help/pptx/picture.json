@@ -11,131 +11,131 @@
     "remove": true
   },
   "paths": {
-    "positional": ["/slide[N]/picture[M]"]
+    "positional": [
+      "/slide[N]/picture[M]"
+    ]
   },
   "note": "Aliases: image, img. 'src' (alias 'path') required. Source resolved by ImageSource — file path, URL, data-URI, raw bytes.",
+  "extends": "_shared/picture",
   "properties": {
-    "src": {
-      "type": "string",
-      "description": "image source — file path, HTTP(S) URL, or data URI (data:image/png;base64,...). Add/set-only input; the image is embedded as an ImagePart and not round-tripped, so Get does NOT surface this key.",
-      "aliases": ["path"],
-      "add": true, "set": true, "get": false,
-      "examples": ["--prop src=/path/to/image.png"],
-      "readback": "add/set-only input; Get does not surface this key.",
-      "enforcement": "report"
-    },
     "x": {
       "type": "length",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop x=1in"],
-      "readback": "length in cm (e.g. \"2cm\")",
+      "description": "anchor column index (0-based, e.g. x=2 means column C).",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop x=0",
+        "--prop x=1in"
+      ],
+      "readback": "anchor column index (0-based integer)",
       "enforcement": "report"
     },
     "y": {
       "type": "length",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop y=1in"],
-      "readback": "length in cm (e.g. \"2cm\")",
-      "enforcement": "report"
-    },
-    "width": {
-      "type": "length",
-      "description": "EMU-parseable. Defaults to 6in if omitted.",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop width=3in"],
-      "readback": "length in cm (e.g. \"2cm\")",
-      "enforcement": "report"
-    },
-    "height": {
-      "type": "length",
-      "description": "EMU-parseable. Defaults to 4in if omitted.",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop height=2in"],
-      "readback": "length in cm (e.g. \"2cm\")",
+      "description": "anchor row index (0-based, e.g. y=4 means row 5).",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop y=0",
+        "--prop y=1in"
+      ],
+      "readback": "anchor row index (0-based integer)",
       "enforcement": "report"
     },
     "crop": {
       "type": "string",
       "description": "Crop in percent (0-100). 1 value = symmetric, 2 values = vertical,horizontal, 4 values = left,top,right,bottom.",
-      "add": true, "set": true,
-      "examples": ["--prop crop=10", "--prop crop=5,10", "--prop crop=10,5,10,5"],
+      "add": true,
+      "set": true,
+      "examples": [
+        "--prop crop=10",
+        "--prop crop=5,10",
+        "--prop crop=10,5,10,5"
+      ],
       "enforcement": "report"
     },
     "cropLeft": {
       "type": "string",
-      "description": "Crop from left edge as percent (0-100). Aliases: cropleft.",
-      "aliases": ["cropleft"],
-      "add": true, "set": true,
-      "examples": ["--prop cropLeft=10"],
-      "enforcement": "report"
+      "description": "Crop from left as fraction (<=1) or percent (>1). E.g. cropLeft=0.1 or cropLeft=10 both mean 10%.",
+      "add": true,
+      "set": true,
+      "examples": [
+        "--prop cropLeft=0.1",
+        "--prop cropLeft=10"
+      ],
+      "enforcement": "report",
+      "aliases": [
+        "cropleft"
+      ]
     },
     "cropRight": {
       "type": "string",
       "description": "Crop from right edge as percent (0-100). Aliases: cropright.",
-      "aliases": ["cropright"],
-      "add": true, "set": true,
-      "examples": ["--prop cropRight=10"],
+      "aliases": [
+        "cropright"
+      ],
+      "add": true,
+      "set": true,
+      "examples": [
+        "--prop cropRight=10"
+      ],
       "enforcement": "report"
     },
     "cropTop": {
       "type": "string",
       "description": "Crop from top edge as percent (0-100). Aliases: croptop.",
-      "aliases": ["croptop"],
-      "add": true, "set": true,
-      "examples": ["--prop cropTop=10"],
+      "aliases": [
+        "croptop"
+      ],
+      "add": true,
+      "set": true,
+      "examples": [
+        "--prop cropTop=10"
+      ],
       "enforcement": "report"
     },
     "cropBottom": {
       "type": "string",
       "description": "Crop from bottom edge as percent (0-100). Aliases: cropbottom.",
-      "aliases": ["cropbottom"],
-      "add": true, "set": true,
-      "examples": ["--prop cropBottom=10"],
+      "aliases": [
+        "cropbottom"
+      ],
+      "add": true,
+      "set": true,
+      "examples": [
+        "--prop cropBottom=10"
+      ],
       "enforcement": "report"
     },
     "mediaType": {
       "type": "string",
       "description": "logical media kind derived from VideoFromFile / AudioFromFile presence under the picture. One of `picture`, `video`, `audio`. Surfaces only via the `image`/`video`/`audio`/`media` selectors.",
-      "add": false, "set": false, "get": true,
+      "add": false,
+      "set": false,
+      "get": true,
       "readback": "`picture` | `video` | `audio`",
-      "enforcement": "report"
-    },
-    "contentType": {
-      "type": "string",
-      "description": "OOXML content-type of the embedded image part (e.g. `image/png`, `image/jpeg`). Read from the package part referenced by the BlipFill embed relationship.",
-      "add": false, "set": false, "get": true,
-      "readback": "MIME-style content-type string from the image part",
-      "enforcement": "report"
-    },
-    "fileSize": {
-      "type": "number",
-      "description": "embedded image file size in bytes (length of the image part stream).",
-      "add": false, "set": false, "get": true,
-      "readback": "byte length of the embedded image part",
       "enforcement": "report"
     },
     "id": {
       "type": "number",
       "description": "OOXML shape id; source of the @id in the stable path /picture[@id=ID].",
-      "add": false, "set": false, "get": true,
+      "add": false,
+      "set": false,
+      "get": true,
       "readback": "integer shape id",
       "enforcement": "report"
     },
     "name": {
       "type": "string",
-      "description": "shape name (DocProperties.Name).",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop name=\"Hero Image\""],
-      "readback": "shape name string",
-      "enforcement": "report"
-    },
-    "alt": {
-      "type": "string",
-      "description": "alt text (DocProperties.Description) for accessibility.",
-      "aliases": ["alttext", "description"],
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop alt=\"Company logo\""],
-      "readback": "alt text string (description); returns \"(missing)\" when absent",
+      "description": "Override the auto-generated 'Picture {id}' label on cNvPr @name.",
+      "add": true,
+      "set": false,
+      "examples": [
+        "--prop name=\"hero-image\"",
+        "--prop name=\"Hero Image\""
+      ],
       "enforcement": "report"
     }
   }
