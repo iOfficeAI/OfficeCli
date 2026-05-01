@@ -377,9 +377,9 @@
       "type": "string",
       "description": "image (blip) fill: path to a local image file used as the shape fill.",
       "aliases": ["imagefill"],
-      "add": true, "set": true, "get": false,
+      "add": true, "set": false, "get": true,
       "examples": ["--prop image=/path/to/photo.png"],
-      "readback": "n/a",
+      "readback": "\"true\" when shape has an image (blipFill) fill",
       "enforcement": "report"
     },
     "line": {

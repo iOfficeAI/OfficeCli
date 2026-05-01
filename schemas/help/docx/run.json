@@ -308,42 +308,42 @@
       "type": "string",
       "description": "w14 text outline 'WIDTHpt-COLOR' (e.g. '1pt-FF0000'). Width first, color second; '-' or ';' separator.",
       "aliases": ["textoutline"],
-      "add": true, "set": true, "get": false,
+      "add": true, "set": true, "get": true,
       "examples": ["--prop textOutline=1pt-FF0000"],
-      "readback": "n/a",
+      "readback": "\"{width}pt\" or \"{width}pt;#RRGGBB\"",
       "enforcement": "report"
     },
     "textFill": {
       "type": "string",
       "description": "w14 text fill (color or gradient spec).",
       "aliases": ["textfill"],
-      "add": true, "set": true, "get": false,
+      "add": true, "set": true, "get": true,
       "examples": ["--prop textFill=FF0000"],
-      "readback": "n/a",
+      "readback": "#RRGGBB (solid) | C1;C2;angle (gradient) | radial:C1;C2",
       "enforcement": "report"
     },
     "w14shadow": {
       "type": "string",
       "description": "w14 text shadow effect.",
-      "add": true, "set": true, "get": false,
+      "add": true, "set": true, "get": true,
       "examples": ["--prop w14shadow=FF0000"],
-      "readback": "n/a",
+      "readback": "#RRGGBB;blur_pt;angle_deg;dist_pt;opacity",
       "enforcement": "report"
     },
     "w14glow": {
       "type": "string",
       "description": "w14 text glow effect.",
-      "add": true, "set": true, "get": false,
+      "add": true, "set": true, "get": true,
       "examples": ["--prop w14glow=FF0000"],
-      "readback": "n/a",
+      "readback": "#RRGGBB;radius_pt;opacity",
       "enforcement": "report"
     },
     "w14reflection": {
       "type": "string",
       "description": "w14 text reflection effect.",
-      "add": true, "set": true, "get": false,
+      "add": true, "set": true, "get": true,
       "examples": ["--prop w14reflection=true"],
-      "readback": "n/a",
+      "readback": "semicolon-delimited reflection parameters",
       "enforcement": "report"
     },
     "effective.size": {
