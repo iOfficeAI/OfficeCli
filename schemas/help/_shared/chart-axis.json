@@ -1,0 +1,79 @@
+{
+  "$schema": "../_schema.json",
+  "element": "chart-axis",
+  "shared_base": true,
+  "properties": {
+    "axisFont": {
+      "type": "string",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "axis text font readback.",
+      "readback": "font name string",
+      "enforcement": "report"
+    },
+    "axisMax": {
+      "type": "number",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "value-axis maximum readback (also surfaced via max on axis-by-role path).",
+      "readback": "numeric value",
+      "enforcement": "report"
+    },
+    "axisMin": {
+      "type": "number",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "value-axis minimum readback (also surfaced via min on axis-by-role path).",
+      "readback": "numeric value",
+      "enforcement": "report"
+    },
+    "axisNumFmt": {
+      "type": "string",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "axis number format string.",
+      "readback": "format code",
+      "enforcement": "report"
+    },
+    "axisOrientation": {
+      "type": "string",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "axis scaling orientation (e.g. maxMin when reversed).",
+      "readback": "orientation token",
+      "enforcement": "report"
+    },
+    "axisTitle": {
+      "type": "string",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "value-axis title readback (chart-level convenience; axis-by-role uses 'title').",
+      "readback": "title string",
+      "enforcement": "report"
+    },
+    "labelOffset": {
+      "type": "number",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "category axis label offset (% of default 100).",
+      "readback": "integer percentage",
+      "enforcement": "report"
+    },
+    "tickLabelSkip": {
+      "type": "number",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "category axis label skip interval (>1 means tick labels are sparser).",
+      "readback": "integer interval",
+      "enforcement": "report"
+    }
+  }
+}

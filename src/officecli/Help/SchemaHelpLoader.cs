@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace OfficeCli.Help;
 
@@ -124,7 +125,26 @@ internal static class SchemaHelpLoader
             using var stream = OpenSchemaStream(canonical, match)
                 ?? throw new InvalidOperationException(
                     $"Embedded schema resource missing: schemas/help/{canonical}/{match}.json");
-            return JsonDocument.Parse(stream);
+            // Read into memory so we can inspect for `extends` and merge with a
+            // shared base if present. Most schemas have no extends and skip the
+            // merge path entirely.
+            using var ms = new MemoryStream();
+            stream.CopyTo(ms);
+            ms.Position = 0;
+            var doc = JsonDocument.Parse(ms);
+            if (TryReadExtends(doc, out var baseRef))
+            {
+                doc.Dispose();
+                ms.Position = 0;
+                using var mainReader = new StreamReader(ms);
+                var mainJson = mainReader.ReadToEnd();
+                var baseJson = LoadSharedBaseRaw(baseRef!)
+                    ?? throw new InvalidOperationException(
+                        $"Schema {canonical}/{match}.json extends '{baseRef}' but base not found at schemas/help/{baseRef}.json");
+                var merged = MergeSchemaJson(baseJson, mainJson);
+                return JsonDocument.Parse(merged);
+            }
+            return doc;
         }
 
         // 2. Unknown element — suggest closest match.
@@ -135,6 +155,98 @@ internal static class SchemaHelpLoader
         throw new InvalidOperationException(
             $"error: unknown element '{TruncateForError(element, 64)}' for format '{canonical}'.{suggestion}\n" +
             $"Use: officecli help {canonical}");
+    }
+
+    /// <summary>
+    /// Check if a parsed schema declares `extends: "_shared/<name>"` referring
+    /// to a base schema fragment. Returns true and sets baseRef if present.
+    /// </summary>
+    private static bool TryReadExtends(JsonDocument doc, out string? baseRef)
+    {
+        baseRef = null;
+        if (doc.RootElement.ValueKind != JsonValueKind.Object) return false;
+        if (!doc.RootElement.TryGetProperty("extends", out var extEl)) return false;
+        if (extEl.ValueKind != JsonValueKind.String) return false;
+        baseRef = extEl.GetString();
+        return !string.IsNullOrEmpty(baseRef);
+    }
+
+    /// <summary>
+    /// Load the raw text of a shared base schema by reference like
+    /// `_shared/chart`. Returns null when not found.
+    /// </summary>
+    private static string? LoadSharedBaseRaw(string baseRef)
+    {
+        var key = $"schemas/help/{baseRef}.json";
+        if (!ManifestIndex.TryGetValue(key, out var resourceName)) return null;
+        using var stream = typeof(SchemaHelpLoader).Assembly.GetManifestResourceStream(resourceName);
+        if (stream == null) return null;
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    /// <summary>
+    /// Deep-merge a base schema JSON with an override schema JSON, producing
+    /// the resolved bytes. Override semantics:
+    ///   - Top-level scalar/array fields in override replace base.
+    ///   - Top-level `properties` object: union of keys; same-name property
+    ///     in override replaces the base entry entirely (no per-attribute deep
+    ///     merge — properties are atomic).
+    ///   - The synthetic `extends` and `shared_base` markers are stripped.
+    /// </summary>
+    private static string MergeSchemaJson(string baseJson, string overrideJson)
+    {
+        var baseNode = JsonNode.Parse(baseJson) as JsonObject
+            ?? throw new InvalidOperationException("Shared base must be a JSON object.");
+        var overrideNode = JsonNode.Parse(overrideJson) as JsonObject
+            ?? throw new InvalidOperationException("Schema override must be a JSON object.");
+
+        var merged = new JsonObject();
+
+        // Start from base top-level (excluding shared_base marker).
+        foreach (var kv in baseNode)
+        {
+            if (kv.Key == "shared_base") continue;
+            merged[kv.Key] = kv.Value?.DeepClone();
+        }
+
+        // Apply override top-level (excluding extends marker).
+        foreach (var kv in overrideNode)
+        {
+            if (kv.Key == "extends") continue;
+            if (kv.Key == "properties")
+            {
+                // Properties order: override-declared first (preserve dev-authored
+                // ordering of the format file), then base-only properties appended
+                // in base order. Same-name in override replaces base entry atomically.
+                var basedProps = merged["properties"] as JsonObject;
+                var overProps = kv.Value as JsonObject;
+                var combined = new JsonObject();
+                if (overProps != null)
+                {
+                    foreach (var pkv in overProps)
+                    {
+                        combined[pkv.Key] = pkv.Value?.DeepClone();
+                    }
+                }
+                if (basedProps != null)
+                {
+                    foreach (var pkv in basedProps)
+                    {
+                        if (combined.ContainsKey(pkv.Key)) continue;
+                        // Re-clone to detach from basedProps before reassigning.
+                        combined[pkv.Key] = pkv.Value?.DeepClone();
+                    }
+                }
+                merged["properties"] = combined;
+            }
+            else
+            {
+                merged[kv.Key] = kv.Value?.DeepClone();
+            }
+        }
+
+        return merged.ToJsonString();
     }
 
     /// <summary>
@@ -463,6 +575,32 @@ internal static class SchemaHelpLoader
             }
             return unknown;
         }
+    }
+
+    /// <summary>
+    /// Phase-1 schema/handler parity helper. Given a set of keys (e.g.
+    /// the <c>DocumentNode.Format</c> keys returned by a handler's Get),
+    /// return those that the schema doesn't declare as valid for
+    /// <paramref name="verb"/>. Reuses <see cref="ValidateProperties"/> so
+    /// alias / propAlias / dotted-sub-prefix / indexed-prefix leniency
+    /// stays in one place.
+    ///
+    /// Lenient on unknown format/element (returns empty), matching the
+    /// rest of the validator — tests on brand-new elements without a
+    /// landed schema don't regress to hard failures.
+    /// </summary>
+    internal static IReadOnlyList<string> FindUnknownKeys(
+        string format, string element, string verb, IEnumerable<string> keys)
+    {
+        if (keys == null) return Array.Empty<string>();
+        var seen = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var k in keys)
+        {
+            if (string.IsNullOrEmpty(k)) continue;
+            seen[k] = "";
+        }
+        if (seen.Count == 0) return Array.Empty<string>();
+        return ValidateProperties(format, element, verb, seen);
     }
 
     /// <summary>

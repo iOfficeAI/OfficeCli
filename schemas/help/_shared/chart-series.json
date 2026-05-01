@@ -1,0 +1,141 @@
+{
+  "$schema": "../_schema.json",
+  "element": "chart-series",
+  "shared_base": true,
+  "properties": {
+    "categoriesRef": {
+      "type": "string",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "A1 cell range backing the category labels.",
+      "readback": "A1 range string",
+      "enforcement": "report"
+    },
+    "dataLabels.numFmt": {
+      "type": "string",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "per-series data label number format readback.",
+      "readback": "format code",
+      "enforcement": "report"
+    },
+    "dataLabels.separator": {
+      "type": "string",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "per-series data label separator string readback.",
+      "readback": "separator string",
+      "enforcement": "report"
+    },
+    "errBars": {
+      "type": "string",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "error bar value type token (e.g. cust, fixedVal, stdDev).",
+      "readback": "OOXML errValType token",
+      "enforcement": "report"
+    },
+    "invertIfNeg": {
+      "type": "bool",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "invert color for negative values (per-series readback).",
+      "readback": "true | false",
+      "enforcement": "report"
+    },
+    "lineDash": {
+      "type": "enum",
+      "values": [
+        "solid",
+        "sysDash",
+        "sysDot",
+        "sysDashDot",
+        "lgDash",
+        "lgDashDot",
+        "lgDashDotDot",
+        "dash",
+        "dashDot",
+        "dot",
+        "longDash"
+      ],
+      "set": true,
+      "get": true,
+      "aliases": [
+        "dash"
+      ],
+      "description": "series line dash style. Set accepts user-friendly aliases (dash/dot/dashDot/longDash); Get returns OOXML token (sysDash/sysDot/sysDashDot/lgDash). 'solid' is the only round-trip-stable value.",
+      "examples": [
+        "--prop lineDash=dash",
+        "--prop lineDash=solid"
+      ],
+      "readback": "OOXML preset dash token",
+      "enforcement": "report"
+    },
+    "lineWidth": {
+      "type": "number",
+      "set": true,
+      "get": true,
+      "description": "series line width in points (e.g. 1.5).",
+      "examples": [
+        "--prop lineWidth=1.5"
+      ],
+      "readback": "numeric width in points",
+      "enforcement": "report"
+    },
+    "marker": {
+      "type": "string",
+      "set": true,
+      "get": true,
+      "description": "per-series marker symbol. Values: circle, dash, diamond, dot, picture, plus, square, star, triangle, x, none. Supports 'symbol:size:COLOR' compound form (e.g. 'circle:8:FF0000'). Applies to line/scatter/radar series.",
+      "examples": [
+        "--prop marker=circle",
+        "--prop marker=\"circle:8:FF0000\""
+      ],
+      "readback": "marker symbol name",
+      "enforcement": "report"
+    },
+    "markerSize": {
+      "type": "number",
+      "set": true,
+      "get": true,
+      "description": "marker size in points (2–72). Applies when marker is not 'none'.",
+      "examples": [
+        "--prop markerSize=8"
+      ],
+      "readback": "integer",
+      "enforcement": "report"
+    },
+    "nameRef": {
+      "type": "string",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "A1 cell reference backing the series name.",
+      "readback": "A1 cell reference",
+      "enforcement": "report"
+    },
+    "scatterStyle": {
+      "type": "string",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "scatter sub-style (line/lineMarker/marker/smooth/smoothMarker/none).",
+      "readback": "OOXML scatterStyle token",
+      "enforcement": "report"
+    },
+    "secondaryAxis": {
+      "type": "bool",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "true when the chart has more than one value axis (this series uses the secondary).",
+      "readback": "true | false",
+      "enforcement": "report"
+    }
+  }
+}

@@ -10,24 +10,38 @@
     "remove": true
   },
   "paths": {
-    "stable":     ["/slide[N]/chart[@id=ID]/series[@id=ID]"],
-    "positional": ["/slide[N]/chart[N]/series[N]"]
+    "stable": [
+      "/slide[N]/chart[@id=ID]/series[@id=ID]"
+    ],
+    "positional": [
+      "/slide[N]/chart[N]/series[N]"
+    ]
   },
   "note": "At Add time, series are usually passed as properties of the parent `chart` element using dotted keys (series1.name, series1.values, series1.color, series1.categories). This element represents per-series Set/Get after the chart exists. Combo charts (mixed chartType per series, or secondary axis) are not supported. Create a separate chart for each chart type. lineWidth (line width in pt) and lineDash (solid/dash/dot/dashDot/longDash) are available on line/scatter series; `lineStyle` is not a recognized key (rejected as UNSUPPORTED — use lineWidth/lineDash instead).",
+  "extends": "_shared/chart-series",
   "properties": {
     "name": {
       "type": "string",
       "description": "series name shown in legend and data labels.",
-      "aliases": ["title"],
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop name=\"Product A\"", "--prop series1.name=\"Product A\""],
+      "aliases": [
+        "title"
+      ],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop name=\"Product A\"",
+        "--prop series1.name=\"Product A\""
+      ],
       "readback": "series name string",
       "enforcement": "strict"
     },
     "values": {
       "type": "string",
       "description": "comma-separated numbers, OR a cell range reference (Sheet1!B2:B13)",
-      "add": true, "set": true, "get": true,
+      "add": true,
+      "set": true,
+      "get": true,
       "examples": [
         "--prop series1.values=\"120,150,180,210\"",
         "--prop series1.values=\"Sheet1!$B$2:$B$5\""
@@ -37,70 +51,60 @@
     "categories": {
       "type": "string",
       "description": "per-series category override; range reference only",
-      "add": true, "set": true, "get": false,
-      "examples": ["--prop series1.categories=\"Sheet1!$A$2:$A$5\""],
+      "add": true,
+      "set": true,
+      "get": false,
+      "examples": [
+        "--prop series1.categories=\"Sheet1!$A$2:$A$5\""
+      ],
       "enforcement": "strict"
     },
     "color": {
       "type": "color",
       "description": "series fill color",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop series1.color=4472C4"],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop series1.color=4472C4"
+      ],
       "readback": "#RRGGBB uppercase",
       "enforcement": "strict"
     },
     "smooth": {
       "type": "bool",
       "description": "smooth line interpolation for line/scatter series.",
-      "appliesWhen": { "parent.chartType": ["line", "scatter"] },
-      "set": true, "get": true,
-      "examples": ["--prop smooth=true"],
+      "appliesWhen": {
+        "parent.chartType": [
+          "line",
+          "scatter"
+        ]
+      },
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop smooth=true"
+      ],
       "readback": "true | false",
       "enforcement": "strict"
     },
-    "marker": {
-      "type": "string",
-      "set": true, "get": true,
-      "description": "per-series marker symbol. Values: circle, dash, diamond, dot, picture, plus, square, star, triangle, x, none. Supports 'symbol:size:COLOR' compound form (e.g. 'circle:8:FF0000'). Applies to line/scatter/radar series.",
-      "examples": ["--prop marker=circle", "--prop marker=\"circle:8:FF0000\""],
-      "readback": "marker symbol name",
+    "outlineColor": {
+      "type": "color",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "per-series outline color readback.",
+      "readback": "#RRGGBB or scheme reference",
       "enforcement": "report"
     },
-    "markerSize": {
+    "alpha": {
       "type": "number",
-      "set": true, "get": true,
-      "description": "marker size in points (2–72). Applies when marker is not 'none'.",
-      "examples": ["--prop markerSize=8"],
-      "readback": "integer",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "series fill alpha readback in OOXML units (0..100000 = 0..100%). Distinct from chart-level `transparency` which is the percent input on Add/Set.",
+      "readback": "integer 0..100000 (OOXML alpha units)",
       "enforcement": "report"
-    },
-    "lineWidth": {
-      "type": "number",
-      "set": true, "get": true,
-      "description": "series line width in points (e.g. 1.5).",
-      "examples": ["--prop lineWidth=1.5"],
-      "readback": "numeric width in points",
-      "enforcement": "report"
-    },
-    "lineDash": {
-      "type": "enum",
-      "values": ["solid", "sysDash", "sysDot", "sysDashDot", "lgDash", "lgDashDot", "lgDashDotDot", "dash", "dashDot", "dot", "longDash"],
-      "set": true, "get": true,
-      "aliases": ["dash"],
-      "description": "series line dash style. Set accepts user-friendly aliases (dash/dot/dashDot/longDash); Get returns OOXML token (sysDash/sysDot/sysDashDot/lgDash). 'solid' is the only round-trip-stable value.",
-      "examples": ["--prop lineDash=dash", "--prop lineDash=solid"],
-      "readback": "OOXML preset dash token",
-      "enforcement": "report"
-    },
-    "dataLabels.separator": { "type":"string", "add":false, "set":false, "get":true, "description":"per-series data label separator string readback.", "readback":"separator string", "enforcement":"report" },
-    "dataLabels.numFmt":    { "type":"string", "add":false, "set":false, "get":true, "description":"per-series data label number format readback.", "readback":"format code", "enforcement":"report" },
-    "invertIfNeg":          { "type":"bool",   "add":false, "set":false, "get":true, "description":"invert color for negative values (per-series readback).", "readback":"true | false", "enforcement":"report" },
-    "errBars":              { "type":"string", "add":false, "set":false, "get":true, "description":"error bar value type token (e.g. cust, fixedVal, stdDev).", "readback":"OOXML errValType token", "enforcement":"report" },
-    "categoriesRef":   { "type":"string", "add":false, "set":false, "get":true, "description":"A1 cell range backing the category labels.", "readback":"A1 range string", "enforcement":"report" },
-    "nameRef":         { "type":"string", "add":false, "set":false, "get":true, "description":"A1 cell reference backing the series name.", "readback":"A1 cell reference", "enforcement":"report" },
-    "secondaryAxis":   { "type":"bool",   "add":false, "set":false, "get":true, "description":"true when the chart has more than one value axis (this series uses the secondary).", "readback":"true | false", "enforcement":"report" },
-    "scatterStyle":    { "type":"string", "add":false, "set":false, "get":true, "description":"scatter sub-style (line/lineMarker/marker/smooth/smoothMarker/none).", "readback":"OOXML scatterStyle token", "enforcement":"report" },
-    "outlineColor":    { "type":"color",  "add":false, "set":false, "get":true, "description":"per-series outline color readback.", "readback":"#RRGGBB or scheme reference", "enforcement":"report" },
-    "alpha":           { "type":"number", "add":false, "set":false, "get":true, "description":"series fill alpha readback in OOXML units (0..100000 = 0..100%). Distinct from chart-level `transparency` which is the percent input on Add/Set.", "readback":"integer 0..100000 (OOXML alpha units)", "enforcement":"report" }
+    }
   }
 }
