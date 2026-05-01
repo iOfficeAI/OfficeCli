@@ -92,6 +92,27 @@
       "add": true, "set": true,
       "examples": ["--prop cropBottom=10"],
       "enforcement": "report"
+    },
+    "mediaType": {
+      "type": "string",
+      "description": "logical media kind derived from VideoFromFile / AudioFromFile presence under the picture. One of `picture`, `video`, `audio`. Surfaces only via the `image`/`video`/`audio`/`media` selectors.",
+      "add": false, "set": false, "get": true,
+      "readback": "`picture` | `video` | `audio`",
+      "enforcement": "report"
+    },
+    "contentType": {
+      "type": "string",
+      "description": "OOXML content-type of the embedded image part (e.g. `image/png`, `image/jpeg`). Read from the package part referenced by the BlipFill embed relationship.",
+      "add": false, "set": false, "get": true,
+      "readback": "MIME-style content-type string from the image part",
+      "enforcement": "report"
+    },
+    "fileSize": {
+      "type": "number",
+      "description": "embedded image file size in bytes (length of the image part stream).",
+      "add": false, "set": false, "get": true,
+      "readback": "byte length of the embedded image part",
+      "enforcement": "report"
     }
   }
 }

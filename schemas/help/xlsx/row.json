@@ -41,11 +41,18 @@
     },
     "outline": {
       "type": "int",
-      "description": "outline/group level 0-7. Currently Set-only. Aliases: outlineLevel, group.",
+      "description": "outline/group level 0-7. Aliases: outlineLevel, group. Set accepts `outline`/`outlineLevel`/`group`; Get readback uses canonical key `outlineLevel`.",
       "aliases": ["outlinelevel", "group"],
       "add": false, "set": true, "get": false,
       "examples": ["--prop outline=1"],
-      "readback": "not surfaced by Get",
+      "readback": "see `outlineLevel`",
+      "enforcement": "report"
+    },
+    "outlineLevel": {
+      "type": "number",
+      "description": "row outline grouping level (0 = ungrouped, 1..7 = nested group depth). Get-only readback of the value set via `outline`.",
+      "add": false, "set": false, "get": true,
+      "readback": "integer 0..7; key omitted when row has no outline level",
       "enforcement": "report"
     },
     "collapsed": {

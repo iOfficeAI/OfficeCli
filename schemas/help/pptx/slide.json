@@ -87,6 +87,13 @@
       "add": false, "set": false, "get": true,
       "readback": "true if slide is hidden in slideshow",
       "enforcement": "report"
+    },
+    "layoutType": {
+      "type": "string",
+      "description": "slide layout type name as encoded on the underlying SlideLayout (e.g. blank, title, titleOnly, twoContent, obj, txAndObj). Distinct from `layout`, which is the user-facing layout display name.",
+      "add": false, "set": false, "get": true,
+      "readback": "layout type token from SlideLayout/@type",
+      "enforcement": "report"
     }
   },
   "children": [

@@ -40,6 +40,13 @@
       "examples": ["--prop text=\"Slide title\""],
       "readback": "concatenated run text",
       "enforcement": "report"
+    },
+    "phIndex": {
+      "type": "number",
+      "description": "placeholder index within the slide layout (PlaceholderShape/@idx). Disambiguates same-typed placeholders (e.g. two `body` placeholders).",
+      "add": false, "set": false, "get": true,
+      "readback": "non-negative integer; key omitted when @idx absent",
+      "enforcement": "report"
     }
   }
 }

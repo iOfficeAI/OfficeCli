@@ -155,6 +155,41 @@
       "add": false, "set": false, "get": true,
       "readback": "margin in inches",
       "enforcement": "report"
+    },
+    "header": {
+      "type": "string",
+      "description": "odd-page header text (HeaderFooter/OddHeader). Excel format codes (&L, &C, &R, &P, &D, etc.) pass through verbatim.",
+      "add": false, "set": true, "get": true,
+      "readback": "raw odd-header text as stored",
+      "enforcement": "report"
+    },
+    "footer": {
+      "type": "string",
+      "description": "odd-page footer text (HeaderFooter/OddFooter). Excel format codes pass through verbatim.",
+      "add": false, "set": true, "get": true,
+      "readback": "raw odd-footer text as stored",
+      "enforcement": "report"
+    },
+    "sort": {
+      "type": "string",
+      "description": "active SortState description, comma-separated `Col:dir` entries (e.g. `A:asc,B:desc`). dir is `asc` or `desc`.",
+      "add": false, "set": true, "get": true,
+      "readback": "comma-separated `Col:asc|desc` list",
+      "enforcement": "report"
+    },
+    "rowBreaks": {
+      "type": "string",
+      "description": "manual horizontal page breaks. Comma-separated row indices (1-based) where each break sits above that row.",
+      "add": false, "set": false, "get": true,
+      "readback": "comma-separated row break indices",
+      "enforcement": "report"
+    },
+    "colBreaks": {
+      "type": "string",
+      "description": "manual vertical page breaks. Comma-separated column indices (1-based) where each break sits to the left of that column.",
+      "add": false, "set": false, "get": true,
+      "readback": "comma-separated column break indices",
+      "enforcement": "report"
     }
   },
   "children": [
