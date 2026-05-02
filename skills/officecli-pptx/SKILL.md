@@ -696,14 +696,6 @@ Run `officecli view "$FILE" html` and Read the returned HTML path. For every sli
 
 REJECT and list every instance with slide number; else report "Gate 3 PASS".
 
-### After all gates pass
-
-Open the deck in the target presentation viewer before shipping — chart colors, font substitution, animations, and zoom are runtime features that only render there.
-
-If a gate fails, fix and **rerun the full Delivery Gate** — one fix commonly creates another problem.
-
-`validate` catches schema, not design — Gates 2–3 are how you catch overflow, slide-order bugs, and gray-on-navy that schema-validation never flags.
-
 ## Common Pitfalls
 
 Sanity-check cheatsheet — what breaks on the first try. Design + shell traps.
