@@ -366,13 +366,13 @@ officecli add-part <file> <parent>                   # create new document part 
 
 ## Specialized Skills
 
-When the user's task matches a row below, load that skill before starting:
+`officecli load_skill <name>` — output is a SKILL.md, follow its rules.
 
-    officecli load_skill <name>
-
-This prints the skill's full SKILL.md to stdout — read it and follow its rules. Always use `load_skill` for the skills below; do not install them to disk. Only this top-level SKILL.md needs to be preloaded into your session.
-
-**Loading rule**: pick the **most specific** match in the "When to use" column. Each specialized skill's SKILL.md already contains every rule from the format default (`word` / `pptx` / `excel`) — `load_skill` once **per artifact**, not per turn; the loaded rules stay in effect for the rest of the work on that file. If the user asks for two distinct artifacts (e.g. a fundraising deck AND a sales deck), load each one separately. If no specialized row fits, load the format default.
+**Loading rule**:
+- Pick the most specific match in "When to use"; if none fits, load the format default (`word` / `pptx` / `excel`).
+- Scenes already contain the format default's rules — load **one** skill per artifact, never stack.
+- Loaded rules persist across turns; don't re-load each reply.
+- Two distinct artifacts → two separate loads.
 
 ### Word (.docx)
 
