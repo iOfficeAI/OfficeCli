@@ -10,6 +10,15 @@ This file covers **3D-specific additions** and an **enriched design system** com
 
 ---
 
+## Setup
+
+If `officecli` is missing:
+
+- **macOS / Linux**: `curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh | bash`
+- **Windows (PowerShell)**: `irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex`
+
+Verify with `officecli --version` (open a new terminal if PATH hasn't picked up). If install fails, download a binary from https://github.com/iOfficeAI/OfficeCLI/releases.
+
 ## Use when
 
 - User wants a `.pptx` with a `.glb` 3D model and Morph transitions.
