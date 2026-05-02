@@ -839,22 +839,15 @@ Sanity-check cheatsheet — what breaks on the first try. Design + shell traps.
 | Unquoted `[N]` in zsh/bash | Always quote paths: `"/slide[1]"`. zsh globs unquoted `[1]` → `no matches found` — #1 first-use stumble |
 | `--name "foo"` | All attributes go through `--prop`: `--prop name="foo"` |
 | Guessing a prop name | `officecli help pptx <element>` — don't improvise |
-| Hex colors with `#` | Drop the `#`: `FF0000`, not `#FF0000` |
-| Theme colors | Use `accent1..accent6`, `dk1`, `dk2`, `lt1`, `lt2` — not hex |
+| Theme colors | Use `accent1..accent6`, `dk1`, `dk2`, `lt1`, `lt2` when you want theme inheritance; hex (`#FF0000` or `FF0000`, both accepted) for fixed colors |
 | `/shape[myname]` (bare name in brackets) | Use `@name=` selector: `/shape[@name=myname]` or `/shape[@id=10007]` |
 | Positional `/shape[3]` after z-order / remove | Positions drift. Use `@name=` / `@id=` for any repeated reference |
 | `[last]` without parens | Must be `[last()]`: `/slide[last()]/shape[1]` |
 | `/slide[last()]` in resident mode | Some resident versions reject it with "Shapes must be added to a slide: /slide[N]". Use explicit `/slide[N]` from `get --depth 0` for production builds. |
 | `[ ]` empty-bracket checkboxes | False-positives Gate 2's empty-bracket token check. Use `☐` (U+2610) / `☑` (U+2611) in checklist UI. |
-| Connector with no arrowhead | Plain `bentConnector3` renders without direction. Use `--prop tailEnd=triangle` on add or set (CLI-native; values: `triangle/arrow/stealth/diamond/oval/none`). For custom size, raw-set `<a:tailEnd w="med" len="med"/>` on `/connector[@id=ID]/spPr/ln`. `preset=rightArrow` overlay works for horizontal flows only. See Recipe (c)/(f) |
 | Paths 1-based vs `--index` 0-based | `/slide[1]` = first slide; `--index 0` = first position |
 | `$` in `--prop text=` | Single-quote: `--prop text='$15M'`. Double-quoted `"$15M"` gets shell-expanded to `M` |
 | `\n` / `\t` in `--prop text=` | CLI does NOT interpret. Use multiple `--type paragraph`, or batch heredoc with JSON `"\n"` |
-| Dark text on dark background | On `fill brightness < 30%`, body text MUST be `FFFFFF` or > 80% bright |
-| Font size / hierarchy violations | See Requirements table — title ≥ 36pt, body ≥ 18pt, title ≥ 2× body. Shrink content, not font |
-| Centered body paragraphs | Center only titles / hero numbers. Left-align body |
-| Accent line under every title | Hallmark of AI-generated slides. Use whitespace or a brand band |
-| Animation on every slide | Max 1 per slide, ≤ 600ms, `fade` / `appear` / `zoom-entrance` only |
 | Modifying a file open in PowerPoint | Close it in PowerPoint first |
 | Running `validate` while resident is open | Spurious errors. `officecli close` first |
 | `view issues "Slide has no title"` on `layout=blank` | Expected on blank layouts (titles are shapes, not placeholders). Not a defect |
