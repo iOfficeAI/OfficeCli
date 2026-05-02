@@ -680,7 +680,6 @@ Four checks. Gates 1–2 are schema/token-grep defenses; Gate 3 catches build-or
 FILE="deck.pptx"
 
 # Gate 1 — schema check.
-officecli close "$FILE" 2>/dev/null
 VALIDATE_OUT=$(officecli validate "$FILE" 2>&1)
 echo "$VALIDATE_OUT" | grep -q "no errors found" && echo "Gate 1 OK" || { echo "REJECT Gate 1:"; echo "$VALIDATE_OUT"; exit 1; }
 
@@ -744,5 +743,4 @@ Sanity-check cheatsheet — what breaks on the first try. Design + shell traps.
 | `$` in `--prop text=` | Single-quote: `--prop text='$15M'`. Double-quoted `"$15M"` gets shell-expanded to `M` |
 | `\n` / `\t` in `--prop text=` | CLI does NOT interpret. Use multiple `--type paragraph`, or batch heredoc with JSON `"\n"` |
 | Modifying a file open in PowerPoint | Close it in PowerPoint first |
-| Running `validate` while resident is open | Spurious errors. `officecli close` first |
 | `view issues "Slide has no title"` on `layout=blank` | Expected on blank layouts (titles are shapes, not placeholders). Not a defect |
