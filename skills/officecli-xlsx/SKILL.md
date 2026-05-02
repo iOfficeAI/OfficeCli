@@ -5,7 +5,7 @@ description: "Use this skill any time a .xlsx file is involved -- as input, outp
 
 # OfficeCLI XLSX Skill
 
-## BEFORE YOU START (CRITICAL)
+## Setup
 
 **If `officecli` is not installed:**
 

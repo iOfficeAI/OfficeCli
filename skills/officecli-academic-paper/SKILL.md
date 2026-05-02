@@ -9,7 +9,7 @@ description: "Use this skill to build academic-style .docx output: journal / con
 
 When the docx base rules cover it, the text here says `→ see docx v2 §X`. Read docx v2 first if you have not.
 
-## BEFORE YOU START (CRITICAL)
+## Setup
 
 **If `officecli` is not installed:**
 

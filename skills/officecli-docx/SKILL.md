@@ -5,7 +5,7 @@ description: "Use this skill any time a .docx file is involved -- as input, outp
 
 # OfficeCLI DOCX Skill
 
-## BEFORE YOU START (CRITICAL)
+## Setup
 
 **If `officecli` is not installed:**
 

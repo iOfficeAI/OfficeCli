@@ -9,7 +9,7 @@ description: "Use this skill when the user wants to build a financial model — 
 
 When the xlsx base rules cover it, the text here says `→ see xlsx v2 §X`. Read `skills/officecli-xlsx/SKILL.md` first if you have not.
 
-## BEFORE YOU START (CRITICAL)
+## Setup
 
 **If `officecli` is not installed:**
 

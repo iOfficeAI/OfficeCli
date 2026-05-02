@@ -9,7 +9,7 @@ description: "Use this skill when the user wants a .pptx with smooth cross-slide
 
 When the pptx base rules cover it, the text here says `→ see pptx v2 §X`. Read `skills/officecli-pptx/SKILL.md` first if you have not.
 
-## BEFORE YOU START (CRITICAL)
+## Setup
 
 **If `officecli` is not installed:**
 
