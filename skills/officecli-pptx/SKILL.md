@@ -250,29 +250,24 @@ officecli view "$FILE" issues           # empty slides, overflow hints
 officecli view "$FILE" stats            # counts + missing alt (false-positive zero — verify via view annotated)
 ```
 
-**Inspect one element.** XPath-style paths, 1-based. ALWAYS quote.
+**Inspect one element.** XPath-style paths, 1-based. ALWAYS quote. Prefer `@name=` / `@id=` selectors over positional `[N]` (stable across reorderings). `[last()]` works. Add `--json` for machine output.
 
 ```bash
 officecli get "$FILE" "/slide[1]" --depth 1              # shape list with IDs and names
-officecli get "$FILE" "/slide[1]/shape[@name=Title]"     # @name selector (LEAD — stable across reorderings)
-officecli get "$FILE" "/slide[1]/shape[@id=10007]"       # @id selector (also stable)
-officecli get "$FILE" "/slide[1]/chart[1]"               # chart data + config
+officecli get "$FILE" "/slide[1]/shape[@name=Title]"
 officecli get "$FILE" "/slide[1]/table[1]" --depth 3     # table rows / cells
 ```
 
-Add `--json` for machine output. Use `[last()]` for "the last": `/slide[last()]/shape[1]`.
-
-**Query across the deck.** CSS-like selectors; operators `=`, `!=`, `~=`, `>=`, `<=`, `[attr]`:
+**Query across the deck.** CSS-like selectors; operators `=`, `!=`, `~=`, `>=`, `<=`, `[attr]`, `:contains()`, `:no-alt`. `help pptx query` lists queryable element types.
 
 ```bash
 officecli query "$FILE" 'shape:contains("Revenue")'
 officecli query "$FILE" 'picture:no-alt'                 # accessibility gap
 officecli query "$FILE" 'shape[fill=1E2761]'             # color match
 officecli query "$FILE" 'shape[width>=10cm]'             # numeric
-officecli query "$FILE" 'animation'                      # every animation in the deck
 ```
 
-**`query --json` output schema.** Results wrap in `.data.results[]`. To extract the first result's ID: `jq -r '.data.results[0].format.id'` — NOT `.[0].id`. Shape name is `.name`; fill is `.format.fill`; textColor is `.format.textColor`. Verify with `query ... --json | jq .data.results[0]` on an unknown shape.
+**`query --json` output schema.** Results wrap in `.data.results[]` — `jq -r '.data.results[0].format.id'`, NOT `.[0].id`. Shape name is `.name`; fill is `.format.fill`; textColor is `.format.textColor`.
 
 **Visual preview (LEAD).**
 
@@ -327,15 +322,9 @@ For real newlines inside one run, use a batch heredoc with JSON `"\n"`. Shell-qu
 
 ### Charts
 
-Chart types: column, bar, line, pie, doughnut, scatter, area, waterfall, funnel, boxWhisker. Pick per the Design Principles chart-choice table. Two data forms:
+Pick chart type per the Design Principles chart-choice table. Full prop list (chartType enum, `seriesN.*`, `data=`/`categories=`, axis options): `help pptx add chart`. Typical multi-series with brand colors:
 
 ```bash
-# (a) compact inline — quick demo charts
-officecli add "$FILE" /slide[3] --type chart --prop chartType=column \
-  --prop "data=Revenue:42,45,48;Growth:2,7,7" --prop "categories=Q1,Q2,Q3" \
-  --prop x=2cm --prop y=4cm --prop width=20cm --prop height=10cm --prop title="FY26"
-
-# (b) dotted per-series — multi-series with explicit brand colors (typical case)
 officecli add "$FILE" /slide[3] --type chart --prop chartType=column \
   --prop series1.name=Revenue --prop series1.values="42,45,48" --prop series1.color=1E2761 \
   --prop series2.name=Growth  --prop series2.values="2,7,7"    --prop series2.color=CADCFC \
@@ -343,7 +332,7 @@ officecli add "$FILE" /slide[3] --type chart --prop chartType=column \
   --prop x=2cm --prop y=4cm --prop width=20cm --prop height=10cm
 ```
 
-Gotchas: (1) series cannot be added after creation — include all series at `add` time or `remove` + re-add. (2) chart titles with `()`, `[]`, `TBD` ship as literal text — replace before delivery. (3) some viewers normalize chart colors to theme defaults — verify in the target presentation viewer.
+Gotchas: (1) series cannot be added after creation — include all series at `add` time or `remove` + re-add. (2) chart titles with `()`, `[]`, `TBD` ship as literal text. (3) some viewers normalize chart colors to theme defaults — verify in the target viewer.
 
 ### Pictures
 
@@ -357,11 +346,7 @@ Confirm with `officecli query "$FILE" 'picture:no-alt'` — must be empty before
 
 ### Connectors (LEAD — flowcharts / decision trees first-class)
 
-Draws a line between two shapes or free coordinates. CLI-native props: `shape`, `from`, `to`, `x`, `y`, `width`, `height`, `color`, `headEnd`, `tailEnd` (values: `triangle|arrow|stealth|diamond|oval|none`).
-
-- `shape` enum: short form `straight | elbow | curve`, or storage form `straightConnector1 | bentConnector3 | curvedConnector3 | line`. `bentConnector2` / `curvedConnector2` are rejected.
-- `from=`/`to=` accept the same shape-ref forms as the rest of the CLI: bare integer (shape ID), `/slide[N]/shape[M]` (positional), `/slide[N]/shape[@id=M]`, or `/slide[N]/shape[@name=Foo]`.
-- Arrowheads via `--prop tailEnd=triangle` (or `headEnd=` for reverse direction). Accepted values: `triangle | arrow | stealth | diamond | oval | none` (plus `closed`/`open`/`circle`).
+Draws a line between two shapes or free coordinates. Full prop / enum reference (`shape`, `headEnd`/`tailEnd` values, `from`/`to` ref forms): `help pptx add connector`.
 
 ```bash
 officecli add "$FILE" /slide[5] --type connector \
@@ -369,25 +354,20 @@ officecli add "$FILE" /slide[5] --type connector \
   --prop shape=elbow --prop color=333333 --prop tailEnd=triangle
 ```
 
-**Every flow connector needs an arrowhead.** Without one, `bentConnector3` renders as a directionless line. Use `--prop tailEnd=triangle` on the connector add or set. `preset=rightArrow` overlay only works for horizontal flows; diamonds / decision trees with diverging edges need `tailEnd=`.
+**Every flow connector needs an arrowhead.** Without one, `bentConnector3` renders as a directionless line. `preset=rightArrow` overlay only works for horizontal flows; diamonds / decision trees with diverging edges need `tailEnd=`.
 
 ### Animations (LEAD)
 
-One preset per slide, ≤ 600ms. Set via shape-level prop or via deep-path `add --type animation`:
+One preset per slide, ≤ 600ms. Preset names + duration syntax: `help pptx animation`.
 
 ```bash
 officecli set "$FILE" "/slide[2]/shape[@name=HeroCard]" --prop animation=fade-entrance-400
-officecli get "$FILE" "/slide[2]/shape[@name=HeroCard]" --json | jq .animation
-officecli set "$FILE" "/slide[2]/shape[@name=HeroCard]" --prop animation=none    # remove all animations on shape
-officecli remove "$FILE" "/slide[2]/shape[@name=HeroCard]/animation[1]"          # remove a specific animation by index
+officecli set "$FILE" "/slide[2]/shape[@name=HeroCard]" --prop animation=none    # clear all
 ```
 
 ### Hyperlinks, tooltips, slide-jump
 
-```bash
-officecli set "$FILE" "/slide[7]/shape[@name=NavBtn]" --prop link=slide:2 --prop tooltip="Back to Agenda"
-officecli set "$FILE" "/slide[7]/shape[@name=DocsBtn]" --prop link=https://example.com
-```
+`--prop link=slide:N` for slide-jump, `link=https://...` for URL, `--prop tooltip="..."` for hover text. (Help only documents the URL form — `slide:N` is skill-only knowledge.)
 
 ### Tables, placeholders, groups, zoom — one-liners
 
