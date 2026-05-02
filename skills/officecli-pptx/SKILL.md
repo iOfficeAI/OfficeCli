@@ -29,11 +29,11 @@ Help reflects the installed CLI version. When skill and help disagree, **help is
 
 ## Shell & Execution Discipline
 
-**Shell quoting (zsh / bash).** ALWAYS quote element paths (`"/slide[1]/..."`) — zsh globs unquoted `[1]` to `no matches found`. CLI does NOT interpret `\$` / `\t` / `\n`; escapes happen at three layers, only one of which is yours:
+**Shell quoting (zsh / bash).** ALWAYS quote element paths (`"/slide[1]/..."`) — zsh globs unquoted `[1]` to `no matches found`. Escapes happen at two layers; the CLI handles one for you:
 
-1. **Shell.** `$` in a value → single-quote the whole value: `--prop text='$15M'`. Double-quoted `"$15M"` gets shell-expanded to `M`.
-2. **JSON (batch).** Real newline in shape text goes via `"\n"` inside a `<<'EOF'` heredoc. Writing `\n` in shell-quoted `--prop text=` is a bug.
-3. **pptx.** A line break is `<a:br/>`, not `\n`. Prefer multiple `--type paragraph` adds over fighting escapes.
+1. **Shell.** `$` in a value still belongs to the shell — single-quote the whole value: `--prop text='$15M'`. Double-quoted `"$15M"` gets expanded to `M`. The CLI does NOT unescape `\$` for you.
+2. **CLI (`text=`).** The two-char escapes `\n` and `\t` ARE interpreted, consistently across pptx / docx / xlsx — `\n` is a line / paragraph break, `\t` is a tab. To produce a literal backslash-n in text, double it (`\\n`); this is rarely what you want.
+3. **JSON (batch).** Real newlines / tabs can also be passed as `"\n"` / `"\t"` inside a `<<'EOF'` heredoc; both forms produce the same result.
 
 If in doubt, `view text` after writing and compare character-for-character.
 
@@ -77,7 +77,7 @@ Before declaring done, the per-slide render (see QA) MUST satisfy:
 - **No text overflow inside shapes.** A 72pt KPI in a 4cm-tall box clips. Shrink the number, enlarge the box, or shorten the text — never trim content to fit.
 - **Cover slide is content-rich.** Title + subtitle + presenter/client block + date + a brand band or key-takeaway strap. A cover with 80% whitespace reads as a stub.
 - **Contrast.** On fills with brightness < 30% (`1E2761`, `36454F`, `000000`, deep forest / berry / cherry), every run of body text, card body, chart series fill, and icon color must be `FFFFFF` or brightness > 80%. Mid-gray (`6B7B8D` ≈ 44%) reads fine on a laptop and vanishes on projection. Verify via `view html` after the dark-fill pass.
-- **No `\$`, `\t`, `\n` literals in slide text.** If `view text` shows these, a shell-escape leaked — delete and re-enter via heredoc batch.
+- **No `\$` literals in slide text.** If `view text` shows a literal `\$`, the shell didn't unescape it (the CLI does NOT interpret `\$`). Single-quote the value: `--prop text='$15M'`. Note: `\n` and `\t` ARE interpreted as a real paragraph break / tab; seeing those as literals means the value was double-escaped (`\\n`).
 
 If any fails, STOP and fix before declaring done.
 
@@ -201,7 +201,7 @@ These are the patterns that make a deck look AI-generated or amateur:
 
 1. **Open/close mode.** Always `officecli open <file>` at start + `officecli close <file>` at end. Resident is the default, not an optimization. Use `batch` for repetitive shape grids.
 2. **Orient.** New deck: `officecli create "$FILE"`. Existing: `officecli view "$FILE" outline` first. Never edit blind.
-3. **Build in display order — HARD RULE.** `--index` on slide add is frequently ignored. Add slides in audience-view order: cover → agenda → section-1 divider → section-1 content → section-2 divider → … → closing. Out-of-order insertion requires `officecli move "$FILE" /slide[N] --index M` + re-verify with `get --depth 0`. **Before final delivery, confirm slide count + narrative arc match your build plan.** Gate 3's order-sanity check catches cases where the cover ends up as slide 11 of 14 instead of slide 1.
+3. **Build in display order.** Add slides in audience-view order: cover → agenda → section-1 divider → section-1 content → section-2 divider → … → closing. `--index` on slide add works, but linear append keeps the build script readable and avoids index-arithmetic bugs. **Before final delivery, confirm slide count + narrative arc match your build plan.** Gate 3's order-sanity check catches cases where the cover ends up as slide 11 of 14 instead of slide 1.
 4. **Incremental per slide.** Create slide + background, then title, then supporting shapes / charts / connectors. Always `layout=blank` for custom designs. After each structural op, `get /slide[N] --depth 1` to confirm shape IDs.
 5. **Format to spec.** Per the Requirements table; formatting is deliverable, not polish.
 6. **Close + verify.** `officecli close` writes the ZIP. Always open in the target presentation viewer before shipping — chart colors, animations, fonts, and zoom are runtime features `view html` can't render. Full verification in QA below.
@@ -243,7 +243,7 @@ Shape of every build: open → slide+background → title → body → notes →
 Start wide, then narrow. `outline` first, `view text` / `get` / `query` once you know where to look.
 
 ```bash
-officecli view "$FILE" outline          # slide count, titles, shape counts (undercounts tables/charts)
+officecli view "$FILE" outline          # slide count + titles
 officecli view "$FILE" annotated        # complete per-slide breakdown with fonts, sizes, tables, charts
 officecli view "$FILE" text --start 1 --end 5   # text dump (does NOT extract table cells — use get)
 officecli view "$FILE" issues           # empty slides, overflow hints
@@ -307,7 +307,7 @@ officecli add "$FILE" /slide[2] --type shape --prop name=Title --prop text="Key 
 
 Positioning is explicit — no layout engine, you own the grid math. `--prop preset=` picks geometry (`rect`, `roundRect`, `ellipse`, `triangle`, `arrow`, `star5`, ...); custom `M...Z` paths are not supported — pick a preset. **Name shapes at creation** (`--prop name=HeroTitle`) and address later with `"/slide[N]/shape[@name=HeroTitle]"` — positional `/shape[3]` breaks after any z-order / remove.
 
-> **ID semantics.** IDs are assigned per-XML-element, not per-`add`-command. Paragraphs and runs consume IDs too — so the 4 IDs returned by 4 `add shape` calls are NOT guaranteed to be sequential (child paragraphs ate some). After a rebuild or remove-then-add, re-`get --depth 1` before referencing IDs. **Prefer `@name=` over `@id=`** — names are stable across all structural ops.
+> **Prefer `@name=` over `@id=`.** Names you set yourself survive remove-then-add and z-order ops cleanly. After any structural change, re-`get --depth 1` before referencing positional indexes.
 
 ### Text inside shapes (paragraphs, runs, styling)
 
@@ -382,8 +382,6 @@ officecli set "$FILE" "/slide[2]/shape[@name=HeroCard]" --prop animation=none   
 officecli remove "$FILE" "/slide[2]/shape[@name=HeroCard]/animation[1]"          # remove a specific animation by index
 ```
 
-**Get round-trip (1.0.58+).** `get animation[N]` now returns the `trigger` field as well — `onClick | afterPrevious | withPrevious` — so Add/Set and Get round-trip. Verify with `officecli get "$FILE" "/slide[N]/shape[@name=X]/animation[1]" --json | jq '.trigger,.duration'` if you need to confirm the read-back matches what you set.
-
 ### Hyperlinks, tooltips, slide-jump
 
 ```bash
@@ -397,7 +395,7 @@ officecli set "$FILE" "/slide[7]/shape[@name=DocsBtn]" --prop link=https://examp
 - **Placeholders** — `"/slide[N]/placeholder[title]"` / `placeholder[body]`. Available only when the slide uses a layout with placeholders (not `layout=blank`).
 - **Groups** (LEAD) — address children via `"/slide[N]/group[@name=G]/shape[1]"`. Survives reordering better than positional indexes.
 - **Zoom slide** (LEAD) — `--type zoom --prop targets="3,7,15"`. Section-navigation hub. Zoom is a runtime feature — `view html` shows the static geometry; the zoom interaction runs only in a live presentation viewer.
-- **Slide comments** — reviewer annotations anchored at `/slide[N]/comment[M]`. Full lifecycle (`add / set / get / query / remove`). Props: `text`, `author`, `initials` (auto-derived), `date` (ISO 8601, defaults to UtcNow), `x` / `y` (EMU anchor).
+- **Slide comments** — reviewer annotations anchored at `/slide[N]/comment[M]`. Full lifecycle (`add / set / get / query / remove`). Props: `text`, `author`, `initials` (auto-derived), `date` (ISO 8601, defaults to UtcNow), `x` / `y` (length anchor).
   ```bash
   officecli add "$FILE" "/slide[2]" --type comment --prop author="Alice" --prop text="Tighten this bullet" --prop x=20cm --prop y=3cm
   officecli query "$FILE" 'comment' --json | jq '.data.results | length'   # count all review comments
@@ -539,31 +537,60 @@ Then 4 connectors (`Decide→YesBox`, `Decide→NoBox`, `YesBox→Done`, `NoBox�
 
 ### Delivery Gate (any failure = REJECT, do NOT deliver)
 
-Three checks. Gate 1 is the schema defense; Gate 2 catches overflow / format / structure issues; Gate 3 is the only visual-assembly check. **None of Gates 1–2 can see a rendered slide.** Refuse to declare done until every gate prints its OK message.
+Gates 1–2b are text/schema-level (cannot see a rendered slide); Gate 3 is the only visual check. Done = every gate PASS **and** Gate 3 loop converged.
 
 ```bash
 FILE="deck.pptx"
 
-# Gate 1 — schema check (REJECT on any validate error)
+# Gate 1 — schema
 officecli validate "$FILE" && echo "Gate 1 OK" || { echo "REJECT Gate 1"; exit 1; }
 
-# Gate 2 — overflow / format / structure issues (filter expected layout=blank "no title" noise)
+# Gate 2 — overflow / format / structure (drop expected layout=blank "no title" noise)
 ISSUES=$(officecli view "$FILE" issues 2>&1 | grep -vE "Slide has no title")
 echo "$ISSUES" | grep -qE "^\s*\[[A-Z][0-9]+\]" && { echo "REJECT Gate 2:"; echo "$ISSUES"; exit 1; } || echo "Gate 2 OK"
 
-echo "Delivery Gate 1–2 PASS — proceed to Gate 3 (fresh-eyes visual audit)"
+# Gate 2b — leftover placeholders ("xxxx", "lorem", "<TODO>", empty (), [], "this slide layout")
+LEFT=$(officecli view "$FILE" text | grep -niE 'xxxx|lorem|ipsum|<todo>|placeholder|this[- ]slide[- ]layout|\(\)|\[\]')
+[ -n "$LEFT" ] && { echo "REJECT Gate 2b:"; echo "$LEFT"; exit 1; } || echo "Gate 2b OK"
 ```
 
-### Gate 3 — Visual audit via HTML preview (MANDATORY)
+### Gate 3 — Visual audit (MANDATORY)
 
-Run `officecli view "$FILE" html` and Read the returned HTML path. For every slide:
+Pick **one** path:
 
-- **overlap** — text shapes overlap each other / a chart, or a giant decorative number (01/02/03 at 100pt+) collides with a divider title
-- **dark-on-dark** — text on fill brightness < 30% with text brightness < 80% (quiz options, phone numbers, card labels on navy/red/green)
-- **missing arrowheads** — flowchart / decision-tree connectors render as plain lines
-- **order sanity** — slide sequence matches the narrative (cover → agenda → dividers-before-sections → closing)
+**Screenshot (default)** — needs image-Read + a headless browser. **Loop per slide** (viewport screenshot covers only slide 1):
 
-REJECT and list every instance with slide number; else report "Gate 3 PASS".
+```bash
+n=1
+while officecli view "$FILE" screenshot --page $n -o "/tmp/gate3_$n.png" 2>/dev/null; do
+  n=$((n+1))
+done
+[ $n -eq 1 ] && { echo "no headless backend — using fallback"; SCREENSHOT_FAILED=1; }
+```
+
+Read each PNG against the checklist; delegate to a subagent when the harness has one.
+
+**Fallback — HTML-text** (no image-Read or no browser): read `view "$FILE" html` as text. DOM cannot prove **dark-on-dark / fine overlap / arrowheads / gap-margin metrics / column alignment** — flag these as "not visually verified" rather than PASS.
+
+**Optional `--grid N`** — only on user request for layout-rhythm, or when `view outline` shows anomalous layout distribution: `officecli view "$FILE" screenshot --grid 3 -o /tmp/grid.png`.
+
+**Per-slide checklist (assume issues exist):**
+
+- **overlap** — shapes / charts / giant decorative numbers (01/02/03 100pt+) colliding
+- **text overflow** — clipped at slide or shape boundary (KPI cards, narrow boxes)
+- **narrow text box** — content fits technically but wraps to many short lines (1–2 words each); long sublabel in a 3cm KPI card, body line in a too-tight column
+- **dark-on-dark** — fill brightness < 30% with text/icon brightness < 80% (incl. dark icons on dark without a contrasting circle)
+- **missing arrowheads** — flowchart connectors as plain lines
+- **decorative-line / title mismatch** — accent bar sized for one-line title but title wrapped to two (or vice versa)
+- **footer / citation collision** — source line, page number, or footnote touching content above
+- **tight margin / gap** — element within ~0.5" of slide edge, or two cards within ~0.3"
+- **uneven gaps** — large empty area on one side, cramped on another (broken rhythm)
+- **column / repeat-element misalignment** — KPI cards / icons off baseline or inconsistent width
+- **order sanity** — sequence matches narrative (cover → agenda → dividers-before-sections → closing)
+
+REJECT with `slide N: <issue>` lines, else "Gate 3 PASS" (HTML-text fallback adds "<unverified-items> not visually verified").
+
+**Fix-verify (mandatory, max 3 cycles).** Fix → re-run Gate 3 → repeat until zero new issues; one fix often surfaces another. After 3 rounds without convergence, **stop** — likely seesaw, template-level cause, or agent misread. Report `slide N: <issue> — attempted: <fixes> — likely root: <template|design-conflict|ambiguous>` and let the user decide.
 
 ## Common Pitfalls
 
