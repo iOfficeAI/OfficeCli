@@ -204,6 +204,14 @@ public partial class WordHandler
             "ins" or "del" or "moveto" or "movefrom" =>
                 throw new ArgumentException(
                     $"Cannot add '{type}' directly. Tracked revisions (<w:ins>/<w:del>/<w:moveTo>/<w:moveFrom>) are authored by word processors with track-changes enabled. To insert content that reviewers see as a tracked change, add the run normally (--type run --prop text=...) and enable track-changes in Word."),
+            // Reject standalone comment range markers. Falling through to
+            // AddDefault triggers schema-aware insertion via Particle.Set
+            // which CLEARS existing run children of the paragraph (data
+            // loss). The atomic, safe path is `add --type comment` which
+            // creates both range markers + comment text together.
+            "commentrangestart" or "commentrangeend" or "commentreference" =>
+                throw new ArgumentException(
+                    $"Cannot add '{type}' directly. Adding a bare comment range marker into a paragraph destroys existing runs (schema-aware sequence reset). Use `add --type comment --prop start=... --prop end=... --prop text=...` to create the comment atomically."),
             _ => AddDefault(parent, parentPath, index, properties, type),
         };
         }
