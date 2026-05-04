@@ -966,6 +966,28 @@ public partial class WordHandler
                 case "start":
                     SetListStartValue(para, ParseHelpers.SafeParseInt(value, "start"));
                     break;
+                case "rstyle":
+                {
+                    // BUG-R6-04 / F-4: Set on paragraph rStyle previously
+                    // returned UNSUPPORTED, breaking dump→batch round-trip
+                    // for table cell paragraphs that carry character
+                    // styles (Set is the natural emit since the cell
+                    // paragraph already exists). Mirror AddParagraph:
+                    // store on the paragraph mark rPr AND propagate to
+                    // all existing runs so visible text picks up the
+                    // character style.
+                    var pmrp = pProps.ParagraphMarkRunProperties
+                        ?? pProps.AppendChild(new ParagraphMarkRunProperties());
+                    pmrp.RemoveAllChildren<RunStyle>();
+                    pmrp.PrependChild(new RunStyle { Val = value });
+                    foreach (var pRun in para.Descendants<Run>())
+                    {
+                        var pRP = EnsureRunProperties(pRun);
+                        pRP.RemoveAllChildren<RunStyle>();
+                        pRP.PrependChild(new RunStyle { Val = value });
+                    }
+                    break;
+                }
                 case "size" or "font" or "bold" or "italic" or "color" or "highlight" or "underline" or "strike"
                   or "font.latin" or "font.ea" or "font.eastasia" or "font.eastasian"
                   or "font.cs" or "font.complexscript" or "font.complex"
