@@ -389,6 +389,14 @@ public partial class WordHandler
         var instrBuilder = new StringBuilder($" TOC \\o \"{levels}\"");
         if (hyperlinks) instrBuilder.Append(" \\h");
         if (!pageNumbers) instrBuilder.Append(" \\z");
+        // BUG-R5-03: \t = custom-style→level mapping (Word's "Style; level"
+        // syntax, e.g. "MyHeading,1,MySub,2"); \b = bookmark scope (single
+        // bookmark name). Both round-trip through dump→add and were
+        // silently dropped before, breaking custom TOC layouts.
+        if (properties.TryGetValue("customStyles", out var cs) && !string.IsNullOrEmpty(cs))
+            instrBuilder.Append($" \\t \"{cs}\"");
+        if (properties.TryGetValue("bookmark", out var bm) && !string.IsNullOrEmpty(bm))
+            instrBuilder.Append($" \\b \"{bm}\"");
         instrBuilder.Append(" \\u ");
 
         var tocPara = new Paragraph();

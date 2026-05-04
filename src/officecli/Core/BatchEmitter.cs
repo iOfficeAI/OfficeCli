@@ -1304,6 +1304,14 @@ public static class BatchEmitter
         // \z suppresses page numbers; absence means pageNumbers=true
         props["pageNumbers"] = System.Text.RegularExpressions.Regex.IsMatch(instruction, "\\\\z\\b")
             ? "false" : "true";
+        // BUG-R5-03: \t = custom-style→level mapping ("Style;level,..."),
+        // \b = bookmark scope. Capture the quoted argument so AddToc can
+        // round-trip them; otherwise custom TOC switches were silently
+        // dropped on dump.
+        var ct = System.Text.RegularExpressions.Regex.Match(instruction, "\\\\t\\s+\"([^\"]+)\"");
+        if (ct.Success) props["customStyles"] = ct.Groups[1].Value;
+        var cb = System.Text.RegularExpressions.Regex.Match(instruction, "\\\\b\\s+\"([^\"]+)\"");
+        if (cb.Success) props["bookmark"] = cb.Groups[1].Value;
         return props;
     }
 
