@@ -67,6 +67,26 @@ public partial class WordHandler : IDocumentHandler
             .Any();
     }
 
+    /// <summary>
+    /// Outer XML of the element at <paramref name="path"/>. BatchEmitter
+    /// uses this as a raw-XML fallback for content that has no typed Add
+    /// path — wps:wsp background shapes being the motivating case. Returns
+    /// null if the path doesn't resolve.
+    /// </summary>
+    public string? GetElementXml(string path)
+    {
+        try
+        {
+            var segments = ParsePath(path);
+            var element = NavigateToElement(segments);
+            return element?.OuterXml;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public (byte[] Bytes, string ContentType)? GetImageBinary(string runPath)
     {
         // Parse + navigate via the same machinery Get/Set use so paraId

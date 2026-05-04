@@ -675,9 +675,31 @@ public static class BatchEmitter
                     });
                     continue;
                 }
-                // Drawing without image part and not a chart — unsupported
-                // anchor (OLE/SmartArt/background image/watermark). Skip
-                // silently; round-trip is lossy on these for v0.5.
+                // Drawing without image part and not a chart — most likely a
+                // wps shape (background rectangle, watermark anchor) drawn
+                // with prstGeom + solidFill. No typed Add path exists yet,
+                // but the XML is self-contained (no rId/embed back-references)
+                // so round-trip via raw-set append is safe. Targets the
+                // already-created paragraph by xpath positional index.
+                // Caveats: drawings with embedded image references (a:blipFill
+                // with r:embed) would also land here and silently lose their
+                // image part — for those we'd need rId remapping. Acceptable
+                // v0.5 lossy mode: log nothing, round-trip survives for the
+                // common decorative-shape case.
+                var rawXml = word.GetElementXml(run.Path);
+                if (!string.IsNullOrEmpty(rawXml) &&
+                    parentPath == "/body" &&
+                    !rawXml.Contains("r:embed") && !rawXml.Contains("r:id"))
+                {
+                    items.Add(new BatchItem
+                    {
+                        Command = "raw-set",
+                        Part = "/document",
+                        Xpath = $"/w:document/w:body/w:p[{targetIndex}]",
+                        Action = "append",
+                        Xml = rawXml
+                    });
+                }
                 continue;
             }
 
