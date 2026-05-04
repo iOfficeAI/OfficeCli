@@ -35,6 +35,16 @@ internal static partial class ChartHelper
 
         var titleEl = chart.GetFirstChild<C.Title>();
         var titleText = titleEl?.Descendants<Drawing.Text>().FirstOrDefault()?.Text;
+        if (titleText == null && titleEl != null)
+        {
+            // BuildChartTitle routes single-cell-reference values (e.g. "Q1",
+            // "Sheet1!A1") through a <c:strRef><c:f>...</c:f></c:strRef> path
+            // instead of <a:t> literal text. Surface the formula so a get→set
+            // round-trip preserves the reference and the schema-declared
+            // 'title' get readback isn't silently empty.
+            var strRefFormula = titleEl.Descendants<C.Formula>().FirstOrDefault()?.Text;
+            if (!string.IsNullOrEmpty(strRefFormula)) titleText = strRefFormula;
+        }
         if (titleText != null) node.Format["title"] = titleText;
 
         // Title formatting: font, size, color, bold from RunProperties
@@ -413,6 +423,19 @@ internal static partial class ChartHelper
 
         var seriesCount = CountSeries(plotArea);
         node.Format["seriesCount"] = seriesCount;
+
+        // Chart-level aggregate readback for series-level fan-out properties.
+        // chart Set ('gradient' / 'marker') applies to every series — surface
+        // the corresponding chart-level keys so a get-after-set round-trips
+        // (schema declares gradient/marker get:true on chart-scope).
+        var allSer = plotArea.Descendants<OpenXmlCompositeElement>()
+            .Where(e => e.LocalName == "ser").ToList();
+        if (allSer.Any(s => s.GetFirstChild<C.ChartShapeProperties>()?.GetFirstChild<Drawing.GradientFill>() != null))
+            node.Format["gradient"] = "true";
+        var firstMarkerSym = allSer
+            .Select(s => s.GetFirstChild<C.Marker>()?.GetFirstChild<C.Symbol>()?.Val)
+            .FirstOrDefault(v => v?.HasValue == true);
+        if (firstMarkerSym != null) node.Format["marker"] = firstMarkerSym.InnerText;
 
         var cats = ReadCategories(plotArea);
         if (cats != null) node.Format["categories"] = string.Join(",", cats);

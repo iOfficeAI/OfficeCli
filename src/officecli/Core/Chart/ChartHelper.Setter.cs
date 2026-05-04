@@ -335,7 +335,34 @@ internal static partial class ChartHelper
                                 ? C.DataLabelPositionValues.InsideEnd
                                 : C.DataLabelPositionValues.OutsideEnd
                     };
-                    foreach (var dl in plotArea2.Descendants<C.DataLabels>())
+                    var existingLabels = plotArea2.Descendants<C.DataLabels>().ToList();
+                    if (existingLabels.Count == 0)
+                    {
+                        // Bootstrap charts often lack a c:dLbls element entirely.
+                        // Without one, labelPos has nowhere to land and Get sees
+                        // nothing — schema declares labelPos get:true so we must
+                        // materialize the parent. Attach to the first chart-group
+                        // (barChart/lineChart/pieChart/scatterChart/etc.).
+                        var chartGroup = plotArea2.ChildElements.OfType<OpenXmlCompositeElement>()
+                            .FirstOrDefault(e => e is C.BarChart or C.Bar3DChart
+                                or C.LineChart or C.Line3DChart or C.PieChart or C.Pie3DChart
+                                or C.ScatterChart or C.BubbleChart);
+                        if (chartGroup != null)
+                        {
+                            var dLbls = new C.DataLabels();
+                            // c:dLbls schema requires showLegendKey..showBubbleSize
+                            // be present in canonical order; defaults are false.
+                            dLbls.AppendChild(new C.ShowLegendKey { Val = false });
+                            dLbls.AppendChild(new C.ShowValue { Val = false });
+                            dLbls.AppendChild(new C.ShowCategoryName { Val = false });
+                            dLbls.AppendChild(new C.ShowSeriesName { Val = false });
+                            dLbls.AppendChild(new C.ShowPercent { Val = false });
+                            dLbls.AppendChild(new C.ShowBubbleSize { Val = false });
+                            chartGroup.PrependChild(dLbls);
+                            existingLabels = new List<C.DataLabels> { dLbls };
+                        }
+                    }
+                    foreach (var dl in existingLabels)
                     {
                         dl.RemoveAllChildren<C.DataLabelPosition>();
                         dl.PrependChild(new C.DataLabelPosition { Val = dlblPos });

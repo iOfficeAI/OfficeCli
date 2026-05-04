@@ -924,8 +924,8 @@
       ],
       "add": true,
       "set": true,
-      "get": true,
-      "description": "marker symbol for line/scatter/radar series only (other types silently skipped). Format: 'symbol' or 'symbol:size' or 'symbol:size:color'. Symbols: none, auto, circle, square, diamond, triangle, x, plus, star, dash, dot, picture.",
+      "get": false,
+      "description": "marker symbol for line/scatter/radar series only (other types silently skipped). Format: 'symbol' or 'symbol:size' or 'symbol:size:color'. Symbols: none, auto, circle, square, diamond, triangle, x, plus, star, dash, dot, picture. Chart-level Get does not surface marker because applicability is chart-type-conditional — read per-series via /chart[N]/series[K] (chart-series schema declares marker get:true).",
       "examples": [
         "--prop marker=circle",
         "--prop marker=square:8:FF0000"
