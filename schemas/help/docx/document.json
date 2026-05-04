@@ -428,8 +428,17 @@
       "description": "different headers for even/odd pages.",
       "add": false,
       "set": true,
-      "get": false,
-      "readback": "n/a (set-only)",
+      "get": true,
+      "readback": "true when settings/evenAndOddHeaders is present",
+      "enforcement": "report"
+    },
+    "autoHyphenation": {
+      "type": "bool",
+      "description": "enable automatic hyphenation (settings/autoHyphenation).",
+      "add": false,
+      "set": true,
+      "get": true,
+      "readback": "true when settings/autoHyphenation is present",
       "enforcement": "report"
     },
     "defaultTabStop": {

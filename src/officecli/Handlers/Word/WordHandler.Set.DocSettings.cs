@@ -154,6 +154,10 @@ public partial class WordHandler
                 SetOnOffSetting<EvenAndOddHeaders>(EnsureSettings(), IsTruthy(value));
                 EnsureSettings().Save();
                 return true;
+            case "autohyphenation":
+                SetOnOffSetting<AutoHyphenation>(EnsureSettings(), IsTruthy(value));
+                EnsureSettings().Save();
+                return true;
             case "defaulttabstop":
             {
                 var settings = EnsureSettings();

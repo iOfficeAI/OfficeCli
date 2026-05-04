@@ -119,6 +119,8 @@ public partial class WordHandler
             node.Format["bookFoldPrintingSheets"] = (int)bookFoldSheets.Val.Value;
         if (settings.GetFirstChild<EvenAndOddHeaders>() != null)
             node.Format["evenAndOddHeaders"] = true;
+        if (settings.GetFirstChild<AutoHyphenation>() != null)
+            node.Format["autoHyphenation"] = true;
         var defTabStop = settings.GetFirstChild<DefaultTabStop>();
         if (defTabStop?.Val?.Value != null)
             node.Format["defaultTabStop"] = FormatTwipsToCm((uint)defTabStop.Val.Value);
