@@ -22,10 +22,34 @@
     "_shared/picture.docx-xlsx"
   ],
   "properties": {
+    "anchor": {
+      "type": "bool",
+      "add": true,
+      "set": false,
+      "get": true,
+      "description": "true to create a floating (anchored) picture instead of inline. Required to enable wrap/hPosition/vPosition/hRelative/vRelative/behindText.",
+      "examples": [
+        "--prop anchor=true --prop wrap=square"
+      ],
+      "readback": "true on floating pictures",
+      "enforcement": "report"
+    },
+    "wrap": {
+      "type": "string",
+      "add": true,
+      "set": true,
+      "get": true,
+      "description": "text wrapping mode for floating picture (none, square, tight, topAndBottom, behind, through).",
+      "examples": [
+        "--prop wrap=square"
+      ],
+      "readback": "wrap token",
+      "enforcement": "report"
+    },
     "behindText": {
       "type": "bool",
-      "add": false,
-      "set": false,
+      "add": true,
+      "set": true,
       "get": true,
       "description": "true when the picture floats behind text (anchor @behindDoc=1).",
       "readback": "true on behind-text floats",
@@ -33,20 +57,44 @@
     },
     "hPosition": {
       "type": "length",
-      "add": false,
-      "set": false,
+      "add": true,
+      "set": true,
       "get": true,
       "description": "absolute horizontal anchor position in cm (positionH/posOffset).",
+      "examples": [
+        "--prop hPosition=3cm"
+      ],
       "readback": "length in cm (e.g. `5.0cm`)",
+      "enforcement": "report"
+    },
+    "vPosition": {
+      "type": "length",
+      "add": true,
+      "set": true,
+      "get": true,
+      "description": "absolute vertical anchor position in cm (positionV/posOffset).",
+      "examples": [
+        "--prop vPosition=4cm"
+      ],
+      "readback": "length in cm (e.g. `4.0cm`)",
       "enforcement": "report"
     },
     "hRelative": {
       "type": "string",
-      "add": false,
-      "set": false,
+      "add": true,
+      "set": true,
       "get": true,
       "description": "horizontal anchor reference frame (e.g. page, margin, column, character).",
       "readback": "OOXML positionH @relativeFrom token",
+      "enforcement": "report"
+    },
+    "vRelative": {
+      "type": "string",
+      "add": true,
+      "set": true,
+      "get": true,
+      "description": "vertical anchor reference frame (e.g. page, margin, paragraph, line).",
+      "readback": "OOXML positionV @relativeFrom token",
       "enforcement": "report"
     },
     "width": {
