@@ -232,6 +232,40 @@ public static class BatchEmitter
         }
     }
 
+    // Emit a body-level SDT (Content Control) as a typed `add /body --type sdt`
+    // row. Get exposes type, alias, tag, items (dropdown/combobox), editable,
+    // and the visible text — all of which AddSdt round-trips. Without this,
+    // SDTs were silently dropped from dump output (BUG-R2-06 / R2-3).
+    private static void EmitSdt(WordHandler word, string sourcePath, List<BatchItem> items)
+    {
+        DocumentNode sdt;
+        try { sdt = word.Get(sourcePath); }
+        catch { return; }
+
+        var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // Whitelist Get-canonical keys that AddSdt consumes. `editable` is a
+        // Get readback (negation of `lock`), the source-side `id` is allocated
+        // at creation, so neither is forwarded.
+        foreach (var key in new[] { "type", "alias", "tag", "items", "format" })
+        {
+            if (sdt.Format.TryGetValue(key, out var v) && v != null)
+            {
+                var s = v.ToString() ?? "";
+                if (s.Length > 0) props[key] = s;
+            }
+        }
+        if (!string.IsNullOrEmpty(sdt.Text))
+            props["text"] = sdt.Text!;
+
+        items.Add(new BatchItem
+        {
+            Command = "add",
+            Parent = "/body",
+            Type = "sdt",
+            Props = props
+        });
+    }
+
     private static string? ExtractParaId(string anchorPath)
     {
         var m = System.Text.RegularExpressions.Regex.Match(anchorPath, @"@paraId=([0-9A-Fa-f]+)");
@@ -250,6 +284,16 @@ public static class BatchEmitter
         "pageStart", "pageNumFmt",
         "titlePage", "direction", "rtlGutter",
         "lineNumbers", "lineNumberCountBy",
+        // Multi-column section layout. Get exposes these as canonical keys
+        // (columns, columnSpace, columns.equalWidth) and Set's case table
+        // accepts all three (WordHandler.Set.SectionLayout.cs). Without them
+        // here, multi-column documents silently revert to single column on
+        // round-trip.
+        "columns", "columnSpace",
+        // Document-level final-section break type (oddPage / evenPage /
+        // continuous). Set / accepts section.type but the canonical Get
+        // surfaces it bare; emit so the trailing sectPr's type survives.
+        "section.type",
         // Document protection
         "protection", "protectionEnforced",
         // Document grid (CJK-aware line layout)
@@ -268,6 +312,9 @@ public static class BatchEmitter
     {
         "docDefaults.",
         "docGrid.",
+        // columns.equalWidth / columns.separator etc. roundtrip via the
+        // canonical dotted form Get already emits.
+        "columns.",
     };
 
     private static void EmitSection(WordHandler word, List<BatchItem> items)
@@ -424,8 +471,11 @@ public static class BatchEmitter
                     // that default and skip emitting section properties.
                     // Section emit is a follow-up.
                     break;
+                case "sdt":
+                    EmitSdt(word, child.Path, items);
+                    break;
                 default:
-                    // Unknown body-level child types (sdt, etc.) — skip for v0.5.
+                    // Unknown body-level child types — skip for v0.5.
                     break;
             }
         }
@@ -553,8 +603,15 @@ public static class BatchEmitter
             props.Remove("listStyle");
             props.Remove("start");
         }
-        var runs = (pNode.Children ?? new List<DocumentNode>())
-            .Where(c => c.Type == "run" || c.Type == "r" || c.Type == "picture")
+        // Collapse non-TOC field chains (fldChar(begin) + instrText(" PAGE ")
+        // + fldChar(separate) + display run(s) + fldChar(end)) into a single
+        // synthetic "field" entry. Without this collapse, the subsequent
+        // `runs` filter sees only the cached display run and emits the field
+        // value as static text — PAGE/REF/SEQ/HYPERLINK/NUMPAGES degrade to
+        // their evaluated string and stop auto-updating (BUG-R2-05 / R2-1).
+        var fieldEntries = CollapseFieldChains(pNode.Children ?? new List<DocumentNode>());
+        var runs = fieldEntries
+            .Where(c => c.Type == "run" || c.Type == "r" || c.Type == "picture" || c.Type == "field")
             .ToList();
         var breaks = (pNode.Children ?? new List<DocumentNode>())
             .Where(c => c.Type == "break")
@@ -579,6 +636,10 @@ public static class BatchEmitter
             !(runs.Count == 1 && runs[0].Type == "picture") &&
             !singleRunIsHyperlink &&
             breaks.Count == 0;
+        // Pull paragraph-level tab stops out for per-stop `add tab` emit
+        // (FilterEmittableProps already drops the `tabs` scalar).
+        pNode.Format.TryGetValue("tabs", out var pTabs);
+
         if (collapseSingleRun)
         {
             if (runs.Count == 1)
@@ -617,6 +678,7 @@ public static class BatchEmitter
                     Props = props.Count > 0 ? props : null
                 });
             }
+            EmitTabStops($"{parentPath}/p[{targetIndex}]", pTabs, items);
             return;
         }
 
@@ -646,6 +708,7 @@ public static class BatchEmitter
         }
 
         var paraTargetPath = $"{parentPath}/p[{targetIndex}]";
+        EmitTabStops(paraTargetPath, pTabs, items);
 
         // Emit any break runs (page/column/textWrapping/line) the paragraph
         // carries. Without this, a break-only paragraph (the OOXML idiom
@@ -668,6 +731,41 @@ public static class BatchEmitter
 
         foreach (var run in runs)
         {
+            // Synthetic field entry from CollapseFieldChains. Format carries
+            // `instruction` (the raw fldSimple/instrText string) and Text holds
+            // the cached display value. AddField parses the instruction code
+            // and rebuilds the fldChar chain on replay.
+            if (run.Type == "field")
+            {
+                var instr = run.Format.TryGetValue("instruction", out var iv)
+                    ? iv?.ToString() ?? "" : "";
+                var fieldProps = BuildFieldAddProps(instr, run.Text ?? "");
+                if (fieldProps != null)
+                {
+                    items.Add(new BatchItem
+                    {
+                        Command = "add",
+                        Parent = paraTargetPath,
+                        Type = "field",
+                        Props = fieldProps
+                    });
+                }
+                else if (!string.IsNullOrEmpty(run.Text))
+                {
+                    // Unparseable instruction — fall back to plain text so the
+                    // paragraph still renders the cached value rather than going
+                    // empty.
+                    items.Add(new BatchItem
+                    {
+                        Command = "add",
+                        Parent = paraTargetPath,
+                        Type = "r",
+                        Props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["text"] = run.Text! }
+                    });
+                }
+                continue;
+            }
+
             // Drawing-bearing runs surface as type=="picture" regardless of
             // whether the Drawing wraps an image (Blip) or a chart
             // (c:chart). Try the image path first; if there's no embedded
@@ -954,6 +1052,167 @@ public static class BatchEmitter
         }
     }
 
+    // Collapse OOXML complex field chains (fldChar(begin) + instrText + …
+    // + fldChar(end)) into a single synthetic "field" DocumentNode with
+    // Format["instruction"] (raw code) and Text (cached display value).
+    // Non-field children pass through untouched in original order. The TOC
+    // chain is handled by the dedicated EmitParagraph branch above and never
+    // reaches this collapsing step (early-return in that branch).
+    private static List<DocumentNode> CollapseFieldChains(List<DocumentNode> children)
+    {
+        var result = new List<DocumentNode>();
+        for (int i = 0; i < children.Count; i++)
+        {
+            var c = children[i];
+            bool isBegin = c.Type == "fieldChar"
+                && c.Format.TryGetValue("fieldCharType", out var fct)
+                && string.Equals(fct?.ToString(), "begin", StringComparison.OrdinalIgnoreCase);
+            if (!isBegin)
+            {
+                result.Add(c);
+                continue;
+            }
+
+            // Walk forward to find instruction text and end marker.
+            string instruction = "";
+            string display = "";
+            int end = -1;
+            for (int j = i + 1; j < children.Count; j++)
+            {
+                var k = children[j];
+                if (k.Type == "instrText")
+                {
+                    if (k.Format.TryGetValue("instruction", out var iv) && iv != null)
+                        instruction += iv.ToString();
+                    else if (!string.IsNullOrEmpty(k.Text))
+                        instruction += k.Text;
+                }
+                else if (k.Type == "fieldChar"
+                    && k.Format.TryGetValue("fieldCharType", out var ft)
+                    && string.Equals(ft?.ToString(), "end", StringComparison.OrdinalIgnoreCase))
+                {
+                    end = j;
+                    break;
+                }
+                else if (k.Type == "run" || k.Type == "r")
+                {
+                    // Cached display segments after fldChar(separate). Concatenate
+                    // their text — formatting on the display run is dropped (the
+                    // field renders fresh on replay).
+                    if (!string.IsNullOrEmpty(k.Text)) display += k.Text;
+                }
+            }
+            if (end < 0)
+            {
+                // Malformed (no end marker) — fall back to passing through.
+                result.Add(c);
+                continue;
+            }
+            var synth = new DocumentNode
+            {
+                Path = c.Path,
+                Type = "field",
+                Text = display,
+                Format = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["instruction"] = instruction.Trim()
+                }
+            };
+            result.Add(synth);
+            i = end;
+        }
+        return result;
+    }
+
+    // Build the prop bag AddField consumes from a parsed field instruction.
+    // Returns null when the instruction is empty or its first token is not a
+    // known field code; the caller falls back to a plain-text run for the
+    // cached display value so the paragraph still renders.
+    private static Dictionary<string, string>? BuildFieldAddProps(string instruction, string display)
+    {
+        if (string.IsNullOrWhiteSpace(instruction)) return null;
+        var trimmed = instruction.Trim();
+        // First whitespace-separated token is the field code.
+        var firstSpace = trimmed.IndexOfAny(new[] { ' ', '\t' });
+        var code = (firstSpace < 0 ? trimmed : trimmed[..firstSpace]).ToUpperInvariant();
+        var rest = firstSpace < 0 ? "" : trimmed[(firstSpace + 1)..].Trim();
+
+        var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["fieldType"] = code
+        };
+        switch (code)
+        {
+            case "PAGE":
+            case "NUMPAGES":
+            case "DATE":
+            case "TIME":
+            case "AUTHOR":
+            case "TITLE":
+            case "SUBJECT":
+            case "FILENAME":
+            case "SECTION":
+            case "SECTIONPAGES":
+                break;
+            case "REF":
+            case "PAGEREF":
+            case "NOTEREF":
+            {
+                // First arg is the bookmark name (may be quoted).
+                var name = ExtractFirstArg(rest);
+                if (string.IsNullOrEmpty(name)) return null;
+                props["bookmarkName"] = name;
+                break;
+            }
+            case "SEQ":
+            {
+                var ident = ExtractFirstArg(rest);
+                if (string.IsNullOrEmpty(ident)) return null;
+                props["identifier"] = ident;
+                break;
+            }
+            case "MERGEFIELD":
+            {
+                var name = ExtractFirstArg(rest);
+                if (string.IsNullOrEmpty(name)) return null;
+                props["fieldName"] = name;
+                break;
+            }
+            case "HYPERLINK":
+            {
+                // Either `\l "anchor"` or a URL as the first arg.
+                var anchorMatch = System.Text.RegularExpressions.Regex.Match(rest, "\\\\l\\s+\"([^\"]+)\"");
+                if (anchorMatch.Success) props["anchor"] = anchorMatch.Groups[1].Value;
+                else
+                {
+                    var url = ExtractFirstArg(rest);
+                    if (string.IsNullOrEmpty(url)) return null;
+                    props["url"] = url;
+                }
+                break;
+            }
+            default:
+                // Unknown field code — let the generic field add try.
+                break;
+        }
+        if (!string.IsNullOrEmpty(display))
+            props["text"] = display;
+        return props;
+    }
+
+    private static string ExtractFirstArg(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return "";
+        var t = s.TrimStart();
+        if (t.StartsWith('"'))
+        {
+            var end = t.IndexOf('"', 1);
+            return end > 0 ? t[1..end] : "";
+        }
+        var spc = t.IndexOfAny(new[] { ' ', '\t' });
+        return spc < 0 ? t : t[..spc];
+    }
+
     // Parse a TOC field instruction (` TOC \o "1-3" \h \u \z `) into the
     // prop bag AddToc accepts. AddToc emits the canonical instruction so
     // round-tripping the parsed props back through it lands at the same
@@ -1043,6 +1302,27 @@ public static class BatchEmitter
         "styleId", "styleName",
     };
 
+    // Serialize the tabs list (List<Dictionary<string,object?>>) to the
+    // semicolon-separated form Add/Set's tab parser accepts:
+    //   "pos=2160 val=left leader=dot;pos=4320 val=center"
+    // ApplyTabsString in WordHandler.Helpers parses both space- and
+    // comma-delimited fields per stop. Without this projection, the raw
+    // .NET List<Dict> rendered as "System.Collections.Generic.List`1[…]"
+    // and tab stops were silently lost on round-trip (BUG-R2-01).
+    private static string SerializeTabsList(IEnumerable<Dictionary<string, object?>> tabs)
+    {
+        var stops = new List<string>();
+        foreach (var t in tabs)
+        {
+            var parts = new List<string>();
+            if (t.TryGetValue("pos", out var p) && p != null) parts.Add($"pos={p}");
+            if (t.TryGetValue("val", out var v) && v != null) parts.Add($"val={v}");
+            if (t.TryGetValue("leader", out var l) && l != null) parts.Add($"leader={l}");
+            if (parts.Count > 0) stops.Add(string.Join(" ", parts));
+        }
+        return string.Join(";", stops);
+    }
+
     private static Dictionary<string, string> FilterEmittableProps(Dictionary<string, object?> raw)
     {
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -1066,8 +1346,16 @@ public static class BatchEmitter
                 continue;
             }
 
+            // tabs is a List<Dict>, not a flat scalar. Both Add and Set ingest
+            // tab stops via the dedicated `add ... --type tab` command (one
+            // row per stop), not as a paragraph/style scalar prop. Skipping
+            // here avoids serializing the .NET list type name into the prop
+            // string (BUG-R2-01); paragraph emitters layer per-stop add rows
+            // separately.
+            if (string.Equals(key, "tabs", StringComparison.OrdinalIgnoreCase)) continue;
+
             if (val == null) continue;
-            var s = val switch
+            string s = val switch
             {
                 bool b => b ? "true" : "false",
                 _ => val.ToString() ?? ""
@@ -1075,5 +1363,27 @@ public static class BatchEmitter
             if (s.Length > 0) result[key] = s;
         }
         return result;
+    }
+
+    // Layer per-stop `add tab` rows under a parent path that already has the
+    // host paragraph/style created. tabs is the flat List<Dict> Get exposes.
+    private static void EmitTabStops(string parentPath, object? tabsVal, List<BatchItem> items)
+    {
+        if (tabsVal is not IEnumerable<Dictionary<string, object?>> list) return;
+        foreach (var t in list)
+        {
+            var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (t.TryGetValue("pos", out var p) && p != null) props["pos"] = p.ToString() ?? "";
+            if (t.TryGetValue("val", out var v) && v != null) props["val"] = v.ToString() ?? "";
+            if (t.TryGetValue("leader", out var l) && l != null) props["leader"] = l.ToString() ?? "";
+            if (props.Count == 0 || !props.ContainsKey("pos")) continue;
+            items.Add(new BatchItem
+            {
+                Command = "add",
+                Parent = parentPath,
+                Type = "tab",
+                Props = props
+            });
+        }
     }
 }
