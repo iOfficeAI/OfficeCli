@@ -37,6 +37,7 @@ public static class BatchEmitter
         // Phase order matters: resources first so body refs (style=Heading1,
         // numId=3, etc.) resolve when the paragraph adds reach them on replay.
         EmitStyles(word, items);
+        EmitThemeRaw(word, items);
         EmitNumberingRaw(word, items);
         EmitSettingsRaw(word, items);
         EmitSection(word, items);
@@ -45,6 +46,29 @@ public static class BatchEmitter
         EmitBody(word, items, paraIdToTargetIdx);
         EmitComments(word, items, paraIdToTargetIdx);
         return items;
+    }
+
+    private static void EmitThemeRaw(WordHandler word, List<BatchItem> items)
+    {
+        // Theme carries clrScheme + fontScheme + fmtScheme — pure structured
+        // XML that users rarely modify property-by-property; the natural
+        // operation is "swap the entire theme block". Raw-set replace fits
+        // that model exactly. Word.Raw returns the literal string
+        // "(no theme)" when the part is missing — gate on a leading '<' so
+        // we only emit when there's real XML to ship.
+        string xml;
+        try { xml = word.Raw("/theme"); }
+        catch { return; }
+        if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<")) return;
+
+        items.Add(new BatchItem
+        {
+            Command = "raw-set",
+            Part = "/theme",
+            Xpath = "/a:theme",
+            Action = "replace",
+            Xml = xml
+        });
     }
 
     private static void EmitSettingsRaw(WordHandler word, List<BatchItem> items)

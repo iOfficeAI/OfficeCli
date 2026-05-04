@@ -50,10 +50,11 @@ public partial class WordHandler : IDocumentHandler
             "/settings" or "/word/settings.xml" => mainPart.DocumentSettingsPart?.Settings?.OuterXml ?? "(no settings)",
             "/numbering" or "/word/numbering.xml" => mainPart.NumberingDefinitionsPart?.Numbering?.OuterXml ?? "(no numbering)",
             "/comments" => mainPart.WordprocessingCommentsPart?.Comments?.OuterXml ?? "(no comments)",
+            "/theme" or "/word/theme/theme1.xml" => mainPart.ThemePart?.Theme?.OuterXml ?? "(no theme)",
             _ when partPath.StartsWith("/header") => GetHeaderRawXml(partPath),
             _ when partPath.StartsWith("/footer") => GetFooterRawXml(partPath),
             _ when partPath.StartsWith("/chart") => GetChartRawXml(partPath),
-            _ => throw new ArgumentException($"Unknown part: {partPath}. Available: /document, /styles, /settings, /numbering, /header[n], /footer[n], /chart[n]")
+            _ => throw new ArgumentException($"Unknown part: {partPath}. Available: /document, /styles, /settings, /numbering, /comments, /theme, /header[n], /footer[n], /chart[n]")
         };
     }
 
@@ -75,6 +76,8 @@ public partial class WordHandler : IDocumentHandler
             rootElement = mainPart.NumberingDefinitionsPart?.Numbering ?? throw new InvalidOperationException("No numbering part");
         else if (lowerPath is "/comments")
             rootElement = mainPart.WordprocessingCommentsPart?.Comments ?? throw new InvalidOperationException("No comments part");
+        else if (lowerPath is "/theme")
+            rootElement = mainPart.ThemePart?.Theme ?? throw new InvalidOperationException("No theme part");
         else if (lowerPath.StartsWith("/header"))
         {
             var idx = 0;
