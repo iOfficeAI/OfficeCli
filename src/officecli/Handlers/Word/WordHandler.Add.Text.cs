@@ -272,6 +272,33 @@ public partial class WordHandler
             pProps.ContextualSpacing = IsTruthy(addCS)
                 ? new ContextualSpacing()
                 : new ContextualSpacing { Val = false };
+        // CONSISTENCY(add-set-symmetry): Set supports outlineLvl via the
+        // schema fallback (TrySetParagraphProp + TypedAttributeFallback);
+        // Add must accept the same canonical key so dump round-trip stays
+        // lossless — the dump emitter pulls outlineLvl from paragraph Get
+        // readback (WordHandler.Navigation.cs:1265-1266) and surfaces it as
+        // an Add prop. BUG-R4-BT4.
+        if (properties.TryGetValue("outlineLvl", out var addOLvl)
+            || properties.TryGetValue("outlinelvl", out addOLvl)
+            || properties.TryGetValue("outlineLevel", out addOLvl)
+            || properties.TryGetValue("outlinelevel", out addOLvl))
+        {
+            if (int.TryParse(addOLvl, out var olvl) && olvl >= 0 && olvl <= 9)
+                pProps.OutlineLevel = new OutlineLevel { Val = olvl };
+        }
+        // CONSISTENCY(add-set-symmetry): paragraph rStyle binds the paragraph
+        // mark's run style. Run Add already supports rStyle; paragraph dump
+        // emit echoes it back from Get (mark rPr.rStyle) and the value
+        // applies to all runs the paragraph carries via its mark inheritance.
+        // BUG-R4-BT4. Stored in ParagraphMarkRunProperties so the run-style
+        // sticks to the paragraph mark itself (not just any subsequently
+        // added run).
+        if (properties.TryGetValue("rStyle", out var addPRStyle) || properties.TryGetValue("rstyle", out addPRStyle))
+        {
+            var pmrp = pProps.ParagraphMarkRunProperties ?? pProps.AppendChild(new ParagraphMarkRunProperties());
+            pmrp.RemoveAllChildren<RunStyle>();
+            pmrp.PrependChild(new RunStyle { Val = addPRStyle });
+        }
         foreach (var (pk, pv) in properties)
         {
             // CONSISTENCY(add-set-symmetry): Set accepts border.top/bottom/left/right/between/bar
@@ -527,6 +554,8 @@ public partial class WordHandler
             "numid", "numId", "ilvl", "numlevel", "numLevel",
             "liststyle", "listStyle", "start", "level", "listLevel", "listlevel",
             "outlinelevel", "outlineLevel",
+            "outlinelvl", "outlineLvl",
+            "rstyle", "rStyle",
             "tabs", "tabstops",
             "border", "borders", "shd", "shading",
             "font", "size", "bold", "italic", "color", "highlight",

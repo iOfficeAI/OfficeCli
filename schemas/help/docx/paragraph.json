@@ -924,11 +924,20 @@
     },
     "outlineLvl": {
       "type": "number",
-      "description": "outline level (0-9). Emitted only when present.",
-      "add": false,
-      "set": false,
+      "description": "outline level (0-9). Used by Word's TOC and document map.",
+      "add": true,
+      "set": true,
       "get": true,
       "readback": "integer",
+      "enforcement": "report"
+    },
+    "rStyle": {
+      "type": "string",
+      "description": "Paragraph mark run style id (e.g. FootnoteReference, IntenseEmphasis). Inherited by runs without their own rStyle.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "readback": "style id",
       "enforcement": "report"
     },
     "tabs": {

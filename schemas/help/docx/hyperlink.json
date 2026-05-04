@@ -61,6 +61,18 @@
       "readback": "concatenated run text",
       "enforcement": "report"
     },
+    "rStyle": {
+      "type": "string",
+      "description": "Run style id applied to the hyperlink's run (typically 'Hyperlink' to inherit theme color/underline).",
+      "add": true,
+      "set": false,
+      "get": true,
+      "examples": [
+        "--prop rStyle=Hyperlink"
+      ],
+      "readback": "style id",
+      "enforcement": "report"
+    },
     "color": {
       "type": "color",
       "description": "override link color (default: theme Hyperlink or 0563C1). Set after Add not supported — formatting lives on inner runs (Set the run, not the hyperlink wrapper).",

@@ -403,6 +403,17 @@ public partial class WordHandler
             hlRProps.Bold = new Bold();
         if (properties.TryGetValue("italic", out var hlItalic) && IsTruthy(hlItalic))
             hlRProps.Italic = new Italic();
+        // CONSISTENCY(add-set-symmetry): hyperlink runs commonly bind to the
+        // built-in `Hyperlink` character style (rStyle=Hyperlink) so they
+        // pick up the document's hyperlink theme color/underline. Run Add
+        // and paragraph dump emit echo rStyle back; AddHyperlink must
+        // accept it on the wrapped run or batch replay strips it with an
+        // UNSUPPORTED warning. BUG-R4-BT5.
+        if (properties.TryGetValue("rStyle", out var hlRStyle) || properties.TryGetValue("rstyle", out hlRStyle))
+        {
+            if (!string.IsNullOrEmpty(hlRStyle))
+                hlRProps.RunStyle = new RunStyle { Val = hlRStyle };
+        }
         // CONSISTENCY(rtl-cascade): inherit pPr/bidi from the enclosing
         // paragraph onto the hyperlink's run rPr. Mirrors the cascade in
         // SetElementParagraph / Add.Text run insertion (R16-bt-3). Without
