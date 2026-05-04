@@ -189,8 +189,24 @@ public partial class WordHandler
     /// Sanitize a hex color for Word OOXML (ST_HexColorRGB = exactly 6-char RGB).
     /// Strips # prefix, uppercases, and handles 8-char AARRGGBB by extracting RGB portion.
     /// </summary>
-    private static string SanitizeHex(string value) =>
-        ParseHelpers.SanitizeColorForOoxml(value).Rgb;
+    private static string SanitizeHex(string value)
+    {
+        var (rgb, alphaPercent) = ParseHelpers.SanitizeColorForOoxml(value);
+        // BUG-R6-07: ARGB input (e.g. `80FF0000`) was silently truncated to
+        // RGB. OOXML's w:color stores only 6-digit RGB so the alpha
+        // channel cannot be preserved here. Emit a stderr warning so
+        // callers know the input was lossy rather than rejected.
+        if (alphaPercent.HasValue)
+        {
+            try
+            {
+                Console.Error.WriteLine(
+                    $"WARNING: color value '{value}' has an alpha component which OOXML w:color cannot store. Stored as #{rgb} (alpha discarded).");
+            }
+            catch { /* best effort — never fail the operation over a warning */ }
+        }
+        return rgb;
+    }
 
     /// <summary>
     /// Sanitize a font name input for the per-script font slots. Strips
