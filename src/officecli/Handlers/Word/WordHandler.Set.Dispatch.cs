@@ -1003,8 +1003,15 @@ public partial class WordHandler
                             "right" or "end" => LevelJustificationValues.Right,
                             _ => throw new ArgumentException($"Invalid justification '{value}'. Valid: left, center, right.")
                         };
+                        // BUG-R5-T4: CT_Lvl schema order is start, numFmt,
+                        // lvlRestart, pStyle, isLgl, suff, lvlText,
+                        // lvlPicBulletId, legacy, lvlJc, pPr, rPr — Word
+                        // silently ignores out-of-order children. Use the
+                        // schema-aware insertion helper instead of raw
+                        // AppendChild (which always tacks elements at the
+                        // end, regardless of where they belong).
                         var jc = level.GetFirstChild<LevelJustification>();
-                        if (jc == null) level.AppendChild(new LevelJustification { Val = jcV });
+                        if (jc == null) InsertLevelChildInOrder(level, new LevelJustification { Val = jcV });
                         else jc.Val = jcV;
                         break;
                     case "suff":
@@ -1016,7 +1023,7 @@ public partial class WordHandler
                             _ => throw new ArgumentException($"Invalid suff '{value}'. Valid: tab, space, nothing.")
                         };
                         var su = level.GetFirstChild<LevelSuffix>();
-                        if (su == null) level.AppendChild(new LevelSuffix { Val = sV });
+                        if (su == null) InsertLevelChildInOrder(level, new LevelSuffix { Val = sV });
                         else su.Val = sV;
                         break;
                     case "indent":
