@@ -383,11 +383,21 @@ public partial class WordHandler
                 // way ApplyRunFormatting (Set path) does — otherwise
                 // Add(.., {color=accent1}) would call SanitizeHex on the
                 // scheme name and produce garbage hex.
-                var pSchemeName = OfficeCli.Core.ParseHelpers.NormalizeSchemeColorName(pColor);
-                if (pSchemeName != null)
-                    rProps.Color = new Color { Val = "auto", ThemeColor = new EnumValue<ThemeColorValues>(new ThemeColorValues(pSchemeName)) };
+                // CONSISTENCY(color-auto): bare "auto" is a legal Color val
+                // (Word's "automatic" text color); short-circuit before the
+                // scheme branch since "auto" is not a ThemeColorValues enum.
+                if (string.Equals(pColor, "auto", StringComparison.OrdinalIgnoreCase))
+                {
+                    rProps.Color = new Color { Val = "auto" };
+                }
                 else
-                    rProps.Color = new Color { Val = SanitizeHex(pColor) };
+                {
+                    var pSchemeName = OfficeCli.Core.ParseHelpers.NormalizeSchemeColorName(pColor);
+                    if (pSchemeName != null)
+                        rProps.Color = new Color { Val = "auto", ThemeColor = new EnumValue<ThemeColorValues>(new ThemeColorValues(pSchemeName)) };
+                    else
+                        rProps.Color = new Color { Val = SanitizeHex(pColor) };
+                }
             }
             if (properties.TryGetValue("underline", out var pUnderline) || properties.TryGetValue("font.underline", out pUnderline))
             {
@@ -854,11 +864,19 @@ public partial class WordHandler
             // CONSISTENCY(theme-color): Add run color accepts scheme color
             // names (accent1, dark2, hyperlink, …); same logic as
             // ApplyRunFormatting in WordHandler.Helpers.cs.
-            var rSchemeName = OfficeCli.Core.ParseHelpers.NormalizeSchemeColorName(rColor);
-            if (rSchemeName != null)
-                newRProps.Color = new Color { Val = "auto", ThemeColor = new EnumValue<ThemeColorValues>(new ThemeColorValues(rSchemeName)) };
+            // CONSISTENCY(color-auto): see WordHandler.Helpers.cs ApplyRunFormatting.
+            if (string.Equals(rColor, "auto", StringComparison.OrdinalIgnoreCase))
+            {
+                newRProps.Color = new Color { Val = "auto" };
+            }
             else
-                newRProps.Color = new Color { Val = SanitizeHex(rColor) };
+            {
+                var rSchemeName = OfficeCli.Core.ParseHelpers.NormalizeSchemeColorName(rColor);
+                if (rSchemeName != null)
+                    newRProps.Color = new Color { Val = "auto", ThemeColor = new EnumValue<ThemeColorValues>(new ThemeColorValues(rSchemeName)) };
+                else
+                    newRProps.Color = new Color { Val = SanitizeHex(rColor) };
+            }
         }
         if (properties.TryGetValue("underline", out var rUnderline) || properties.TryGetValue("font.underline", out rUnderline))
         {

@@ -1141,15 +1141,28 @@ public partial class WordHandler
                 // ThemeColor attribute instead of Val; Val is left at "auto"
                 // per ECMA-376 §17.3.2.6 (Excel rejects Val=accent1).
                 {
-                    var schemeName = OfficeCli.Core.ParseHelpers.NormalizeSchemeColorName(value);
                     Color colorEl;
-                    if (schemeName != null)
+                    // Bare "auto" is a legal Color val per ECMA-376 §17.3.2.6 —
+                    // it tells Word to use the document's automatic text color.
+                    // SchemeColorNames includes "auto" for the cross-handler
+                    // input lenience pass, but new ThemeColorValues("auto")
+                    // throws (no such enum). Short-circuit before the scheme
+                    // branch so dump-emitted color=auto round-trips correctly.
+                    if (string.Equals(value, "auto", StringComparison.OrdinalIgnoreCase))
                     {
-                        colorEl = new Color { Val = "auto", ThemeColor = new EnumValue<ThemeColorValues>(new ThemeColorValues(schemeName)) };
+                        colorEl = new Color { Val = "auto" };
                     }
                     else
                     {
-                        colorEl = new Color { Val = SanitizeHex(value) };
+                        var schemeName = OfficeCli.Core.ParseHelpers.NormalizeSchemeColorName(value);
+                        if (schemeName != null)
+                        {
+                            colorEl = new Color { Val = "auto", ThemeColor = new EnumValue<ThemeColorValues>(new ThemeColorValues(schemeName)) };
+                        }
+                        else
+                        {
+                            colorEl = new Color { Val = SanitizeHex(value) };
+                        }
                     }
                     InsertRunPropInSchemaOrder(props, colorEl);
                 }
