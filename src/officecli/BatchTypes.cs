@@ -99,6 +99,8 @@ internal class BatchItemConverter : JsonConverter<BatchItem>
         if (value.Type != null) writer.WriteString("type", value.Type);
         if (value.From != null) writer.WriteString("from", value.From);
         if (value.Index.HasValue) writer.WriteNumber("index", value.Index.Value);
+        if (value.After != null) writer.WriteString("after", value.After);
+        if (value.Before != null) writer.WriteString("before", value.Before);
         if (value.To != null) writer.WriteString("to", value.To);
         if (value.Props != null) { writer.WritePropertyName("props"); PropsConverter.Write(writer, value.Props, options); }
         if (value.Selector != null) writer.WriteString("selector", value.Selector);
