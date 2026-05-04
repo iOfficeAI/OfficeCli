@@ -419,15 +419,12 @@ public partial class WordHandler
             tocPara.InsertBeforeSelf(titlePara);
         }
 
-        // Add UpdateFieldsOnOpen setting
-        var settingsPart2 = _doc.MainDocumentPart!.DocumentSettingsPart
-            ?? _doc.MainDocumentPart.AddNewPart<DocumentSettingsPart>();
-        settingsPart2.Settings ??= new Settings();
-        if (settingsPart2.Settings.GetFirstChild<UpdateFieldsOnOpen>() == null)
-        {
-            settingsPart2.Settings.AddChild(new UpdateFieldsOnOpen { Val = true });
-        }
-        settingsPart2.Settings.Save();
+        // Intentionally do NOT set <w:updateFieldsOnOpen w:val="true"/>: it
+        // makes Word prompt the user with "update fields?" on every open.
+        // The TOC field result stays empty until the user right-clicks ->
+        // "Update Field" (or presses F9). Trade-off accepted: empty-by-default
+        // beats a dialog every open, since we can't pre-render real page
+        // numbers without a layout engine. See chat 2026-05-05.
 
         // Determine TOC index in document order (not total count)
         var tocParas = body.Elements<Paragraph>()
