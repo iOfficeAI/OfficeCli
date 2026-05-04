@@ -297,6 +297,9 @@ internal static class ParseHelpers
         "hyperlink", "followedHyperlink",
         // Extra variants seen in OOXML: text1/text2/background1/background2 alias dark/light.
         "text1", "text2", "background1", "background2",
+        // BUG-R6-06: alternate Word theme color aliases (windowText / windowBackground)
+        // are valid OOXML w:themeColor values that map to dark1/light1.
+        "windowText", "windowBackground",
         "none", "auto",
     };
 
@@ -329,6 +332,8 @@ internal static class ParseHelpers
             "text2" => "dark2",
             "background1" => "light1",
             "background2" => "light2",
+            "windowtext" => "dark1",
+            "windowbackground" => "light1",
             _ => v,
         };
     }
