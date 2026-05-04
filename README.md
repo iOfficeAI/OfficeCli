@@ -469,6 +469,7 @@ OFFICECLI_SKIP_UPDATE=1 officecli ...          # Skip check for one invocation (
 | [`validate`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-validate) | Validate against OpenXML schema |
 | `view <file> issues` | Enumerate document issues (text overflow, missing alt text, formula errors, ...) |
 | [`batch`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-batch) | Multiple operations in one open/save cycle (stdin, `--input`, or `--commands`; stops on first error, `--force` to continue) |
+| [`dump`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-dump) | Serialize a `.docx` into a replayable batch JSON (round-trip via `batch`) |
 | [`merge`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-merge) | Template merge — replace `{{key}}` placeholders with JSON data |
 | [`watch`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-watch) | Live HTML preview in browser with auto-refresh |
 | [`mcp`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-mcp) | Start MCP server for AI tool integration |
