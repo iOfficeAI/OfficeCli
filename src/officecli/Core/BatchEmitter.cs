@@ -33,8 +33,41 @@ public static class BatchEmitter
     public static List<BatchItem> EmitWord(WordHandler word)
     {
         var items = new List<BatchItem>();
+
+        // Phase order matters: resources first so body refs (style=Heading1,
+        // numId=3, etc.) resolve when the paragraph adds reach them on replay.
+        EmitStyles(word, items);
         EmitBody(word, items);
         return items;
+    }
+
+    private static void EmitStyles(WordHandler word, List<BatchItem> items)
+    {
+        // Use query() rather than walking Get("/styles").Children — the
+        // positional /styles/style[N] children Get returns are not
+        // addressable on the Get side (style paths resolve by id, not by
+        // index). Query produces id-based paths and excludes docDefaults.
+        var styles = word.Query("style");
+        foreach (var stub in styles)
+        {
+            DocumentNode full;
+            try { full = word.Get(stub.Path); }
+            catch { continue; }
+            var props = FilterEmittableProps(full.Format);
+            // Ensure id is present (Add requires it for /styles target).
+            if (!props.ContainsKey("id") && !props.ContainsKey("styleId"))
+            {
+                if (props.TryGetValue("name", out var n)) props["id"] = n;
+                else continue;
+            }
+            items.Add(new BatchItem
+            {
+                Command = "add",
+                Parent = "/styles",
+                Type = "style",
+                Props = props
+            });
+        }
     }
 
     private static void EmitBody(WordHandler word, List<BatchItem> items)
