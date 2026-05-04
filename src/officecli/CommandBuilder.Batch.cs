@@ -14,12 +14,22 @@ static partial class CommandBuilder
         var batchFileArg = new Argument<FileInfo>("file") { Description = "Office document path" };
         var batchInputOpt = new Option<FileInfo?>("--input") { Description = "JSON file containing batch commands. If omitted, reads from stdin" };
         var batchCommandsOpt = new Option<string?>("--commands") { Description = "Inline JSON array of batch commands (alternative to --input or stdin)" };
-        var batchForceOpt = new Option<bool>("--force") { Description = "Continue execution even if a command fails (default: stop on first error)" };
+        // BUG-R4-BT2: default flipped to continue-on-error. A 700-command
+        // dump replay losing 80% of the document on the first failing item
+        // (e.g. one unsupported prop) is a far worse default than reporting
+        // the failure and letting the rest of the batch through. Errors are
+        // still surfaced individually (BatchResult.Error) and the overall
+        // exit code is 1 if any item failed, so callers can still tell
+        // "everything succeeded". `--stop-on-error` opts back into the
+        // strict abort-on-first-failure flow for callers who depend on it.
+        var batchForceOpt = new Option<bool>("--force") { Description = "Deprecated alias for the default continue-on-error mode (kept for compatibility)" };
+        var batchStopOpt = new Option<bool>("--stop-on-error") { Description = "Abort the batch as soon as any command fails (default: continue and report per-item errors)" };
         var batchCommand = new Command("batch", "Execute multiple commands from a JSON array (one open/save cycle)");
         batchCommand.Add(batchFileArg);
         batchCommand.Add(batchInputOpt);
         batchCommand.Add(batchCommandsOpt);
         batchCommand.Add(batchForceOpt);
+        batchCommand.Add(batchStopOpt);
         batchCommand.Add(jsonOption);
 
         batchCommand.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
@@ -27,7 +37,12 @@ static partial class CommandBuilder
             var file = result.GetValue(batchFileArg)!;
             var inputFile = result.GetValue(batchInputOpt);
             var inlineCommands = result.GetValue(batchCommandsOpt);
-            var stopOnError = !result.GetValue(batchForceOpt);
+            // Default: continue on error. --stop-on-error flips it to strict.
+            // --force still acts as the docx-protection bypass (matches set
+            // --force semantics) but no longer doubles as the continue-on-
+            // error switch.
+            var stopOnError = result.GetValue(batchStopOpt);
+            var forceFlag = result.GetValue(batchForceOpt);
 
             string jsonText;
             if (inlineCommands != null)
@@ -99,7 +114,7 @@ static partial class CommandBuilder
             // CONSISTENCY(docx-protection): if you change the protection
             // semantics, also update CommandBuilder.Set.cs at the matching
             // CheckDocxProtection call site.
-            var force = !stopOnError;
+            var force = forceFlag;
             if (!force && file.Extension.Equals(".docx", StringComparison.OrdinalIgnoreCase))
             {
                 foreach (var batchItem in items)
@@ -133,7 +148,8 @@ static partial class CommandBuilder
                     Args =
                     {
                         ["batchJson"] = jsonText,
-                        ["force"] = force.ToString()
+                        ["force"] = force.ToString(),
+                        ["stopOnError"] = stopOnError.ToString()
                     }
                 };
                 // CONSISTENCY(resident-two-step): long connectTimeoutMs so the

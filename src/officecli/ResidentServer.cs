@@ -728,9 +728,16 @@ public class ResidentServer : IDisposable
     {
         _lastBatchHadFailure = false;
         var batchJson = request.GetArg("batchJson");
+        // BUG-R4-BT2: stopOnError is now an explicit arg from the client.
+        // For older clients that only send "force", fall back to the legacy
+        // semantics (force=true ⇒ continue-on-error). Newer clients always
+        // send stopOnError so the legacy fallback never fires.
         var force = request.GetArg("force", "false")
             .Equals("true", StringComparison.OrdinalIgnoreCase);
-        var stopOnError = !force;
+        var hasStopArg = request.Args?.ContainsKey("stopOnError") == true;
+        var stopOnError = hasStopArg
+            ? request.GetArg("stopOnError", "false").Equals("true", StringComparison.OrdinalIgnoreCase)
+            : !force;
         var json = request.Json;
 
         var items = System.Text.Json.JsonSerializer.Deserialize<List<BatchItem>>(
