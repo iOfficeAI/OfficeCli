@@ -956,6 +956,10 @@ public partial class WordHandler
             };
             secNode.Format["lineNumbers"] = restart;
             if (countBy != 1) secNode.Format["lineNumberCountBy"] = countBy;
+            // BUG-DUMP11-02: surface w:lnNumType/@w:start so /section[N] readback
+            // matches the root sectPr reader.
+            if (lnNum.Start?.Value is short lnStart)
+                secNode.Format["lineNumberStart"] = (int)lnStart;
         }
 
         // Column properties — dotted canonical keys mirror Set's input form

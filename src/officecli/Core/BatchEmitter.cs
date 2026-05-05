@@ -354,6 +354,8 @@ public static class BatchEmitter
         "chapStyle", "chapSep",
         "titlePage", "direction", "rtlGutter",
         "lineNumbers", "lineNumberCountBy",
+        // BUG-DUMP11-02: lnNumType/@w:start (first line number when counting).
+        "lineNumberStart",
         // Multi-column section layout. Get exposes these as canonical keys
         // (columns, columnSpace, columns.equalWidth) and Set's case table
         // accepts all three (WordHandler.Set.SectionLayout.cs). Without them

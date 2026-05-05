@@ -290,6 +290,25 @@ public partial class WordHandler
                 return true;
             }
 
+            // BUG-DUMP11-02: w:lnNumType/@w:start — first line number when
+            // counting begins. Auto-create LineNumberType if absent so the
+            // start value isn't dropped.
+            case "linenumberstart":
+            {
+                var sectPr = EnsureSectionProperties();
+                if (!int.TryParse(value, out var lnStart) || lnStart < 0)
+                    throw new ArgumentException(
+                        $"Invalid lineNumberStart value: '{value}'. Must be a non-negative integer.");
+                var lnNum = sectPr.GetFirstChild<LineNumberType>();
+                if (lnNum == null)
+                {
+                    lnNum = new LineNumberType { Restart = LineNumberRestartValues.Continuous };
+                    InsertSectPrChildInOrder(sectPr, lnNum);
+                }
+                lnNum.Start = (short)lnStart;
+                return true;
+            }
+
             // Bare `type` / `break` at the body-level path is by-design unsupported:
             // `/` refers to the final (body-level) section, which has no break type —
             // the break only makes sense between mid-doc sections. Intercept here so

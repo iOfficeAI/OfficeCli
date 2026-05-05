@@ -225,6 +225,10 @@ public partial class WordHandler
                     _ => "continuous"
                 };
                 if (countBy != 1) node.Format["lineNumberCountBy"] = countBy;
+                // BUG-DUMP11-02: w:lnNumType/@w:start was silently dropped.
+                // Surface as canonical lineNumberStart key.
+                if (lnNum.Start?.Value is short lnStart)
+                    node.Format["lineNumberStart"] = (int)lnStart;
             }
         }
 
