@@ -642,6 +642,31 @@ public static class BatchEmitter
                 Type = "section",
                 Props = sectProps
             });
+            // BUG-DUMP4-04: a section-break paragraph can also carry visible
+            // text runs (the carrier paragraph is just a regular paragraph
+            // with sectPr in its pPr). Without this re-emit, the early return
+            // above silently discards every run on the carrier. AddSection
+            // appends a fresh paragraph at /body/p[targetIndex]; emit each
+            // text-bearing run as `add r` against that paragraph.
+            var carrierRuns = (pNode.Children ?? new List<DocumentNode>())
+                .Where(c => (c.Type == "run" || c.Type == "r") && !string.IsNullOrEmpty(c.Text))
+                .ToList();
+            if (carrierRuns.Count > 0)
+            {
+                var carrierPath = $"/body/p[{targetIndex}]";
+                foreach (var run in carrierRuns)
+                {
+                    var rProps = FilterEmittableProps(run.Format);
+                    rProps["text"] = run.Text!;
+                    items.Add(new BatchItem
+                    {
+                        Command = "add",
+                        Parent = carrierPath,
+                        Type = "r",
+                        Props = rProps
+                    });
+                }
+            }
             return;
         }
 
