@@ -480,6 +480,57 @@ public partial class WordHandler
             }
 
         }
+        else
+        {
+            // No explicit <w:spacing> on paragraph or anywhere in its style chain.
+            // Word fills in baked-in defaults from Normal.dotm regardless — without
+            // this fallback, paragraphs land on the global CSS reset (margin:0) and
+            // the document compresses ~10pt per paragraph relative to real Word.
+            // Walk the style chain by styleId to find a matching built-in (Heading1/
+            // Title/ListParagraph/etc.); fall through to Normal defaults otherwise.
+            // See project memory project_word_html_spacing_fix.
+            var builtIn = ResolveBuiltInStyleDefaults(styleId)
+                          ?? BuiltInStyleDefaults["Normal"];
+
+            // Margin collapse: subtract previous sibling's effective spaceAfter
+            // from this paragraph's spaceBefore (CSS flexbox doesn't collapse).
+            double prevAfterPt = 0;
+            var prevP = para.PreviousSibling<Paragraph>();
+            if (prevP != null)
+            {
+                var prevSId = prevP.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+                var prevSpacing = prevP.ParagraphProperties?.SpacingBetweenLines
+                                  ?? ResolveSpacingFromStyle(prevSId);
+                if (prevSpacing?.After?.Value is string pa && int.TryParse(pa, out var paT))
+                    prevAfterPt = paT / 20.0;
+                else if (ResolveBuiltInStyleDefaults(prevSId) is { } prevBuiltIn)
+                    prevAfterPt = prevBuiltIn.After;
+                else
+                    prevAfterPt = BuiltInStyleDefaults["Normal"].After;
+            }
+
+            var beforePt = Math.Max(0, builtIn.Before - prevAfterPt);
+            if (beforePt > 0)
+                parts.Add($"{vSpacingPropBefore}:{beforePt:0.##}pt");
+            if (builtIn.After > 0)
+                parts.Add($"{vSpacingPropAfter}:{builtIn.After:0.##}pt");
+
+            var paraFontDef = ResolveParaFontForLineHeight(para);
+            var ratioDef = FontMetricsReader.GetRatio(paraFontDef);
+            // Use built-in line multiplier, but raise to font metric ratio when the
+            // font's natural ascent+descent exceeds it (CJK / glyph-tall fonts).
+            var lhDef = Math.Max(builtIn.Line, ratioDef);
+            parts.Add($"line-height:{lhDef:0.##}");
+
+            // NOTE: do not emit font-size/bold/color from BuiltInStyleDefaults here.
+            // Per ECMA-376, when a paragraph references a style that is undefined
+            // in the doc, Word renders as if no style applied — it does NOT pull
+            // font-size/bold/color from Normal.dotm. Those Normal.dotm built-ins
+            // are template-specific, not standard. Verified against formulas.docx:
+            // Heading1/Heading2 referenced without styles.xml render as plain 11pt
+            // black in real Word. Only spacing/line-height are kept here because
+            // Word still applies Normal-equivalent paragraph defaults regardless.
+        }
 
         // docGrid snap: when type="lines" and paragraph doesn't opt out via snapToGrid=false,
         // snap line-height to the nearest multiple of linePitch that fits the text.
@@ -671,6 +722,62 @@ public partial class WordHandler
             var tabs = style.StyleParagraphProperties?.Tabs?.Elements<TabStop>();
             if (tabs != null && tabs.Any()) return tabs;
             currentStyleId = style.BasedOn?.Val?.Value;
+        }
+        return null;
+    }
+
+    /// <summary>Word built-in style defaults (Office 2010+ Normal.dotm baseline).
+    /// Used when the style is referenced but undefined in the doc, OR defined
+    /// without these properties — Word fills in baked-in values regardless.
+    /// Progressive — covers spacing/line/size/bold/color. Italic/keepWithNext
+    /// still missing. Terminal goal is full-fidelity built-in style table.</summary>
+    private record BuiltInStyleDefault(
+        double Before, double After, double Line,
+        double? SizePt, bool Bold, string? ColorHex);
+
+    private static readonly System.Collections.Generic.Dictionary<string, BuiltInStyleDefault> BuiltInStyleDefaults
+        = new(System.StringComparer.OrdinalIgnoreCase)
+    {
+        // Normal: Office 2010 baseline (10pt after, 1.15 line). Office 2013+ uses
+        // 8pt/1.08; we keep 2010 values for consistency with global else-branch fallback.
+        ["Normal"]       = new(0,  10, 1.15, null, false, null),
+        ["Heading1"]     = new(12,  0, 1.08, 16,   true,  "#2E74B5"),
+        ["Heading2"]     = new( 2,  0, 1.08, 13,   true,  "#2E74B5"),
+        ["Heading3"]     = new( 2,  0, 1.08, 12,   true,  "#1F3864"),
+        ["Heading4"]     = new( 2,  0, 1.08, 11,   true,  "#2E74B5"),
+        ["Heading5"]     = new( 2,  0, 1.08, 11,   false, "#2E74B5"),
+        ["Heading6"]     = new( 2,  0, 1.08, 11,   false, "#1F3864"),
+        ["Heading7"]     = new( 2,  0, 1.08, 11,   false, "#1F3864"),
+        ["Heading8"]     = new( 2,  0, 1.08, 11,   false, "#2E74B5"),
+        ["Heading9"]     = new( 2,  0, 1.08, 11,   false, "#2E74B5"),
+        ["Title"]        = new( 0,  0, 1.0,  28,   false, null),
+        ["Subtitle"]     = new( 0,  0, 1.15, 11,   false, "#5A5A5A"),
+        ["ListParagraph"]= new( 0, 10, 1.15, null, false, null),  // contextualSpacing handled separately
+        ["Quote"]        = new( 0,  0, 1.15, null, false, null),
+        ["IntenseQuote"] = new( 0,  0, 1.15, null, true,  "#2E74B5"),
+    };
+
+    /// <summary>Walk the style chain and return Word's built-in defaults for the
+    /// first style that (1) is actually defined in the doc and (2) matches a known
+    /// built-in name, OR is referenced as the doc's default Normal-equivalent.
+    /// Per ECMA-376, when a style is referenced but undefined, Word treats the
+    /// paragraph as styleless — it does NOT inherit Normal.dotm's Heading1
+    /// built-ins. Verified against formulas.docx: pStyle="Heading1" without
+    /// styles.xml renders as plain 11pt black, no 12pt spaceBefore.
+    /// Returns null when no defined style in the chain matches a built-in.</summary>
+    private BuiltInStyleDefault? ResolveBuiltInStyleDefaults(string? styleId)
+    {
+        if (styleId == null) return null;
+        var visited = new HashSet<string>();
+        var current = styleId;
+        while (current != null && visited.Add(current))
+        {
+            var style = _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles
+                ?.Elements<Style>().FirstOrDefault(s => s.StyleId?.Value == current);
+            if (style == null) return null;  // Undefined style → no built-in inheritance.
+            if (BuiltInStyleDefaults.TryGetValue(current, out var defaults))
+                return defaults;
+            current = style.BasedOn?.Val?.Value;
         }
         return null;
     }
