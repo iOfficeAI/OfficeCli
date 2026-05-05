@@ -491,14 +491,28 @@ public partial class WordHandler
             {
                 rProps.AppendChild(new FontSize { Val = ((int)Math.Round(ParseFontSize(size) * 2, MidpointRounding.AwayFromZero)).ToString() });
             }
-            if ((properties.TryGetValue("bold", out var bold) || properties.TryGetValue("font.bold", out bold)) && IsTruthy(bold))
-                rProps.Bold = new Bold();
+            // CONSISTENCY(toggle-explicit-false): match the no-text branch
+            // (BUG-R7-07) — explicit `false` must emit <w:b w:val="false"/>
+            // so a run can override a style-asserted toggle. IsTruthy alone
+            // would silently drop the override and the run would re-inherit
+            // bold/italic from the style chain (e.g. non-bold span inside
+            // Heading1, non-italic citation inside Quote).
+            if (properties.TryGetValue("bold", out var bold) || properties.TryGetValue("font.bold", out bold))
+            {
+                if (IsTruthy(bold)) rProps.Bold = new Bold();
+                else if (IsExplicitFalseAddOverride(bold))
+                    rProps.Bold = new Bold { Val = OnOffValue.FromBoolean(false) };
+            }
             if ((properties.TryGetValue("bold.cs", out var boldCs)
                     || properties.TryGetValue("font.bold.cs", out boldCs))
                 && IsTruthy(boldCs))
                 rProps.BoldComplexScript = new BoldComplexScript();
-            if ((properties.TryGetValue("italic", out var pItalic) || properties.TryGetValue("font.italic", out pItalic)) && IsTruthy(pItalic))
-                rProps.Italic = new Italic();
+            if (properties.TryGetValue("italic", out var pItalic) || properties.TryGetValue("font.italic", out pItalic))
+            {
+                if (IsTruthy(pItalic)) rProps.Italic = new Italic();
+                else if (IsExplicitFalseAddOverride(pItalic))
+                    rProps.Italic = new Italic { Val = OnOffValue.FromBoolean(false) };
+            }
             if ((properties.TryGetValue("italic.cs", out var italicCs)
                     || properties.TryGetValue("font.italic.cs", out italicCs))
                 && IsTruthy(italicCs))
@@ -539,37 +553,74 @@ public partial class WordHandler
                 var ulVal = NormalizeUnderlineValue(pUnderline);
                 rProps.Underline = new Underline { Val = new UnderlineValues(ulVal) };
             }
-            if ((properties.TryGetValue("strike", out var pStrike)
+            // CONSISTENCY(toggle-explicit-false): see bold/italic above.
+            if (properties.TryGetValue("strike", out var pStrike)
                     || properties.TryGetValue("strikethrough", out pStrike)
                     || properties.TryGetValue("font.strike", out pStrike)
                     || properties.TryGetValue("font.strikethrough", out pStrike))
-                && IsTruthy(pStrike))
-                rProps.Strike = new Strike();
+            {
+                if (IsTruthy(pStrike)) rProps.Strike = new Strike();
+                else if (IsExplicitFalseAddOverride(pStrike))
+                    rProps.Strike = new Strike { Val = OnOffValue.FromBoolean(false) };
+            }
             if (properties.TryGetValue("highlight", out var pHighlight))
                 rProps.Highlight = new Highlight { Val = ParseHighlightColor(pHighlight) };
-            if ((properties.TryGetValue("caps", out var pCaps)
+            if (properties.TryGetValue("caps", out var pCaps)
                     || properties.TryGetValue("allcaps", out pCaps)
                     || properties.TryGetValue("allCaps", out pCaps))
-                && IsTruthy(pCaps))
-                rProps.Caps = new Caps();
+            {
+                if (IsTruthy(pCaps)) rProps.Caps = new Caps();
+                else if (IsExplicitFalseAddOverride(pCaps))
+                    rProps.Caps = new Caps { Val = OnOffValue.FromBoolean(false) };
+            }
             if (properties.TryGetValue("smallcaps", out var pSmallCaps) || properties.TryGetValue("smallCaps", out pSmallCaps))
             {
                 if (IsTruthy(pSmallCaps)) rProps.SmallCaps = new SmallCaps();
+                else if (IsExplicitFalseAddOverride(pSmallCaps))
+                    rProps.SmallCaps = new SmallCaps { Val = OnOffValue.FromBoolean(false) };
             }
-            if (properties.TryGetValue("dstrike", out var pDstrike) && IsTruthy(pDstrike))
-                rProps.DoubleStrike = new DoubleStrike();
-            if (properties.TryGetValue("vanish", out var pVanish) && IsTruthy(pVanish))
-                rProps.Vanish = new Vanish();
-            if (properties.TryGetValue("outline", out var pOutline) && IsTruthy(pOutline))
-                rProps.Outline = new Outline();
-            if (properties.TryGetValue("shadow", out var pShadow) && IsTruthy(pShadow))
-                rProps.Shadow = new Shadow();
-            if (properties.TryGetValue("emboss", out var pEmboss) && IsTruthy(pEmboss))
-                rProps.Emboss = new Emboss();
-            if (properties.TryGetValue("imprint", out var pImprint) && IsTruthy(pImprint))
-                rProps.Imprint = new Imprint();
-            if (properties.TryGetValue("noproof", out var pNoProof) && IsTruthy(pNoProof))
-                rProps.NoProof = new NoProof();
+            if (properties.TryGetValue("dstrike", out var pDstrike))
+            {
+                if (IsTruthy(pDstrike)) rProps.DoubleStrike = new DoubleStrike();
+                else if (IsExplicitFalseAddOverride(pDstrike))
+                    rProps.DoubleStrike = new DoubleStrike { Val = OnOffValue.FromBoolean(false) };
+            }
+            if (properties.TryGetValue("vanish", out var pVanish))
+            {
+                if (IsTruthy(pVanish)) rProps.Vanish = new Vanish();
+                else if (IsExplicitFalseAddOverride(pVanish))
+                    rProps.Vanish = new Vanish { Val = OnOffValue.FromBoolean(false) };
+            }
+            if (properties.TryGetValue("outline", out var pOutline))
+            {
+                if (IsTruthy(pOutline)) rProps.Outline = new Outline();
+                else if (IsExplicitFalseAddOverride(pOutline))
+                    rProps.Outline = new Outline { Val = OnOffValue.FromBoolean(false) };
+            }
+            if (properties.TryGetValue("shadow", out var pShadow))
+            {
+                if (IsTruthy(pShadow)) rProps.Shadow = new Shadow();
+                else if (IsExplicitFalseAddOverride(pShadow))
+                    rProps.Shadow = new Shadow { Val = OnOffValue.FromBoolean(false) };
+            }
+            if (properties.TryGetValue("emboss", out var pEmboss))
+            {
+                if (IsTruthy(pEmboss)) rProps.Emboss = new Emboss();
+                else if (IsExplicitFalseAddOverride(pEmboss))
+                    rProps.Emboss = new Emboss { Val = OnOffValue.FromBoolean(false) };
+            }
+            if (properties.TryGetValue("imprint", out var pImprint))
+            {
+                if (IsTruthy(pImprint)) rProps.Imprint = new Imprint();
+                else if (IsExplicitFalseAddOverride(pImprint))
+                    rProps.Imprint = new Imprint { Val = OnOffValue.FromBoolean(false) };
+            }
+            if (properties.TryGetValue("noproof", out var pNoProof))
+            {
+                if (IsTruthy(pNoProof)) rProps.NoProof = new NoProof();
+                else if (IsExplicitFalseAddOverride(pNoProof))
+                    rProps.NoProof = new NoProof { Val = OnOffValue.FromBoolean(false) };
+            }
             // Run-level rtl: explicit `rtl=true` OR cascaded from paragraph
             // direction=rtl above. Skipping the cascade would leave Latin
             // character order inside an RTL paragraph (broken Arabic).
@@ -1008,13 +1059,26 @@ public partial class WordHandler
         }
         if (properties.TryGetValue("size", out var rSize) || properties.TryGetValue("font.size", out rSize) || properties.TryGetValue("fontsize", out rSize))
             newRProps.AppendChild(new FontSize { Val = ((int)Math.Round(ParseFontSize(rSize) * 2, MidpointRounding.AwayFromZero)).ToString() });
-        if ((properties.TryGetValue("bold", out var rBold) || properties.TryGetValue("font.bold", out rBold)) && IsTruthy(rBold))
-            newRProps.Bold = new Bold();
+        // CONSISTENCY(toggle-explicit-false): mirror AddParagraph text-bearing
+        // (BUG-018) — explicit `false` must emit <w:b w:val="false"/> so the
+        // run can override a style-asserted toggle. AddRun reaches this block
+        // via dump→batch replay of any docx with run-level toggle overrides
+        // (Heading1 + non-bold span, Quote + non-italic citation, …).
+        if (properties.TryGetValue("bold", out var rBold) || properties.TryGetValue("font.bold", out rBold))
+        {
+            if (IsTruthy(rBold)) newRProps.Bold = new Bold();
+            else if (IsExplicitFalseAddOverride(rBold))
+                newRProps.Bold = new Bold { Val = OnOffValue.FromBoolean(false) };
+        }
         if ((properties.TryGetValue("bold.cs", out var rBoldCs) || properties.TryGetValue("font.bold.cs", out rBoldCs))
             && IsTruthy(rBoldCs))
             newRProps.BoldComplexScript = new BoldComplexScript();
-        if ((properties.TryGetValue("italic", out var rItalic) || properties.TryGetValue("font.italic", out rItalic)) && IsTruthy(rItalic))
-            newRProps.Italic = new Italic();
+        if (properties.TryGetValue("italic", out var rItalic) || properties.TryGetValue("font.italic", out rItalic))
+        {
+            if (IsTruthy(rItalic)) newRProps.Italic = new Italic();
+            else if (IsExplicitFalseAddOverride(rItalic))
+                newRProps.Italic = new Italic { Val = OnOffValue.FromBoolean(false) };
+        }
         if ((properties.TryGetValue("italic.cs", out var rItalicCs) || properties.TryGetValue("font.italic.cs", out rItalicCs))
             && IsTruthy(rItalicCs))
             newRProps.ItalicComplexScript = new ItalicComplexScript();
@@ -1049,37 +1113,74 @@ public partial class WordHandler
             var ulVal = NormalizeUnderlineValue(rUnderline);
             newRProps.Underline = new Underline { Val = new UnderlineValues(ulVal) };
         }
-        if ((properties.TryGetValue("strike", out var rStrike)
+        // CONSISTENCY(toggle-explicit-false): see bold/italic above.
+        if (properties.TryGetValue("strike", out var rStrike)
                 || properties.TryGetValue("strikethrough", out rStrike)
                 || properties.TryGetValue("font.strike", out rStrike)
                 || properties.TryGetValue("font.strikethrough", out rStrike))
-            && IsTruthy(rStrike))
-            newRProps.Strike = new Strike();
+        {
+            if (IsTruthy(rStrike)) newRProps.Strike = new Strike();
+            else if (IsExplicitFalseAddOverride(rStrike))
+                newRProps.Strike = new Strike { Val = OnOffValue.FromBoolean(false) };
+        }
         if (properties.TryGetValue("highlight", out var rHighlight))
             newRProps.Highlight = new Highlight { Val = ParseHighlightColor(rHighlight) };
-        if ((properties.TryGetValue("caps", out var rCaps)
+        if (properties.TryGetValue("caps", out var rCaps)
                 || properties.TryGetValue("allcaps", out rCaps)
                 || properties.TryGetValue("allCaps", out rCaps))
-            && IsTruthy(rCaps))
-            newRProps.Caps = new Caps();
+        {
+            if (IsTruthy(rCaps)) newRProps.Caps = new Caps();
+            else if (IsExplicitFalseAddOverride(rCaps))
+                newRProps.Caps = new Caps { Val = OnOffValue.FromBoolean(false) };
+        }
         if (properties.TryGetValue("smallcaps", out var rSmallCaps) || properties.TryGetValue("smallCaps", out rSmallCaps))
         {
             if (IsTruthy(rSmallCaps)) newRProps.SmallCaps = new SmallCaps();
+            else if (IsExplicitFalseAddOverride(rSmallCaps))
+                newRProps.SmallCaps = new SmallCaps { Val = OnOffValue.FromBoolean(false) };
         }
-        if (properties.TryGetValue("dstrike", out var rDstrike) && IsTruthy(rDstrike))
-            newRProps.DoubleStrike = new DoubleStrike();
-        if (properties.TryGetValue("vanish", out var rVanish) && IsTruthy(rVanish))
-            newRProps.Vanish = new Vanish();
-        if (properties.TryGetValue("outline", out var rOutline) && IsTruthy(rOutline))
-            newRProps.Outline = new Outline();
-        if (properties.TryGetValue("shadow", out var rShadow) && IsTruthy(rShadow))
-            newRProps.Shadow = new Shadow();
-        if (properties.TryGetValue("emboss", out var rEmboss) && IsTruthy(rEmboss))
-            newRProps.Emboss = new Emboss();
-        if (properties.TryGetValue("imprint", out var rImprint) && IsTruthy(rImprint))
-            newRProps.Imprint = new Imprint();
-        if (properties.TryGetValue("noproof", out var rNoProof) && IsTruthy(rNoProof))
-            newRProps.NoProof = new NoProof();
+        if (properties.TryGetValue("dstrike", out var rDstrike))
+        {
+            if (IsTruthy(rDstrike)) newRProps.DoubleStrike = new DoubleStrike();
+            else if (IsExplicitFalseAddOverride(rDstrike))
+                newRProps.DoubleStrike = new DoubleStrike { Val = OnOffValue.FromBoolean(false) };
+        }
+        if (properties.TryGetValue("vanish", out var rVanish))
+        {
+            if (IsTruthy(rVanish)) newRProps.Vanish = new Vanish();
+            else if (IsExplicitFalseAddOverride(rVanish))
+                newRProps.Vanish = new Vanish { Val = OnOffValue.FromBoolean(false) };
+        }
+        if (properties.TryGetValue("outline", out var rOutline))
+        {
+            if (IsTruthy(rOutline)) newRProps.Outline = new Outline();
+            else if (IsExplicitFalseAddOverride(rOutline))
+                newRProps.Outline = new Outline { Val = OnOffValue.FromBoolean(false) };
+        }
+        if (properties.TryGetValue("shadow", out var rShadow))
+        {
+            if (IsTruthy(rShadow)) newRProps.Shadow = new Shadow();
+            else if (IsExplicitFalseAddOverride(rShadow))
+                newRProps.Shadow = new Shadow { Val = OnOffValue.FromBoolean(false) };
+        }
+        if (properties.TryGetValue("emboss", out var rEmboss))
+        {
+            if (IsTruthy(rEmboss)) newRProps.Emboss = new Emboss();
+            else if (IsExplicitFalseAddOverride(rEmboss))
+                newRProps.Emboss = new Emboss { Val = OnOffValue.FromBoolean(false) };
+        }
+        if (properties.TryGetValue("imprint", out var rImprint))
+        {
+            if (IsTruthy(rImprint)) newRProps.Imprint = new Imprint();
+            else if (IsExplicitFalseAddOverride(rImprint))
+                newRProps.Imprint = new Imprint { Val = OnOffValue.FromBoolean(false) };
+        }
+        if (properties.TryGetValue("noproof", out var rNoProof))
+        {
+            if (IsTruthy(rNoProof)) newRProps.NoProof = new NoProof();
+            else if (IsExplicitFalseAddOverride(rNoProof))
+                newRProps.NoProof = new NoProof { Val = OnOffValue.FromBoolean(false) };
+        }
         // CONSISTENCY(add-set-symmetry): Set surfaces rStyle via the typed-attr
         // fallback; Add must accept it explicitly because the bare-key fallback
         // below skips dotless keys without warning. Without this, dump → batch
