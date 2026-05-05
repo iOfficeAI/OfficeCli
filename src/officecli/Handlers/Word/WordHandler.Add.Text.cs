@@ -1373,8 +1373,13 @@ public partial class WordHandler
             if (key.Contains('.')) continue;
             if (addRunCuratedBare.Contains(key)) continue;
             if (ApplyRunFormatting(newRProps, key, value)) continue;
-            // ApplyRunFormatting returned false → genuinely unsupported.
-            // Mark for the CLI WARNING surface (LastAddUnsupportedProps).
+            // BUG-DUMP8-07: rescue dump-emitted run props (specVanish,
+            // webHidden, effect, em, fitText, position, …) that
+            // ApplyRunFormatting has no curated case for but which are
+            // typed scalar-val SDK elements. Mirrors the AddParagraph
+            // bare-key fallback so dump→batch round-trips through. Only
+            // genuinely unknown keys land in LastAddUnsupportedProps.
+            if (Core.GenericXmlQuery.TryCreateTypedChild(newRProps, key, value)) continue;
             LastAddUnsupportedProps.Add(key);
         }
         foreach (var (key, value) in properties)
