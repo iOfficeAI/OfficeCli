@@ -1823,6 +1823,12 @@ public static class BatchEmitter
                 var ident = ExtractFirstArg(rest);
                 if (string.IsNullOrEmpty(ident)) return null;
                 props["identifier"] = ident;
+                // BUG-DUMP17-01: preserve trailing switches (\* ARABIC, \r N,
+                // \n, \c, \h, \s …). Without this, dump→batch round-trips
+                // strip every SEQ formatting switch and replay produces a
+                // bare " SEQ Figure ".
+                var seqSw = ExtractTrailingSwitches(rest, ident);
+                if (!string.IsNullOrEmpty(seqSw)) props["switches"] = seqSw;
                 break;
             }
             case "MERGEFIELD":
@@ -1883,6 +1889,29 @@ public static class BatchEmitter
         }
         var spc = t.IndexOfAny(new[] { ' ', '\t' });
         return spc < 0 ? t : t[..spc];
+    }
+
+    // Return the portion of `s` that follows the first arg (which
+    // ExtractFirstArg already returned), trimmed. Used by SEQ /
+    // MERGEFIELD field parsing to preserve trailing switches like
+    // `\* ARABIC \r N` or `\* MERGEFORMAT` so AddField can replay them
+    // verbatim. BUG-DUMP17-01 / BUG-DUMP17-02.
+    private static string ExtractTrailingSwitches(string? s, string firstArg)
+    {
+        if (string.IsNullOrEmpty(s) || string.IsNullOrEmpty(firstArg)) return "";
+        var t = s.TrimStart();
+        int consumed;
+        if (t.StartsWith('"'))
+        {
+            var end = t.IndexOf('"', 1);
+            if (end < 0) return "";
+            consumed = end + 1;
+        }
+        else
+        {
+            consumed = firstArg.Length;
+        }
+        return consumed >= t.Length ? "" : t[consumed..].Trim();
     }
 
     // Parse a TOC field instruction (` TOC \o "1-3" \h \u \z `) into the

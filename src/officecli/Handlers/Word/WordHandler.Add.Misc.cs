@@ -613,7 +613,7 @@ public partial class WordHandler
             "ref" => $" REF {refBookmarkName}{(IsTruthy(properties.GetValueOrDefault("hyperlink")) ? " \\h" : "")} ",
             "pageref" => $" PAGEREF {refBookmarkName}{(IsTruthy(properties.GetValueOrDefault("hyperlink")) ? " \\h" : "")} ",
             "noteref" => $" NOTEREF {refBookmarkName}{(IsTruthy(properties.GetValueOrDefault("hyperlink")) ? " \\h" : "")} ",
-            "seq" => $" SEQ {seqIdentifier} ",
+            "seq" => $" SEQ {seqIdentifier}{AppendFieldSwitches(properties)} ",
             "styleref" => $" STYLEREF \"{styleRefName}\" ",
             "docproperty" => $" DOCPROPERTY \"{docPropertyName}\" ",
             "if" => BuildIfFieldInstruction(properties),
@@ -843,7 +843,7 @@ public partial class WordHandler
         ["ref"] = new[] { "name", "fieldname", "bookmarkname", "bookmark", "hyperlink" },
         ["pageref"] = new[] { "name", "fieldname", "bookmarkname", "bookmark", "hyperlink" },
         ["noteref"] = new[] { "name", "fieldname", "bookmarkname", "bookmark", "hyperlink" },
-        ["seq"] = new[] { "identifier", "id", "name" },
+        ["seq"] = new[] { "identifier", "id", "name", "switches" },
         ["styleref"] = new[] { "stylename", "name" },
         ["docproperty"] = new[] { "propertyname", "name" },
         ["if"] = new[] { "expression", "condition", "truetext", "falsetext" },
@@ -1380,6 +1380,18 @@ public partial class WordHandler
     // BUG-DUMP9-09: MERGEFIELD field names with whitespace must be quoted in
     // the instruction so Word parses them as one token. Already-quoted input
     // is left as-is so the instruction is idempotent under dump round-trip.
+    // Append the trailing-switches blob produced by BatchEmitter for SEQ /
+    // MERGEFIELD round-trips (e.g. `\* ARABIC \r 1`, `\* MERGEFORMAT`).
+    // Returns either an empty string or a single space + verbatim switches,
+    // so the caller can splice it directly between the identifier and the
+    // closing space. BUG-DUMP17-01 / BUG-DUMP17-02.
+    private static string AppendFieldSwitches(Dictionary<string, string>? properties)
+    {
+        if (properties == null) return "";
+        if (!properties.TryGetValue("switches", out var sw) || string.IsNullOrWhiteSpace(sw)) return "";
+        return " " + sw.Trim();
+    }
+
     private static string QuoteFieldNameIfNeeded(string name)
     {
         if (string.IsNullOrEmpty(name)) return name;
