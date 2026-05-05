@@ -1836,6 +1836,10 @@ public static class BatchEmitter
                 var name = ExtractFirstArg(rest);
                 if (string.IsNullOrEmpty(name)) return null;
                 props["fieldName"] = name;
+                // BUG-DUMP17-02: preserve trailing switches (\* MERGEFORMAT,
+                // \b, \f, \v …). Same shape as the SEQ case above.
+                var mfSw = ExtractTrailingSwitches(rest, name);
+                if (!string.IsNullOrEmpty(mfSw)) props["switches"] = mfSw;
                 break;
             }
             case "HYPERLINK":

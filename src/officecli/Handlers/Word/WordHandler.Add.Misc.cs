@@ -609,7 +609,7 @@ public partial class WordHandler
             // BUG-DUMP9-09: quote MERGEFIELD names containing whitespace so
             // Word parses the full name as one token. " MERGEFIELD First Name "
             // would otherwise be parsed as field "First" with arg "Name".
-            "mergefield" => $" MERGEFIELD {QuoteFieldNameIfNeeded(mergeFieldName!)} ",
+            "mergefield" => $" MERGEFIELD {QuoteFieldNameIfNeeded(mergeFieldName!)}{AppendFieldSwitches(properties)} ",
             "ref" => $" REF {refBookmarkName}{(IsTruthy(properties.GetValueOrDefault("hyperlink")) ? " \\h" : "")} ",
             "pageref" => $" PAGEREF {refBookmarkName}{(IsTruthy(properties.GetValueOrDefault("hyperlink")) ? " \\h" : "")} ",
             "noteref" => $" NOTEREF {refBookmarkName}{(IsTruthy(properties.GetValueOrDefault("hyperlink")) ? " \\h" : "")} ",
@@ -839,7 +839,7 @@ public partial class WordHandler
     private static readonly Dictionary<string, string[]> FieldTypeProps =
         new(StringComparer.OrdinalIgnoreCase)
     {
-        ["mergefield"] = new[] { "name", "fieldname" },
+        ["mergefield"] = new[] { "name", "fieldname", "switches" },
         ["ref"] = new[] { "name", "fieldname", "bookmarkname", "bookmark", "hyperlink" },
         ["pageref"] = new[] { "name", "fieldname", "bookmarkname", "bookmark", "hyperlink" },
         ["noteref"] = new[] { "name", "fieldname", "bookmarkname", "bookmark", "hyperlink" },
