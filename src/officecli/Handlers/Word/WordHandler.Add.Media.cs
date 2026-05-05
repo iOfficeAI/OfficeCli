@@ -56,7 +56,13 @@ public partial class WordHandler
         long chartCy = properties.TryGetValue("height", out var chStr) ? ParseEmu(chStr) : 3600000;
 
         var docPropId = NextDocPropId();
-        var chartName = chartTitle ?? $"Chart {docPropId}";
+        // BUG-R7-02 (T-2): explicit `name` prop was previously ignored —
+        // dump emitted name=… on round-trip but Add silently dropped it,
+        // so the chart's shape name reverted to its title every replay.
+        // Honor caller intent first; fall back to title, then synthesize.
+        var chartName = properties.GetValueOrDefault("name")
+                     ?? chartTitle
+                     ?? $"Chart {docPropId}";
 
         // Extended chart types (cx:chart) — funnel, treemap, sunburst, boxWhisker, histogram
         if (Core.ChartExBuilder.IsExtendedChartType(chartType))
