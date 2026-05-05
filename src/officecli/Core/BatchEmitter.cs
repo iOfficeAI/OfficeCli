@@ -1231,8 +1231,11 @@ public static class BatchEmitter
                 {
                     ["mode"] = string.IsNullOrEmpty(eqMode) ? "inline" : eqMode!
                 };
-                if (!string.IsNullOrEmpty(run.Text))
-                    eqProps["formula"] = run.Text!;
+                // Always emit `formula` (even when empty) so replay's
+                // AddEquation has the required key. ToLatex may legitimately
+                // return "" for minimal m:oMath; Navigation falls back to
+                // element.InnerText, which can also be empty.
+                eqProps["formula"] = run.Text ?? "";
                 items.Add(new BatchItem
                 {
                     Command = "add",

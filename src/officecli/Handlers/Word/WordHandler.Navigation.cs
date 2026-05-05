@@ -2639,6 +2639,8 @@ public partial class WordHandler
             node.Format["mode"] = "inline";
             try { node.Text = Core.FormulaParser.ToLatex(inlineMath); }
             catch { node.Text = element.InnerText; }
+            if (string.IsNullOrEmpty(node.Text))
+                node.Text = element.InnerText;
         }
         else if (element is Header or Footer)
         {
