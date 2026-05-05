@@ -39,7 +39,7 @@
       "add": true,
       "set": true,
       "get": true,
-      "description": "text wrapping mode for floating picture (none, square, tight, topAndBottom, behind, through).",
+      "description": "text wrapping mode for floating picture (none, square, tight, topandbottom, through). For 'behind text', use wrap=none + behindText=true.",
       "examples": [
         "--prop wrap=square"
       ],
