@@ -501,6 +501,53 @@
       ],
       "enforcement": "report"
     },
+    "font.asciiTheme": {
+      "type": "string",
+      "description": "Theme font binding for the ascii slot (rFonts/asciiTheme). Values: minorHAnsi, majorHAnsi, minorEastAsia, majorEastAsia, minorBidi, majorBidi.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop font.asciiTheme=minorHAnsi"
+      ],
+      "enforcement": "report"
+    },
+    "font.hAnsiTheme": {
+      "type": "string",
+      "description": "Theme font binding for the hAnsi slot (rFonts/hAnsiTheme).",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop font.hAnsiTheme=minorHAnsi"
+      ],
+      "enforcement": "report"
+    },
+    "font.eaTheme": {
+      "type": "string",
+      "description": "Theme font binding for the East-Asia slot (rFonts/eastAsiaTheme). Values: minorEastAsia, majorEastAsia.",
+      "aliases": [
+        "font.eastAsiaTheme"
+      ],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop font.eaTheme=minorEastAsia"
+      ],
+      "enforcement": "report"
+    },
+    "font.csTheme": {
+      "type": "string",
+      "description": "Theme font binding for the complex-script slot (rFonts/cstheme). Values: minorBidi, majorBidi.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop font.csTheme=minorBidi"
+      ],
+      "enforcement": "report"
+    },
     "bold.cs": {
       "type": "bool",
       "description": "complex-script bold for the paragraph's runs (<w:bCs/>). Required for Arabic / Hebrew bold rendering.",

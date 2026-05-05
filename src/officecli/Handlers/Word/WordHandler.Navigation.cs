@@ -1642,6 +1642,18 @@ public partial class WordHandler
                     }
                     if (!string.IsNullOrEmpty(pRunFonts.EastAsia?.Value) && !node.Format.ContainsKey("font.ea"))
                         node.Format["font.ea"] = pRunFonts.EastAsia!.Value!;
+                    // BUG-DUMP15-03: surface theme-font slots on the paragraph
+                    // node (leaked from first run rPr) so dump→batch round-trip
+                    // preserves theme bindings. Mirrors the run-level readback
+                    // at the typed-Run branch below.
+                    if (pRunFonts.AsciiTheme?.HasValue == true && !node.Format.ContainsKey("font.asciiTheme"))
+                        node.Format["font.asciiTheme"] = pRunFonts.AsciiTheme.InnerText;
+                    if (pRunFonts.HighAnsiTheme?.HasValue == true && !node.Format.ContainsKey("font.hAnsiTheme"))
+                        node.Format["font.hAnsiTheme"] = pRunFonts.HighAnsiTheme.InnerText;
+                    if (pRunFonts.EastAsiaTheme?.HasValue == true && !node.Format.ContainsKey("font.eaTheme"))
+                        node.Format["font.eaTheme"] = pRunFonts.EastAsiaTheme.InnerText;
+                    if (pRunFonts.ComplexScriptTheme?.HasValue == true && !node.Format.ContainsKey("font.csTheme"))
+                        node.Format["font.csTheme"] = pRunFonts.ComplexScriptTheme.InnerText;
                 }
 
                 var fsVal = rp?.FontSize?.Val?.Value ?? markRp?.GetFirstChild<FontSize>()?.Val?.Value;
