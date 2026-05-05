@@ -1537,6 +1537,18 @@ public partial class WordHandler
         {
             node.Type = "run";
             node.Text = GetRunText(run);
+            // BUG-DUMP7-01: surface <w:sym w:font=… w:char=…/> as a `sym`
+            // Format key (font:hex). GetRunText also surfaces the resolved
+            // Unicode glyph as Text so the run looks non-empty, but Text
+            // alone is lossy — Wingdings F0E0 ↦ U+F0E0 would replay as a
+            // plain text run in a non-symbol font and the glyph would
+            // disappear. AddRun consumes `sym=` to rebuild SymbolChar.
+            var symEl = run.GetFirstChild<SymbolChar>();
+            if (symEl?.Char?.Value != null)
+            {
+                var symFontVal = symEl.Font?.Value ?? "";
+                node.Format["sym"] = $"{symFontVal}:{symEl.Char.Value}";
+            }
             // BUG-DUMP4-02: surface track-change attribution from any
             // InsertedRun/DeletedRun ancestor wrapping this run. Descendants<Run>
             // unwraps the wrapper so the run looks plain on the curated

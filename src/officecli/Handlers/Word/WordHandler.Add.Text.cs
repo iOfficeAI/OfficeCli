@@ -1314,8 +1314,29 @@ public partial class WordHandler
         }
 
         newRun.AppendChild(newRProps);
-        var runText = properties.GetValueOrDefault("text", "");
-        AppendTextWithBreaks(newRun, runText);
+        // BUG-DUMP7-01: a run carrying `sym=font:hex` represents a single
+        // <w:sym/> glyph (no <w:t>). The dump round-trip flow surfaces both
+        // the resolved Unicode codepoint as `text` (so the run looks
+        // non-empty in textual previews) and the canonical font:char pair
+        // as `sym` so AddRun can rebuild the SymbolChar element verbatim.
+        // Drop the placeholder `text` when `sym` is present so the SymbolChar
+        // stands alone — appending both would also emit the cached glyph
+        // text in the body font, doubling the visual output.
+        if (properties.TryGetValue("sym", out var symRaw) && !string.IsNullOrEmpty(symRaw))
+        {
+            var colon = symRaw.LastIndexOf(':');
+            string symFont = colon > 0 ? symRaw[..colon] : "";
+            string symHex = colon >= 0 ? symRaw[(colon + 1)..] : symRaw;
+            var sym = new SymbolChar();
+            if (!string.IsNullOrEmpty(symFont)) sym.Font = symFont;
+            if (!string.IsNullOrEmpty(symHex)) sym.Char = symHex.ToUpperInvariant();
+            newRun.AppendChild(sym);
+        }
+        else
+        {
+            var runText = properties.GetValueOrDefault("text", "");
+            AppendTextWithBreaks(newRun, runText);
+        }
 
         // Dotted-key fallback: same generic helper as Set's run path.
         // Anything still unconsumed after the hand-rolled blocks above
@@ -1344,6 +1365,8 @@ public partial class WordHandler
             // BUG-DUMP5-10: consumed up-front for the w:ins/w:del wrapper
             // emit at the bottom of this method.
             "trackchange",
+            // BUG-DUMP7-01: consumed up-front to emit <w:sym/> in place of <w:t>.
+            "sym",
         };
         foreach (var (key, value) in properties)
         {

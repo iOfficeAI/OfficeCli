@@ -860,7 +860,14 @@ public static class BatchEmitter
              // AddRun consumes it and rebuilds the wrapper, but
              // AddParagraph has no equivalent path. Collapsing onto the
              // paragraph would silently drop the attribution.
-             || runs[0].Format.ContainsKey("trackChange"));
+             || runs[0].Format.ContainsKey("trackChange")
+             // BUG-DUMP7-01: w:sym runs carry a `sym=font:hex` key that only
+             // AddRun consumes (rebuilds SymbolChar). Collapsing onto the
+             // paragraph would drop the key (AddParagraph's run fallback has
+             // no case) and replay would emit a plain text run with the
+             // resolved Unicode codepoint in the wrong font (e.g. U+F0E0
+             // outside Wingdings is invisible).
+             || runs[0].Format.ContainsKey("sym"));
         bool singleRunIsNoteRef = runs.Count == 1 &&
             runs[0].Format.TryGetValue("rStyle", out var srStyle)
             && (string.Equals(srStyle?.ToString(), "FootnoteReference", StringComparison.OrdinalIgnoreCase)

@@ -615,6 +615,23 @@ public partial class WordHandler
             {
                 case Text t: sb.Append(t.Text); break;
                 case TabChar: sb.Append('\t'); break;
+                // BUG-DUMP7-01: <w:sym w:font="Wingdings" w:char="F0E0"/> is a
+                // glyph substitution — the run carries no <w:t>. Without a case
+                // here, GetRunText returned empty and BatchEmitter's run-emit
+                // dropped the whole run, silently losing the symbol on dump
+                // round-trip. Surface the resolved Unicode code point as Text
+                // so the run looks non-empty; the canonical `sym` Format key
+                // (set in Navigation.cs) carries the font+char metadata that
+                // AddRun consumes to rebuild the SymbolChar element verbatim.
+                case SymbolChar symChild:
+                {
+                    var charHex = symChild.Char?.Value;
+                    if (!string.IsNullOrEmpty(charHex)
+                        && int.TryParse(charHex, System.Globalization.NumberStyles.HexNumber,
+                            System.Globalization.CultureInfo.InvariantCulture, out var symCode))
+                        sb.Append(char.ConvertFromUtf32(symCode));
+                    break;
+                }
                 // BUG-DUMP4-01: a Run nested inside a w:del wrapper carries its
                 // text in <w:delText> (DeletedText), not <w:t>. Without this
                 // case the deleted content was silently dropped from Get
