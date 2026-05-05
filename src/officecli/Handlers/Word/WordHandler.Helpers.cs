@@ -111,6 +111,22 @@ public partial class WordHandler
         ParseHelpers.IsTruthy(value);
 
     /// <summary>
+    /// BUG-R7-07: a value the user explicitly typed as "false"/"0"/"off" — not
+    /// just any non-truthy input (null/empty count as "no override"). Used by
+    /// AddParagraph's no-text fallback to decide whether to emit
+    /// <c>&lt;w:b w:val="false"/&gt;</c> as an explicit style override vs.
+    /// simply removing the element. Set-style call sites continue to use
+    /// ApplyRunFormatting's "remove on falsy" semantics so existing tests
+    /// (R25/R26 EmptyRpr_NotSurfaced) keep passing.
+    /// </summary>
+    internal static bool IsExplicitFalseAddOverride(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return false;
+        var v = value.Trim().ToLowerInvariant();
+        return v is "false" or "0" or "off" or "no" or "n";
+    }
+
+    /// <summary>
     /// Read a w:val OnOff attribute defensively. Returns null when the
     /// attribute is absent OR when the stored text is not a valid OnOff
     /// token (e.g. <c>&lt;w:bidi w:val="garbage"/&gt;</c>). Default-on
@@ -182,7 +198,22 @@ public partial class WordHandler
             "center" => JustificationValues.Center,
             "right" => JustificationValues.Right,
             "justify" or "both" => JustificationValues.Both,
-            _ => throw new ArgumentException($"Invalid alignment value: '{value}'. Valid values: left, center, right, justify.")
+            // BUG-R7-04 (F-4): w:jc="distribute" stretches every line
+            // (including the last) — used in CJK/Thai documents to fill
+            // the column. Was rejected by the white-list even though
+            // OOXML / Word accept it (see HtmlPreview.Css distribute
+            // branch). Mirror Word's tolerant parser for the rest of the
+            // ECMA-376 ST_Jc enum: highKashida/mediumKashida/lowKashida
+            // (Arabic), thaiDistribute, numTab.
+            "distribute" => JustificationValues.Distribute,
+            "thaidistribute" => JustificationValues.ThaiDistribute,
+            "highkashida" => JustificationValues.HighKashida,
+            "mediumkashida" => JustificationValues.MediumKashida,
+            "lowkashida" => JustificationValues.LowKashida,
+            "numtab" => JustificationValues.NumTab,
+            "start" => JustificationValues.Left, // bidi-aware alias
+            "end" => JustificationValues.Right,
+            _ => throw new ArgumentException($"Invalid alignment value: '{value}'. Valid values: left, center, right, justify, distribute, thaiDistribute, start, end.")
         };
 
     /// <summary>
@@ -1283,6 +1314,30 @@ public partial class WordHandler
             case "vanish":
                 props.RemoveAllChildren<Vanish>();
                 if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Vanish());
+                return true;
+            case "bdr":
+                // BUG-R7-06: character border <w:bdr/> — round-trip captured
+                // it from real docs but Add/Set rejected it as UNSUPPORTED.
+                // Accept the same colon-encoded form as paragraph borders
+                // (STYLE[;SIZE[;COLOR[;SPACE]]]). Empty/none/false clears.
+                props.RemoveAllChildren<Border>();
+                if (!string.IsNullOrEmpty(value)
+                    && !string.Equals(value, "none", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(value, "false", StringComparison.OrdinalIgnoreCase))
+                {
+                    var (bStyle, bSize, bColor, bSpace) = ParseBorderValue(value);
+                    var bdr = new Border { Val = bStyle, Size = bSize, Space = bSpace };
+                    if (bColor != null) bdr.Color = bColor;
+                    InsertRunPropInSchemaOrder(props, bdr);
+                }
+                return true;
+            case "kern":
+                // BUG-R7-06: <w:kern w:val="N"/> (kerning threshold in
+                // half-points). Get exposes it; Add/Set silently dropped.
+                props.RemoveAllChildren<Kern>();
+                if (!string.IsNullOrEmpty(value)
+                    && uint.TryParse(value, out var kernVal))
+                    InsertRunPropInSchemaOrder(props, new Kern { Val = kernVal });
                 return true;
             case "lang" or "lang.latin" or "lang.val":
             case "lang.ea" or "lang.eastasia" or "lang.eastasian":

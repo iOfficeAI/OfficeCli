@@ -108,6 +108,76 @@ public partial class WordHandler
             var markRPr = pProps.ParagraphMarkRunProperties ?? pProps.AppendChild(new ParagraphMarkRunProperties());
             ApplyRunFormatting(markRPr, "size.cs", paraSizeCs);
         }
+        // BUG-R7-07: when the paragraph has no `text` prop, no run is created
+        // — yet style-overriding run-level props (size, italic=false,
+        // bold=false, color, font.* …) must still ride on the paragraph mark
+        // rPr so they survive the next dump. Without this hoist, dump→batch
+        // round-trip silently drops the override and the style's defaults
+        // re-emerge (e.g. `style=TOC2 size=11pt` → 12pt because TOC2's
+        // base size is 12pt). Mirrors the size.cs/italic.cs/bold.cs hoist
+        // above. Only applied when there is no text run carrier.
+        if (!properties.ContainsKey("text"))
+        {
+            ParagraphMarkRunProperties? noTextMarkRPr = null;
+            ParagraphMarkRunProperties EnsureNoTextMarkRPr() =>
+                noTextMarkRPr ??= (pProps.ParagraphMarkRunProperties
+                    ?? pProps.AppendChild(new ParagraphMarkRunProperties()));
+            if (properties.TryGetValue("size", out var ntSize)
+                || properties.TryGetValue("font.size", out ntSize)
+                || properties.TryGetValue("fontsize", out ntSize))
+                ApplyRunFormatting(EnsureNoTextMarkRPr(), "size", ntSize);
+            // BUG-R7-07 / F-7: explicit `false` must produce <w:b w:val="false"/>
+            // (resp. <w:i w:val="false"/>) so it overrides a style that sets
+            // bold/italic=true. ApplyRunFormatting on its own removes the
+            // element entirely on a falsy value — that contract is preserved
+            // for the Set-after-create call sites (existing R25/R26 tests
+            // depend on it). Only the Add path needs the explicit-override
+            // semantics, so emit the val=false form directly here.
+            if (properties.TryGetValue("bold", out var ntBold)
+                || properties.TryGetValue("font.bold", out ntBold))
+            {
+                var rp = EnsureNoTextMarkRPr();
+                rp.RemoveAllChildren<Bold>();
+                if (IsTruthy(ntBold))
+                    InsertRunPropInSchemaOrder(rp, new Bold());
+                else if (IsExplicitFalseAddOverride(ntBold))
+                    InsertRunPropInSchemaOrder(rp, new Bold { Val = OnOffValue.FromBoolean(false) });
+            }
+            if (properties.TryGetValue("italic", out var ntItalic)
+                || properties.TryGetValue("font.italic", out ntItalic))
+            {
+                var rp = EnsureNoTextMarkRPr();
+                rp.RemoveAllChildren<Italic>();
+                if (IsTruthy(ntItalic))
+                    InsertRunPropInSchemaOrder(rp, new Italic());
+                else if (IsExplicitFalseAddOverride(ntItalic))
+                    InsertRunPropInSchemaOrder(rp, new Italic { Val = OnOffValue.FromBoolean(false) });
+            }
+            if (properties.TryGetValue("color", out var ntColor)
+                || properties.TryGetValue("font.color", out ntColor))
+                ApplyRunFormatting(EnsureNoTextMarkRPr(), "color", ntColor);
+            if (properties.TryGetValue("underline", out var ntUl)
+                || properties.TryGetValue("font.underline", out ntUl))
+                ApplyRunFormatting(EnsureNoTextMarkRPr(), "underline", ntUl);
+            if (properties.TryGetValue("strike", out var ntStrike)
+                || properties.TryGetValue("font.strike", out ntStrike)
+                || properties.TryGetValue("strikethrough", out ntStrike)
+                || properties.TryGetValue("font.strikethrough", out ntStrike))
+                ApplyRunFormatting(EnsureNoTextMarkRPr(), "strike", ntStrike);
+            if (properties.TryGetValue("font", out var ntFont)
+                || properties.TryGetValue("font.name", out ntFont))
+                ApplyRunFormatting(EnsureNoTextMarkRPr(), "font", ntFont);
+            if (properties.TryGetValue("font.latin", out var ntFontLatin))
+                ApplyRunFormatting(EnsureNoTextMarkRPr(), "font.latin", ntFontLatin);
+            if (properties.TryGetValue("font.ea", out var ntFontEa)
+                || properties.TryGetValue("font.eastasia", out ntFontEa)
+                || properties.TryGetValue("font.eastasian", out ntFontEa))
+                ApplyRunFormatting(EnsureNoTextMarkRPr(), "font.ea", ntFontEa);
+            if (properties.TryGetValue("font.cs", out var ntFontCs)
+                || properties.TryGetValue("font.complexscript", out ntFontCs)
+                || properties.TryGetValue("font.complex", out ntFontCs))
+                ApplyRunFormatting(EnsureNoTextMarkRPr(), "font.cs", ntFontCs);
+        }
         if (properties.TryGetValue("firstlineindent", out var indent) || properties.TryGetValue("firstLineIndent", out indent))
         {
             // Lenient input: accept "2cm", "0.5in", "18pt", or bare twips (backward compat).
@@ -609,6 +679,11 @@ public partial class WordHandler
             "caps", "smallcaps",
             "boldcs", "italiccs", "sizecs",
             "field", "formula", "ref", "id",
+            // BUG-R7-06: bdr (character border) and kern (kerning) are
+            // run-level OOXML keys — handled via ApplyRunFormatting on the
+            // bare-key fallback path below. Listing them here just prevents
+            // double-routing through TypedAttributeFallback.
+            "bdr", "kern",
         };
         foreach (var (key, value) in properties)
         {
@@ -1115,6 +1190,35 @@ public partial class WordHandler
         // gets routed through TypedAttributeFallback; failures land in
         // LastAddUnsupportedProps so the CLI surfaces a WARNING instead
         // of silently dropping. CONSISTENCY(add-set-symmetry).
+        // BUG-R7-06: bare run-level keys (bdr / kern / lang shortcuts) that
+        // the curated AddRun block above did not consume — route through
+        // ApplyRunFormatting so batch replay actually applies them instead
+        // of silently dropping. Mirrors the bare-key fallback in
+        // AddParagraph (line 670). CONSISTENCY(add-set-symmetry).
+        var addRunCuratedBare = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "type", "text", "html", "anchor", "anchorid",
+            "font", "size", "bold", "italic", "color", "highlight",
+            "underline", "strike", "strikethrough", "doublestrike", "dstrike",
+            "vanish", "outline", "shadow", "emboss", "imprint", "noproof",
+            "rtl", "vertalign", "superscript", "subscript",
+            "charspacing", "letterspacing",
+            "caps", "smallcaps", "allcaps",
+            "boldcs", "italiccs", "sizecs",
+            "shd", "shading",
+            "rstyle", "rStyle",
+            "textoutline", "textfill", "w14shadow", "w14glow", "w14reflection",
+            "field", "formula", "ref", "id",
+        };
+        foreach (var (key, value) in properties)
+        {
+            if (key.Contains('.')) continue;
+            if (addRunCuratedBare.Contains(key)) continue;
+            if (ApplyRunFormatting(newRProps, key, value)) continue;
+            // ApplyRunFormatting returned false → genuinely unsupported.
+            // Mark for the CLI WARNING surface (LastAddUnsupportedProps).
+            LastAddUnsupportedProps.Add(key);
+        }
         foreach (var (key, value) in properties)
         {
             if (!key.Contains('.')) continue;
