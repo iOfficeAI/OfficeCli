@@ -256,6 +256,11 @@ public partial class WordHandler
             // TypedAttributeFallback (which doesn't model border.*).
             // CONSISTENCY(add-set-symmetry).
             if (key.StartsWith("border.", StringComparison.OrdinalIgnoreCase)) continue;
+            // BUG-DUMP14-04: padding.{top,bottom,left,right} are handled by
+            // the main switch above (round-13 added tblCellMar emit). Skip
+            // them here so they aren't double-tagged as UNSUPPORTED by the
+            // generic TypedAttributeFallback. Mirrors border.* skip.
+            if (key.StartsWith("padding.", StringComparison.OrdinalIgnoreCase)) continue;
             if (Core.TypedAttributeFallback.TrySet(tblProps, key, value)) continue;
             LastAddUnsupportedProps.Add(key);
         }
