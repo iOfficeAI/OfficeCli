@@ -366,7 +366,15 @@ public partial class WordHandler
             || properties.TryGetValue("href", out hlUrl)
             || properties.TryGetValue("link", out hlUrl);
         var hasAnchor = properties.TryGetValue("anchor", out var hlAnchor) || properties.TryGetValue("bookmark", out hlAnchor);
-        if (!hasUrl && !hasAnchor)
+        // BUG-DUMP10-05: a w:hyperlink element with neither r:id nor anchor
+        // is still a valid Word construct (tooltip-only / target-frame-only
+        // hover popups). Only reject when none of the four destination /
+        // metadata attributes are present so the wrapper can survive
+        // dump→batch round-trip.
+        var hasTooltip = properties.ContainsKey("tooltip");
+        var hasTgtFrame = properties.ContainsKey("tgtFrame") || properties.ContainsKey("tgtframe");
+        var hasHistory = properties.ContainsKey("history");
+        if (!hasUrl && !hasAnchor && !hasTooltip && !hasTgtFrame && !hasHistory)
             throw new ArgumentException("'url' or 'anchor' property is required for hyperlink type");
 
         if (parent is not Paragraph hlPara)
@@ -432,6 +440,15 @@ public partial class WordHandler
             hyperlink.Id = hlRelId;
         if (hasAnchor)
             hyperlink.Anchor = hlAnchor;
+        // BUG-DUMP10-02: round-trip the optional metadata attrs.
+        if (hasTooltip && properties.TryGetValue("tooltip", out var hlTooltip))
+            hyperlink.Tooltip = hlTooltip;
+        if (hasTgtFrame &&
+            (properties.TryGetValue("tgtFrame", out var hlTgt)
+             || properties.TryGetValue("tgtframe", out hlTgt)))
+            hyperlink.TargetFrame = hlTgt;
+        if (hasHistory && properties.TryGetValue("history", out var hlHist) && IsTruthy(hlHist))
+            hyperlink.History = OnOffValue.FromBoolean(true);
 
         // index is a childElement-index (ResolveAnchorPosition counts pPr).
         // Route through pPr-aware helper so index 0 clamps forward past

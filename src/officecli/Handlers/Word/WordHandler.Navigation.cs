@@ -2037,6 +2037,14 @@ public partial class WordHandler
 
             if (run.Parent is Hyperlink hlParent)
             {
+                // BUG-DUMP10-05: a hyperlink wrapper with neither r:id nor
+                // anchor (tooltip-only / history-only) used to fall through
+                // both branches below, leaving the run with no Format keys
+                // that would trigger the BatchEmitter hyperlink-emit guard.
+                // Surface a sentinel so the wrapper survives even when there
+                // is no destination — required for w:hyperlink[@w:tooltip]
+                // bookmarks-style hover popups.
+                node.Format["isHyperlink"] = true;
                 if (hlParent.Id?.Value != null)
                 {
                     try
@@ -2058,6 +2066,16 @@ public partial class WordHandler
                 // dump→batch round-trip.
                 if (hlParent.Anchor?.Value != null)
                     node.Format["anchor"] = hlParent.Anchor.Value;
+                // BUG-DUMP10-02: surface the tooltip / tgtFrame / history
+                // attributes from the wrapping hyperlink so dump→batch
+                // round-trip preserves them. Same canonical keys as the
+                // standalone Hyperlink branch below.
+                if (hlParent.Tooltip?.Value != null)
+                    node.Format["tooltip"] = hlParent.Tooltip.Value;
+                if (hlParent.TargetFrame?.Value != null)
+                    node.Format["tgtFrame"] = hlParent.TargetFrame.Value;
+                if (hlParent.History?.Value == true)
+                    node.Format["history"] = true;
             }
 
             // Populate effective.* properties from style inheritance.
@@ -2106,6 +2124,15 @@ public partial class WordHandler
             // round-trips and users can debug why a link points where it does.
             if (hyperlink.Anchor?.Value != null)
                 node.Format["anchor"] = hyperlink.Anchor.Value;
+            // BUG-DUMP10-02: tooltip / tgtFrame / history attributes are
+            // independent of url/anchor — surface them so dump→batch
+            // preserves the hover popup, target window, and history flag.
+            if (hyperlink.Tooltip?.Value != null)
+                node.Format["tooltip"] = hyperlink.Tooltip.Value;
+            if (hyperlink.TargetFrame?.Value != null)
+                node.Format["tgtFrame"] = hyperlink.TargetFrame.Value;
+            if (hyperlink.History?.Value == true)
+                node.Format["history"] = true;
             // Read run formatting from the first run inside the hyperlink
             var hlRun = hyperlink.Elements<Run>().FirstOrDefault(r => r.GetFirstChild<Text>() != null);
             if (hlRun?.RunProperties != null)

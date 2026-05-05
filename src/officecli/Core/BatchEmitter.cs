@@ -881,7 +881,12 @@ public static class BatchEmitter
         // consume url/anchor. Force the multi-run path so the run gets
         // re-emitted as `add hyperlink` below.
         bool singleRunIsHyperlink = runs.Count == 1 &&
-            (runs[0].Format.ContainsKey("url") || runs[0].Format.ContainsKey("anchor"));
+            (runs[0].Format.ContainsKey("url") || runs[0].Format.ContainsKey("anchor")
+             // BUG-DUMP10-05: tooltip-only hyperlinks have neither url nor
+             // anchor; the `isHyperlink` sentinel is set by Navigation
+             // whenever the run's parent is a w:hyperlink so the wrapper
+             // survives dump→batch round-trip.
+             || runs[0].Format.ContainsKey("isHyperlink"));
         // BUG-R4-FUZZ-2: when a paragraph's sole run is a footnote/endnote
         // reference (rStyle=FootnoteReference / EndnoteReference), collapsing
         // the run into the paragraph prop bag emits `add p props={rStyle=...}`
@@ -1331,7 +1336,8 @@ public static class BatchEmitter
             // <w:hyperlink>+rel-relationship round-trip rebuilds correctly.
             // CONSISTENCY(docx-hyperlink-canonical-url): canonical key is
             // `url` on both Get readback and Add input.
-            if (rProps.ContainsKey("url") || rProps.ContainsKey("anchor"))
+            if (rProps.ContainsKey("url") || rProps.ContainsKey("anchor")
+                || rProps.ContainsKey("isHyperlink"))
             {
                 // AddHyperlink writes its own color/underline defaults from
                 // theme; drop the inferred `color: hyperlink` /
@@ -1344,6 +1350,9 @@ public static class BatchEmitter
                 if (rProps.TryGetValue("underline", out var hlUl)
                     && string.Equals(hlUl, "single", StringComparison.OrdinalIgnoreCase))
                     rProps.Remove("underline");
+                // The sentinel itself is not a real Add prop; drop it before
+                // emission so AddHyperlink doesn't see an unsupported key.
+                rProps.Remove("isHyperlink");
                 items.Add(new BatchItem
                 {
                     Command = "add",
