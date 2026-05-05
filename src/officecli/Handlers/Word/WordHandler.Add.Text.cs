@@ -1609,7 +1609,13 @@ public partial class WordHandler
         if (!properties.TryGetValue("pos", out var posStr) || string.IsNullOrWhiteSpace(posStr))
             throw new ArgumentException("tab requires 'pos' property (e.g. --prop pos=9360 or --prop pos=6cm)");
 
-        var posTwips = (int)SpacingConverter.ParseWordSpacing(posStr);
+        // Tab positions may be negative (OOXML allows w:pos < 0 to place a tab
+        // stop in the negative-indent / hanging region). Cannot reuse
+        // SpacingConverter.ParseWordSpacing here because that helper enforces
+        // a non-negative guard suitable for paragraph spacing but semantically
+        // wrong for tab positions. Parse as signed twips with the same unit
+        // suffix vocabulary as ParseWordSpacing (pt / cm / in / bare twips).
+        var posTwips = ParseSignedTwips(posStr);
 
         var tabStop = new TabStop { Position = posTwips };
         if (properties.TryGetValue("val", out var valStr) && !string.IsNullOrEmpty(valStr))
@@ -1681,6 +1687,39 @@ public partial class WordHandler
 
         var newIdx = tabs.Elements<TabStop>().ToList().IndexOf(tabStop) + 1;
         return $"{parentPath}/tab[{newIdx}]";
+    }
+
+    // Signed twips parser for tab w:pos. Accepts the same unit suffixes as
+    // SpacingConverter (pt / cm / in / bare twips) but permits negative values.
+    private static int ParseSignedTwips(string value)
+    {
+        var trimmed = value.Trim();
+        const double pointsPerCm = 72.0 / 2.54;
+        const double pointsPerInch = 72.0;
+        const int twipsPerPoint = 20;
+
+        double points;
+        if (trimmed.EndsWith("pt", StringComparison.OrdinalIgnoreCase))
+            points = ParseSignedNumber(trimmed[..^2]);
+        else if (trimmed.EndsWith("cm", StringComparison.OrdinalIgnoreCase))
+            points = ParseSignedNumber(trimmed[..^2]) * pointsPerCm;
+        else if (trimmed.EndsWith("in", StringComparison.OrdinalIgnoreCase))
+            points = ParseSignedNumber(trimmed[..^2]) * pointsPerInch;
+        else
+            // Bare number → twips (Word convention, matches ParseWordSpacing)
+            return (int)Math.Round(ParseSignedNumber(trimmed));
+
+        return (int)Math.Round(points * twipsPerPoint);
+    }
+
+    private static double ParseSignedNumber(string s)
+    {
+        var t = s.Trim();
+        if (!double.TryParse(t, System.Globalization.CultureInfo.InvariantCulture, out var result)
+            || double.IsNaN(result) || double.IsInfinity(result))
+            throw new ArgumentException(
+                $"Invalid tab 'pos' value '{s}'. Expected a finite number with optional unit (e.g. '-360', '6cm', '0.5in').");
+        return result;
     }
 
     // CONSISTENCY(run-special-content): inline `<w:ptab>` (positional tab,
