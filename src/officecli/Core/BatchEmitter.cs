@@ -245,6 +245,22 @@ public static class BatchEmitter
                     parentTarget = $"/body/p[{idx}]";
                 props.Remove("anchoredTo");
             }
+            // BUG-DUMP4-03: emit the 1-based run index where the source
+            // CommentRangeStart sits inside its paragraph so replay can
+            // narrow the anchor instead of widening to the entire para.
+            // 0 means "before all runs" (paragraph start); >=1 means
+            // "after run N". AddComment already accepts a run-targeted
+            // parent path (/body/p[N]/r[M]), but we keep the prop on the
+            // paragraph-level emit so the wire format stays uniform with
+            // the existing parent-resolution logic — replay can switch on
+            // runStart later without changing the schema.
+            if (c.Format.TryGetValue("id", out var cid) && cid != null)
+            {
+                var runStart = word.FindCommentAnchorRunIndex(cid.ToString()!);
+                // 0 = before all runs (paragraph start); always emit so
+                // replay knows the anchor is positional, not whole-paragraph.
+                props["runStart"] = runStart.ToString();
+            }
             // The comment id is allocated by AddComment on the target side;
             // do not propagate the source id (would conflict on replay).
             props.Remove("id");

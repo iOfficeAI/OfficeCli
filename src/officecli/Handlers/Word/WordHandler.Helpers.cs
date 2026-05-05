@@ -546,6 +546,38 @@ public partial class WordHandler
     }
 
     /// <summary>
+    /// Find the 1-based run index inside the anchor paragraph where the
+    /// CommentRangeStart with <paramref name="commentId"/> sits — i.e. the
+    /// number of runs before the range marker plus 1. Returns 0 when the
+    /// range marker is not found, or sits before any Run (anchor at paragraph
+    /// start).
+    /// BUG-DUMP4-03: callers (BatchEmitter) need this so dump can preserve
+    /// intra-paragraph anchor position; without it replay widens every
+    /// comment to the whole paragraph.
+    /// </summary>
+    public int FindCommentAnchorRunIndex(string commentId)
+    {
+        var body = _doc.MainDocumentPart?.Document?.Body;
+        if (body == null) return 0;
+        foreach (var para in body.Descendants<Paragraph>())
+        {
+            var rs = para.Descendants<CommentRangeStart>()
+                .FirstOrDefault(r => r.Id?.Value == commentId);
+            if (rs == null) continue;
+            // Count Run elements that appear before the CommentRangeStart in
+            // document order within the same paragraph.
+            int runCount = 0;
+            foreach (var el in para.Descendants())
+            {
+                if (ReferenceEquals(el, rs)) break;
+                if (el is Run r && r.GetFirstChild<CommentReference>() == null) runCount++;
+            }
+            return runCount; // 0 = before any run; N = after run N (1-based)
+        }
+        return 0;
+    }
+
+    /// <summary>
     /// Find the paragraph path where a CommentRangeStart with the given ID is anchored.
     /// Returns "/body/p[N]" or null if not found.
     /// </summary>
