@@ -487,6 +487,12 @@ public partial class WordHandler
             hyperlink.Id = hlRelId;
         if (hasAnchor)
             hyperlink.Anchor = hlAnchor;
+        // BUG-DUMP24-02: w:docLocation is a separate "location in target
+        // document" attribute, distinct from w:anchor. Round-trip it so
+        // dump→batch preserves the wrapping hyperlink fully.
+        if (properties.TryGetValue("docLocation", out var hlDocLoc)
+            || properties.TryGetValue("doclocation", out hlDocLoc))
+            hyperlink.DocLocation = hlDocLoc;
         // BUG-DUMP10-02: round-trip the optional metadata attrs.
         if (hasTooltip && properties.TryGetValue("tooltip", out var hlTooltip))
             hyperlink.Tooltip = hlTooltip;

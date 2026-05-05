@@ -2379,6 +2379,11 @@ public partial class WordHandler
                 // dump→batch round-trip.
                 if (hlParent.Anchor?.Value != null)
                     node.Format["anchor"] = hlParent.Anchor.Value;
+                // BUG-DUMP24-02: w:docLocation is a separate "location in
+                // target document" attribute, distinct from w:anchor. Surface
+                // it so dump→batch round-trips the wrapping hyperlink fully.
+                if (hlParent.DocLocation?.Value != null)
+                    node.Format["docLocation"] = hlParent.DocLocation.Value;
                 // BUG-DUMP10-02: surface the tooltip / tgtFrame / history
                 // attributes from the wrapping hyperlink so dump→batch
                 // round-trip preserves them. Same canonical keys as the
@@ -2437,6 +2442,11 @@ public partial class WordHandler
             // round-trips and users can debug why a link points where it does.
             if (hyperlink.Anchor?.Value != null)
                 node.Format["anchor"] = hyperlink.Anchor.Value;
+            // BUG-DUMP24-02: w:docLocation is a separate "location in target
+            // document" attribute, distinct from w:anchor. Surface it so
+            // dump→batch round-trips it.
+            if (hyperlink.DocLocation?.Value != null)
+                node.Format["docLocation"] = hyperlink.DocLocation.Value;
             // BUG-DUMP10-02: tooltip / tgtFrame / history attributes are
             // independent of url/anchor — surface them so dump→batch
             // preserves the hover popup, target window, and history flag.
