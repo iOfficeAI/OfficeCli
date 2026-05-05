@@ -1633,9 +1633,12 @@ public partial class WordHandler
                 // change-track wrappers — they are paragraph grandchildren,
                 // not direct children, and were silently dropped on dump.
                 int inlineEqIdx = 0;
+                // BUG-DUMP9-04: m:oMath nested inside w:hyperlink is a
+                // grandchild of the paragraph and was silently dropped.
                 var inlineEqs = para.Elements<M.OfficeMath>()
                     .Concat(para.Elements<InsertedRun>().SelectMany(ins => ins.Elements<M.OfficeMath>()))
-                    .Concat(para.Elements<DeletedRun>().SelectMany(del => del.Elements<M.OfficeMath>()));
+                    .Concat(para.Elements<DeletedRun>().SelectMany(del => del.Elements<M.OfficeMath>()))
+                    .Concat(para.Elements<Hyperlink>().SelectMany(hl => hl.Elements<M.OfficeMath>()));
                 foreach (var inlineEq in inlineEqs)
                 {
                     node.Children.Add(ElementToNode(inlineEq, $"{path}/equation[{inlineEqIdx + 1}]", depth - 1));
@@ -1646,8 +1649,12 @@ public partial class WordHandler
                 // instruction preserved. Without this, GetAllRuns descended
                 // into SimpleField and surfaced the inner display run as a
                 // plain run, silently dropping the w:instr attribute.
+                // BUG-DUMP9-03: w:fldSimple nested inside w:hyperlink is a
+                // grandchild of the paragraph and was silently dropped.
                 int fldSimpleIdx = 0;
-                foreach (var fld in para.Elements<SimpleField>())
+                var fldSimples = para.Elements<SimpleField>()
+                    .Concat(para.Elements<Hyperlink>().SelectMany(hl => hl.Elements<SimpleField>()));
+                foreach (var fld in fldSimples)
                 {
                     var instr = fld.Instruction?.Value ?? "";
                     var displayText = string.Join("",

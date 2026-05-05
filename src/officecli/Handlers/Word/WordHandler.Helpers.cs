@@ -446,7 +446,19 @@ public partial class WordHandler
                 foreach (var hChild in hyperlink.ChildElements)
                 {
                     if (hChild is Run hRun) sb.Append(GetRunText(hRun));
+                    else if (hChild.LocalName == "oMath" || hChild is M.OfficeMath)
+                        sb.Append(string.Concat(hChild.Descendants<Text>().Select(t => t.Text))
+                            + string.Concat(hChild.Descendants<M.Text>().Select(t => t.Text)));
                 }
+            }
+            else if (child.LocalName == "oMath" || child is M.OfficeMath)
+            {
+                // BUG-DUMP9-04: inline equations contribute readable text to the
+                // paragraph readback so dump round-trip can verify formula
+                // survival. Use raw m:t / w:t descendants (not LaTeX) so the
+                // glyphs match the source.
+                sb.Append(string.Concat(child.Descendants<Text>().Select(t => t.Text))
+                    + string.Concat(child.Descendants<M.Text>().Select(t => t.Text)));
             }
         }
         return sb.ToString();
