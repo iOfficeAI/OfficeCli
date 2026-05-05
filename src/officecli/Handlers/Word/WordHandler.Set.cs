@@ -528,7 +528,12 @@ public partial class WordHandler
         var parts = value.Split(';');
         var style = ParseBorderStyle(parts[0]);
         uint size;
-        if (parts.Length > 1)
+        // CONSISTENCY(border-empty-segment): mirror the empty-color tolerance
+        // below — BatchEmitter's border fold emits "STYLE;;COLOR" whenever a
+        // side has color but no explicit sz attribute (very common in real
+        // .docx files where w:sz is inherited via the style chain). Treat an
+        // empty SIZE segment as "use default" instead of throwing.
+        if (parts.Length > 1 && !string.IsNullOrEmpty(parts[1].Trim()))
         {
             // OOXML stores border size in eighth-of-a-point units. Accept bare
             // integer (already in eighths) plus unit-qualified lengths
@@ -561,7 +566,10 @@ public partial class WordHandler
             ? SanitizeHex(parts[2])
             : null;
         uint space = 0u;
-        if (parts.Length > 3 && !uint.TryParse(parts[3], out space))
+        // CONSISTENCY(border-empty-segment): symmetric with the SIZE/COLOR
+        // tolerance — empty SPACE segment means "no override".
+        if (parts.Length > 3 && !string.IsNullOrEmpty(parts[3])
+            && !uint.TryParse(parts[3], out space))
             throw new ArgumentException($"Invalid border space '{parts[3]}', expected integer. Format: STYLE[;SIZE[;COLOR[;SPACE]]]");
         return (style, size, color, space);
     }
