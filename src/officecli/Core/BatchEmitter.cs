@@ -353,14 +353,16 @@ public static class BatchEmitter
     {
         var root = word.Get("/");
         // protectionEnforced has no Set case in WordHandler — `set / protectionEnforced=...`
-        // emits a WARNING on every replay. The only meaningful encoding is
-        // when protection is non-default; for protection="none" the
-        // enforced flag is implicitly false anyway. Drop the noisy
-        // false-when-no-protection emit so round-trips stay clean.
+        // emits a WARNING on every replay regardless of protection state.
+        // Enforcement is implicit in any non-"none" protection value (the
+        // `protection` Set handler stamps w:enforcement=1 itself), so the
+        // separate flag is dump-only metadata with no replay path. Drop it
+        // unconditionally; for protection="none" also drop the noisy
+        // protection key so round-trips stay clean.
+        root.Format.Remove("protectionEnforced");
         if (root.Format.TryGetValue("protection", out var protVal)
             && string.Equals(protVal?.ToString(), "none", StringComparison.OrdinalIgnoreCase))
         {
-            root.Format.Remove("protectionEnforced");
             root.Format.Remove("protection");
         }
         var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
