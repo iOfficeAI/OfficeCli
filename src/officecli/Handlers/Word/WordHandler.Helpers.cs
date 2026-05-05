@@ -542,6 +542,12 @@ public partial class WordHandler
             // inner run was emitted twice — once unwrapped (losing metadata)
             // and once via the sdt branch.
             .Where(r => r.Ancestors<SdtRun>().FirstOrDefault() == null)
+            // BUG-DUMP6-01: skip runs nested inside <w:fldSimple>. Those
+            // runs are surfaced separately as a typed `field` paragraph child
+            // carrying the SimpleField.Instruction attribute. Without this
+            // filter the inner display run was emitted as a plain run and
+            // the field instruction was silently dropped on dump round-trip.
+            .Where(r => r.Ancestors<SimpleField>().FirstOrDefault() == null)
             .ToList();
     }
 

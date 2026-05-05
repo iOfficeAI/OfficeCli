@@ -1507,6 +1507,30 @@ public partial class WordHandler
                     node.Children.Add(ElementToNode(sdtR, $"{path}/sdt[{sdtRunIdx + 1}]", depth - 1));
                     sdtRunIdx++;
                 }
+                // BUG-DUMP6-01: surface <w:fldSimple> children as typed `field`
+                // nodes so BatchEmitter can re-emit `add field` with the
+                // instruction preserved. Without this, GetAllRuns descended
+                // into SimpleField and surfaced the inner display run as a
+                // plain run, silently dropping the w:instr attribute.
+                int fldSimpleIdx = 0;
+                foreach (var fld in para.Elements<SimpleField>())
+                {
+                    var instr = fld.Instruction?.Value ?? "";
+                    var displayText = string.Join("",
+                        fld.Descendants<Text>().Select(t => t.Text));
+                    var fldNode = new DocumentNode
+                    {
+                        Type = "field",
+                        Text = displayText,
+                        Path = $"{path}/field[{fldSimpleIdx + 1}]",
+                    };
+                    fldNode.Format["instruction"] = instr.Trim();
+                    var instrUpper = instr.Trim().Split(' ', 2)[0].ToUpperInvariant();
+                    if (!string.IsNullOrEmpty(instrUpper))
+                        fldNode.Format["fieldType"] = instrUpper.ToLowerInvariant();
+                    node.Children.Add(fldNode);
+                    fldSimpleIdx++;
+                }
             }
         }
         else if (element is Run run)
