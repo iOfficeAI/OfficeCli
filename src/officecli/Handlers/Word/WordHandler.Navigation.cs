@@ -2139,9 +2139,18 @@ public partial class WordHandler
                 node.Format["subscript"] = true;
             if (run.RunProperties?.Spacing?.Val?.HasValue == true)
                 node.Format["charSpacing"] = $"{run.RunProperties.Spacing.Val.Value / 20.0:0.##}pt";
-            if (run.RunProperties?.Shading?.Fill?.Value != null)
+            if (run.RunProperties?.Shading != null)
             {
-                node.Format["shading"] = ParseHelpers.FormatHexColor(run.RunProperties.Shading.Fill.Value);
+                // BUG-DUMP22-01/02: surface val/fill/color sub-keys instead of
+                // a bare `shading=fill` value. The bare form silently coerced
+                // val to "clear" and dropped color on dump round-trip. Mirrors
+                // the paragraph/table/cell shading reader (round-21 fix).
+                var rShdVal = run.RunProperties.Shading.Val?.InnerText;
+                var rShdFill = run.RunProperties.Shading.Fill?.Value;
+                var rShdColor = run.RunProperties.Shading.Color?.Value;
+                if (!string.IsNullOrEmpty(rShdVal)) node.Format["shading.val"] = rShdVal;
+                if (!string.IsNullOrEmpty(rShdFill)) node.Format["shading.fill"] = ParseHelpers.FormatHexColor(rShdFill);
+                if (!string.IsNullOrEmpty(rShdColor)) node.Format["shading.color"] = ParseHelpers.FormatHexColor(rShdColor);
             }
             // w14 text effects
             ReadW14TextEffects(run.RunProperties, node);
