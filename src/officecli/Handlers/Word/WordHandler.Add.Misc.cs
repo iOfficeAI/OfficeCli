@@ -757,6 +757,46 @@ public partial class WordHandler
                 resultPath = $"{fieldParaPath}/r[{runIdx}]";
             }
         }
+        else if (parent is Hyperlink fieldHl && fieldHl.Parent is Paragraph fieldHlPara)
+        {
+            // BUG-DUMP18-02: field added with parent=w:hyperlink. The 5 field
+            // runs become direct children of the hyperlink so they render
+            // INSIDE the hyperlink scope (mirrors AddEquation's Hyperlink
+            // branch added in BUG-DUMP15-04).
+            fieldHlPara.TextId = GenerateParaId();
+            if (index.HasValue)
+            {
+                var children = fieldHl.ChildElements.ToList();
+                OpenXmlElement[] runs = { fieldRunBegin, fieldRunInstr, fieldRunSep, fieldRunResult, fieldRunEnd };
+                if (index.Value < children.Count)
+                {
+                    var anchor = children[index.Value];
+                    foreach (var r in runs)
+                    {
+                        anchor.InsertBeforeSelf(r);
+                    }
+                }
+                else
+                {
+                    foreach (var r in runs) fieldHl.AppendChild(r);
+                }
+            }
+            else
+            {
+                fieldHl.AppendChild(fieldRunBegin);
+                fieldHl.AppendChild(fieldRunInstr);
+                fieldHl.AppendChild(fieldRunSep);
+                fieldHl.AppendChild(fieldRunResult);
+                fieldHl.AppendChild(fieldRunEnd);
+            }
+            var fieldHlParaPath = ReplaceTrailingParaSegment(parentPath, fieldHlPara);
+            // Strip trailing /hyperlink[K] segment to get paragraph path
+            var slashIdxHl = fieldHlParaPath.LastIndexOf("/hyperlink[", StringComparison.Ordinal);
+            var paraPathOnly = slashIdxHl > 0 ? fieldHlParaPath.Substring(0, slashIdxHl) : fieldHlParaPath;
+            var hlIdxF = fieldHlPara.Elements<Hyperlink>().TakeWhile(h => !ReferenceEquals(h, fieldHl)).Count() + 1;
+            var runIdxAfter = GetAllRuns(fieldHlPara).IndexOf(fieldRunResult);
+            resultPath = $"{paraPathOnly}/hyperlink[{hlIdxF}]/r[{runIdxAfter + 1}]";
+        }
         else if (parent is Run hostRun && hostRun.Parent is Paragraph hostRunPara)
         {
             // Adding a field "to" an existing run: insert the 5 field runs as

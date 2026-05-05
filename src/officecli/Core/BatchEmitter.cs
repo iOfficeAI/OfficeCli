@@ -1293,12 +1293,75 @@ public static class BatchEmitter
                 var instr = run.Format.TryGetValue("instruction", out var iv)
                     ? iv?.ToString() ?? "" : "";
                 var fieldProps = BuildFieldAddProps(instr, run.Text ?? "");
+                // BUG-DUMP18-02: w:fldSimple / fldChar-chain field inside
+                // w:hyperlink should replay INSIDE the hyperlink. Mirrors the
+                // equation-emit logic above (BUG-DUMP15-04) but gated on the
+                // hyperlink actually having been emitted as a prior `add
+                // hyperlink` batch row — hyperlinks with no emittable runs
+                // (BUG-DUMP9-03 fldSimple-only hyperlinks) never surface a
+                // hyperlink row, and routing the field there would fail the
+                // replay path lookup. Fall back to paraTargetPath in that
+                // case (the field still renders, just lifted out of the
+                // hyperlink wrapper — same trade-off as round-9 baseline).
+                var fldParent = paraTargetPath;
+                string? candidateHlParent = null;
+                if (!string.IsNullOrEmpty(run.Path))
+                {
+                    var idxFld = run.Path.LastIndexOf("/field[", StringComparison.Ordinal);
+                    if (idxFld > 0)
+                    {
+                        var derived = run.Path.Substring(0, idxFld);
+                        if (derived.Contains("/hyperlink["))
+                            candidateHlParent = derived;
+                    }
+                }
+                // fldChar-chain fields surface with a flat /…/r[N] path; the
+                // hyperlink hint is in Format._hyperlinkParent.
+                if (candidateHlParent == null
+                    && run.Format.TryGetValue("_hyperlinkParent", out var fhlpObj)
+                    && fhlpObj != null)
+                {
+                    var hint = fhlpObj.ToString();
+                    if (!string.IsNullOrEmpty(hint)) candidateHlParent = hint;
+                }
+                if (candidateHlParent != null)
+                {
+                    // Re-base the candidate path onto paraTargetPath (which
+                    // may use either /p[N] or /p[@paraId=...] form depending
+                    // on whether this is a body paragraph or via stable id —
+                    // Navigation surfaces /p[@paraId=...] but BatchEmitter
+                    // emits children under the numeric /p[N] parent). Then
+                    // verify a prior `add hyperlink` row landed under that
+                    // same paragraph; without it, the hyperlink-scoped path
+                    // wouldn't resolve on replay (BUG-DUMP9-03 fldSimple-
+                    // only hyperlinks never surface a hyperlink row).
+                    const string hlMarker = "/hyperlink[";
+                    var hlIdxStart = candidateHlParent.LastIndexOf(hlMarker, StringComparison.Ordinal);
+                    if (hlIdxStart > 0)
+                    {
+                        var hlEnd = candidateHlParent.IndexOf(']', hlIdxStart);
+                        if (hlEnd > hlIdxStart)
+                        {
+                            var kStr = candidateHlParent.Substring(hlIdxStart + hlMarker.Length,
+                                hlEnd - hlIdxStart - hlMarker.Length);
+                            if (int.TryParse(kStr, out var kIdx))
+                            {
+                                var rebased = paraTargetPath
+                                    + candidateHlParent.Substring(hlIdxStart);
+                                int emittedHls = items.Count(it => it.Type == "hyperlink"
+                                    && string.Equals(it.Parent, paraTargetPath, StringComparison.Ordinal));
+                                if (emittedHls >= kIdx)
+                                    fldParent = rebased;
+                            }
+                        }
+                    }
+                }
                 if (fieldProps != null)
                 {
                     items.Add(new BatchItem
                     {
                         Command = "add",
-                        Parent = paraTargetPath,
+                        Parent = fldParent,
                         Type = "field",
                         Props = fieldProps
                     });
@@ -1311,7 +1374,7 @@ public static class BatchEmitter
                     items.Add(new BatchItem
                     {
                         Command = "add",
-                        Parent = paraTargetPath,
+                        Parent = fldParent,
                         Type = "r",
                         Props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["text"] = run.Text! }
                     });
@@ -1756,6 +1819,11 @@ public static class BatchEmitter
                     ["instruction"] = instruction.Trim()
                 }
             };
+            // BUG-DUMP18-02: propagate hyperlink-scope hint from the begin
+            // run so the field-emit branch can target the hyperlink parent
+            // on replay.
+            if (c.Format.TryGetValue("_hyperlinkParent", out var hlp) && hlp != null)
+                synth.Format["_hyperlinkParent"] = hlp;
             result.Add(synth);
             i = end;
         }
@@ -2047,6 +2115,10 @@ public static class BatchEmitter
         // for them, cause double-application. Drop the aliases so the
         // dump bag stays minimal.
         "styleId", "styleName",
+        // BUG-DUMP18-02: internal hyperlink-scope hint stamped on runs (and
+        // propagated to synthetic field nodes) by Navigation. Consumed by the
+        // field-emit branch only; never replayed as a Set/Add property.
+        "_hyperlinkParent",
         // BUG-019: lineSpacing alone cannot distinguish AtLeast from Exact —
         // SpacingConverter.FormatWordLineSpacing serializes both as "Npt".
         // Set/AddParagraph now accept `lineRule` explicitly so it must flow

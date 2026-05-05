@@ -1763,7 +1763,23 @@ public partial class WordHandler
                 {
                     if (entry.kind == "run")
                     {
-                        node.Children.Add(ElementToNode(entry.el, $"{path}/r[{runIdx + 1}]", depth - 1));
+                        var runNode = ElementToNode(entry.el, $"{path}/r[{runIdx + 1}]", depth - 1);
+                        // BUG-DUMP18-02: surface a hyperlink-scoped subpath on
+                        // runs that are direct children of <w:hyperlink>. The
+                        // canonical Path stays flat (/…/r[N]) for back-compat
+                        // with every existing caller; BatchEmitter's
+                        // CollapseFieldChains carries this hint to the synth
+                        // field-add row so a fldChar-chain field inside a
+                        // hyperlink replays INSIDE the hyperlink instead of
+                        // alongside it. Mirrors the SimpleField hyperlink-
+                        // scope path emitted below.
+                        if (entry.el.Parent is Hyperlink runHl)
+                        {
+                            int hlIdxRun = paraHyperlinks.IndexOf(runHl);
+                            if (hlIdxRun >= 0)
+                                runNode.Format["_hyperlinkParent"] = $"{path}/hyperlink[{hlIdxRun + 1}]";
+                        }
+                        node.Children.Add(runNode);
                         runIdx++;
                     }
                     else if (entry.kind == "eq")
@@ -1944,9 +1960,11 @@ public partial class WordHandler
                 // BUG-DUMP9-03: w:fldSimple nested inside w:hyperlink is a
                 // grandchild of the paragraph and was silently dropped.
                 int fldSimpleIdx = 0;
-                var fldSimples = para.Elements<SimpleField>()
-                    .Concat(para.Elements<Hyperlink>().SelectMany(hl => hl.Elements<SimpleField>()));
-                foreach (var fld in fldSimples)
+                // BUG-DUMP18-02: w:fldSimple inside w:hyperlink must surface
+                // as /…/p[N]/hyperlink[K]/field[M] so dump→batch replays the
+                // field INSIDE the hyperlink rather than alongside it. Mirrors
+                // BUG-DUMP15-04 hyperlink-scoped equation paths above.
+                foreach (var fld in para.Elements<SimpleField>())
                 {
                     var instr = fld.Instruction?.Value ?? "";
                     var displayText = string.Join("",
@@ -1963,6 +1981,29 @@ public partial class WordHandler
                         fldNode.Format["fieldType"] = instrUpper.ToLowerInvariant();
                     node.Children.Add(fldNode);
                     fldSimpleIdx++;
+                }
+                for (int hlI = 0; hlI < paraHyperlinks.Count; hlI++)
+                {
+                    var hl = paraHyperlinks[hlI];
+                    int perHlFldIdx = 0;
+                    foreach (var fld in hl.Elements<SimpleField>())
+                    {
+                        var instr = fld.Instruction?.Value ?? "";
+                        var displayText = string.Join("",
+                            fld.Descendants<Text>().Select(t => t.Text));
+                        var fldNode = new DocumentNode
+                        {
+                            Type = "field",
+                            Text = displayText,
+                            Path = $"{path}/hyperlink[{hlI + 1}]/field[{perHlFldIdx + 1}]",
+                        };
+                        fldNode.Format["instruction"] = instr.Trim();
+                        var instrUpper = instr.Trim().Split(' ', 2)[0].ToUpperInvariant();
+                        if (!string.IsNullOrEmpty(instrUpper))
+                            fldNode.Format["fieldType"] = instrUpper.ToLowerInvariant();
+                        node.Children.Add(fldNode);
+                        perHlFldIdx++;
+                    }
                 }
             }
         }
