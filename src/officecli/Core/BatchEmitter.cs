@@ -629,6 +629,10 @@ public static class BatchEmitter
                         };
                         if (!string.IsNullOrEmpty(eqFull.Text))
                             eqProps["formula"] = eqFull.Text!;
+                        // BUG-DUMP19-02: forward block-equation alignment.
+                        if (eqFull.Format.TryGetValue("align", out var eqAlign)
+                            && eqAlign != null && !string.IsNullOrEmpty(eqAlign.ToString()))
+                            eqProps["align"] = eqAlign.ToString()!;
                         items.Add(new BatchItem
                         {
                             Command = "add",
@@ -678,6 +682,10 @@ public static class BatchEmitter
             };
             if (!string.IsNullOrEmpty(pNode.Text))
                 eqProps["formula"] = pNode.Text!;
+            // BUG-DUMP19-02: forward block-equation alignment.
+            if (pNode.Format.TryGetValue("align", out var eqAlign)
+                && eqAlign != null && !string.IsNullOrEmpty(eqAlign.ToString()))
+                eqProps["align"] = eqAlign.ToString()!;
             items.Add(new BatchItem
             {
                 Command = "add",

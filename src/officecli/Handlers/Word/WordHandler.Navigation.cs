@@ -2753,6 +2753,19 @@ public partial class WordHandler
         {
             node.Type = "equation";
             node.Format["mode"] = "display";
+            // BUG-DUMP19-02: surface m:oMathParaPr/m:jc as Format["align"] so
+            // block-equation alignment round-trips. Without this the value is
+            // silently dropped on read-back.
+            var mathPPr = element.GetFirstChild<M.ParagraphProperties>();
+            var jcVal = mathPPr?.Justification?.Val?.InnerText;
+            if (!string.IsNullOrEmpty(jcVal))
+            {
+                node.Format["align"] = jcVal switch
+                {
+                    "centerGroup" => "centerGroup",
+                    _ => jcVal // "left" | "center" | "right"
+                };
+            }
             // Extract LaTeX via FormulaParser
             var oMath = element.Descendants<M.OfficeMath>().FirstOrDefault();
             if (oMath != null)

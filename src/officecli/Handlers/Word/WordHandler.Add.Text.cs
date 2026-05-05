@@ -996,6 +996,25 @@ public partial class WordHandler
 
             var mathPara = new M.Paragraph(oMath);
 
+            // BUG-DUMP19-02: apply m:oMathParaPr/m:jc when caller passes `align`
+            // so block-equation alignment round-trips. Schema requires
+            // m:oMathParaPr to precede m:oMath inside m:oMathPara.
+            if (properties != null && properties.TryGetValue("align", out var alignVal)
+                && !string.IsNullOrWhiteSpace(alignVal))
+            {
+                var jcVal = alignVal.Trim().ToLowerInvariant() switch
+                {
+                    "left" => M.JustificationValues.Left,
+                    "right" => M.JustificationValues.Right,
+                    "center" or "centre" => M.JustificationValues.Center,
+                    "centergroup" => M.JustificationValues.CenterGroup,
+                    _ => throw new ArgumentException(
+                        $"Invalid equation align value: '{alignVal}'. Valid: left, center, right, centerGroup.")
+                };
+                mathPara.PrependChild(new M.ParagraphProperties(
+                    new M.Justification { Val = jcVal }));
+            }
+
             // Display equation must be a direct child of Body (wrapped in w:p).
             // If parent is a Paragraph, insert after that paragraph as a sibling.
             var insertTarget = parent;
