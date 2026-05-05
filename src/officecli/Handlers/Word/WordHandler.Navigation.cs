@@ -1507,6 +1507,20 @@ public partial class WordHandler
                     node.Children.Add(ElementToNode(sdtR, $"{path}/sdt[{sdtRunIdx + 1}]", depth - 1));
                     sdtRunIdx++;
                 }
+                // BUG-DUMP7-03: surface inline <m:oMath> children as typed
+                // `equation` nodes (mode=inline) so BatchEmitter can re-emit
+                // `add equation mode=inline`. Without this, GetAllRuns
+                // ignored the OfficeMath element entirely and the paragraph
+                // surfaced empty — dump emitted just `add p` and the formula
+                // was silently dropped. Block-level oMathPara is already
+                // handled at the body level via the LocalName=="oMathPara"
+                // branch below.
+                int inlineEqIdx = 0;
+                foreach (var inlineEq in para.Elements<M.OfficeMath>())
+                {
+                    node.Children.Add(ElementToNode(inlineEq, $"{path}/equation[{inlineEqIdx + 1}]", depth - 1));
+                    inlineEqIdx++;
+                }
                 // BUG-DUMP6-01: surface <w:fldSimple> children as typed `field`
                 // nodes so BatchEmitter can re-emit `add field` with the
                 // instruction preserved. Without this, GetAllRuns descended

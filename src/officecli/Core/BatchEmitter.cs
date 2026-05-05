@@ -796,7 +796,11 @@ public static class BatchEmitter
         // BEFORE the runs loop, hoisting every <w:br/> to the front of its
         // paragraph (e.g. textA + <br> + textB became <br> + textA + textB).
         var runs = fieldEntries
-            .Where(c => c.Type == "run" || c.Type == "r" || c.Type == "picture" || c.Type == "field" || c.Type == "ptab" || c.Type == "break")
+            .Where(c => c.Type == "run" || c.Type == "r" || c.Type == "picture" || c.Type == "field" || c.Type == "ptab" || c.Type == "break"
+                // BUG-DUMP7-03: inline <m:oMath> children surface as type=equation.
+                // Without inclusion the inline equation was dropped from the runs
+                // pipeline and `add equation mode=inline` was never emitted.
+                || c.Type == "equation")
             .ToList();
         var breaks = runs.Where(c => c.Type == "break").ToList();
         // CONSISTENCY(bookmark-roundtrip): bookmarks are paragraph-level
@@ -883,6 +887,10 @@ public static class BatchEmitter
         // happened to have multiple runs that already forced the multi-run
         // branch.
         bool singleRunIsField = runs.Count == 1 && runs[0].Type == "field";
+        // BUG-DUMP7-03: an inline equation child must emit `add equation`
+        // explicitly (collapsing the formula text onto `add p` would lose
+        // the OfficeMath structure entirely).
+        bool singleRunIsEquation = runs.Count == 1 && runs[0].Type == "equation";
         bool collapseSingleRun = runs.Count <= 1 &&
             !(runs.Count == 1 && runs[0].Type == "picture") &&
             !(runs.Count == 1 && runs[0].Type == "ptab") &&
@@ -890,6 +898,7 @@ public static class BatchEmitter
             !singleRunIsNoteRef &&
             !singleRunHasW14 &&
             !singleRunIsField &&
+            !singleRunIsEquation &&
             breaks.Count == 0 &&
             bookmarks.Count == 0 &&
             inlineSdts.Count == 0;
@@ -1084,6 +1093,28 @@ public static class BatchEmitter
                     Parent = paraTargetPath,
                     Type = "ptab",
                     Props = ptabProps.Count > 0 ? ptabProps : null
+                });
+                continue;
+            }
+
+            // BUG-DUMP7-03: inline <m:oMath> as paragraph child. Get surfaces
+            // it as type="equation" with mode=inline and the LaTeX-ish formula
+            // in Text. AddEquation accepts a paragraph parent for inline mode.
+            if (run.Type == "equation")
+            {
+                var eqMode = run.Format.TryGetValue("mode", out var emv) ? emv?.ToString() : "inline";
+                var eqProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["mode"] = string.IsNullOrEmpty(eqMode) ? "inline" : eqMode!
+                };
+                if (!string.IsNullOrEmpty(run.Text))
+                    eqProps["formula"] = run.Text!;
+                items.Add(new BatchItem
+                {
+                    Command = "add",
+                    Parent = paraTargetPath,
+                    Type = "equation",
+                    Props = eqProps
                 });
                 continue;
             }
