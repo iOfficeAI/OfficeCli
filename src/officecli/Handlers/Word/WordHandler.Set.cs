@@ -516,8 +516,15 @@ public partial class WordHandler
         "thinthicklargegap" => BorderValues.ThinThickLargeGap,
         "thickthinlargegap" => BorderValues.ThickThinLargeGap,
         "thinthickthinlargegap" => BorderValues.ThinThickThinLargeGap,
-        "wave" => BorderValues.Wave,
-        "doublewave" => BorderValues.DoubleWave,
+        // BUG-DUMP23-02: dashSmallGap is a valid ST_Border token (just wasn't
+        // listed). wavy is a colloquial alias for wave. wavyDouble / wavyHeavy
+        // are not part of ECMA-376 ST_Border (the SDK rejects them at validate
+        // time even via the string ctor) — accept them as input aliases and
+        // map to the nearest valid token (DoubleWave) so add/set don't reject
+        // user-supplied style names that show up in real-world docs.
+        "wave" or "wavy" => BorderValues.Wave,
+        "doublewave" or "wavydouble" or "wavyheavy" => BorderValues.DoubleWave,
+        "dashsmallgap" => BorderValues.DashSmallGap,
         "threedembed" or "3demboss" => BorderValues.ThreeDEmboss,
         "threedengrave" or "3dengrave" => BorderValues.ThreeDEngrave,
         _ => throw new ArgumentException($"Invalid border style: '{style}'. Valid values: single, thick, double, dotted, dashed, none, triple, wave, etc.")
