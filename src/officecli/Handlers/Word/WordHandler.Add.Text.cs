@@ -721,7 +721,7 @@ public partial class WordHandler
             "rightchars", "rightChars",
             "hangingchars", "hangingChars",
             "rightindent", "indentright", "hangingindent", "hanging",
-            "spacebefore", "spaceafter", "linespacing", "lineSpacing",
+            "spacebefore", "spaceafter", "linespacing", "lineSpacing", "linerule", "lineRule",
             "keepnext", "keepwithnext", "keeplines", "keeptogether",
             "pagebreakbefore", "break",
             "widowcontrol", "widowControl",
