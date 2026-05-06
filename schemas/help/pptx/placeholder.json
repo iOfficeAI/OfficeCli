@@ -17,10 +17,10 @@
   "properties": {
     "phType": {
       "type": "enum",
-      "description": "placeholder type. Required.",
+      "description": "placeholder type. Required at Add. Set is intentionally not supported: phType binds the placeholder to a slide-layout slot for style/position inheritance, so changing it after creation would produce a half-bound shape rather than a typed placeholder. To change a placeholder's role, remove it and re-add with the new phType.",
       "values": ["title", "body", "subtitle", "date", "footer", "slidenum", "header", "picture", "chart", "table", "diagram", "media", "obj", "clipart"],
       "aliases": ["phtype", "type"],
-      "add": true, "set": true, "get": true,
+      "add": true, "set": false, "get": true,
       "examples": ["--prop phType=title"],
       "readback": "placeholder type string",
       "enforcement": "report"
