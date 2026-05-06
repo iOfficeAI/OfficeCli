@@ -447,6 +447,16 @@ public partial class PowerPointHandler
         {
             var bgColor = ReadColorFromFill(solidFill);
             if (bgColor != null) node.Format["background"] = bgColor;
+            // Surface alpha when the color carries an <a:alpha val="..."/> child.
+            // Schema declares background.alpha get:true; previously only the
+            // image-blipFill branch emitted it (line ~515), so users who set
+            // a translucent solid background (`background=80FF0000`) saw
+            // alpha disappear from Get readback.
+            var solidColorEl = (OpenXmlElement?)solidFill.GetFirstChild<Drawing.RgbColorModelHex>()
+                ?? solidFill.GetFirstChild<Drawing.SchemeColor>();
+            var solidAlpha = solidColorEl?.GetFirstChild<Drawing.Alpha>();
+            if (solidAlpha?.Val?.HasValue == true)
+                node.Format["background.alpha"] = (int)Math.Round(solidAlpha.Val.Value / 1000.0);
         }
         else if (gradFill != null)
         {
