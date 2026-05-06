@@ -1089,7 +1089,18 @@ public partial class WordHandler
     private string AddRun(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)
     {
         string resultPath;
-        if (parent is not Paragraph targetPara)
+        // BUG-DUMP33-01: support <w:hyperlink> as a run parent so dump→batch
+        // can round-trip tab-only / formatted runs that live inside a
+        // hyperlink wrapper (Navigation surfaces them with hyperlink-scoped
+        // _hyperlinkParent and BatchEmitter rebases the parent path).
+        Hyperlink? targetHyperlink = null;
+        Paragraph? targetPara = parent as Paragraph;
+        if (targetPara == null && parent is Hyperlink hlParent && hlParent.Parent is Paragraph hlEnclosingPara)
+        {
+            targetHyperlink = hlParent;
+            targetPara = hlEnclosingPara;
+        }
+        if (targetPara == null)
             throw new ArgumentException("Runs can only be added to paragraphs");
 
         // BUG-DUMP5-10: track-change attribution from dump round-trip.
@@ -1532,7 +1543,10 @@ public partial class WordHandler
         // Use ChildElements for index lookup so ResolveAnchorPosition's
         // childElement-indexed result lines up. If index points at
         // ParagraphProperties, clamp forward so pPr stays first.
-        var allChildren = targetPara.ChildElements.ToList();
+        // BUG-DUMP33-01: when targetHyperlink is set, append/insert inside
+        // the hyperlink wrapper instead of directly into the paragraph.
+        OpenXmlElement insertHost = (OpenXmlElement?)targetHyperlink ?? targetPara;
+        var allChildren = insertHost.ChildElements.ToList();
         if (index.HasValue && index.Value < allChildren.Count)
         {
             var refElement = allChildren[index.Value];
@@ -1540,25 +1554,55 @@ public partial class WordHandler
             {
                 // insert after pPr — i.e. before whatever sits at index+1, else append
                 if (index.Value + 1 < allChildren.Count)
-                    targetPara.InsertBefore(newRun, allChildren[index.Value + 1]);
+                    insertHost.InsertBefore(newRun, allChildren[index.Value + 1]);
                 else
-                    targetPara.AppendChild(newRun);
+                    insertHost.AppendChild(newRun);
             }
             else
             {
-                targetPara.InsertBefore(newRun, refElement);
+                insertHost.InsertBefore(newRun, refElement);
             }
             // CONSISTENCY(run-path-index): match navigation's r[N] enumeration
             // (Descendants<Run>() minus comment-reference runs) via GetAllRuns.
             var runPosIdx = GetAllRuns(targetPara).IndexOf(newRun) + 1;
             // CONSISTENCY(para-path-canonical): canonicalize to paraId-form.
-            resultPath = $"{ReplaceTrailingParaSegment(parentPath, targetPara)}/r[{runPosIdx}]";
+            // For hyperlink-parented runs, parentPath already includes the
+            // hyperlink segment; emit a hyperlink-scoped result path.
+            if (targetHyperlink != null)
+            {
+                var hlIdx = targetPara.Elements<Hyperlink>()
+                    .TakeWhile(h => !ReferenceEquals(h, targetHyperlink)).Count() + 1;
+                var hlSubIdx = targetHyperlink.Elements<Run>()
+                    .TakeWhile(r => !ReferenceEquals(r, newRun)).Count() + 1;
+                var hlSegIdx = parentPath.LastIndexOf("/hyperlink[", StringComparison.Ordinal);
+                var paraPathOnly = hlSegIdx > 0 ? parentPath.Substring(0, hlSegIdx) : parentPath;
+                var paraOnly = ReplaceTrailingParaSegment(paraPathOnly, targetPara);
+                resultPath = $"{paraOnly}/hyperlink[{hlIdx}]/r[{hlSubIdx}]";
+            }
+            else
+            {
+                resultPath = $"{ReplaceTrailingParaSegment(parentPath, targetPara)}/r[{runPosIdx}]";
+            }
         }
         else
         {
-            targetPara.AppendChild(newRun);
-            var runCount = GetAllRuns(targetPara).IndexOf(newRun) + 1;
-            resultPath = $"{ReplaceTrailingParaSegment(parentPath, targetPara)}/r[{runCount}]";
+            insertHost.AppendChild(newRun);
+            if (targetHyperlink != null)
+            {
+                var hlIdx = targetPara.Elements<Hyperlink>()
+                    .TakeWhile(h => !ReferenceEquals(h, targetHyperlink)).Count() + 1;
+                var hlSubIdx = targetHyperlink.Elements<Run>()
+                    .TakeWhile(r => !ReferenceEquals(r, newRun)).Count() + 1;
+                var hlSegIdx = parentPath.LastIndexOf("/hyperlink[", StringComparison.Ordinal);
+                var paraPathOnly = hlSegIdx > 0 ? parentPath.Substring(0, hlSegIdx) : parentPath;
+                var paraOnly = ReplaceTrailingParaSegment(paraPathOnly, targetPara);
+                resultPath = $"{paraOnly}/hyperlink[{hlIdx}]/r[{hlSubIdx}]";
+            }
+            else
+            {
+                var runCount = GetAllRuns(targetPara).IndexOf(newRun) + 1;
+                resultPath = $"{ReplaceTrailingParaSegment(parentPath, targetPara)}/r[{runCount}]";
+            }
         }
 
         // BUG-DUMP5-10: wrap in w:ins / w:del when the dump asked for

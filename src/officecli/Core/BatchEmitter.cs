@@ -1245,10 +1245,11 @@ public static class BatchEmitter
             // so emit `add r text="\t"` to round-trip the tab character.
             if (run.Type == "tab")
             {
+                var tabParent = ResolveHyperlinkParent(run, paraTargetPath, items);
                 items.Add(new BatchItem
                 {
                     Command = "add",
-                    Parent = paraTargetPath,
+                    Parent = tabParent,
                     Type = "r",
                     Props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                     {
@@ -1271,10 +1272,11 @@ public static class BatchEmitter
                     ptabProps["relativeTo"] = pRel.ToString() ?? "";
                 if (run.Format.TryGetValue("leader", out var pLead) && pLead != null)
                     ptabProps["leader"] = pLead.ToString() ?? "";
+                var ptabParent = ResolveHyperlinkParent(run, paraTargetPath, items);
                 items.Add(new BatchItem
                 {
                     Command = "add",
-                    Parent = paraTargetPath,
+                    Parent = ptabParent,
                     Type = "ptab",
                     Props = ptabProps.Count > 0 ? ptabProps : null
                 });
@@ -1757,6 +1759,37 @@ public static class BatchEmitter
     // <w:hyperlink>, regardless of how many runs the source wrapped. The
     // synthesized node carries the merged Text (for AddHyperlink's `text`
     // prop) and the shared url/anchor/Hyperlink-style format keys.
+    // Mirrors the field-emit hyperlink-parent rebase logic for tab/ptab runs.
+    // Navigation marks tab-only runs that live inside w:hyperlink with a
+    // Format["_hyperlinkParent"] hint (e.g. /body/p[1]/hyperlink[2]); without
+    // re-routing on emit they would replay under the bare paragraph and lose
+    // the hyperlink wrapper. The candidate-verify step (a prior `add hyperlink`
+    // row must have landed under paraTargetPath) avoids dangling paths when
+    // the hyperlink has no emittable runs and so was never added.
+    private static string ResolveHyperlinkParent(DocumentNode run, string paraTargetPath, List<BatchItem> items)
+    {
+        string? candidateHlParent = null;
+        if (run.Format.TryGetValue("_hyperlinkParent", out var hlpObj) && hlpObj != null)
+        {
+            var hint = hlpObj.ToString();
+            if (!string.IsNullOrEmpty(hint)) candidateHlParent = hint;
+        }
+        if (candidateHlParent == null) return paraTargetPath;
+
+        const string hlMarker = "/hyperlink[";
+        var hlIdxStart = candidateHlParent.LastIndexOf(hlMarker, StringComparison.Ordinal);
+        if (hlIdxStart <= 0) return paraTargetPath;
+        var hlEnd = candidateHlParent.IndexOf(']', hlIdxStart);
+        if (hlEnd <= hlIdxStart) return paraTargetPath;
+        var kStr = candidateHlParent.Substring(hlIdxStart + hlMarker.Length,
+            hlEnd - hlIdxStart - hlMarker.Length);
+        if (!int.TryParse(kStr, out var kIdx)) return paraTargetPath;
+        var rebased = paraTargetPath + candidateHlParent.Substring(hlIdxStart);
+        int emittedHls = items.Count(it => it.Type == "hyperlink"
+            && string.Equals(it.Parent, paraTargetPath, StringComparison.Ordinal));
+        return emittedHls >= kIdx ? rebased : paraTargetPath;
+    }
+
     private static List<DocumentNode> CoalesceHyperlinkRuns(List<DocumentNode> runs)
     {
         var result = new List<DocumentNode>(runs.Count);
