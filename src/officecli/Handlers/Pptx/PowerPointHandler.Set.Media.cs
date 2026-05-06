@@ -756,9 +756,38 @@ public partial class PowerPointHandler
                         xfrm.Extents ?? (xfrm.Extents = new Drawing.Extents()));
                     break;
                 }
+                case "poster":
+                {
+                    // Replace the media's thumbnail image. Schema declares
+                    // set:true; Add wires it via blipFill on the picture
+                    // shape (Add.Media.cs:498). Mirror that here.
+                    var blip = pic.BlipFill?.Blip;
+                    if (blip?.Embed?.Value == null) { unsupported.Add(key); break; }
+                    var (posterStream, posterType) = OfficeCli.Core.ImageSource.Resolve(value);
+                    using var posterDispose = posterStream;
+                    // Fresh ImagePart so content-type stays in sync with bytes —
+                    // reusing the old part would silently mismatch
+                    // [Content_Types].xml when the new poster is a different
+                    // image format (e.g. existing was png, new is jpeg).
+                    var newPosterPart = slidePart.AddImagePart(posterType);
+                    newPosterPart.FeedData(posterStream);
+                    var newPosterRelId = slidePart.GetIdOfPart(newPosterPart);
+                    var oldPosterRelId = blip.Embed.Value!;
+                    blip.Embed = newPosterRelId;
+                    // Best-effort drop the old part. Keep on any error so a
+                    // shared-blip edge case doesn't corrupt the file —
+                    // worst case is an orphan ImagePart, not a broken doc.
+                    try
+                    {
+                        if (slidePart.GetPartById(oldPosterRelId) is ImagePart oldPart)
+                            slidePart.DeletePart(oldPart);
+                    }
+                    catch { /* leave orphan */ }
+                    break;
+                }
                 default:
                     if (unsupported.Count == 0)
-                        unsupported.Add($"{key} (valid media props: volume, autoplay, trimstart, trimend, x, y, width, height)");
+                        unsupported.Add($"{key} (valid media props: volume, autoplay, trimstart, trimend, x, y, width, height, poster)");
                     else
                         unsupported.Add(key);
                     break;
