@@ -314,7 +314,6 @@ public partial class ExcelHandler
 
     public string CopyFrom(string sourcePath, string targetParentPath, InsertPosition? position)
     {
-        var index = position?.Index;
         var segments = sourcePath.TrimStart('/').Split('/', 2);
         var sheetName = segments[0];
         var worksheet = FindWorksheet(sheetName)
@@ -342,6 +341,35 @@ public partial class ExcelHandler
             var row = sheetData.Elements<Row>().FirstOrDefault(r => r.RowIndex?.Value == rowIdx)
                 ?? throw new ArgumentException($"Row {rowIdx} not found");
             var clone = (Row)row.CloneNode(true);
+
+            // Resolve --after/--before anchors to a 0-based row position in
+            // the target sheet. Anchor format must be `/SheetName/row[K]`.
+            // Mismatch (different sheet, non-row anchor, missing row) → throw.
+            int? index = null;
+            if (position != null)
+            {
+                var rowsList = targetSheetData.Elements<Row>().ToList();
+                int FindAnchorRowIndex(string anchorPath)
+                {
+                    var aSegs = anchorPath.TrimStart('/').Split('/', 2);
+                    if (aSegs.Length < 2)
+                        throw new ArgumentException(
+                            $"Anchor must be a row path like /{tgtSegments[0]}/row[K], got: {anchorPath}");
+                    if (!aSegs[0].Equals(tgtSegments[0], StringComparison.OrdinalIgnoreCase))
+                        throw new ArgumentException(
+                            $"Anchor sheet '{aSegs[0]}' must match target sheet '{tgtSegments[0]}'");
+                    var am = Regex.Match(aSegs[1], @"^row\[(\d+)\]$");
+                    if (!am.Success)
+                        throw new ArgumentException(
+                            $"Anchor must be a row path like /{tgtSegments[0]}/row[K], got: {anchorPath}");
+                    var anchorRowIdx = uint.Parse(am.Groups[1].Value);
+                    var pos = rowsList.FindIndex(r => r.RowIndex?.Value == anchorRowIdx);
+                    if (pos < 0)
+                        throw new ArgumentException($"Anchor row {anchorRowIdx} not found in {tgtSegments[0]}");
+                    return pos;
+                }
+                index = position.Resolve(FindAnchorRowIndex, rowsList.Count);
+            }
 
             // R8-1: CloneNode preserves the source row's RowIndex and every
             // cell's CellReference (e.g. "A1","B1"). Without rewriting these,
