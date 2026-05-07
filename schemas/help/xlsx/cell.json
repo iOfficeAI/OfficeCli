@@ -259,6 +259,19 @@
       "readback": "n/a",
       "enforcement": "report"
     },
+    "shift": {
+      "type": "string",
+      "description": "Cell-level Insert/Delete shift (Excel UI parity). On `add --type cell`: 'right' pushes existing cells in the same row right by one to make room; 'down' pushes existing cells in the same column down by one. On `remove` (passed via the top-level `--shift` flag, not `--prop`): 'left' shifts cells in the same row left into the gap; 'up' shifts cells in the same column up. Scope cap: only cellRefs within the affected row (left/right) or column (up/down) are rewritten — formulas, mergeCells, and CF/DV/hyperlink/table refs that span the affected band are NOT adjusted. For full-band shift with all metadata adjusted, use add/remove --type row or --type col.",
+      "add": true, "set": false, "get": false,
+      "examples": [
+        "add file.xlsx /Sheet1/B5 --type cell --prop shift=right --prop value=NEW",
+        "add file.xlsx /Sheet1/B5 --type cell --prop shift=down --prop value=NEW",
+        "remove file.xlsx /Sheet1/B5 --shift left",
+        "remove file.xlsx /Sheet1/B5 --shift up"
+      ],
+      "readback": "n/a (structural)",
+      "enforcement": "report"
+    },
     "arrayformula": {
       "type": "string",
       "description": "dynamic-array formula spilled into ref range (without leading '=').",

@@ -13,7 +13,7 @@
   "paths": {
     "positional": ["/SheetName/row[N]"]
   },
-  "note": "Row index N is 1-based. Add creates the row element (optionally seeded with empty cells via 'cols'); all formatting props are currently Set-only — known Add/Set asymmetry.",
+  "note": "Row index N is 1-based. Add creates the row element (optionally seeded with empty cells via 'cols'); all formatting props are currently Set-only — known Add/Set asymmetry. Position can be specified with --index N (1-based row slot), --before /SheetName/row[K], or --after /SheetName/row[K]; when the slot is occupied, all rows at or past the slot shift down by one and every range-bearing structure on the sheet is adjusted (mergeCells, CF/DV sqref, autoFilter, hyperlink/table refs, named ranges, and formula cell-refs across the sheet via FormulaRefShifter). Use add --from /SheetName/row[K] together with --before/--after to copy an entire row's contents at the chosen slot.",
   "properties": {
     "cols": {
       "type": "int",
