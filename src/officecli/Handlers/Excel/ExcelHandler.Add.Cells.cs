@@ -593,6 +593,10 @@ public partial class ExcelHandler
                 mergeCellsEl = new MergeCells();
                 sheetEl.AppendChild(mergeCellsEl);
             }
+            // CONSISTENCY(merge-comma): comma in *prop value* is the supported
+            // batch form (here, in cell Set, and in sheet Set) — split into
+            // separate <mergeCell> elements. Comma in *path* is rejected by
+            // InsertMergeCellChecked since path is a single-target locator.
             foreach (var rangeRef in mergeRange.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
                 InsertMergeCellChecked(mergeCellsEl, rangeRef);
             mergeCellsEl.Count = (uint)mergeCellsEl.Elements<MergeCell>().Count();

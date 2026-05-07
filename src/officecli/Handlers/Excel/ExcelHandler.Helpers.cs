@@ -1793,9 +1793,26 @@ public partial class ExcelHandler
     //   with prior dedup behavior).
     // - Geometric overlap with a non-identical range: throw.
     // - Otherwise: append.
+    private static readonly System.Text.RegularExpressions.Regex SingleMergeRefPattern =
+        new(@"^[A-Z]+[0-9]+(:[A-Z]+[0-9]+)?$",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
     private static void InsertMergeCellChecked(MergeCells mergeCells, string newRangeRef)
     {
         var refUpper = newRangeRef.ToUpperInvariant();
+        // Bottom-line guard: <mergeCell ref="..."> is OOXML ST_Ref — a single A1
+        // cell or A1:B2 range. Comma-separated forms are accepted only as a
+        // batch convenience in prop *values* (sheet-level merge=A1:B1,A2:B2),
+        // and must be split into separate <mergeCell> elements before reaching
+        // this writer. This guard makes any future drift fail at write time
+        // instead of corrupting the file and exploding later in `view`.
+        if (refUpper.Contains(','))
+            throw new ArgumentException(
+                $"Invalid merge ref '{newRangeRef}': path is a single-target locator (no comma). " +
+                $"Move ranges to a prop value, e.g. `set ... '/Sheet1' --prop merge={newRangeRef}`.");
+        if (!SingleMergeRefPattern.IsMatch(refUpper))
+            throw new ArgumentException(
+                $"Invalid merge ref '{newRangeRef}': must be a single A1 cell (e.g. 'B2') or A1:B2 range (e.g. 'B4:E4').");
         foreach (var existing in mergeCells.Elements<MergeCell>())
         {
             if (existing.Reference?.Value is not string er) continue;

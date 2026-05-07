@@ -689,6 +689,11 @@ public partial class ExcelHandler
                             mergeCellsEl = new MergeCells();
                             ws.AppendChild(mergeCellsEl);
                         }
+                        // CONSISTENCY(merge-comma): comma in *prop value* is the
+                        // supported batch form (here, in cell Add, and in sheet Set)
+                        // — split into separate <mergeCell> elements. Comma in
+                        // *path* is rejected by InsertMergeCellChecked since path
+                        // is a single-target locator.
                         foreach (var rangeRef in value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
                             InsertMergeCellChecked(mergeCellsEl, rangeRef);
                         mergeCellsEl.Count = (uint)mergeCellsEl.Elements<MergeCell>().Count();
@@ -1643,6 +1648,11 @@ public partial class ExcelHandler
                             ws.AppendChild(mergeCells);
                         }
 
+                        // CONSISTENCY(merge-comma): path is a single-target locator, not
+                        // a list. Disjoint multi-range merges go through prop value form
+                        // (`--prop merge=A1:B1,A2:B2`), at sheet- or cell-anchored set.
+                        // A comma in the path itself is rejected by the guard inside
+                        // InsertMergeCellChecked with an actionable message.
                         InsertMergeCellChecked(mergeCells, rangeRef);
                         mergeCells.Count = (uint)mergeCells.Elements<MergeCell>().Count();
                     }
