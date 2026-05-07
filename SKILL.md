@@ -142,8 +142,6 @@ officecli query report.docx 'paragraph[style=Normal] > run[font!=Arial]'
 officecli query slides.pptx 'shape[fill=FF0000]'
 ```
 
-For large documents, use `--max-lines` to limit output.
-
 ---
 
 ## Watch & Interactive Selection
