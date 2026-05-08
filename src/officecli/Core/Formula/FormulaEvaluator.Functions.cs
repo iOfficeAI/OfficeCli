@@ -132,7 +132,8 @@ internal partial class FormulaEvaluator
             "LOOKUP" => EvalLookup(args),
             "XLOOKUP" => EvalXlookup(args),
             "HYPERLINK" => FR_S(args.Count >= 2 && args[1] is FormulaResult fn ? fn.AsString() : str(0)),
-            "OFFSET" or "INDIRECT" => null, // unsupported (requires first-class reference values)
+            "OFFSET" => EvalOffset(args),
+            "INDIRECT" => EvalIndirect(args),
 
             // ===== Date & Time =====
             "TODAY" => FR(DateTime.Today.ToOADate()), "NOW" => FR(DateTime.Now.ToOADate()),

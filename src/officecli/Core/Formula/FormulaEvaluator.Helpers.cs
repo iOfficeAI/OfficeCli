@@ -23,8 +23,13 @@ internal partial class FormulaEvaluator
         return a.AsNumber().CompareTo(b.AsNumber());
     }
 
+    private static IEnumerable<FormulaResult> ExpandRange(RangeData rd) =>
+        Enumerable.Range(0, rd.Rows).SelectMany(r =>
+            Enumerable.Range(0, rd.Cols).Select(c => rd.Cells[r, c] ?? FormulaResult.Number(0)));
+
     private static List<FormulaResult> AllArgs(List<object> args) =>
-        args.SelectMany(a => a is RangeData rd ? Enumerable.Range(0, rd.Rows).SelectMany(r => Enumerable.Range(0, rd.Cols).Select(c => rd.Cells[r, c] ?? FormulaResult.Number(0)))
+        args.SelectMany(a => a is RangeData rd ? ExpandRange(rd)
+            : a is FormulaResult { IsRange: true } fr ? ExpandRange(fr.RangeValue!)
             : a is double[] arr ? arr.Select(v => FormulaResult.Number(v))
             : a is FormulaResult r ? [r] : Enumerable.Empty<FormulaResult>()).ToList();
 
@@ -34,6 +39,7 @@ internal partial class FormulaEvaluator
         foreach (var a in args)
         {
             if (a is RangeData rd) { var err = rd.FirstError(); if (err != null) return err; }
+            else if (a is FormulaResult { IsRange: true } fr) { var err = fr.RangeValue!.FirstError(); if (err != null) return err; }
             else if (a is FormulaResult { IsError: true } e) return e;
         }
         return null;
@@ -45,6 +51,7 @@ internal partial class FormulaEvaluator
         foreach (var a in args)
         {
             if (a is RangeData rd) result.AddRange(rd.ToDoubleArray());
+            else if (a is FormulaResult { IsRange: true } fr) result.AddRange(fr.RangeValue!.ToDoubleArray());
             else if (a is double[] arr) result.AddRange(arr);
             else if (a is FormulaResult { IsNumeric: true } r) result.Add(r.NumericValue!.Value);
             else if (a is FormulaResult { IsBool: true } rb) result.Add(rb.BoolValue!.Value ? 1 : 0);

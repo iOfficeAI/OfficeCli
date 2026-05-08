@@ -19,22 +19,29 @@ internal record FormulaResult
     public bool? BoolValue { get; init; }
     public string? ErrorValue { get; init; }
     public double[]? ArrayValue { get; init; }
+    public RangeData? RangeValue { get; init; }
 
     public bool IsNumeric => NumericValue.HasValue;
     public bool IsString => StringValue != null;
     public bool IsBool => BoolValue.HasValue;
     public bool IsError => ErrorValue != null;
     public bool IsArray => ArrayValue != null;
+    public bool IsRange => RangeValue != null;
 
     public static FormulaResult Number(double v) => new() { NumericValue = v };
     public static FormulaResult Str(string v) => new() { StringValue = v };
     public static FormulaResult Bool(bool v) => new() { BoolValue = v };
     public static FormulaResult Error(string v) => new() { ErrorValue = v };
     public static FormulaResult Array(double[] v) => new() { ArrayValue = v };
+    public static FormulaResult Area(RangeData v) => new() { RangeValue = v };
 
-    public double AsNumber() => NumericValue ?? (BoolValue == true ? 1 : 0);
-    public string AsString() => StringValue ?? NumericValue?.ToString(CultureInfo.InvariantCulture)
+    public double AsNumber() => IsRange ? (FirstCell()?.AsNumber() ?? 0) : NumericValue ?? (BoolValue == true ? 1 : 0);
+    public string AsString() => IsRange ? (FirstCell()?.AsString() ?? "") :
+        StringValue ?? NumericValue?.ToString(CultureInfo.InvariantCulture)
         ?? (BoolValue.HasValue ? (BoolValue.Value ? "TRUE" : "FALSE") : ErrorValue ?? "");
+
+    private FormulaResult? FirstCell() =>
+        RangeValue is { Rows: > 0, Cols: > 0 } rd ? rd.Cells[0, 0] : null;
 
     public string ToCellValueText()
     {
@@ -461,17 +468,62 @@ internal partial class FormulaEvaluator
         var name = t[p].Value; p++;
         if (p >= t.Count || t[p].Type != TT.LParen) return null; p++;
         var args = new List<object>();
+        var argIdx = 0;
         if (p < t.Count && t[p].Type != TT.RParen)
         {
             while (true)
             {
-                if (p < t.Count && t[p].Type is TT.Range or TT.SheetRange) { args.Add(Expand2DRange(t[p].Value)); p++; }
+                if (argIdx == 0 && name == "OFFSET" && TryParseRefArg(t, ref p) is { } refArg)
+                { args.Add(refArg); }
+                else if (p < t.Count && t[p].Type is TT.Range or TT.SheetRange) { args.Add(Expand2DRange(t[p].Value)); p++; }
                 else { var expr = ParseExpression(t, ref p); if (expr == null) return null; args.Add(expr); }
+                argIdx++;
                 if (p >= t.Count || t[p].Type != TT.Comma) break; p++;
             }
         }
         if (p < t.Count && t[p].Type == TT.RParen) p++;
         return EvalFunction(name, args);
+    }
+
+    /// <summary>
+    /// Peek the next token; if it's a CellRef / SheetCellRef / Range / SheetRange,
+    /// consume it and return a RefArg without dereferencing the cells. Used by
+    /// reference-consuming functions (OFFSET) whose first argument must remain
+    /// a reference instead of being eagerly evaluated to a scalar value.
+    /// </summary>
+    private RefArg? TryParseRefArg(List<Token> t, ref int p)
+    {
+        if (p >= t.Count) return null;
+        var tok = t[p];
+        switch (tok.Type)
+        {
+            case TT.CellRef:
+            {
+                var (col, row) = ParseRef(tok.Value);
+                p++;
+                return new RefArg(null, ColToIndex(col), row, 1, 1);
+            }
+            case TT.SheetCellRef:
+            {
+                var bang = tok.Value.IndexOf('!');
+                var sheet = tok.Value[..bang];
+                var (col, row) = ParseRef(tok.Value[(bang + 1)..]);
+                p++;
+                return new RefArg(sheet, ColToIndex(col), row, 1, 1);
+            }
+            case TT.Range:
+                p++;
+                return BuildRefFromRange(null, tok.Value);
+            case TT.SheetRange:
+            {
+                var bang = tok.Value.IndexOf('!');
+                var sheet = tok.Value[..bang];
+                p++;
+                return BuildRefFromRange(sheet, tok.Value[(bang + 1)..]);
+            }
+            default:
+                return null;
+        }
     }
 
     // ==================== Cell & Range Resolution ====================
