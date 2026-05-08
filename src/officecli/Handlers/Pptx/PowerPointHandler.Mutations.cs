@@ -680,6 +680,18 @@ public partial class PowerPointHandler
             return CopyTableColumn(colCloneMatch, position, targetParentPath);
         }
 
+        // Table cell clone: --from /slide[N]/table[K]/tr[R]/tc[C]. Same-row
+        // only — cross-row tc copy is ambiguous (column slot shifts) and
+        // cross-table is rejected for the same reason as row/col copies.
+        // Without this branch the path falls through to ResolveSlideElement,
+        // which only accepts /slide[N]/element[M] and throws "Invalid element
+        // path".
+        var tcCloneMatch = Regex.Match(sourcePath, @"^/slide\[(\d+)\]/table\[(\d+)\]/tr\[(\d+)\]/tc\[(\d+)\]$");
+        if (tcCloneMatch.Success)
+        {
+            return CopyTableCell(tcCloneMatch, position, targetParentPath);
+        }
+
         // Whole-slide clone: --from /slide[N] to / (or null == "duplicate in
         // place" at presentation root, i.e. append the clone after the source
         // slide).
@@ -854,6 +866,73 @@ public partial class PowerPointHandler
         var newRows = table.Elements<Drawing.TableRow>().ToList();
         var newRowIdx = newRows.IndexOf(clone) + 1;
         return $"/slide[{slideIdx}]/table[{tableIdx}]/tr[{newRowIdx}]";
+    }
+
+    /// <summary>
+    /// Clone a single table cell within its row (same-row only). Mirrors
+    /// CopyTableRow: target must be the source row (or null = "duplicate in
+    /// place"), --before/--after must point at a sibling tc in the same row.
+    /// Cross-row / cross-table cell copy is rejected — the receiving row
+    /// would have a different column count than its peers, breaking the
+    /// table's grid invariant.
+    /// </summary>
+    private string CopyTableCell(Match tcMatch, InsertPosition? position, string? targetParentPath)
+    {
+        var slideIdx = int.Parse(tcMatch.Groups[1].Value);
+        var tableIdx = int.Parse(tcMatch.Groups[2].Value);
+        var rowIdx = int.Parse(tcMatch.Groups[3].Value);
+        var cellIdx = int.Parse(tcMatch.Groups[4].Value);
+
+        if (!string.IsNullOrEmpty(targetParentPath))
+        {
+            var expected = $"/slide[{slideIdx}]/table[{tableIdx}]/tr[{rowIdx}]";
+            if (!string.Equals(targetParentPath, expected, StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException(
+                    $"Cross-row/cross-table cell copy is not supported. Source cell's row is {expected}; target was {targetParentPath}.");
+        }
+
+        var (slidePart, table) = ResolveTable(slideIdx, tableIdx);
+        var rows = table.Elements<Drawing.TableRow>().ToList();
+        if (rowIdx < 1 || rowIdx > rows.Count)
+            throw new ArgumentException($"Row {rowIdx} not found (total: {rows.Count})");
+        var row = rows[rowIdx - 1];
+        var cells = row.Elements<Drawing.TableCell>().ToList();
+        if (cellIdx < 1 || cellIdx > cells.Count)
+            throw new ArgumentException($"Cell {cellIdx} not found (total: {cells.Count})");
+
+        var clone = (Drawing.TableCell)cells[cellIdx - 1].CloneNode(true);
+
+        int? targetIdx = null;
+        if (position?.After != null || position?.Before != null)
+        {
+            var anchorPath = ResolveIdPath(position.After ?? position.Before!);
+            var anchorMatch = Regex.Match(anchorPath, @"^/slide\[(\d+)\]/table\[(\d+)\]/tr\[(\d+)\]/tc\[(\d+)\]$");
+            if (!anchorMatch.Success ||
+                int.Parse(anchorMatch.Groups[1].Value) != slideIdx ||
+                int.Parse(anchorMatch.Groups[2].Value) != tableIdx ||
+                int.Parse(anchorMatch.Groups[3].Value) != rowIdx)
+            {
+                throw new ArgumentException(
+                    $"Copy cell anchor must be a cell in the same row: /slide[{slideIdx}]/table[{tableIdx}]/tr[{rowIdx}]/tc[N]. Got: {anchorPath}");
+            }
+            var anchorCellIdx = int.Parse(anchorMatch.Groups[4].Value);
+            targetIdx = position.After != null ? anchorCellIdx : anchorCellIdx - 1; // 0-based
+        }
+        else if (position?.Index.HasValue == true)
+        {
+            targetIdx = position.Index.Value;
+        }
+
+        var siblings = row.Elements<Drawing.TableCell>().ToList();
+        if (targetIdx.HasValue && targetIdx.Value >= 0 && targetIdx.Value < siblings.Count)
+            siblings[targetIdx.Value].InsertBeforeSelf(clone);
+        else
+            row.AppendChild(clone);
+
+        GetSlide(slidePart).Save();
+        var newCells = row.Elements<Drawing.TableCell>().ToList();
+        var newCellIdx = newCells.IndexOf(clone) + 1;
+        return $"/slide[{slideIdx}]/table[{tableIdx}]/tr[{rowIdx}]/tc[{newCellIdx}]";
     }
 
     /// <summary>
