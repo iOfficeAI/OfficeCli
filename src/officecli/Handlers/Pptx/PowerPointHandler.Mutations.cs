@@ -372,6 +372,16 @@ public partial class PowerPointHandler
             return MoveTableRow(trMoveMatch, position, targetParentPath);
         }
 
+        // Case 0b: Move table column within the same table.
+        // Path: /slide[N]/table[K]/col[C]. Same-table only — column has no
+        // standalone OOXML element (it's gridCol + per-row tc), and merging
+        // grids across tables of different widths is ambiguous.
+        var colMoveMatch = Regex.Match(sourcePath, @"^/slide\[(\d+)\]/table\[(\d+)\]/col\[(\d+)\]$");
+        if (colMoveMatch.Success)
+        {
+            return MoveTableColumn(colMoveMatch, position, targetParentPath);
+        }
+
         // Case 1: Move entire slide (reorder)
         var slideOnlyMatch = Regex.Match(sourcePath, @"^/slide\[(\d+)\]$");
         if (slideOnlyMatch.Success)
@@ -662,6 +672,14 @@ public partial class PowerPointHandler
             return CopyTableRow(trCloneMatch, position, targetParentPath);
         }
 
+        // Table column clone: --from /slide[N]/table[K]/col[C]. Same-table
+        // only. Clones the gridCol entry plus the per-row tc cells in lockstep.
+        var colCloneMatch = Regex.Match(sourcePath, @"^/slide\[(\d+)\]/table\[(\d+)\]/col\[(\d+)\]$");
+        if (colCloneMatch.Success)
+        {
+            return CopyTableColumn(colCloneMatch, position, targetParentPath);
+        }
+
         // Whole-slide clone: --from /slide[N] to / (or null == "duplicate in
         // place" at presentation root, i.e. append the clone after the source
         // slide).
@@ -836,6 +854,177 @@ public partial class PowerPointHandler
         var newRows = table.Elements<Drawing.TableRow>().ToList();
         var newRowIdx = newRows.IndexOf(clone) + 1;
         return $"/slide[{slideIdx}]/table[{tableIdx}]/tr[{newRowIdx}]";
+    }
+
+    /// <summary>
+    /// Resolve a column-anchor path against the same table. Returns the
+    /// requested 0-based target column index (insertion slot in gridCol /
+    /// per-row tc lists), or null if no anchor or anchor was self-referential.
+    /// </summary>
+    private int? ResolveColumnAnchorIndex(InsertPosition? position, int slideIdx, int tableIdx, int? sourceColIdx)
+    {
+        if (position?.After == null && position?.Before == null)
+        {
+            return position?.Index;
+        }
+        var anchorPath = ResolveIdPath(position.After ?? position.Before!);
+        var anchorMatch = Regex.Match(anchorPath, @"^/slide\[(\d+)\]/table\[(\d+)\]/col\[(\d+)\]$");
+        if (!anchorMatch.Success ||
+            int.Parse(anchorMatch.Groups[1].Value) != slideIdx ||
+            int.Parse(anchorMatch.Groups[2].Value) != tableIdx)
+        {
+            throw new ArgumentException(
+                $"Column anchor must be a column in the same table: /slide[{slideIdx}]/table[{tableIdx}]/col[N]. Got: {anchorPath}");
+        }
+        var anchorColIdx = int.Parse(anchorMatch.Groups[3].Value); // 1-based
+        if (sourceColIdx.HasValue && anchorColIdx == sourceColIdx.Value)
+            return -1; // self-anchor sentinel
+        var target = position.After != null ? anchorColIdx : anchorColIdx - 1; // 0-based
+        // Compensate when removing the source shifts later siblings left
+        if (sourceColIdx.HasValue && sourceColIdx.Value < anchorColIdx) target -= 1;
+        return target;
+    }
+
+    /// <summary>
+    /// Move a table column within its table by --before/--after/--index. Same
+    /// table only — cross-table moves are ambiguous (grid widths differ).
+    /// Mirrors MoveTableRow's compensation logic for delete-then-insert order.
+    /// </summary>
+    private string MoveTableColumn(Match colMatch, InsertPosition? position, string? targetParentPath)
+    {
+        var slideIdx = int.Parse(colMatch.Groups[1].Value);
+        var tableIdx = int.Parse(colMatch.Groups[2].Value);
+        var colIdx = int.Parse(colMatch.Groups[3].Value);
+
+        if (!string.IsNullOrEmpty(targetParentPath))
+        {
+            var expected = $"/slide[{slideIdx}]/table[{tableIdx}]";
+            if (!string.Equals(targetParentPath, expected, StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException(
+                    $"Cross-table column move is not supported. Source column's table is {expected}; target was {targetParentPath}.");
+        }
+
+        var (slidePart, table) = ResolveTable(slideIdx, tableIdx);
+        var grid = table.GetFirstChild<Drawing.TableGrid>()
+            ?? throw new InvalidOperationException("Table has no grid");
+        var gridCols = grid.Elements<Drawing.GridColumn>().ToList();
+        if (colIdx < 1 || colIdx > gridCols.Count)
+            throw new ArgumentException($"Column {colIdx} not found (total: {gridCols.Count})");
+
+        var targetIdx = ResolveColumnAnchorIndex(position, slideIdx, tableIdx, colIdx);
+        if (targetIdx == -1) // self-anchor
+            return $"/slide[{slideIdx}]/table[{tableIdx}]/col[{colIdx}]";
+
+        // Detach gridCol + per-row tc
+        var movingGridCol = gridCols[colIdx - 1];
+        movingGridCol.Remove();
+        var movingCells = new List<Drawing.TableCell>();
+        foreach (var row in table.Elements<Drawing.TableRow>())
+        {
+            var cells = row.Elements<Drawing.TableCell>().ToList();
+            if (colIdx <= cells.Count)
+            {
+                movingCells.Add(cells[colIdx - 1]);
+                cells[colIdx - 1].Remove();
+            }
+            else
+            {
+                movingCells.Add(new Drawing.TableCell()); // pad if asymmetric
+            }
+        }
+
+        // Insert gridCol at targetIdx
+        var remainingGridCols = grid.Elements<Drawing.GridColumn>().ToList();
+        if (targetIdx.HasValue && targetIdx.Value >= 0 && targetIdx.Value < remainingGridCols.Count)
+            remainingGridCols[targetIdx.Value].InsertBeforeSelf(movingGridCol);
+        else
+            grid.AppendChild(movingGridCol);
+
+        // Insert tc into each row at the same position
+        int rowIdx2 = 0;
+        foreach (var row in table.Elements<Drawing.TableRow>())
+        {
+            var rowCells = row.Elements<Drawing.TableCell>().ToList();
+            var movingCell = movingCells[rowIdx2++];
+            if (targetIdx.HasValue && targetIdx.Value >= 0 && targetIdx.Value < rowCells.Count)
+                rowCells[targetIdx.Value].InsertBeforeSelf(movingCell);
+            else
+                row.AppendChild(movingCell);
+        }
+
+        GetSlide(slidePart).Save();
+        var newGridCols = grid.Elements<Drawing.GridColumn>().ToList();
+        var newColIdx = newGridCols.IndexOf(movingGridCol) + 1;
+        return $"/slide[{slideIdx}]/table[{tableIdx}]/col[{newColIdx}]";
+    }
+
+    /// <summary>
+    /// Clone a table column (gridCol + per-row tc) inside the same table.
+    /// </summary>
+    private string CopyTableColumn(Match colMatch, InsertPosition? position, string? targetParentPath)
+    {
+        var slideIdx = int.Parse(colMatch.Groups[1].Value);
+        var tableIdx = int.Parse(colMatch.Groups[2].Value);
+        var colIdx = int.Parse(colMatch.Groups[3].Value);
+
+        if (!string.IsNullOrEmpty(targetParentPath))
+        {
+            var expected = $"/slide[{slideIdx}]/table[{tableIdx}]";
+            if (!string.Equals(targetParentPath, expected, StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException(
+                    $"Cross-table column copy is not supported. Source column's table is {expected}; target was {targetParentPath}.");
+        }
+
+        var (slidePart, table) = ResolveTable(slideIdx, tableIdx);
+        var grid = table.GetFirstChild<Drawing.TableGrid>()
+            ?? throw new InvalidOperationException("Table has no grid");
+        var gridCols = grid.Elements<Drawing.GridColumn>().ToList();
+        if (colIdx < 1 || colIdx > gridCols.Count)
+            throw new ArgumentException($"Column {colIdx} not found (total: {gridCols.Count})");
+
+        // No source removal here, so don't pass sourceColIdx (no compensation needed).
+        var targetIdx = ResolveColumnAnchorIndex(position, slideIdx, tableIdx, sourceColIdx: null);
+
+        var clonedGridCol = (Drawing.GridColumn)gridCols[colIdx - 1].CloneNode(true);
+        var clonedCells = new List<Drawing.TableCell>();
+        foreach (var row in table.Elements<Drawing.TableRow>())
+        {
+            var cells = row.Elements<Drawing.TableCell>().ToList();
+            clonedCells.Add(colIdx <= cells.Count
+                ? (Drawing.TableCell)cells[colIdx - 1].CloneNode(true)
+                : new Drawing.TableCell());
+        }
+
+        var siblingsGrid = grid.Elements<Drawing.GridColumn>().ToList();
+        if (targetIdx.HasValue && targetIdx.Value >= 0 && targetIdx.Value < siblingsGrid.Count)
+            siblingsGrid[targetIdx.Value].InsertBeforeSelf(clonedGridCol);
+        else
+            grid.AppendChild(clonedGridCol);
+
+        int rowIdx2 = 0;
+        foreach (var row in table.Elements<Drawing.TableRow>())
+        {
+            var rowCells = row.Elements<Drawing.TableCell>().ToList();
+            var clone = clonedCells[rowIdx2++];
+            if (targetIdx.HasValue && targetIdx.Value >= 0 && targetIdx.Value < rowCells.Count)
+                rowCells[targetIdx.Value].InsertBeforeSelf(clone);
+            else
+                row.AppendChild(clone);
+        }
+
+        // Update GraphicFrame container width to match new total grid width
+        var graphicFrame = table.Ancestors<GraphicFrame>().FirstOrDefault();
+        if (graphicFrame?.Transform?.Extents != null)
+        {
+            long totalColWidth = grid.Elements<Drawing.GridColumn>()
+                .Sum(gc => gc.Width?.Value ?? 914400);
+            graphicFrame.Transform.Extents.Cx = totalColWidth;
+        }
+
+        GetSlide(slidePart).Save();
+        var newGridCols = grid.Elements<Drawing.GridColumn>().ToList();
+        var newColIdx = newGridCols.IndexOf(clonedGridCol) + 1;
+        return $"/slide[{slideIdx}]/table[{tableIdx}]/col[{newColIdx}]";
     }
 
     /// <summary>
