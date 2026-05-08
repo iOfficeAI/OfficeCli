@@ -1098,7 +1098,7 @@ public partial class ExcelHandler
                 tblCols[ci].TotalsRowFunction = TotalsRowFunctionValues.Custom;
                 tblCols[ci].TotalsRowLabel = null;
                 tblCols[ci].TotalsRowFormula = new TotalsRowFormula(customFormula);
-                existingCell.CellFormula = new CellFormula(customFormula);
+                existingCell.CellFormula = new CellFormula(OfficeCli.Core.PivotTableHelper.SanitizeXmlText(customFormula));
                 existingCell.CellValue = null;
                 existingCell.DataType = null;
             }

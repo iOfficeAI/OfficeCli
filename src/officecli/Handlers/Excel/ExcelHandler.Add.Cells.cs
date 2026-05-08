@@ -393,7 +393,7 @@ public partial class ExcelHandler
             if (value.StartsWith('=') && value.Length > 1)
             {
                 RejectCrossWorkbookFormula(value);
-                cell.CellFormula = new CellFormula(Core.ModernFunctionQualifier.Qualify(Core.ModernFunctionQualifier.AutoQuoteSheetRefs(value.TrimStart('='))));
+                cell.CellFormula = new CellFormula(Core.PivotTableHelper.SanitizeXmlText(Core.ModernFunctionQualifier.Qualify(Core.ModernFunctionQualifier.AutoQuoteSheetRefs(value.TrimStart('=')))));
                 cell.CellValue = null;
             }
             else
@@ -429,7 +429,7 @@ public partial class ExcelHandler
             if (fTrim.StartsWith("{") && fTrim.EndsWith("}"))
                 throw new ArgumentException("Literal braces '{...}' around a formula create an Excel-rejected file. Use --prop arrayformula=... (without braces) to declare a CSE array formula.");
             RejectCrossWorkbookFormula(fTrim);
-            cell.CellFormula = new CellFormula(Core.ModernFunctionQualifier.Qualify(Core.ModernFunctionQualifier.AutoQuoteSheetRefs(fTrim)));
+            cell.CellFormula = new CellFormula(Core.PivotTableHelper.SanitizeXmlText(Core.ModernFunctionQualifier.Qualify(Core.ModernFunctionQualifier.AutoQuoteSheetRefs(fTrim))));
             cell.CellValue = null;
         }
         // CE1: allow `runs=<json>` without an explicit `type=richtext`.
@@ -534,7 +534,7 @@ public partial class ExcelHandler
             // arrRef so the array formula spills correctly; otherwise default
             // to the single cellRef.
             var arrRef = arrayFormulaRefRange ?? properties.GetValueOrDefault("ref", cellRef);
-            cell.CellFormula = new CellFormula(Core.ModernFunctionQualifier.Qualify(Core.ModernFunctionQualifier.AutoQuoteSheetRefs(arrFormula.TrimStart('='))))
+            cell.CellFormula = new CellFormula(Core.PivotTableHelper.SanitizeXmlText(Core.ModernFunctionQualifier.Qualify(Core.ModernFunctionQualifier.AutoQuoteSheetRefs(arrFormula.TrimStart('=')))))
             {
                 FormulaType = CellFormulaValues.Array,
                 Reference = arrRef

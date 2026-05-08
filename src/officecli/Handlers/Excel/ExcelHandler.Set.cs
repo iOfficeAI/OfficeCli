@@ -469,7 +469,11 @@ public partial class ExcelHandler
                             "To clear a formula use --prop value= (set to a plain value) or --prop clear=true.");
                     RejectCrossWorkbookFormula(value);
                     ValidateFormulaCellRefs(value);
-                    cell.CellFormula = new CellFormula(Core.ModernFunctionQualifier.Qualify(Core.ModernFunctionQualifier.AutoQuoteSheetRefs(value.TrimStart('='))));
+                    // BUG R4-A: scrub XML-illegal control chars (U+000B, U+000C, etc.)
+                    // from formula text before assignment. CellValue text gets sanitized
+                    // elsewhere; without symmetric handling here, save throws
+                    // ArgumentException("invalid character") from XmlUtf8RawTextWriter.
+                    cell.CellFormula = new CellFormula(Core.PivotTableHelper.SanitizeXmlText(Core.ModernFunctionQualifier.Qualify(Core.ModernFunctionQualifier.AutoQuoteSheetRefs(value.TrimStart('=')))));
                     // Try to evaluate and cache the result immediately
                     var evalSheetData = GetSheet(worksheet).GetFirstChild<SheetData>();
                     var evaluator = new Core.FormulaEvaluator(evalSheetData!, _doc.WorkbookPart);
@@ -575,7 +579,7 @@ public partial class ExcelHandler
                 {
                     RejectCrossWorkbookFormula(value);
                     var arrRef = properties.GetValueOrDefault("ref", cellRef);
-                    cell.CellFormula = new CellFormula(Core.ModernFunctionQualifier.Qualify(Core.ModernFunctionQualifier.AutoQuoteSheetRefs(value.TrimStart('='))))
+                    cell.CellFormula = new CellFormula(Core.PivotTableHelper.SanitizeXmlText(Core.ModernFunctionQualifier.Qualify(Core.ModernFunctionQualifier.AutoQuoteSheetRefs(value.TrimStart('=')))))
                     {
                         FormulaType = CellFormulaValues.Array,
                         Reference = arrRef
