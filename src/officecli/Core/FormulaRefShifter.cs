@@ -80,7 +80,22 @@ public static class FormulaRefShifter
         IReadOnlyDictionary<int, int> oldToNewRow)
     {
         if (string.IsNullOrEmpty(formula) || oldToNewRow.Count == 0) return formula;
+        return WalkFormulaTokens(formula, chunk =>
+            RenumberRefsInChunk(chunk, currentSheet, modifiedSheet, oldToNewRow));
+    }
 
+    /// <summary>
+    /// Outer tokenize-skip walker shared by every <c>FormulaRefShifter</c>
+    /// public entry point. Streams the formula char-by-char, copying string
+    /// literals (with the Excel <c>""</c> doubling escape) and bracket
+    /// content (structured refs like <c>Table1[Col1]</c>; cross-workbook
+    /// prefixes like <c>[Book2]Sheet1!A1</c>) verbatim. Hands every other
+    /// contiguous chunk to <paramref name="chunkProcessor"/>, which runs
+    /// the per-match cell-ref rewrite for that semantic (shift / renumber /
+    /// copy-delta) and returns the rewritten chunk.
+    /// </summary>
+    private static string WalkFormulaTokens(string formula, Func<string, string> chunkProcessor)
+    {
         var sb = new StringBuilder(formula.Length);
         int i = 0;
         while (i < formula.Length)
@@ -117,9 +132,7 @@ public static class FormulaRefShifter
             {
                 int start = i;
                 while (i < formula.Length && formula[i] != '"' && formula[i] != '[') i++;
-                sb.Append(RenumberRefsInChunk(
-                    formula.AsSpan(start, i - start).ToString(),
-                    currentSheet, modifiedSheet, oldToNewRow));
+                sb.Append(chunkProcessor(formula.AsSpan(start, i - start).ToString()));
             }
         }
         return sb.ToString();
@@ -207,49 +220,8 @@ public static class FormulaRefShifter
         IReadOnlyDictionary<int, int> oldToNewCol)
     {
         if (string.IsNullOrEmpty(formula) || oldToNewCol.Count == 0) return formula;
-
-        var sb = new StringBuilder(formula.Length);
-        int i = 0;
-        while (i < formula.Length)
-        {
-            char ch = formula[i];
-            if (ch == '"')
-            {
-                sb.Append(ch); i++;
-                while (i < formula.Length)
-                {
-                    sb.Append(formula[i]);
-                    if (formula[i] == '"')
-                    {
-                        if (i + 1 < formula.Length && formula[i + 1] == '"')
-                        { sb.Append(formula[i + 1]); i += 2; continue; }
-                        i++; break;
-                    }
-                    i++;
-                }
-            }
-            else if (ch == '[')
-            {
-                int depth = 0;
-                while (i < formula.Length)
-                {
-                    char c = formula[i];
-                    sb.Append(c);
-                    if (c == '[') depth++;
-                    else if (c == ']') { depth--; if (depth == 0) { i++; break; } }
-                    i++;
-                }
-            }
-            else
-            {
-                int start = i;
-                while (i < formula.Length && formula[i] != '"' && formula[i] != '[') i++;
-                sb.Append(RenumberColRefsInChunk(
-                    formula.AsSpan(start, i - start).ToString(),
-                    currentSheet, modifiedSheet, oldToNewCol));
-            }
-        }
-        return sb.ToString();
+        return WalkFormulaTokens(formula, chunk =>
+            RenumberColRefsInChunk(chunk, currentSheet, modifiedSheet, oldToNewCol));
     }
 
     private static string RenumberColRefsInChunk(
@@ -317,49 +289,8 @@ public static class FormulaRefShifter
         int deltaRow)
     {
         if (string.IsNullOrEmpty(formula) || (deltaCol == 0 && deltaRow == 0)) return formula;
-
-        var sb = new StringBuilder(formula.Length);
-        int i = 0;
-        while (i < formula.Length)
-        {
-            char ch = formula[i];
-            if (ch == '"')
-            {
-                sb.Append(ch); i++;
-                while (i < formula.Length)
-                {
-                    sb.Append(formula[i]);
-                    if (formula[i] == '"')
-                    {
-                        if (i + 1 < formula.Length && formula[i + 1] == '"')
-                        { sb.Append(formula[i + 1]); i += 2; continue; }
-                        i++; break;
-                    }
-                    i++;
-                }
-            }
-            else if (ch == '[')
-            {
-                int depth = 0;
-                while (i < formula.Length)
-                {
-                    char c = formula[i];
-                    sb.Append(c);
-                    if (c == '[') depth++;
-                    else if (c == ']') { depth--; if (depth == 0) { i++; break; } }
-                    i++;
-                }
-            }
-            else
-            {
-                int start = i;
-                while (i < formula.Length && formula[i] != '"' && formula[i] != '[') i++;
-                sb.Append(DeltaShiftRefsInChunk(
-                    formula.AsSpan(start, i - start).ToString(),
-                    currentSheet, modifiedSheet, deltaCol, deltaRow));
-            }
-        }
-        return sb.ToString();
+        return WalkFormulaTokens(formula, chunk =>
+            DeltaShiftRefsInChunk(chunk, currentSheet, modifiedSheet, deltaCol, deltaRow));
     }
 
     private static string DeltaShiftRefsInChunk(
@@ -443,61 +374,8 @@ public static class FormulaRefShifter
         int insertIdx)
     {
         if (string.IsNullOrEmpty(formula)) return formula;
-
-        var sb = new StringBuilder(formula.Length);
-        int i = 0;
-        while (i < formula.Length)
-        {
-            char ch = formula[i];
-            if (ch == '"')
-            {
-                // Copy a string literal verbatim. Excel escapes embedded
-                // quotes by doubling them ("" inside "...").
-                sb.Append(ch);
-                i++;
-                while (i < formula.Length)
-                {
-                    sb.Append(formula[i]);
-                    if (formula[i] == '"')
-                    {
-                        if (i + 1 < formula.Length && formula[i + 1] == '"')
-                        {
-                            sb.Append(formula[i + 1]);
-                            i += 2;
-                            continue;
-                        }
-                        i++;
-                        break;
-                    }
-                    i++;
-                }
-            }
-            else if (ch == '[')
-            {
-                // Copy bracket content verbatim — covers structured refs
-                // (Table1[Col1], Table1[#Headers]) and cross-workbook prefixes
-                // ([Book2]Sheet1!A1). Brackets nest in some structured forms.
-                int depth = 0;
-                while (i < formula.Length)
-                {
-                    char c = formula[i];
-                    sb.Append(c);
-                    if (c == '[') depth++;
-                    else if (c == ']') { depth--; if (depth == 0) { i++; break; } }
-                    i++;
-                }
-            }
-            else
-            {
-                int start = i;
-                while (i < formula.Length && formula[i] != '"' && formula[i] != '[')
-                    i++;
-                sb.Append(ShiftRefsInChunk(
-                    formula.AsSpan(start, i - start).ToString(),
-                    currentSheet, modifiedSheet, direction, insertIdx));
-            }
-        }
-        return sb.ToString();
+        return WalkFormulaTokens(formula, chunk =>
+            ShiftRefsInChunk(chunk, currentSheet, modifiedSheet, direction, insertIdx));
     }
 
     private static string ShiftRefsInChunk(
