@@ -13,7 +13,7 @@ static partial class CommandBuilder
     {
         var watchFileArg = new Argument<FileInfo>("file") { Description = "Office document path (.pptx, .xlsx, .docx)" };
         var watchPortOpt = new Option<int>("--port") { Description = "HTTP port for preview server" };
-        watchPortOpt.DefaultValueFactory = _ => 18080;
+        watchPortOpt.DefaultValueFactory = _ => 26315;
 
         var watchCommand = new Command("watch", "Start a live preview server that refreshes when officecli modifies the document (external edits are not detected)");
         watchCommand.Add(watchFileArg);
