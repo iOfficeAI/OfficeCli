@@ -274,10 +274,11 @@ officecli merge q4-template.pptx q4-acme.pptx data.json
 
 #### Round-trip dump — learn from existing docs
 
-`dump` serializes any `.docx` into a replayable batch JSON; `batch` replays it. Given a sample document the user wants to imitate, an agent reads the structured spec — paragraphs, styles, table shape — instead of raw OOXML XML, mutates, and replays. Bridges "I have an existing template" and "generate me 100 variations."
+`dump` serializes any `.docx` — whole document **or any subtree** (a single paragraph, table, the styles part, numbering, theme, or settings) — into a replayable batch JSON; `batch` replays it. Given a sample the user wants to imitate, an agent reads the structured spec instead of raw OOXML XML, mutates, and replays. Bridges "I have an existing template" and "generate me 100 variations."
 
 ```bash
-officecli dump existing.docx -o blueprint.json
+officecli dump existing.docx -o blueprint.json                  # whole document
+officecli dump existing.docx /body/tbl[1] -o table.json         # any subtree
 officecli batch new.docx --input blueprint.json
 ```
 

@@ -274,10 +274,11 @@ officecli merge q4-template.pptx q4-acme.pptx data.json
 
 #### Dump によるラウンドトリップ — 既存ドキュメントから学ぶ
 
-`dump` は任意の `.docx` を再生可能なバッチ JSON にシリアライズし、`batch` で再生。ユーザーが模倣したいサンプルドキュメントから、エージェントは生の OOXML XML ではなく構造化された仕様 — 段落、スタイル、表の形 — を読み、変更して再生します。"既存テンプレートがある" と "100 個のバリエーションを生成して" を繋ぎます。
+`dump` は任意の `.docx` — ドキュメント全体**または任意のサブツリー**（単一の段落、表、styles、numbering、theme、settings）— を再生可能なバッチ JSON にシリアライズし、`batch` で再生。ユーザーが模倣したいサンプルから、エージェントは生の OOXML XML ではなく構造化された仕様を読み、変更して再生します。"既存テンプレートがある" と "100 個のバリエーションを生成して" を繋ぎます。
 
 ```bash
-officecli dump existing.docx -o blueprint.json
+officecli dump existing.docx -o blueprint.json                  # ドキュメント全体
+officecli dump existing.docx /body/tbl[1] -o table.json         # 任意のサブツリー
 officecli batch new.docx --input blueprint.json
 ```
 

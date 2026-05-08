@@ -274,10 +274,11 @@ officecli merge q4-template.pptx q4-acme.pptx data.json
 
 #### Dump 라운드트립 — 기존 문서에서 학습
 
-`dump`는 모든 `.docx`를 재생 가능한 batch JSON으로 직렬화하고, `batch`가 재생합니다. 사용자가 모방하고 싶은 샘플 문서가 주어지면, 에이전트는 원시 OOXML XML이 아닌 구조화된 사양 — 단락, 스타일, 표 모양 — 을 읽고, 변경하여 재생합니다. "기존 템플릿이 있다"와 "100개 변형을 생성해 줘" 사이의 다리.
+`dump`는 모든 `.docx`를 — 전체 문서 **또는 임의의 서브트리** (단일 단락, 표, styles, numbering, theme, settings) — 재생 가능한 batch JSON으로 직렬화하고, `batch`가 재생합니다. 사용자가 모방하고 싶은 샘플 문서가 주어지면, 에이전트는 원시 OOXML XML이 아닌 구조화된 사양을 읽고, 변경하여 재생합니다. "기존 템플릿이 있다"와 "100개 변형을 생성해 줘" 사이의 다리.
 
 ```bash
-officecli dump existing.docx -o blueprint.json
+officecli dump existing.docx -o blueprint.json                  # 전체 문서
+officecli dump existing.docx /body/tbl[1] -o table.json         # 임의의 서브트리
 officecli batch new.docx --input blueprint.json
 ```
 

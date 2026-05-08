@@ -274,10 +274,11 @@ officecli merge q4-template.pptx q4-acme.pptx data.json
 
 #### Dump 往返 —— 从现有文档学习
 
-`dump` 把任意 `.docx` 序列化为可重放的 batch JSON，`batch` 重放回去。给一份用户想模仿的范本，智能体读结构化规格——段落、样式、表格形状——而不是原始 OOXML XML，修改后重放。打通"我有一份现成模板"和"给我生成 100 份变体"之间的链路。
+`dump` 把任意 `.docx` —— 整个文档**或任意子树**（单段、单表、styles、numbering、theme、settings）——序列化为可重放的 batch JSON，`batch` 重放回去。给一份用户想模仿的范本，智能体读结构化规格而不是原始 OOXML XML，修改后重放。打通"我有一份现成模板"和"给我生成 100 份变体"之间的链路。
 
 ```bash
-officecli dump existing.docx -o blueprint.json
+officecli dump existing.docx -o blueprint.json                  # 整个文档
+officecli dump existing.docx /body/tbl[1] -o table.json         # 任意子树
 officecli batch new.docx --input blueprint.json
 ```
 
