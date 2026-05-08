@@ -1,0 +1,35 @@
+{
+  "$schema": "../_schema.json",
+  "format": "docx",
+  "element": "column",
+  "parent": "table",
+  "operations": {
+    "add": true,
+    "set": false,
+    "get": false,
+    "query": false,
+    "remove": true
+  },
+  "paths": {
+    "positional": ["/body/tbl[N]/col[C]"]
+  },
+  "note": "Virtual element — OOXML has no <w:col> child of <w:tbl>; the path is synthesized from <w:tblGrid>/<w:gridCol> + the per-row cell at column slot C. Same-table only for move/copy. Get/Set/Query at the column level are not supported (read width via /body/tbl[N] tblGrid or per-cell tcW). Insert is rejected when the column slot crosses a merged cell (gridSpan/vMerge) — unmerge first.",
+  "properties": {
+    "width": {
+      "type": "length",
+      "description": "column width in twips (or any twips-parseable length).",
+      "add": true, "set": false, "get": false,
+      "examples": ["--prop width=2400", "--prop width=3cm"],
+      "readback": "n/a (column-level Get not implemented; inspect tblGrid)",
+      "enforcement": "report"
+    },
+    "text": {
+      "type": "string",
+      "description": "seed text inserted into every new cell of this column (one paragraph per cell).",
+      "add": true, "set": false, "get": false,
+      "examples": ["--prop text=Header"],
+      "readback": "not surfaced at column level",
+      "enforcement": "strict"
+    }
+  }
+}
