@@ -73,6 +73,13 @@ internal class RangeData
     public FormulaResult?[,] Cells { get; }
     public int Rows { get; }
     public int Cols { get; }
+    // Origin row/col of the top-left cell when this RangeData was produced by a
+    // resolved reference (1-based). 0 means "not from a reference" (e.g. literal
+    // array). Used by ROW() / COLUMN() / ADDRESS() so they can answer the
+    // reference's origin even when given an OFFSET-returned Area instead of a
+    // raw cell-ref string.
+    public int BaseRow { get; init; }
+    public int BaseCol { get; init; }
 
     public RangeData(FormulaResult?[,] cells) { Cells = cells; Rows = cells.GetLength(0); Cols = cells.GetLength(1); }
 

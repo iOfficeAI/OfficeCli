@@ -102,13 +102,6 @@ internal partial class FormulaEvaluator
     /// </summary>
     private FormulaResult? ResolveRef(RefArg r)
     {
-        if (r.Width == 1 && r.Height == 1)
-        {
-            var cellRef = $"{IndexToCol(r.Col)}{r.Row}";
-            return r.Sheet != null
-                ? ResolveSheetCellResult($"{r.Sheet}!{cellRef}")
-                : ResolveCellResult(cellRef);
-        }
         var cells = new FormulaResult?[r.Height, r.Width];
         for (int dr = 0; dr < r.Height; dr++)
             for (int dc = 0; dc < r.Width; dc++)
@@ -118,7 +111,11 @@ internal partial class FormulaEvaluator
                     ? ResolveSheetCellResult($"{r.Sheet}!{cellRef}")
                     : ResolveCellResult(cellRef);
             }
-        return FormulaResult.Area(new RangeData(cells));
+        // Always return an Area, even for single-cell refs. This preserves the
+        // origin row/col so ROW(OFFSET(...)) / COLUMN(OFFSET(...)) / ADDRESS can
+        // answer correctly. Single-cell consumers (AsNumber, AsString) transparently
+        // peek the lone cell via FirstCell() in FormulaResult.
+        return FormulaResult.Area(new RangeData(cells) { BaseRow = r.Row, BaseCol = r.Col });
     }
 
     /// <summary>

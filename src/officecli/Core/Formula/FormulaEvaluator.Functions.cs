@@ -157,7 +157,7 @@ internal partial class FormulaEvaluator
             "ISNUMBER" => FR_B(arg(0)?.IsNumeric == true),
             "ISTEXT" => FR_B(arg(0)?.IsString == true),
             "ISBLANK" => FR_B(arg(0) == null || (arg(0)?.AsString() == "" && !arg(0)!.IsNumeric)),
-            "ISERROR" or "ISERR" => args.Count > 0 && args[0] is RangeData rd_err
+            "ISERROR" or "ISERR" => args.Count > 0 && AsRangeData(args[0]) is { } rd_err
                 ? FormulaResult.Array(rd_err.ToFlatResults().Select(r => r?.IsError == true ? 1.0 : 0.0).ToArray())
                 : FR_B(arg(0)?.IsError == true),
             "ISNA" => FR_B(arg(0)?.ErrorValue == "#N/A"),
@@ -306,7 +306,7 @@ internal partial class FormulaEvaluator
         var parts = new List<string>();
         for (int i = 2; i < args.Count; i++)
         {
-            if (args[i] is RangeData rd2)
+            if (AsRangeData(args[i]) is { } rd2)
             {
                 for (int row = 0; row < rd2.Rows; row++)
                     for (int col = 0; col < rd2.Cols; col++)
@@ -333,7 +333,7 @@ internal partial class FormulaEvaluator
             if (rowIdx < 1 || rowIdx > rd.Rows || colIdx < 1 || colIdx > rd.Cols) return FormulaResult.Error("#REF!");
             return rd.Cells[rowIdx - 1, colIdx - 1] ?? FormulaResult.Number(0);
         }
-        if (args[0] is double[] arr)
+        if (AsDoubles(args[0]) is { } arr)
         {
             var idx = args[1] is FormulaResult r2 ? (int)r2.AsNumber() - 1 : 0;
             return idx >= 0 && idx < arr.Length ? FR(arr[idx]) : FormulaResult.Error("#REF!");
@@ -345,12 +345,12 @@ internal partial class FormulaEvaluator
     {
         if (args.Count < 2) return null;
         var lookup = args[0] is FormulaResult r ? r : null; if (lookup == null) return null;
-        if (args[1] is RangeData rd)
+        if (AsRangeData(args[1]) is { } rd)
         {
             if (rd.Cols == 1) { for (int i = 0; i < rd.Rows; i++) { var cell = rd.Cells[i, 0]; if (cell != null && CompareValues(cell, lookup) == 0) return FR(i + 1); } }
             else if (rd.Rows == 1) { for (int i = 0; i < rd.Cols; i++) { var cell = rd.Cells[0, i]; if (cell != null && CompareValues(cell, lookup) == 0) return FR(i + 1); } }
         }
-        if (args[1] is double[] arr)
+        else if (AsDoubles(args[1]) is { } arr)
         { for (int i = 0; i < arr.Length; i++) if (Math.Abs(arr[i] - lookup.AsNumber()) < 1e-10) return FR(i + 1); }
         return FormulaResult.Error("#N/A");
     }
@@ -358,6 +358,11 @@ internal partial class FormulaEvaluator
     private FormulaResult? EvalRowCol(List<object> args, bool isRow)
     {
         if (args.Count == 0) return null;
+        // OFFSET / INDIRECT / ranges produce a FormulaResult.Area whose underlying
+        // RangeData carries the resolved reference's top-left origin. Use that
+        // when present so ROW(OFFSET(A1,2,0)) reports 3 (not the cell value's row).
+        if (AsRangeData(args[0]) is { BaseRow: > 0 } rd)
+            return FR(isRow ? rd.BaseRow : rd.BaseCol);
         if (args[0] is FormulaResult r)
         { var m = Regex.Match(r.AsString(), @"([A-Z]+)(\d+)", RegexOptions.IgnoreCase);
           return m.Success ? FR(isRow ? int.Parse(m.Groups[2].Value) : ColToIndex(m.Groups[1].Value)) : null; }
@@ -366,8 +371,8 @@ internal partial class FormulaEvaluator
 
     private static FormulaResult? EvalRowsCols(List<object> args, bool isRows)
     {
-        if (args.Count > 0 && args[0] is RangeData rd) return FR(isRows ? rd.Rows : rd.Cols);
-        if (args.Count > 0 && args[0] is double[] arr) return FR(arr.Length);
+        if (args.Count > 0 && AsRangeData(args[0]) is { } rd) return FR(isRows ? rd.Rows : rd.Cols);
+        if (args.Count > 0 && AsDoubles(args[0]) is { } arr) return FR(arr.Length);
         return FR(1);
     }
 
@@ -375,7 +380,7 @@ internal partial class FormulaEvaluator
     {
         if (args.Count < 3) return null;
         var lookupVal = args[0] is FormulaResult r ? r : null; if (lookupVal == null) return null;
-        var table = args[1] is RangeData rd ? rd : null; if (table == null) return FormulaResult.Error("#N/A");
+        var table = AsRangeData(args[1]); if (table == null) return FormulaResult.Error("#N/A");
         var colIndex = args[2] is FormulaResult ci ? (int)ci.AsNumber() : 0;
         if (colIndex < 1 || colIndex > table.Cols) return FormulaResult.Error("#REF!");
         var exactMatch = args.Count > 3 && args[3] is FormulaResult rm && (rm.AsNumber() == 0 || rm.AsString().Equals("FALSE", StringComparison.OrdinalIgnoreCase));
@@ -393,7 +398,7 @@ internal partial class FormulaEvaluator
     {
         if (args.Count < 3) return null;
         var lookupVal = args[0] is FormulaResult r ? r : null; if (lookupVal == null) return null;
-        var table = args[1] is RangeData rd ? rd : null; if (table == null) return FormulaResult.Error("#N/A");
+        var table = AsRangeData(args[1]); if (table == null) return FormulaResult.Error("#N/A");
         var rowIndex = args[2] is FormulaResult ri ? (int)ri.AsNumber() : 0;
         if (rowIndex < 1 || rowIndex > table.Rows) return FormulaResult.Error("#REF!");
         var exactMatch = args.Count > 3 && args[3] is FormulaResult rm && (rm.AsNumber() == 0 || rm.AsString().Equals("FALSE", StringComparison.OrdinalIgnoreCase));
@@ -417,7 +422,7 @@ internal partial class FormulaEvaluator
         if (args.Count < 2) return null;
         var lookupVal = args[0] is FormulaResult r ? r : null;
         if (lookupVal == null) return null;
-        var lv = args[1] is RangeData rd ? rd : null;
+        var lv = AsRangeData(args[1]);
         if (lv == null) return FormulaResult.Error("#N/A");
 
         // Vector form (1D): optionally with a parallel result_vector
@@ -426,7 +431,7 @@ internal partial class FormulaEvaluator
             int found = ApproximateMatchVector(lv, lookupVal);
             if (found < 0) return FormulaResult.Error("#N/A");
 
-            var resultVec = args.Count >= 3 && args[2] is RangeData rv ? rv : lv;
+            var resultVec = args.Count >= 3 && AsRangeData(args[2]) is { } rv ? rv : lv;
             if (resultVec.Rows == 1 && found < resultVec.Cols)
                 return resultVec.Cells[0, found] ?? FormulaResult.Number(0);
             if (resultVec.Cols == 1 && found < resultVec.Rows)
@@ -499,8 +504,8 @@ internal partial class FormulaEvaluator
         if (args.Count < 3) return null;
         var lookupVal = args[0] is FormulaResult r ? r : null;
         if (lookupVal == null) return null;
-        var lookupArr = args[1] is RangeData la ? la : null;
-        var returnArr = args[2] is RangeData ra ? ra : null;
+        var lookupArr = AsRangeData(args[1]);
+        var returnArr = AsRangeData(args[2]);
         if (lookupArr == null || returnArr == null) return FormulaResult.Error("#N/A");
 
         var ifNotFound = args.Count >= 4 && args[3] is FormulaResult inf ? inf : null;
@@ -578,7 +583,7 @@ internal partial class FormulaEvaluator
 
     private static FormulaResult? EvalLarge(List<object> args)
     {
-        var arr = args.Count > 0 && args[0] is double[] a ? a : null;
+        var arr = args.Count > 0 ? AsDoubles(args[0]) : null;
         var k = args.Count > 1 && args[1] is FormulaResult r ? (int)r.AsNumber() : 1;
         if (arr == null || k < 1 || k > arr.Length) return FormulaResult.Error("#NUM!");
         return FR(arr.OrderByDescending(x => x).ElementAt(k - 1));
@@ -586,7 +591,7 @@ internal partial class FormulaEvaluator
 
     private static FormulaResult? EvalSmall(List<object> args)
     {
-        var arr = args.Count > 0 && args[0] is double[] a ? a : null;
+        var arr = args.Count > 0 ? AsDoubles(args[0]) : null;
         var k = args.Count > 1 && args[1] is FormulaResult r ? (int)r.AsNumber() : 1;
         if (arr == null || k < 1 || k > arr.Length) return FormulaResult.Error("#NUM!");
         return FR(arr.OrderBy(x => x).ElementAt(k - 1));
@@ -596,7 +601,7 @@ internal partial class FormulaEvaluator
     {
         if (args.Count < 2) return null;
         var val = args[0] is FormulaResult r ? r.AsNumber() : 0;
-        var arr = args[1] is double[] a ? a : null; if (arr == null) return null;
+        var arr = AsDoubles(args[1]); if (arr == null) return null;
         var order = args.Count > 2 && args[2] is FormulaResult r2 ? (int)r2.AsNumber() : 0;
         var sorted = order == 0 ? arr.OrderByDescending(x => x).ToArray() : arr.OrderBy(x => x).ToArray();
         for (int i = 0; i < sorted.Length; i++) if (Math.Abs(sorted[i] - val) < 1e-10) return FR(i + 1);
@@ -605,7 +610,7 @@ internal partial class FormulaEvaluator
 
     private static FormulaResult? EvalPercentile(List<object> args)
     {
-        var arr = args.Count > 0 && args[0] is double[] a ? a : null;
+        var arr = args.Count > 0 ? AsDoubles(args[0]) : null;
         var k = args.Count > 1 && args[1] is FormulaResult r ? r.AsNumber() : 0;
         if (arr == null || arr.Length == 0 || k < 0 || k > 1) return FormulaResult.Error("#NUM!");
         var sorted = arr.OrderBy(x => x).ToArray();
@@ -615,7 +620,7 @@ internal partial class FormulaEvaluator
 
     private static FormulaResult? EvalPercentRank(List<object> args)
     {
-        var arr = args.Count > 0 && args[0] is double[] a ? a : null;
+        var arr = args.Count > 0 ? AsDoubles(args[0]) : null;
         var val = args.Count > 1 && args[1] is FormulaResult r ? r.AsNumber() : 0;
         if (arr == null || arr.Length == 0) return FormulaResult.Error("#NUM!");
         return FR((double)arr.Count(x => x < val) / (arr.Length - 1));
@@ -636,9 +641,6 @@ internal partial class FormulaEvaluator
 
     // ==================== Conditional Aggregation ====================
 
-    // Helper: extract double[] from RangeData or double[]
-    private static double[]? AsDoubles(object? a) => a is RangeData rd ? rd.ToDoubleArray() : a is double[] arr ? arr : null;
-
     // Helper: accept a RangeData directly OR a FormulaResult.Area wrapping one.
     // OFFSET / INDIRECT return Area-typed FormulaResult for multi-cell results,
     // so any function that iterates cells must accept both forms.
@@ -649,8 +651,22 @@ internal partial class FormulaEvaluator
         return null;
     }
 
-    // Helper: extract FormulaResult?[] from RangeData (preserves string values for criteria matching)
-    private static FormulaResult?[]? AsResults(object? a) => a is RangeData rd ? rd.ToFlatResults() : null;
+    // Helper: extract double[] from RangeData, FormulaResult.Area, FormulaResult.Array, or bare double[].
+    // Area-aware so functions like LARGE/SMALL/RANK/PERCENTILE work over OFFSET/INDIRECT results.
+    private static double[]? AsDoubles(object? a)
+    {
+        if (AsRangeData(a) is { } rd) return rd.ToDoubleArray();
+        if (a is FormulaResult fr && fr.IsArray) return fr.ArrayValue;
+        if (a is double[] arr) return arr;
+        return null;
+    }
+
+    // Helper: extract FormulaResult?[] from RangeData OR FormulaResult.Area (preserves string values for criteria matching).
+    private static FormulaResult?[]? AsResults(object? a)
+    {
+        if (AsRangeData(a) is { } rd) return rd.ToFlatResults();
+        return null;
+    }
 
     // Helper: extract numeric value from a FormulaResult (null for non-numeric).
     // Used by conditional aggregation to keep value-range indices aligned with criteria-range indices
@@ -762,10 +778,7 @@ internal partial class FormulaEvaluator
     private FormulaResult? EvalSumProduct(List<object> args)
     {
         if (args.Count == 0) return FR(0);
-        var arrays = args.Select(a =>
-            a is RangeData rd ? rd.ToDoubleArray() :
-            a is FormulaResult fr && fr.IsArray ? fr.ArrayValue :
-            a is double[] arr ? arr : null).ToList();
+        var arrays = args.Select(a => AsDoubles(a)).ToList();
         // Single numeric value: SUMPRODUCT(scalar) = scalar
         if (arrays.All(a => a == null) && args.Count == 1 && args[0] is FormulaResult single && single.IsNumeric)
             return single;
@@ -863,7 +876,7 @@ internal partial class FormulaEvaluator
         if (args.Count < 2) return null;
         var rate = args[0] is FormulaResult r ? r.AsNumber() : 0;
         var values = new List<double>();
-        for (int i = 1; i < args.Count; i++) { if (args[i] is double[] arr) values.AddRange(arr); else if (args[i] is FormulaResult fr) values.Add(fr.AsNumber()); }
+        for (int i = 1; i < args.Count; i++) { if (AsDoubles(args[i]) is { } arr) values.AddRange(arr); else if (args[i] is FormulaResult fr) values.Add(fr.AsNumber()); }
         double npv = 0; for (int i = 0; i < values.Count; i++) npv += values[i] / Math.Pow(1 + rate, i + 1);
         return FR(npv);
     }
