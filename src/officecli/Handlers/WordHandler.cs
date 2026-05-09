@@ -147,15 +147,15 @@ public partial class WordHandler : IDocumentHandler
         if (mainPart == null) return "(no main part)";
 
         // CONSISTENCY(zip-uri-lookup): see RawXmlHelper. Any path ending in
-        // .xml is resolved against the package's part tree directly.
+        // .xml or .rels is resolved against the package directly.
         if (RawXmlHelper.IsZipUriPath(partPath))
         {
-            var part = RawXmlHelper.FindPartByZipUri(_doc, partPath)
+            var xml = RawXmlHelper.TryReadByZipUri(_doc, _filePath, partPath)
                 ?? throw new ArgumentException(
                     $"Unknown part: {partPath}. The path was treated as a zip-internal URI " +
-                    $"because it ends in .xml, but no matching part exists in the package. " +
+                    $"but no matching part exists in the package. " +
                     $"Use semantic paths (/document, /styles, /header[N]) for stable identification.");
-            return RawXmlHelper.ReadPartXml(part);
+            return xml;
         }
 
         return partPath.ToLowerInvariant() switch

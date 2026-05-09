@@ -59,16 +59,16 @@ public partial class ExcelHandler : IDocumentHandler
         var workbookPart = _doc.WorkbookPart;
         if (workbookPart == null) return "(empty)";
 
-        // Zip-URI form: any path ending in .xml is resolved literally against
-        // the package's part tree. No alias table needed.
+        // Zip-URI form: any path ending in .xml or .rels is resolved literally
+        // against the package. No alias table needed.
         if (RawXmlHelper.IsZipUriPath(partPath))
         {
-            var part = RawXmlHelper.FindPartByZipUri(_doc, partPath)
+            var xml = RawXmlHelper.TryReadByZipUri(_doc, _filePath, partPath)
                 ?? throw new ArgumentException(
                     $"Unknown part: {partPath}. The path was treated as a zip-internal URI " +
-                    $"because it ends in .xml, but no matching part exists in the package. " +
+                    $"but no matching part exists in the package. " +
                     $"Use semantic paths (/workbook, /Sheet1, /chart[N]) for stable identification.");
-            return RawXmlHelper.ReadPartXml(part);
+            return xml;
         }
 
         if (partPath == "/" || partPath == "/workbook")

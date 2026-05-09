@@ -1,6 +1,8 @@
 // Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
+using System.IO.Compression;
+using System.IO.Packaging;
 using System.Xml;
 using System.Xml.Linq;
 using System.Xml.XPath;
@@ -342,10 +344,19 @@ internal static class RawXmlHelper
     /// `/xl/workbook.xml#frag` and `/xl/workbook.xml?x=1` both classify as
     /// zip-URI inputs (rather than silently falling through to the
     /// semantic-path "Available: ..." dispatcher).
+    ///
+    /// Accepts `.xml`, `.rels` (relationship parts), and the literal
+    /// `[Content_Types].xml` package manifest. The first two are normal OPC
+    /// parts; `[Content_Types].xml` is package metadata reachable only
+    /// through a separate code path.
     /// </summary>
-    public static bool IsZipUriPath(string partPath) =>
-        partPath != null
-        && StripUriSuffixes(partPath.AsSpan().Trim()).EndsWith(".xml", StringComparison.OrdinalIgnoreCase);
+    public static bool IsZipUriPath(string partPath)
+    {
+        if (partPath == null) return false;
+        var s = StripUriSuffixes(partPath.AsSpan().Trim());
+        return s.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)
+            || s.EndsWith(".rels", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static ReadOnlySpan<char> StripUriSuffixes(ReadOnlySpan<char> s)
     {
@@ -400,6 +411,96 @@ internal static class RawXmlHelper
     /// parts so zip-URI calls don't randomly include the prolog depending
     /// on whether the SDK strongly-typed the target part.
     /// </summary>
+    /// <summary>
+    /// Resolve a zip-URI path to its content. Tries the OpenXmlPart graph
+    /// first (typed parts — preserves SDK-canonical serialization for parts
+    /// that have a strongly-typed root); falls back to the underlying OPC
+    /// package (covers relationship parts `.rels` and any XML part the
+    /// SDK doesn't surface as a typed OpenXmlPart).
+    ///
+    /// Returns null if no part matches; throws InvalidDataException if the
+    /// part exists but contains no root element.
+    /// </summary>
+    public static string? TryReadByZipUri(OpenXmlPackage package, string? filePath, string partPath)
+    {
+        // Typed-part path first (preserves SDK-canonical serialization for
+        // strongly-typed parts).
+        var typed = FindPartByZipUri(package, partPath);
+        if (typed != null) return ReadPartXml(typed);
+
+        // Fall back: open the .NET BCL System.IO.Packaging.Package on a
+        // fresh FileShare.ReadWrite handle. This covers `.rels` parts and
+        // any XML part the SDK does not surface as a typed OpenXmlPart.
+        // Trim-mode-safe (no reflection); requires a file path.
+        if (filePath == null) return null;
+
+        // Special case: `[Content_Types].xml` is the OPC package manifest,
+        // not a part. System.IO.Packaging.Package does not expose it; read
+        // it as a literal zip entry.
+        var trimmed = StripUriSuffixes(partPath.AsSpan().Trim()).ToString();
+        if (trimmed.TrimStart('/').Equals("[Content_Types].xml", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                using var fs = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                using var zip = new ZipArchive(fs, ZipArchiveMode.Read);
+                var entry = zip.Entries.FirstOrDefault(e =>
+                    e.FullName.Equals("[Content_Types].xml", StringComparison.OrdinalIgnoreCase));
+                if (entry == null) return null;
+                using var es = entry.Open();
+                using var er = new StreamReader(es);
+                var ec = er.ReadToEnd();
+                var es2 = StripXmlProlog(ec);
+                return es2.Length == 0
+                    ? throw new InvalidDataException("[Content_Types].xml is empty.")
+                    : es2;
+            }
+            catch (Exception ex) when (ex is not InvalidDataException)
+            {
+                return null;
+            }
+        }
+
+        var clean = StripUriSuffixes(partPath.AsSpan().Trim()).ToString();
+        var target = clean.StartsWith('/') ? clean : "/" + clean;
+        Uri uri;
+        try { uri = new Uri(target, UriKind.Relative); } catch { return null; }
+
+        Package bclPkg;
+        try
+        {
+            // FileShare.ReadWrite so we coexist with the SDK's existing handle.
+            // Package internally opens the underlying stream with
+            // FileAccess.Read here.
+            bclPkg = Package.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        }
+        catch
+        {
+            // SDK opened with FileShare.None (e.g. editable mode on Windows),
+            // or the file is gone — give up cleanly.
+            return null;
+        }
+
+        try
+        {
+            if (!bclPkg.PartExists(uri)) return null;
+            var part = bclPkg.GetPart(uri);
+            using var stream = part.GetStream(FileMode.Open, FileAccess.Read);
+            using var reader = new StreamReader(stream);
+            var content = reader.ReadToEnd();
+            var stripped = StripXmlProlog(content);
+            if (stripped.Length == 0)
+                throw new InvalidDataException(
+                    $"Part '{target}' contains no root element (only an XML " +
+                    $"declaration, whitespace, or BOM).");
+            return stripped;
+        }
+        finally
+        {
+            bclPkg.Close();
+        }
+    }
+
     public static string ReadPartXml(OpenXmlPart part)
     {
         if (part.RootElement is OpenXmlPartRootElement root && root != null)

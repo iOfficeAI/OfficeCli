@@ -47,12 +47,12 @@ public partial class PowerPointHandler : IDocumentHandler
 
         if (RawXmlHelper.IsZipUriPath(partPath))
         {
-            var part = RawXmlHelper.FindPartByZipUri(_doc, partPath)
+            var xml = RawXmlHelper.TryReadByZipUri(_doc, _filePath, partPath)
                 ?? throw new ArgumentException(
                     $"Unknown part: {partPath}. The path was treated as a zip-internal URI " +
-                    $"because it ends in .xml, but no matching part exists in the package. " +
+                    $"but no matching part exists in the package. " +
                     $"Use semantic paths (/presentation, /slide[N], /slideMaster[N]) for stable identification.");
-            return RawXmlHelper.ReadPartXml(part);
+            return xml;
         }
 
         if (partPath == "/" || partPath == "/presentation")
