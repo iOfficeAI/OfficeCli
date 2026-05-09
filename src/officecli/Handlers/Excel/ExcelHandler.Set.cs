@@ -1329,8 +1329,9 @@ public partial class ExcelHandler
                 case "printarea":
                 {
                     var workbook = GetWorkbook();
-                    var definedNames = workbook.GetFirstChild<DefinedNames>()
-                        ?? workbook.AppendChild(new DefinedNames());
+                    // CONSISTENCY(workbook-child-order): use helper to create
+                    // <definedNames> in schema-correct position when missing.
+                    var definedNames = GetOrCreateDefinedNames(workbook);
                     // Find sheet index
                     var allSheets = workbook.GetFirstChild<Sheets>()?.Elements<Sheet>().ToList();
                     var sheetIdx = allSheets?.FindIndex(s =>
@@ -1357,8 +1358,9 @@ public partial class ExcelHandler
                     // repeating columns into a single comma-separated value
                     // for the sheet, e.g. "Sheet1!$A:$A,Sheet1!$1:$1".
                     var workbook = GetWorkbook();
-                    var definedNames = workbook.GetFirstChild<DefinedNames>()
-                        ?? workbook.AppendChild(new DefinedNames());
+                    // CONSISTENCY(workbook-child-order): use helper to create
+                    // <definedNames> in schema-correct position when missing.
+                    var definedNames = GetOrCreateDefinedNames(workbook);
                     var allSheets = workbook.GetFirstChild<Sheets>()?.Elements<Sheet>().ToList();
                     var sheetIdx = allSheets?.FindIndex(s =>
                         s.Name?.Value?.Equals(sheetName, StringComparison.OrdinalIgnoreCase) == true) ?? -1;

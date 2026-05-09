@@ -4410,6 +4410,26 @@ public partial class ExcelHandler
     // ("@"). All three accepted aliases are checked: numberformat, numfmt,
     // format. Whitespace is trimmed; quoting is not expected here because
     // ExcelStyleManager already strips surrounding quotes upstream.
+    // CT_Workbook schema order: ...sheets, functionGroups, externalReferences,
+    // definedNames, calcPr, oleSize, customWorkbookViews, pivotCaches...
+    // Returns existing <definedNames> or creates+inserts one in schema-correct
+    // position. AppendChild lands after calcPr, which fails strict validators.
+    private static DefinedNames GetOrCreateDefinedNames(Workbook workbook)
+    {
+        var definedNames = workbook.GetFirstChild<DefinedNames>();
+        if (definedNames != null) return definedNames;
+        definedNames = new DefinedNames();
+        var insertBefore = (OpenXmlElement?)workbook.GetFirstChild<CalculationProperties>()
+            ?? (OpenXmlElement?)workbook.GetFirstChild<OleSize>()
+            ?? (OpenXmlElement?)workbook.GetFirstChild<CustomWorkbookViews>()
+            ?? (OpenXmlElement?)workbook.GetFirstChild<PivotCaches>();
+        if (insertBefore != null)
+            workbook.InsertBefore(definedNames, insertBefore);
+        else
+            workbook.AppendChild(definedNames);
+        return definedNames;
+    }
+
     private static bool IsTextNumberFormat(Dictionary<string, string> styleProps)
     {
         foreach (var key in new[] { "numberformat", "numfmt", "format" })

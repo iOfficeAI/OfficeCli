@@ -88,21 +88,9 @@ public partial class ExcelHandler
                 $"Cross-workbook references like '{refVal}' require an externalLinks part which officecli doesn't expose; use raw-set for this case");
 
         var workbook = GetWorkbook();
-        var definedNames = workbook.GetFirstChild<DefinedNames>();
-        if (definedNames == null)
-        {
-            definedNames = new DefinedNames();
-            // OOXML schema order: ...sheets, functionGroups, externalReferences, definedNames, calcPr, oleSize, customWorkbookViews, pivotCaches...
-            // Insert before calcPr, oleSize, customWorkbookViews, pivotCaches, or any later element
-            var insertBefore = (DocumentFormat.OpenXml.OpenXmlElement?)workbook.GetFirstChild<CalculationProperties>()
-                ?? (DocumentFormat.OpenXml.OpenXmlElement?)workbook.GetFirstChild<DocumentFormat.OpenXml.Spreadsheet.OleSize>()
-                ?? (DocumentFormat.OpenXml.OpenXmlElement?)workbook.GetFirstChild<DocumentFormat.OpenXml.Spreadsheet.CustomWorkbookViews>()
-                ?? (DocumentFormat.OpenXml.OpenXmlElement?)workbook.GetFirstChild<DocumentFormat.OpenXml.Spreadsheet.PivotCaches>();
-            if (insertBefore != null)
-                workbook.InsertBefore(definedNames, insertBefore);
-            else
-                workbook.AppendChild(definedNames);
-        }
+        // CONSISTENCY(workbook-child-order): helper inserts <definedNames>
+        // in schema-correct position (before calcPr/oleSize/...).
+        var definedNames = GetOrCreateDefinedNames(workbook);
 
         var dn = new DefinedName(refVal) { Name = nrName };
 
