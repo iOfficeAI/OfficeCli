@@ -87,6 +87,10 @@ internal class RangeData
     // raw cell-ref string.
     public int BaseRow { get; init; }
     public int BaseCol { get; init; }
+    // Sheet name when the area was produced by a cross-sheet reference (e.g.
+    // OFFSET(Sheet2!A1, 0, 0)). Null/empty means same-sheet. Used by EvalOffset
+    // when reconstructing a RefArg from an Area to preserve the origin sheet.
+    public string? BaseSheet { get; init; }
 
     public RangeData(FormulaResult?[,] cells) { Cells = cells; Rows = cells.GetLength(0); Cols = cells.GetLength(1); }
 
@@ -379,7 +383,13 @@ internal partial class FormulaEvaluator
                     {
                         var inner = Tokenize(body);
                         if (inner.Count == 0) throw new NameResolutionException(stripped);
+                        // Wrap the inlined body in parentheses so a name like
+                        // MyName=A1+B1 evaluates as `(A1+B1)*2 = 2*(A1+B1)`,
+                        // not `A1+B1*2` (textual substitution would break
+                        // operator precedence).
+                        tokens.Add(new Token(TT.LParen, "("));
                         tokens.AddRange(inner);
+                        tokens.Add(new Token(TT.RParen, ")"));
                     }
                     catch (NotSupportedException) { throw new NameResolutionException(stripped); }
                     finally { _expandingNames.Remove(stripped); }
@@ -831,7 +841,7 @@ internal partial class FormulaEvaluator
         // answer correctly when given a literal range token (`A1:B3`) — the
         // tokenizer routes those through Expand2DRange, bypassing ResolveRef
         // where Round 2 introduced BaseRow/BaseCol propagation.
-        return new RangeData(cells) { BaseRow = r1, BaseCol = cMin };
+        return new RangeData(cells) { BaseRow = r1, BaseCol = cMin, BaseSheet = sheetPrefix };
     }
 
     private static (string col, int row) ParseRef(string r)

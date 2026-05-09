@@ -122,7 +122,7 @@ internal partial class FormulaEvaluator
         // origin row/col so ROW(OFFSET(...)) / COLUMN(OFFSET(...)) / ADDRESS can
         // answer correctly. Single-cell consumers (AsNumber, AsString) transparently
         // peek the lone cell via FirstCell() in FormulaResult.
-        return FormulaResult.Area(new RangeData(cells) { BaseRow = r.Row, BaseCol = r.Col });
+        return FormulaResult.Area(new RangeData(cells) { BaseRow = r.Row, BaseCol = r.Col, BaseSheet = r.Sheet });
     }
 
     /// <summary>
@@ -156,7 +156,7 @@ internal partial class FormulaEvaluator
         if (args[0] is RefArg ra) baseRef = ra;
         else if (args[0] is FormulaResult fra && fra.IsRange &&
                  fra.RangeValue is { BaseRow: > 0, BaseCol: > 0 } rd)
-            baseRef = new RefArg(null, rd.BaseCol, rd.BaseRow, rd.Cols, rd.Rows);
+            baseRef = new RefArg(rd.BaseSheet, rd.BaseCol, rd.BaseRow, rd.Cols, rd.Rows);
         else return FormulaResult.Error("#VALUE!");
 
         // Bug 1: propagate any error in row/col/height/width before consuming.
