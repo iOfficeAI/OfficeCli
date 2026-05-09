@@ -338,12 +338,20 @@ internal static class RawXmlHelper
     /// <summary>
     /// Returns true if `partPath` should be resolved as a literal zip-internal
     /// URI rather than a semantic short name. Trims surrounding whitespace
-    /// before checking the .xml suffix so a stray trailing space/newline
-    /// doesn't silently route the input to the semantic-path dispatcher
-    /// (which would emit a misleading "Available: ..." list).
+    /// and discards any URI fragment (`#...`) or query (`?...`) suffix so
+    /// `/xl/workbook.xml#frag` and `/xl/workbook.xml?x=1` both classify as
+    /// zip-URI inputs (rather than silently falling through to the
+    /// semantic-path "Available: ..." dispatcher).
     /// </summary>
     public static bool IsZipUriPath(string partPath) =>
-        partPath != null && partPath.AsSpan().TrimEnd().EndsWith(".xml", StringComparison.OrdinalIgnoreCase);
+        partPath != null
+        && StripUriSuffixes(partPath.AsSpan().Trim()).EndsWith(".xml", StringComparison.OrdinalIgnoreCase);
+
+    private static ReadOnlySpan<char> StripUriSuffixes(ReadOnlySpan<char> s)
+    {
+        var cut = s.IndexOfAny('#', '?');
+        return cut >= 0 ? s[..cut] : s;
+    }
 
     /// <summary>
     /// Walk the entire part tree of a package and return the part whose
@@ -352,8 +360,11 @@ internal static class RawXmlHelper
     /// </summary>
     public static OpenXmlPart? FindPartByZipUri(OpenXmlPackage package, string partPath)
     {
-        // Trim surrounding whitespace and normalize leading slash.
-        partPath = partPath.Trim();
+        // Trim surrounding whitespace, discard fragment/query, and normalize
+        // leading slash. Fragments and query strings are not part of OPC
+        // URIs; users may inadvertently type them and we should resolve
+        // against the bare part path.
+        partPath = StripUriSuffixes(partPath.AsSpan().Trim()).ToString();
         var target = partPath.StartsWith('/') ? partPath : "/" + partPath;
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         return Walk(package);
