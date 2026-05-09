@@ -24,13 +24,17 @@
 // Known leaks (acceptable for the typo-detection goal):
 //  - foreach iteration: iterators don't go through the comparer, so a
 //    handler that exhaustively foreaches the dict to find what it
-//    wants won't mark anything as accessed. Mitigated by the new
-//    GetEnumerator override below — when the static type is
-//    TrackingPropertyDictionary, every yielded key is counted as
-//    accessed. The override does NOT fire when the dict is upcast to
-//    Dictionary<>; in that case foreach reads are silent. In practice
-//    handlers iterate via for-loops over $"series{i}" probes, which
-//    do go through TryGetValue, so this is rare.
+//    wants won't mark anything as accessed. Mitigated two ways:
+//    (a) the `new GetEnumerator` override below fires when the static
+//        type is TrackingPropertyDictionary;
+//    (b) we re-declare IEnumerable<KeyValuePair<>> on this class so
+//        interface-dispatched foreach (e.g. LINQ Where/Select on a
+//        `Dictionary<string,string>`-typed variable) also lands on our
+//        tracking enumerator instead of the base's silent one. Without
+//        (b), patterns like `props.Where(kv => IsDeferredKey(kv.Key))`
+//        in chart/media Add paths bypassed tracking entirely and
+//        emitted spurious unsupported_property warnings for keys the
+//        handler had functionally consumed (issue #102).
 
 using System.Collections;
 using System.Collections.Generic;
@@ -38,7 +42,8 @@ using System.Linq;
 
 namespace OfficeCli.Core;
 
-internal sealed class TrackingPropertyDictionary : Dictionary<string, string>
+internal sealed class TrackingPropertyDictionary
+    : Dictionary<string, string>, IEnumerable<KeyValuePair<string, string>>
 {
     private readonly TrackingComparer _cmp;
     private readonly HashSet<string> _initialKeys;
@@ -67,12 +72,25 @@ internal sealed class TrackingPropertyDictionary : Dictionary<string, string>
 
     public new IEnumerator<KeyValuePair<string, string>> GetEnumerator()
     {
-        foreach (var kv in (IDictionary<string, string>)this)
+        // Statically bind to Dictionary<,>.GetEnumerator (struct enumerator)
+        // — virtual / interface dispatch would loop back into us via the
+        // explicit IEnumerable<KVP> impl below.
+        var e = base.GetEnumerator();
+        while (e.MoveNext())
         {
-            _cmp.AccessedKeys.Add(kv.Key);
-            yield return kv;
+            _cmp.AccessedKeys.Add(e.Current.Key);
+            yield return e.Current;
         }
     }
+
+    // Re-declare IEnumerable<KVP> so LINQ / interface-dispatched foreach
+    // routes to the tracking enumerator above even when the variable's
+    // static type is Dictionary<string,string> (the common case in
+    // handler signatures). Without this, .Where()/.Select() bypassed
+    // tracking and triggered false unsupported_property warnings.
+    IEnumerator<KeyValuePair<string, string>>
+        IEnumerable<KeyValuePair<string, string>>.GetEnumerator()
+        => GetEnumerator();
 
     private sealed class TrackingComparer : IEqualityComparer<string>
     {
