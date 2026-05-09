@@ -3,13 +3,20 @@
 
 using System.IO.Compression;
 using System.IO.Packaging;
-using System.Reflection;
 using System.Xml;
 using System.Xml.Linq;
 using System.Xml.XPath;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Validation;
+// OOXML0001: PackageExtensions.GetPackage() is marked [Experimental] but it
+// is the only public path to the underlying IPackage. The previous reflection
+// workaround tripped trim analysis (IL2026/IL2075/IL2060) and was fragile —
+// IPackage/IPackagePart are themselves public interfaces with public methods,
+// so once GetPackage() returns we are entirely on the public surface.
+#pragma warning disable OOXML0001
+using DocumentFormat.OpenXml.Experimental;
+#pragma warning restore OOXML0001
 
 namespace OfficeCli.Core;
 
@@ -371,64 +378,29 @@ internal static class RawXmlHelper
     /// normalization). Returns null if no part matches.
     /// </summary>
     /// <summary>
-    /// Resolve a zip-URI path through the SDK's own underlying IPackage
-    /// (reflected — IPackageFeature is internal to DocumentFormat.OpenXml).
+    /// Resolve a zip-URI path through the SDK's own underlying IPackage.
     /// Used as the primary fallback after the typed-OpenXmlPart graph,
     /// because it shares the SDK's file handle and so works correctly when
-    /// the file is held open editable (resident mode). Returns null if the
-    /// reflection chain fails or the part does not exist.
+    /// the file is held open editable (resident mode) where a fresh BCL
+    /// Package.Open would fail with a FileShare conflict. Returns null if
+    /// the part does not exist.
     /// </summary>
     private static string? TryReadViaSdkPackage(OpenXmlPackage package, string partPath)
     {
-        // Reach the SDK's own underlying IPackage via reflection. IPackageFeature
-        // and IPackage are internal to DocumentFormat.OpenXml, but the
-        // FeatureCollection exposes a public Type-indexer (and a public
-        // generic Get<T>()) that lets us reach them by name. This shares the
-        // SDK's file handle, so it works correctly when the file is held
-        // open editable (resident mode) where a fresh BCL Package.Open
-        // would fail with a FileShare conflict.
         try
         {
-            var asm = typeof(OpenXmlPackage).Assembly;
-            var ipkgFeatType = asm.GetType("DocumentFormat.OpenXml.Features.IPackageFeature");
-            if (ipkgFeatType == null) return null;
-
-            var features = package.Features;
-            var indexer = features.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                .FirstOrDefault(p => p.GetIndexParameters().Length == 1 && p.GetIndexParameters()[0].ParameterType == typeof(Type));
-            object? feat = null;
-            if (indexer != null)
-                feat = indexer.GetValue(features, new object[] { ipkgFeatType });
-            if (feat == null)
-            {
-                var get = features.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance)
-                    .FirstOrDefault(m => m.Name == "Get" && m.IsGenericMethodDefinition && m.GetParameters().Length == 0);
-                if (get == null) return null;
-                feat = get.MakeGenericMethod(ipkgFeatType).Invoke(features, null);
-            }
-            if (feat == null) return null;
-
-            var pkg = ipkgFeatType.GetProperty("Package")?.GetValue(feat);
-            if (pkg == null) return null;
-            var pkgType = pkg.GetType();
-
             var clean = StripUriSuffixes(partPath.AsSpan().Trim()).ToString();
             var target = clean.StartsWith('/') ? clean : "/" + clean;
             Uri uri;
             try { uri = new Uri(target, UriKind.Relative); } catch { return null; }
 
-            var exists = pkgType.GetMethod("PartExists", new[] { typeof(Uri) })?.Invoke(pkg, new object[] { uri });
-            if (exists is not true) return null;
-            var part = pkgType.GetMethod("GetPart", new[] { typeof(Uri) })?.Invoke(pkg, new object[] { uri });
-            if (part == null) return null;
+#pragma warning disable OOXML0001
+            var pkg = package.GetPackage();
+#pragma warning restore OOXML0001
+            if (!pkg.PartExists(uri)) return null;
+            var part = pkg.GetPart(uri);
 
-            // IPackagePart.GetStream takes (FileMode, FileAccess) — there is
-            // no zero-arg overload. Pass Open + Read.
-            var getStream = part.GetType().GetMethod(
-                "GetStream", new[] { typeof(FileMode), typeof(FileAccess) });
-            using var stream = getStream?.Invoke(part,
-                new object[] { FileMode.Open, FileAccess.Read }) as Stream;
-            if (stream == null) return null;
+            using var stream = part.GetStream(FileMode.Open, FileAccess.Read);
             using var reader = new StreamReader(stream);
             var content = reader.ReadToEnd();
             var stripped = StripXmlProlog(content);
