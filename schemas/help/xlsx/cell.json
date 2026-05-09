@@ -20,7 +20,7 @@
       "type": "string",
       "description": "literal cell value — string, number, or date. Numeric strings stored as numbers unless cell has text format (@) or explicit type=string. Readback in DocumentNode.Text.",
       "add": true, "set": true, "get": true,
-      "examples": ["--prop value=\"Hello\"", "--prop value=42", "--prop value=3.14", "--prop value=00456 (looks numeric but stored as String — leading zeros preserved)", "--prop value=42 --prop type=string (force '42' to stay as String)"],
+      "examples": ["--prop value=\"Hello\"", "--prop value=42", "--prop value=3.14", "--prop value=42 --prop type=string (force '42' to stay as String)"],
       "readback": "plain string in DocumentNode.Text",
       "enforcement": "report"
     },
