@@ -955,6 +955,20 @@ public partial class ExcelHandler
                                     wsChanged = true;
                                 }
                             }
+                            // CONSISTENCY(sheet-rename-refs): sparkline location
+                            // (<xne:sqref>Sheet1!D1</xne:sqref>) carries the same
+                            // sheet-qualified ref text and must follow the rename.
+                            // Without this, <xne:f> points at the new sheet but
+                            // <xne:sqref> still names the old one — Excel loses
+                            // the anchor on render.
+                            foreach (var s in wsRoot.Descendants<DocumentFormat.OpenXml.Office.Excel.ReferenceSequence>())
+                            {
+                                if (s.Text != null && s.Text.Contains(oldRef, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    s.Text = s.Text.Replace(oldRef, newRef, StringComparison.OrdinalIgnoreCase);
+                                    wsChanged = true;
+                                }
+                            }
                             foreach (var f in wsRoot.Descendants<Formula1>())
                             {
                                 if (f.Text != null && f.Text.Contains(oldRef, StringComparison.OrdinalIgnoreCase))
