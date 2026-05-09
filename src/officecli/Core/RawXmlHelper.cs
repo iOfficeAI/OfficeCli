@@ -3,6 +3,7 @@
 
 using System.IO.Compression;
 using System.IO.Packaging;
+using System.Reflection;
 using System.Xml;
 using System.Xml.Linq;
 using System.Xml.XPath;
@@ -369,6 +370,81 @@ internal static class RawXmlHelper
     /// `Uri.OriginalString` matches `partPath` (with leading-slash
     /// normalization). Returns null if no part matches.
     /// </summary>
+    /// <summary>
+    /// Resolve a zip-URI path through the SDK's own underlying IPackage
+    /// (reflected — IPackageFeature is internal to DocumentFormat.OpenXml).
+    /// Used as the primary fallback after the typed-OpenXmlPart graph,
+    /// because it shares the SDK's file handle and so works correctly when
+    /// the file is held open editable (resident mode). Returns null if the
+    /// reflection chain fails or the part does not exist.
+    /// </summary>
+    private static string? TryReadViaSdkPackage(OpenXmlPackage package, string partPath)
+    {
+        // Reach the SDK's own underlying IPackage via reflection. IPackageFeature
+        // and IPackage are internal to DocumentFormat.OpenXml, but the
+        // FeatureCollection exposes a public Type-indexer (and a public
+        // generic Get<T>()) that lets us reach them by name. This shares the
+        // SDK's file handle, so it works correctly when the file is held
+        // open editable (resident mode) where a fresh BCL Package.Open
+        // would fail with a FileShare conflict.
+        try
+        {
+            var asm = typeof(OpenXmlPackage).Assembly;
+            var ipkgFeatType = asm.GetType("DocumentFormat.OpenXml.Features.IPackageFeature");
+            if (ipkgFeatType == null) return null;
+
+            var features = package.Features;
+            var indexer = features.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .FirstOrDefault(p => p.GetIndexParameters().Length == 1 && p.GetIndexParameters()[0].ParameterType == typeof(Type));
+            object? feat = null;
+            if (indexer != null)
+                feat = indexer.GetValue(features, new object[] { ipkgFeatType });
+            if (feat == null)
+            {
+                var get = features.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault(m => m.Name == "Get" && m.IsGenericMethodDefinition && m.GetParameters().Length == 0);
+                if (get == null) return null;
+                feat = get.MakeGenericMethod(ipkgFeatType).Invoke(features, null);
+            }
+            if (feat == null) return null;
+
+            var pkg = ipkgFeatType.GetProperty("Package")?.GetValue(feat);
+            if (pkg == null) return null;
+            var pkgType = pkg.GetType();
+
+            var clean = StripUriSuffixes(partPath.AsSpan().Trim()).ToString();
+            var target = clean.StartsWith('/') ? clean : "/" + clean;
+            Uri uri;
+            try { uri = new Uri(target, UriKind.Relative); } catch { return null; }
+
+            var exists = pkgType.GetMethod("PartExists", new[] { typeof(Uri) })?.Invoke(pkg, new object[] { uri });
+            if (exists is not true) return null;
+            var part = pkgType.GetMethod("GetPart", new[] { typeof(Uri) })?.Invoke(pkg, new object[] { uri });
+            if (part == null) return null;
+
+            // IPackagePart.GetStream takes (FileMode, FileAccess) — there is
+            // no zero-arg overload. Pass Open + Read.
+            var getStream = part.GetType().GetMethod(
+                "GetStream", new[] { typeof(FileMode), typeof(FileAccess) });
+            using var stream = getStream?.Invoke(part,
+                new object[] { FileMode.Open, FileAccess.Read }) as Stream;
+            if (stream == null) return null;
+            using var reader = new StreamReader(stream);
+            var content = reader.ReadToEnd();
+            var stripped = StripXmlProlog(content);
+            if (stripped.Length == 0)
+                throw new InvalidDataException(
+                    $"Part '{target}' contains no root element (only an XML " +
+                    $"declaration, whitespace, or BOM).");
+            return stripped;
+        }
+        catch (InvalidDataException) { throw; }
+        catch
+        {
+            return null;
+        }
+    }
+
     public static OpenXmlPart? FindPartByZipUri(OpenXmlPackage package, string partPath)
     {
         // Trim surrounding whitespace, discard fragment/query, and normalize
@@ -428,10 +504,14 @@ internal static class RawXmlHelper
         var typed = FindPartByZipUri(package, partPath);
         if (typed != null) return ReadPartXml(typed);
 
-        // Fall back: open the .NET BCL System.IO.Packaging.Package on a
-        // fresh FileShare.ReadWrite handle. This covers `.rels` parts and
-        // any XML part the SDK does not surface as a typed OpenXmlPart.
-        // Trim-mode-safe (no reflection); requires a file path.
+        // Then: SDK's own underlying IPackage via reflection. This sees
+        // every .rels part the SDK is managing AND coexists with the SDK
+        // file handle (no second-handle FileShare conflict — important for
+        // resident mode where the file is open editable and a fresh
+        // BCL Package.Open would fail).
+        var sdkResult = TryReadViaSdkPackage(package, partPath);
+        if (sdkResult != null) return sdkResult;
+
         if (filePath == null) return null;
 
         // Special case: `[Content_Types].xml` is the OPC package manifest,

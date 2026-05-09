@@ -143,6 +143,7 @@ public partial class WordHandler : IDocumentHandler
 
     public string Raw(string partPath, int? startRow = null, int? endRow = null, HashSet<string>? cols = null)
     {
+        if (partPath == null) throw new ArgumentNullException(nameof(partPath));
         var mainPart = _doc.MainDocumentPart;
         if (mainPart == null) return "(no main part)";
 
@@ -183,7 +184,7 @@ public partial class WordHandler : IDocumentHandler
             var part = RawXmlHelper.FindPartByZipUri(_doc, partPath)
                 ?? throw new ArgumentException(
                     $"Unknown part: {partPath}. The path was treated as a zip-internal URI " +
-                    $"because it ends in .xml, but no matching part exists in the package. " +
+                    $"but no matching part exists in the package. " +
                     $"Use semantic paths (/document, /styles, /header[N]) for stable identification.");
             RawXmlHelper.Execute(part, xpath, action, xml);
             return;

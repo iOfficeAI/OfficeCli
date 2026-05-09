@@ -56,6 +56,7 @@ public partial class ExcelHandler : IDocumentHandler
 
     public string Raw(string partPath, int? startRow = null, int? endRow = null, HashSet<string>? cols = null)
     {
+        if (partPath == null) throw new ArgumentNullException(nameof(partPath));
         var workbookPart = _doc.WorkbookPart;
         if (workbookPart == null) return "(empty)";
 
@@ -242,7 +243,7 @@ public partial class ExcelHandler : IDocumentHandler
             var part = RawXmlHelper.FindPartByZipUri(_doc, partPath)
                 ?? throw new ArgumentException(
                     $"Unknown part: {partPath}. The path was treated as a zip-internal URI " +
-                    $"because it ends in .xml, but no matching part exists in the package. " +
+                    $"but no matching part exists in the package. " +
                     $"Use semantic paths (/workbook, /Sheet1, /chart[N]) for stable identification.");
             RawXmlHelper.Execute(part, xpath, action, xml);
             return;
