@@ -1,4 +1,4 @@
-$repo = "iOfficeAI/OfficeCli"
+$repo = "iOfficeAI/OfficeCLI"
 $asset = "officecli-win-x64.exe"
 $binary = "officecli.exe"
 
@@ -8,7 +8,7 @@ $source = $null
 $url = "https://github.com/$repo/releases/latest/download/$asset"
 $checksumUrl = "https://github.com/$repo/releases/latest/download/SHA256SUMS"
 $tempFile = "$env:TEMP\$binary"
-Write-Host "Downloading OfficeCli..."
+Write-Host "Downloading OfficeCLI..."
 try {
     Invoke-WebRequest -Uri $url -OutFile $tempFile
     # Verify checksum if available
@@ -39,7 +39,7 @@ try {
         $source = $tempFile
         Write-Host "Download verified."
     } else {
-        Write-Host "Downloaded file is not a valid OfficeCli binary."
+        Write-Host "Downloaded file is not a valid OfficeCLI binary."
         Remove-Item -Force $tempFile -ErrorAction SilentlyContinue
     }
 } catch {
@@ -63,7 +63,7 @@ if (-not $source) {
 }
 
 if (-not $source) {
-    Write-Host "Error: Could not find a valid OfficeCli binary."
+    Write-Host "Error: Could not find a valid OfficeCLI binary."
     Write-Host "Download manually from: https://github.com/$repo/releases"
     exit 1
 }
@@ -74,7 +74,7 @@ if ($existing) {
     $installDir = Split-Path $existing.Source
     Write-Host "Found existing installation at $($existing.Source), upgrading..."
 } else {
-    $installDir = "$env:LOCALAPPDATA\OfficeCli"
+    $installDir = "$env:LOCALAPPDATA\OfficeCLI"
 }
 
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
@@ -128,5 +128,5 @@ if (-not (Test-Path $skillMarker)) {
     New-Item -ItemType File -Force -Path $skillMarker | Out-Null
 }
 
-Write-Host "OfficeCli installed successfully!"
+Write-Host "OfficeCLI installed successfully!"
 Write-Host "Run 'officecli --help' to get started."

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-REPO="iOfficeAI/OfficeCli"
+REPO="iOfficeAI/OfficeCLI"
 BINARY_NAME="officecli"
 
 # Detect platform
@@ -54,7 +54,7 @@ SOURCE=""
 # Step 1: Try downloading from GitHub
 DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/$ASSET"
 CHECKSUM_URL="https://github.com/$REPO/releases/latest/download/SHA256SUMS"
-echo "Downloading OfficeCli ($ASSET)..."
+echo "Downloading OfficeCLI ($ASSET)..."
 if curl -fsSL "$DOWNLOAD_URL" -o "/tmp/$BINARY_NAME" 2>/dev/null; then
     # Verify checksum if available
     CHECKSUM_OK=false
@@ -104,7 +104,7 @@ if [ -z "$SOURCE" ]; then
 fi
 
 if [ -z "$SOURCE" ]; then
-    echo "Error: Could not find a valid OfficeCli binary."
+    echo "Error: Could not find a valid OfficeCLI binary."
     echo "Download manually from: https://github.com/$REPO/releases"
     exit 1
 fi
@@ -185,5 +185,5 @@ if [ ! -f "$SKILL_MARKER" ]; then
     touch "$SKILL_MARKER"
 fi
 
-echo "OfficeCli installed successfully!"
+echo "OfficeCLI installed successfully!"
 echo "Run 'officecli --help' to get started."

@@ -33,7 +33,7 @@ Generic cx styling exercised across the deck: `title.glow`, `title.shadow`, `tit
 > **Notes on cx:chart limitations:**
 >
 > - `chartFill` / `plotFill` only accept a **solid** hex color (or `none`). Unlike regular cChart, gradient `C1-C2:angle` is not supported.
-> - `colors=` palette **does not work per-data-point** on single-series cx charts (funnel, treemap, sunburst). OfficeCli only applies the first palette color to the whole series, so every bar/tile/segment ends up the same color. Omit `colors=` on these charts and let Excel's theme drive the default rainbow. `colors=` still works normally on multi-series cx charts (boxWhisker) and on all regular cChart types.
+> - `colors=` palette **does not work per-data-point** on single-series cx charts (funnel, treemap, sunburst). OfficeCLI only applies the first palette color to the whole series, so every bar/tile/segment ends up the same color. Omit `colors=` on these charts and let Excel's theme drive the default rainbow. `colors=` still works normally on multi-series cx charts (boxWhisker) and on all regular cChart types.
 
 ---
 
@@ -269,7 +269,7 @@ officecli add charts-extended.xlsx "/4-Pareto" --type chart \
 [Schema] The 'val' attribute is not declared.
 ```
 
-This is expected. The Open XML SDK's generated schema models `cx:binCount` as a text-valued leaf (`<binCount>5</binCount>`), but **real Excel writes and requires** the attribute form (`<binCount val="5"/>`). OfficeCli writes the Excel-compatible form via a raw unknown element; the SDK validator then complains. See `ChartExBuilder.cs:793–801` for the rationale. Files open and render correctly in Excel.
+This is expected. The Open XML SDK's generated schema models `cx:binCount` as a text-valued leaf (`<binCount>5</binCount>`), but **real Excel writes and requires** the attribute form (`<binCount val="5"/>`). OfficeCLI writes the Excel-compatible form via a raw unknown element; the SDK validator then complains. See `ChartExBuilder.cs:793–801` for the rationale. Files open and render correctly in Excel.
 
 ---
 

@@ -100,8 +100,8 @@ jobs:
         run: |
           publish/${{ matrix.name }} install
           if [ "$RUNNER_OS" == "Windows" ]; then
-            test -f "$LOCALAPPDATA/OfficeCli/officecli.exe" || { echo "FAIL: officecli.exe not found in %LOCALAPPDATA%\\OfficeCli"; exit 1; }
-            "$LOCALAPPDATA/OfficeCli/officecli.exe" --version
+            test -f "$LOCALAPPDATA/OfficeCLI/officecli.exe" || { echo "FAIL: officecli.exe not found in %LOCALAPPDATA%\\OfficeCLI"; exit 1; }
+            "$LOCALAPPDATA/OfficeCLI/officecli.exe" --version
           else
             test -f "$HOME/.local/bin/officecli" || { echo "FAIL: officecli not found in ~/.local/bin"; exit 1; }
             "$HOME/.local/bin/officecli" --version

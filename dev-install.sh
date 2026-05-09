@@ -79,5 +79,5 @@ case ":$PATH:" in
        echo "Or add the line above to your ~/.zshrc or ~/.bashrc" ;;
 esac
 
-echo "OfficeCli installed successfully!"
+echo "OfficeCLI installed successfully!"
 echo "Run 'officecli --help' to get started."

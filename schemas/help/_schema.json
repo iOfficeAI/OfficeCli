@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "officecli/help-schema/v1",
-  "title": "OfficeCli Help Schema",
+  "title": "OfficeCLI Help Schema",
   "description": "Capability schema for one (format, element) pair. Consumed by `officecli <format> <op> <element> --help --json`, contract tests, and release-time wiki generation. This is the agent-facing source of truth for what officecli can do; it is updated in the same PR as the implementation.",
   "type": "object",
   "required": ["format", "element", "operations", "properties"],
