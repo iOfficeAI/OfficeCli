@@ -63,6 +63,17 @@ public partial class ExcelHandler : IDocumentHandler
         // against the package. No alias table needed.
         if (RawXmlHelper.IsZipUriPath(partPath))
         {
+            // CONSISTENCY(zip-uri-row-filter): if the resolved part is a
+            // worksheet AND the caller asked for row/column filtering,
+            // route through the same filter as the semantic /SheetName
+            // path. Without this, --start/--end/--cols would be silently
+            // ignored on zip-URI worksheet reads.
+            if ((startRow.HasValue || endRow.HasValue || cols != null)
+                && RawXmlHelper.FindPartByZipUri(_doc, partPath) is WorksheetPart wsp)
+            {
+                return RawSheetWithFilter(wsp, startRow, endRow, cols);
+            }
+
             var xml = RawXmlHelper.TryReadByZipUri(_doc, _filePath, partPath)
                 ?? throw new ArgumentException(
                     $"Unknown part: {partPath}. The path was treated as a zip-internal URI " +
