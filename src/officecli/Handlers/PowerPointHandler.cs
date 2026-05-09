@@ -36,8 +36,25 @@ public partial class PowerPointHandler : IDocumentHandler
 
     // ==================== Raw Layer ====================
 
+    // CONSISTENCY(zip-path-alias): mirror WordHandler.Raw's accept-both-forms
+    // pattern — agents trained on OOXML / ECMA-376 reach for the standard
+    // zip-internal part name (e.g. /ppt/presentation.xml). Aliased only for
+    // unambiguous global parts; slide/master/layout/noteSlide are NOT
+    // aliased because the internal slide1.xml numbering can drift from
+    // visible slide order after reorder/delete.
+    private static readonly Dictionary<string, string> ZipPartAliases =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["/ppt/presentation.xml"] = "/presentation",
+        };
+
+    private static string NormalizeZipPath(string partPath) =>
+        ZipPartAliases.TryGetValue(partPath, out var canonical) ? canonical : partPath;
+
     public string Raw(string partPath, int? startRow = null, int? endRow = null, HashSet<string>? cols = null)
     {
+        partPath = NormalizeZipPath(partPath);
+
         if (partPath == "/" || partPath == "/presentation")
             return _doc.PresentationPart?.Presentation?.OuterXml ?? "(empty)";
 
@@ -58,6 +75,8 @@ public partial class PowerPointHandler : IDocumentHandler
     {
         var presentationPart = _doc.PresentationPart
             ?? throw new InvalidOperationException("No presentation part");
+
+        partPath = NormalizeZipPath(partPath);
 
         OpenXmlPartRootElement rootElement;
 

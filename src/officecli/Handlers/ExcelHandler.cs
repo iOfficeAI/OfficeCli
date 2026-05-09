@@ -47,10 +47,30 @@ public partial class ExcelHandler : IDocumentHandler
 
     // ==================== Raw Layer ====================
 
+    // CONSISTENCY(zip-path-alias): mirror WordHandler.Raw's accept-both-forms
+    // pattern — agents trained on OOXML / ECMA-376 reach for the standard
+    // zip-internal part name (e.g. /xl/workbook.xml). Map those to the
+    // canonical short name only for unambiguous global parts; sheet-scoped
+    // parts (/xl/worksheets/sheet1.xml) are intentionally NOT aliased,
+    // because the internal sheet1.xml numbering can drift from sheet display
+    // name/order after rename/reorder/delete.
+    private static readonly Dictionary<string, string> ZipPartAliases =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["/xl/workbook.xml"] = "/workbook",
+            ["/xl/styles.xml"] = "/styles",
+            ["/xl/sharedStrings.xml"] = "/sharedstrings",
+        };
+
+    private static string NormalizeZipPath(string partPath) =>
+        ZipPartAliases.TryGetValue(partPath, out var canonical) ? canonical : partPath;
+
     public string Raw(string partPath, int? startRow = null, int? endRow = null, HashSet<string>? cols = null)
     {
         var workbookPart = _doc.WorkbookPart;
         if (workbookPart == null) return "(empty)";
+
+        partPath = NormalizeZipPath(partPath);
 
         if (partPath == "/" || partPath == "/workbook")
             return workbookPart.Workbook?.OuterXml ?? "(empty)";
@@ -197,6 +217,8 @@ public partial class ExcelHandler : IDocumentHandler
     {
         var workbookPart = _doc.WorkbookPart
             ?? throw new InvalidOperationException("No workbook part");
+
+        partPath = NormalizeZipPath(partPath);
 
         OpenXmlPartRootElement rootElement;
         if (partPath is "/" or "/workbook")
