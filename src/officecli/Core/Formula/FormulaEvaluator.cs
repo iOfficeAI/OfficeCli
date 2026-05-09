@@ -135,10 +135,19 @@ internal partial class FormulaEvaluator
     private readonly SheetData _sheetData;
     private readonly WorkbookPart? _workbookPart;
     private readonly HashSet<string> _visiting;
+    private readonly HashSet<string> _expandingNames = new(StringComparer.OrdinalIgnoreCase);
     private readonly int _depth;
     private readonly string _sheetKey; // used to qualify cell refs for circular detection
     private Dictionary<string, Cell>? _cellIndex;
     private Dictionary<string, string>? _definedNames;
+
+    /// <summary>Thrown when a defined name cannot be resolved — either it
+    /// recursively references itself or its body fails to tokenize. Both
+    /// surface to the user as <c>#NAME?</c>.</summary>
+    private sealed class NameResolutionException : Exception
+    {
+        public NameResolutionException(string name) : base(name) { }
+    }
 
     public FormulaEvaluator(SheetData sheetData, WorkbookPart? workbookPart = null)
         : this(sheetData, workbookPart, new HashSet<string>(StringComparer.OrdinalIgnoreCase), 0, "") { }
@@ -162,12 +171,13 @@ internal partial class FormulaEvaluator
     {
         try
         {
-            if (_depth == 0) _visiting.Clear();
+            if (_depth == 0) { _visiting.Clear(); _expandingNames.Clear(); }
             // Accept both qualified (`_xlfn.SEQUENCE`) and bare (`SEQUENCE`)
             // forms. Stored XML uses the qualified form post-R11-2; user code
             // and tests still pass the canonical name.
             return EvaluateFormula(ModernFunctionQualifier.Unqualify(formula));
         }
+        catch (NameResolutionException) { return FormulaResult.Error("#NAME?"); }
         catch { return null; }
     }
 
@@ -361,7 +371,11 @@ internal partial class FormulaEvaluator
                         tokens.Add(refToken);
                         continue;
                     }
-                    tokens.AddRange(Tokenize(body));
+                    if (!_expandingNames.Add(stripped))
+                        throw new NameResolutionException(stripped);
+                    try { tokens.AddRange(Tokenize(body)); }
+                    catch (NotSupportedException) { throw new NameResolutionException(stripped); }
+                    finally { _expandingNames.Remove(stripped); }
                     continue;
                 }
 
