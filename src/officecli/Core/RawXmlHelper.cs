@@ -337,11 +337,13 @@ internal static class RawXmlHelper
 
     /// <summary>
     /// Returns true if `partPath` should be resolved as a literal zip-internal
-    /// URI rather than a semantic short name. Currently: any path ending in
-    /// `.xml` (case-insensitive).
+    /// URI rather than a semantic short name. Trims surrounding whitespace
+    /// before checking the .xml suffix so a stray trailing space/newline
+    /// doesn't silently route the input to the semantic-path dispatcher
+    /// (which would emit a misleading "Available: ..." list).
     /// </summary>
     public static bool IsZipUriPath(string partPath) =>
-        partPath != null && partPath.EndsWith(".xml", StringComparison.OrdinalIgnoreCase);
+        partPath != null && partPath.AsSpan().TrimEnd().EndsWith(".xml", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Walk the entire part tree of a package and return the part whose
@@ -350,8 +352,8 @@ internal static class RawXmlHelper
     /// </summary>
     public static OpenXmlPart? FindPartByZipUri(OpenXmlPackage package, string partPath)
     {
-        // Normalize: ensure leading slash and lowercase compare per Open
-        // Packaging Conventions (URIs are case-insensitive in zip parts).
+        // Trim surrounding whitespace and normalize leading slash.
+        partPath = partPath.Trim();
         var target = partPath.StartsWith('/') ? partPath : "/" + partPath;
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         return Walk(package);
@@ -377,6 +379,15 @@ internal static class RawXmlHelper
     /// <see cref="OpenXmlPartRootElement"/> when available (preserves
     /// canonical SDK serialization); fall back to the underlying stream for
     /// untyped XML parts (e.g. CustomXml).
+    ///
+    /// Output omits the &lt;?xml ?&gt; prolog uniformly so that:
+    ///   raw /workbook              (semantic path, typed OuterXml)
+    ///   raw /xl/workbook.xml       (zip URI, typed OuterXml)
+    ///   raw /customXml/item1.xml   (zip URI, untyped stream)
+    /// all produce element-only output. The semantic short-name path has
+    /// always done this; this method extends the convention to untyped
+    /// parts so zip-URI calls don't randomly include the prolog depending
+    /// on whether the SDK strongly-typed the target part.
     /// </summary>
     public static string ReadPartXml(OpenXmlPart part)
     {
@@ -384,7 +395,21 @@ internal static class RawXmlHelper
             return root.OuterXml;
         using var stream = part.GetStream(FileMode.Open, FileAccess.Read);
         using var reader = new StreamReader(stream);
-        return reader.ReadToEnd();
+        var content = reader.ReadToEnd();
+        return StripXmlProlog(content);
+    }
+
+    private static string StripXmlProlog(string xml)
+    {
+        var s = xml.AsSpan().TrimStart();
+        // BOM stripping (StreamReader usually handles this, but defensive)
+        if (s.Length > 0 && s[0] == '﻿') s = s[1..];
+        if (s.StartsWith("<?xml"))
+        {
+            var end = s.IndexOf("?>", StringComparison.Ordinal);
+            if (end >= 0) s = s[(end + 2)..].TrimStart();
+        }
+        return s.ToString();
     }
 
     /// <summary>
