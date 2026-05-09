@@ -37,7 +37,7 @@
       "description": "Excel number format string. \"@\" forces String storage on subsequent values.",
       "aliases": ["format", "numfmt"],
       "add": true, "set": true, "get": true,
-      "examples": ["--prop numberformat=\"#,##0.00\"", "--prop numberformat=yyyy-mm-dd"],
+      "examples": ["--prop numberformat=\"#,##0.00\"", "--prop numberformat=yyyy-mm-dd", "--prop numberformat=@"],
       "readback": "format string as stored",
       "enforcement": "report"
     },
