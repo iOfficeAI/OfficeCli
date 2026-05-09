@@ -130,11 +130,19 @@ internal static class OutputFormatter
 
     /// <summary>
     /// Wraps pre-serialized data JSON into a unified envelope with optional warnings.
-    /// Output: { "success": true, "data": ..., "warnings": [...] }
+    /// Output: { "success": true|false, "data": ..., "warnings": [...] }
+    ///
+    /// CONTRACT: `success` reflects the *business* outcome of the command, not
+    /// process liveness. Pass `success: false` when the command ran to
+    /// completion but its judgment is "failed" (e.g. validate found schema
+    /// errors, batch had a failed step). For *probe* commands like
+    /// `view --mode issues`, success stays true even when issues are listed —
+    /// listing issues is the command's normal output, not a failure verdict.
+    /// See CLAUDE.md "JSON Envelope" for the per-command judgment table.
     /// </summary>
-    public static string WrapEnvelope(string dataJson, List<CliWarning>? warnings = null)
+    public static string WrapEnvelope(string dataJson, List<CliWarning>? warnings = null, bool success = true)
     {
-        var envelope = new JsonObject { ["success"] = true };
+        var envelope = new JsonObject { ["success"] = success };
 
         // Parse and embed data as-is (preserves original structure)
         try { envelope["data"] = JsonNode.Parse(dataJson); }
@@ -148,12 +156,13 @@ internal static class OutputFormatter
 
     /// <summary>
     /// Wraps a plain text result (like "Updated ..." or "Added ...") into an envelope.
+    /// See WrapEnvelope's CONTRACT note for `success` semantics.
     /// </summary>
-    public static string WrapEnvelopeText(string message, List<CliWarning>? warnings = null, int? matched = null)
+    public static string WrapEnvelopeText(string message, List<CliWarning>? warnings = null, int? matched = null, bool success = true)
     {
         var envelope = new JsonObject
         {
-            ["success"] = true,
+            ["success"] = success,
             // BUG-R6-04: `add --json` previously emitted only `message`,
             // diverging from get/set/dump which surface a `data` field.
             // Keep `message` for backwards compatibility but also expose
@@ -172,11 +181,11 @@ internal static class OutputFormatter
         return envelope.ToJsonString(JsonOptions);
     }
 
-    public static string WrapEnvelopeWithData(string message, DocumentNode data, List<CliWarning>? warnings = null, int? matched = null)
+    public static string WrapEnvelopeWithData(string message, DocumentNode data, List<CliWarning>? warnings = null, int? matched = null, bool success = true)
     {
         var envelope = new JsonObject
         {
-            ["success"] = true,
+            ["success"] = success,
             ["message"] = message,
             ["data"] = JsonSerializer.SerializeToNode(data, AppJsonContext.Default.DocumentNode)
         };

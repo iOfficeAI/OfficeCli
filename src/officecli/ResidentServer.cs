@@ -549,11 +549,17 @@ public class ResidentServer : IDisposable
                 var warnings = BuildWarnings(stderr);
                 var isFailure = string.IsNullOrEmpty(stdout) && warnings is { Count: > 0 }
                     || stdout.StartsWith("No properties applied", StringComparison.Ordinal);
+                // JSON Envelope contract: propagate judgment-command verdicts
+                // (batch / validate) into envelope.success so it agrees with
+                // exit code on line below. Without this the resident path
+                // emitted success=true while exit code went to 1 — exactly the
+                // mismatch the non-resident path was already broken for.
+                var businessSuccess = !(batchFailure || validateFailure);
                 var envelope = IsJson(stdout)
-                    ? OutputFormatter.WrapEnvelope(stdout, warnings)
+                    ? OutputFormatter.WrapEnvelope(stdout, warnings, success: businessSuccess)
                     : isFailure
                         ? OutputFormatter.WrapEnvelopeError(stdout, warnings)
-                        : OutputFormatter.WrapEnvelopeText(stdout, warnings);
+                        : OutputFormatter.WrapEnvelopeText(stdout, warnings, success: businessSuccess);
                 // BUG-R11-03: JSON-mode exit code must match text mode. Previously
                 // hard-coded to 0, which silently swallowed every error type
                 // (path-not-found, unsupported_property, failed open) for any

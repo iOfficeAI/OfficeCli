@@ -250,12 +250,19 @@ static partial class CommandBuilder
             // calls OutputFormatter.WrapEnvelope on any JSON-shaped stdout).
             // Capture PrintBatchResults output and apply the same envelope
             // here so callers see the same shape regardless of resident state.
+            // JSON Envelope contract: batch is a *judgment* command — any
+            // failed step means the batch as a whole did not deliver what the
+            // caller asked for, so envelope.success mirrors exit code. Note
+            // there are two `success` fields in the JSON: outer (this one,
+            // batch verdict) and per-step `data.results[].success`. They are
+            // not the same and have distinct JSON paths.
+            var batchSuccess = !batchResults.Any(r => !r.Success);
             if (json)
             {
                 using var sw = new System.IO.StringWriter();
                 PrintBatchResults(batchResults, json, items.Count, sw);
                 var inner = sw.ToString().TrimEnd('\n', '\r');
-                Console.WriteLine(OfficeCli.Core.OutputFormatter.WrapEnvelope(inner));
+                Console.WriteLine(OfficeCli.Core.OutputFormatter.WrapEnvelope(inner, success: batchSuccess));
             }
             else
             {
@@ -263,7 +270,7 @@ static partial class CommandBuilder
             }
             if (batchResults.Any(r => r.Success))
                 NotifyWatch(handler, file.FullName, null);
-            return batchResults.Any(r => !r.Success) ? 1 : 0;
+            return batchSuccess ? 0 : 1;
         }, json); });
 
         return batchCommand;

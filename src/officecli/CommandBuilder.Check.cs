@@ -30,7 +30,11 @@ static partial class CommandBuilder
             if (json)
             {
                 var validationJson = FormatValidationErrors(errors);
-                Console.WriteLine(OutputFormatter.WrapEnvelope(validationJson));
+                // JSON Envelope contract: validate is a *judgment* command —
+                // schema errors mean the document failed validation, so the
+                // envelope must reflect that on success. exit code already
+                // mirrors this at line below.
+                Console.WriteLine(OutputFormatter.WrapEnvelope(validationJson, success: errors.Count == 0));
             }
             else
             {
