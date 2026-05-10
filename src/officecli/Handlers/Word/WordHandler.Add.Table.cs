@@ -18,40 +18,37 @@ public partial class WordHandler
     private string AddTable(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)
     {
         var table = new Table();
-        // BUG-R7-03: Previously this always seeded all 6 borders (top/bottom/
-        // left/right/insideH/insideV) and then applied user props on top —
-        // which corrupted three-line tables (top+bottom only) on round-trip
-        // because dump emits only the user-set sides. When the caller passes
-        // ANY border.* prop, treat it as an explicit specification: start
-        // with an empty TableBorders and apply only the requested sides.
-        // Otherwise (no border props at all), keep the historical default
-        // grid look so bare `add table` still produces a visible table.
-        var hasExplicitBorders = properties.Keys.Any(k =>
-            k.StartsWith("border", StringComparison.OrdinalIgnoreCase));
-        TableProperties tblProps;
-        if (hasExplicitBorders)
-        {
-            tblProps = new TableProperties(new TableBorders());
-            table.AppendChild(tblProps);
-            foreach (var (bk, bv) in properties)
+        // BUG-R2-P1-5: always seed all 6 default borders (top/bottom/left/right/
+        // insideH/insideV at Single/4), then apply user-supplied border.* props
+        // on top. Previously a partial border spec (e.g. just border.top +
+        // border.left) wiped the other four sides, surprising users who
+        // expected partial-override semantics. To express a genuine three-line
+        // table (top/bottom only), pass border=none first to wipe defaults,
+        // then border.top + border.bottom. CONSISTENCY(border-default-overlay).
+        TableProperties tblProps = new TableProperties(
+            new TableBorders(
+                new TopBorder { Val = BorderValues.Single, Size = 4 },
+                new LeftBorder { Val = BorderValues.Single, Size = 4 },
+                new BottomBorder { Val = BorderValues.Single, Size = 4 },
+                new RightBorder { Val = BorderValues.Single, Size = 4 },
+                new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4 },
+                new InsideVerticalBorder { Val = BorderValues.Single, Size = 4 }
+            )
+        );
+        table.AppendChild(tblProps);
+        // Apply user-supplied border.* props in order; "border" / "border.all"
+        // (with value "none") wipes defaults before per-side props overlay.
+        var orderedBorderProps = properties
+            .Where(kv => kv.Key.StartsWith("border", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(kv =>
             {
-                if (bk.StartsWith("border", StringComparison.OrdinalIgnoreCase))
-                    ApplyTableBorders(tblProps, bk, bv);
-            }
-        }
-        else
+                var k = kv.Key.ToLowerInvariant();
+                return (k == "border" || k == "border.all") ? 0 : 1;
+            })
+            .ToList();
+        foreach (var (bk, bv) in orderedBorderProps)
         {
-            tblProps = new TableProperties(
-                new TableBorders(
-                    new TopBorder { Val = BorderValues.Single, Size = 4 },
-                    new LeftBorder { Val = BorderValues.Single, Size = 4 },
-                    new BottomBorder { Val = BorderValues.Single, Size = 4 },
-                    new RightBorder { Val = BorderValues.Single, Size = 4 },
-                    new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4 },
-                    new InsideVerticalBorder { Val = BorderValues.Single, Size = 4 }
-                )
-            );
-            table.AppendChild(tblProps);
+            ApplyTableBorders(tblProps, bk, bv);
         }
 
         // Parse data if provided: "H1,H2;R1C1,R1C2;R2C1,R2C2" or CSV file/URL/data-URI

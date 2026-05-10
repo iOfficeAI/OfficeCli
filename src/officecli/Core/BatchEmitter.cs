@@ -1776,6 +1776,22 @@ public static class BatchEmitter
         var tableProps = FilterEmittableProps(tableNode.Format);
         tableProps["rows"] = rows.Count.ToString();
         tableProps["cols"] = cols.ToString();
+        // BUG-R2-P1-5: AddTable seeds all 6 default borders and overlays user
+        // props on top, so a partial border spec (e.g. only border.top +
+        // border.bottom for a banner-line table) replays as 6 single-borders.
+        // If the source table emits only a subset of the 6 sides, prepend an
+        // explicit `border=none` wipe so the visible result round-trips.
+        // CONSISTENCY(border-default-overlay).
+        {
+            var sideKeys = new[] { "border.top", "border.bottom", "border.left",
+                "border.right", "border.insideH", "border.insideV" };
+            int presentSides = sideKeys.Count(s => tableProps.ContainsKey(s));
+            bool hasBorderAll = tableProps.ContainsKey("border") || tableProps.ContainsKey("border.all");
+            if (presentSides > 0 && presentSides < 6 && !hasBorderAll)
+            {
+                tableProps["border"] = "none";
+            }
+        }
         // Nested tables sit inside a parent table cell; AddTable accepts
         // /body/tbl[N]/tr[M]/tc[K] as a parent. Outer-level tables target
         // /body. parentTablePath, when set, is a cell target path
@@ -2414,6 +2430,12 @@ public static class BatchEmitter
         // 3-segment subkeys (see the explicit "drop them here" comment below)
         // and round-trip silently downgrades real borders to default thin
         // single. Fold sz/color/space into the 2-segment key.
+        // BUG-R2-P1-5: Add path now seeds all 6 default borders and overlays
+        // user props on top, so a partial spec (e.g. only border.top +
+        // border.bottom) replays as 6 single-borders, not 2. Detect a
+        // partial spec here and prepend an explicit `border=none` wipe so
+        // genuine three-line / banner-line tables round-trip with the same
+        // visible result. CONSISTENCY(border-default-overlay).
         var borderFold = new Dictionary<string, (string? style, string? sz, string? color, string? space)>(
             StringComparer.OrdinalIgnoreCase);
         foreach (var (key, val) in raw)
