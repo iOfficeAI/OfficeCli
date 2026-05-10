@@ -200,8 +200,15 @@ public partial class PowerPointHandler
                 if (gridSpan > 1) spanAttrs += $" colspan=\"{gridSpan}\"";
                 if (rowSpan > 1) spanAttrs += $" rowspan=\"{rowSpan}\"";
 
-                // Skip merged continuation cells
-                if (cell.HorizontalMerge?.Value == true || cell.VerticalMerge?.Value == true)
+                // Skip merged continuation cells. hMerge cells consume one slot
+                // of the active skipCols counter; vMerge cells (vertical merge
+                // continuation) do not affect horizontal accounting.
+                if (cell.HorizontalMerge?.Value == true)
+                {
+                    if (skipCols > 0) skipCols--;
+                    continue;
+                }
+                if (cell.VerticalMerge?.Value == true)
                     continue;
 
                 // Skip cells covered by previous gridSpan
