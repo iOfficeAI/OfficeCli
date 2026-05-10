@@ -1463,7 +1463,8 @@ public partial class WordHandler
                     && !string.Equals(value, "false", StringComparison.OrdinalIgnoreCase))
                 {
                     var (bStyle, bSize, bColor, bSpace) = ParseBorderValue(value);
-                    var bdr = new Border { Val = bStyle, Size = bSize, Space = bSpace };
+                    var bdr = new Border { Val = bStyle, Size = bSize };
+                    if (bSpace.HasValue) bdr.Space = bSpace.Value;
                     if (bColor != null) bdr.Color = bColor;
                     InsertRunPropInSchemaOrder(props, bdr);
                 }

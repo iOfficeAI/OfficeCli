@@ -530,7 +530,12 @@ public partial class WordHandler
         _ => throw new ArgumentException($"Invalid border style: '{style}'. Valid values: single, thick, double, dotted, dashed, none, triple, wave, etc.")
     };
 
-    private static (BorderValues style, uint size, string? color, uint space) ParseBorderValue(string value)
+    // CONSISTENCY(border-empty-segment): space is uint? rather than uint so the
+    // caller can distinguish "not specified" from "explicitly 0" — the OOXML
+    // default for w:space is 0, so writing the attribute when the user did not
+    // ask for it round-trips into a spurious `border.X.space: 0` readback (and
+    // a `STYLE;SZ;;0` artifact in batch dump).
+    private static (BorderValues style, uint size, string? color, uint? space) ParseBorderValue(string value)
     {
         var parts = value.Split(';');
         var style = ParseBorderStyle(parts[0]);
@@ -572,18 +577,27 @@ public partial class WordHandler
         string? color = (parts.Length > 2 && !string.IsNullOrEmpty(parts[2]))
             ? SanitizeHex(parts[2])
             : null;
-        uint space = 0u;
+        uint? space = null;
         // CONSISTENCY(border-empty-segment): symmetric with the SIZE/COLOR
         // tolerance — empty SPACE segment means "no override".
-        if (parts.Length > 3 && !string.IsNullOrEmpty(parts[3])
-            && !uint.TryParse(parts[3], out space))
-            throw new ArgumentException($"Invalid border space '{parts[3]}', expected integer. Format: STYLE[;SIZE[;COLOR[;SPACE]]]");
+        if (parts.Length > 3 && !string.IsNullOrEmpty(parts[3]))
+        {
+            if (!uint.TryParse(parts[3], out var spaceVal))
+                throw new ArgumentException($"Invalid border space '{parts[3]}', expected integer. Format: STYLE[;SIZE[;COLOR[;SPACE]]]");
+            space = spaceVal;
+        }
         return (style, size, color, space);
     }
 
-    private static T MakeBorder<T>(BorderValues style, uint size, string? color, uint space) where T : BorderType, new()
+    private static T MakeBorder<T>(BorderValues style, uint size, string? color, uint? space) where T : BorderType, new()
     {
-        var b = new T { Val = style, Size = size, Space = space };
+        // BUG-R2-P2-7: only emit w:space attribute when the caller actually
+        // provided one. Writing space=0 explicitly round-trips into a
+        // spurious `border.X.space: 0` readback and a `STYLE;SZ;;0` batch
+        // artifact, even though 0 is the OOXML default and the user never
+        // asked for it.
+        var b = new T { Val = style, Size = size };
+        if (space.HasValue) b.Space = space.Value;
         if (color != null) b.Color = color;
         return b;
     }
