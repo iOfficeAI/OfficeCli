@@ -111,6 +111,40 @@ public partial class PowerPointHandler
         GetSlide(slidePart).Save();
         return unsupported;
     }
+
+    // BUG-R8-table-merge BUG-10: Set on /slide[N]/table[M]/col[C] previously
+    // fell through to the shape catch-all because the dispatch table only
+    // knew tr[R]/tc[C], tr[R], and table[M]. Mirror SetTableRowByPath so
+    // Add/Get/Set parity holds for the col sub-path. CONSISTENCY(table-col-path).
+    private List<string> SetTableColByPath(Match tblColMatch, Dictionary<string, string> properties)
+    {
+        var slideIdx = int.Parse(tblColMatch.Groups[1].Value);
+        var tblIdx = int.Parse(tblColMatch.Groups[2].Value);
+        var colIdx = int.Parse(tblColMatch.Groups[3].Value);
+
+        var (slidePart, table) = ResolveTable(slideIdx, tblIdx);
+        var gridCols = table.TableGrid?.Elements<Drawing.GridColumn>().ToList();
+        if (gridCols == null || colIdx < 1 || colIdx > gridCols.Count)
+            throw new ArgumentException($"Column {colIdx} not found (total: {gridCols?.Count ?? 0})");
+
+        var gc = gridCols[colIdx - 1];
+        var unsupported = new List<string>();
+        foreach (var (key, value) in properties)
+        {
+            switch (key.ToLowerInvariant())
+            {
+                case "width":
+                    gc.Width = ParseEmu(value);
+                    break;
+                default:
+                    unsupported.Add(key);
+                    break;
+            }
+        }
+        GetSlide(slidePart).Save();
+        return unsupported;
+    }
+
     private List<string> SetTableByPath(Match tblMatch, Dictionary<string, string> properties)
     {
         var slideIdx = int.Parse(tblMatch.Groups[1].Value);

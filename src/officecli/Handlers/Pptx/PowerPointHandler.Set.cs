@@ -221,6 +221,10 @@ public partial class PowerPointHandler
         var tblRowMatch = Regex.Match(path, @"^/slide\[(\d+)\]/table\[(\d+)\]/tr\[(\d+)\]$");
         if (tblRowMatch.Success) return SetTableRowByPath(tblRowMatch, properties);
 
+        // Try table column path: /slide[N]/table[M]/col[C]
+        var tblColMatch = Regex.Match(path, @"^/slide\[(\d+)\]/table\[(\d+)\]/col\[(\d+)\]$");
+        if (tblColMatch.Success) return SetTableColByPath(tblColMatch, properties);
+
         // Try placeholder path: /slide[N]/placeholder[M] or /slide[N]/placeholder[type]
         var phMatch = Regex.Match(path, @"^/slide\[(\d+)\]/placeholder\[(\w+)\]$");
         if (phMatch.Success) return SetPlaceholderByPath(phMatch, properties);
