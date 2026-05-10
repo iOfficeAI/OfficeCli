@@ -366,13 +366,29 @@ public partial class WordHandler
         // BUG-R1-P0-3b: cols > existing tblGrid count must expand tblGrid
         // to keep tcW / gridCol in agreement. Otherwise the extra cells
         // have no column-width definition and Word misaligns them.
+        // BUG-R2-P0-2: extending the grid alone leaves already-existing rows
+        // with fewer cells than the grid claims. Word renders the missing
+        // slots as a half-collapsed final column. Pad each existing row with
+        // empty placeholder cells so per-row cell count tracks the new grid.
         if (existingGridCols.Count > 0 && newCols > existingGridCols.Count)
         {
             // Width: average of existing cols, falling back to 2400.
             long avg = (long)existingGridCols.Average(gc =>
                 long.TryParse(gc.Width?.Value, out var w) ? w : 2400L);
-            for (int extra = existingGridCols.Count; extra < newCols; extra++)
+            int oldCount = existingGridCols.Count;
+            for (int extra = oldCount; extra < newCols; extra++)
                 grid.AppendChild(new GridColumn { Width = avg.ToString() });
+
+            int padPerRow = newCols - oldCount;
+            foreach (var existingRow in targetTable.Elements<TableRow>())
+            {
+                for (int i = 0; i < padPerRow; i++)
+                {
+                    var pad = new TableCell(new Paragraph());
+                    AssignParaId(pad.GetFirstChild<Paragraph>()!);
+                    existingRow.AppendChild(pad);
+                }
+            }
         }
 
         var newRow = new TableRow();
