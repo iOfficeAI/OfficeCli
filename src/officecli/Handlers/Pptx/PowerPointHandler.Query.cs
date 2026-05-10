@@ -233,7 +233,7 @@ public partial class PowerPointHandler
                 throw new ArgumentException($"Slide {notesSlideIdx} not found (total: {slidePartsN.Count})");
             var slidePartN = slidePartsN[notesSlideIdx - 1];
             if (slidePartN.NotesSlidePart == null)
-                return null!;
+                return new DocumentNode { Path = path, Type = "error", Text = $"Slide {notesSlideIdx} has no notes" };
             var notesText = GetNotesText(slidePartN.NotesSlidePart);
             var notesNode = new DocumentNode { Path = path, Type = "notes", Text = notesText };
             // Schema declares text get=true; mirror node.Text into Format for parity.
@@ -357,7 +357,7 @@ public partial class PowerPointHandler
 
             var effectCTns = EnumerateShapeAnimationCTns(animSlidePart, animShape);
             if (aIdx < 1 || aIdx > effectCTns.Count)
-                return null!;
+                return new DocumentNode { Path = path, Type = "error", Text = $"animation[{aIdx}] not found (shape has {effectCTns.Count} animation(s))" };
             var animNode = new DocumentNode { Path = $"/slide[{sIdx}]/{animShapePathSeg}/animation[{aIdx}]", Type = "animation" };
             PopulateAnimationNode(animNode, effectCTns[aIdx - 1]);
             return animNode;
