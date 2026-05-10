@@ -234,6 +234,11 @@ public partial class WordHandler
                     }
                     break;
                 case "style":
+                case "tablestyle":
+                case "tablestyleid":
+                    // BUG-R3 P1-#6: schema declares tableStyle/tableStyleId as
+                    // aliases for `style`; honor them here so Add doesn't flag
+                    // them UNSUPPORTED.
                     tblProps.TableStyle = new TableStyle { Val = tv };
                     // Add TableLook so built-in styles apply banding correctly
                     tblProps.RemoveAllChildren<TableLook>();
