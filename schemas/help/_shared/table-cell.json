@@ -94,7 +94,7 @@
     },
     "fill": {
       "type": "color",
-      "description": "cell background fill. Accepts a solid color (hex, named, rgb(...)), 'none' for explicit no-fill, or a gradient string 'COLOR1-COLOR2[-ANGLE]' (e.g. 'FF0000-0000FF-90'). Stored on the cell's properties element using each format's native shading/fill primitives.",
+      "description": "cell background fill. Accepts a solid color (hex, named, rgb(...)), 'none' for explicit no-fill, or a gradient string 'COLOR1-COLOR2[-ANGLE]' (e.g. 'FF0000-0000FF-90'). Stored on the cell's properties element using each format's native shading/fill primitives. Scheme color names (accent1, dk1, lt2, …) are supported in pptx only.",
       "aliases": [
         "background",
         "shd",
@@ -107,7 +107,6 @@
         "--prop fill=FFFF00",
         "--prop fill=#FF0000",
         "--prop fill=red",
-        "--prop background=accent1",
         "--prop fill=none",
         "--prop fill=\"FF0000-0000FF-90\"",
         "--prop fill=\"gradient;FF0000;0000FF;90\""
