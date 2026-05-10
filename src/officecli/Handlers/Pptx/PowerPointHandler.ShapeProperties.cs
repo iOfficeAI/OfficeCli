@@ -1549,6 +1549,26 @@ public partial class PowerPointHandler
                             throw new ArgumentException($"Invalid rowspan: {rsSpan} exceeds remaining rows ({remainingRows}) from this cell.");
                     }
                     cell.RowSpan = new DocumentFormat.OpenXml.Int32Value(rsSpan);
+                    // BUG-R1-table-merge: rowSpan on the anchor cell is not
+                    // sufficient — every continuation cell directly below
+                    // must carry vMerge=true or PowerPoint treats the cells
+                    // as independent. CONSISTENCY(table-merge-anchor):
+                    // mirrors merge.down case below.
+                    if (rsSpan > 1
+                        && cell.Parent is Drawing.TableRow rsAnchorRow
+                        && rsAnchorRow.Parent is Drawing.Table rsAnchorTbl)
+                    {
+                        var rsRows2 = rsAnchorTbl.Elements<Drawing.TableRow>().ToList();
+                        var rsRowIdx2 = rsRows2.IndexOf(rsAnchorRow);
+                        var rsCells2 = rsAnchorRow.Elements<Drawing.TableCell>().ToList();
+                        var rsColIdx2 = rsCells2.IndexOf(cell);
+                        for (int ri = rsRowIdx2 + 1; ri < rsRowIdx2 + rsSpan && ri < rsRows2.Count; ri++)
+                        {
+                            var belowCells = rsRows2[ri].Elements<Drawing.TableCell>().ToList();
+                            if (rsColIdx2 < belowCells.Count)
+                                belowCells[rsColIdx2].VerticalMerge = new DocumentFormat.OpenXml.BooleanValue(true);
+                        }
+                    }
                     break;
                 }
                 case "vmerge":
