@@ -1726,8 +1726,33 @@ public partial class WordHandler
     {
         var unsupported = new List<string>();
         var tblPr = tbl.GetFirstChild<TableProperties>() ?? tbl.PrependChild(new TableProperties());
-        foreach (var (key, value) in properties)
+        foreach (var (rawKey, value) in properties)
         {
+            // BUG-R9 (tbllook.* compound key): strip the "tbllook." namespace
+            // prefix so callers can write tblLook.firstRow=true alongside the
+            // bare `firstRow=true` form. Unknown sub-keys raise instead of
+            // being silently dropped (and falsely reporting "Updated"). The
+            // bare lookup happens via the lowercased `key` below; we rewrite
+            // it here so downstream cases match unchanged.
+            var key = rawKey;
+            var rkl = rawKey.ToLowerInvariant();
+            if (rkl.StartsWith("tbllook."))
+            {
+                var sub = rkl.Substring("tbllook.".Length);
+                if (sub is "firstrow" or "lastrow"
+                        or "firstcol" or "firstcolumn"
+                        or "lastcol" or "lastcolumn"
+                        or "bandrow" or "bandedrows" or "bandrows"
+                        or "bandcol" or "bandedcols" or "bandcols"
+                        or "nohband" or "nohorizontalband"
+                        or "novband" or "noverticalband")
+                    key = sub;
+                else
+                    throw new ArgumentException(
+                        $"Unknown tblLook sub-key: '{rawKey}'. Valid sub-keys: " +
+                        $"firstRow, lastRow, firstCol, lastCol, bandRow, bandCol, " +
+                        $"noHBand, noVBand. Or use the bare hex form tblLook=04A0.");
+            }
             switch (key.ToLowerInvariant())
             {
                 case "style":
