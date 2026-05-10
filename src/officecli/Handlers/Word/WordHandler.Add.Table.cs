@@ -777,7 +777,10 @@ public partial class WordHandler
 
         // BUG-R1-P0-2: expand tblGrid if this row's grid-column occupancy
         // (sum of gridSpan) now exceeds existing gridCol count.
-        if (cellGrid != null)
+        // BUG-R1-table-merge: when expanding tblGrid, pad sibling rows with
+        // empty placeholder cells so they remain aligned to the new column
+        // count. CONSISTENCY(table-grid-pad): mirrors AddRow at lines 471-489.
+        if (cellGrid != null && cellParentTable != null)
         {
             var existingGridCount = cellGrid.Elements<GridColumn>().Count();
             var rowSpan = targetRow.Elements<TableCell>().Sum(tc =>
@@ -791,6 +794,18 @@ public partial class WordHandler
                     : 2400L;
                 for (int i = existingGridCount; i < rowSpan; i++)
                     cellGrid.AppendChild(new GridColumn { Width = avgWidth.ToString() });
+
+                int padPerRow = rowSpan - existingGridCount;
+                foreach (var siblingRow in cellParentTable.Elements<TableRow>())
+                {
+                    if (siblingRow == targetRow) continue;
+                    for (int i = 0; i < padPerRow; i++)
+                    {
+                        var pad = new TableCell(new Paragraph());
+                        AssignParaId(pad.GetFirstChild<Paragraph>()!);
+                        siblingRow.AppendChild(pad);
+                    }
+                }
             }
         }
 
