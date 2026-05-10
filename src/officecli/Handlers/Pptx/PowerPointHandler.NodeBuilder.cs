@@ -197,7 +197,7 @@ public partial class PowerPointHandler
                     foreach (var cell in row.Elements<Drawing.TableCell>())
                     {
                         cIdx++;
-                        var cellText = cell.TextBody?.InnerText ?? "";
+                        var cellText = GetCellTextWithParagraphBreaks(cell);
                         var cellNode = new DocumentNode
                         {
                             Path = $"/slide[{slideNum}]/{tblPathSeg}/tr[{rIdx}]/tc[{cIdx}]",

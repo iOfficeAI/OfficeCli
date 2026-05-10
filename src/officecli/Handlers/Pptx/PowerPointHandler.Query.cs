@@ -383,7 +383,7 @@ public partial class PowerPointHandler
                 throw new ArgumentException($"Cell {cIdx} not found (row has {cells.Count} cells)");
 
             var cell = cells[cIdx - 1];
-            var cellText = cell.TextBody?.InnerText ?? "";
+            var cellText = GetCellTextWithParagraphBreaks(cell);
             var cellNode = new DocumentNode
             {
                 Path = $"/slide[{sIdx}]/{tblPathSeg}/tr[{rIdx}]/tc[{cIdx}]",

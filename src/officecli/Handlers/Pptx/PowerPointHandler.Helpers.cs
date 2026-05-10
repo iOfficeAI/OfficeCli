@@ -20,6 +20,21 @@ public partial class PowerPointHandler
     private static bool IsTruthy(string? value) =>
         ParseHelpers.IsTruthy(value);
 
+    /// <summary>
+    /// Read a table cell's text content, joining multi-paragraph text with "\n".
+    /// CONSISTENCY(cell-text-readback): cell.TextBody?.InnerText concatenates
+    /// paragraphs without separators, which silently loses line-break structure
+    /// on multi-line cells. Get must return the user's input shape verbatim.
+    /// </summary>
+    internal static string GetCellTextWithParagraphBreaks(Drawing.TableCell cell)
+    {
+        var tb = cell.TextBody;
+        if (tb == null) return "";
+        var paragraphs = tb.Elements<Drawing.Paragraph>().ToList();
+        if (paragraphs.Count == 0) return tb.InnerText ?? "";
+        return string.Join("\n", paragraphs.Select(p => p.InnerText ?? ""));
+    }
+
     private static bool IsValidBooleanString(string? value) =>
         ParseHelpers.IsValidBooleanString(value);
 
