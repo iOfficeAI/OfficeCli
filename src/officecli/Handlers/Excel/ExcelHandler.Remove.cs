@@ -231,11 +231,51 @@ public partial class ExcelHandler
             foreach (var cp in cachePartsTouched)
                 PrunePivotCacheIfOrphan(workbookPart, cp);
 
-            // Clean up named ranges referencing the deleted sheet
+            // CONSISTENCY(remove-sheet-refs): defined names that point into the
+            // removed sheet are silently dropped (they would be orphaned).
+            // BUT: if those defined names are referenced by formulas in *other*
+            // sheets, dropping them silently leaves those formulas with #NAME?.
+            // Mirror the DV / sparkline / pivot guards: throw if any other-sheet
+            // formula uses one of the about-to-be-orphaned names.
             var workbook = GetWorkbook();
             var definedNames = workbook.GetFirstChild<DefinedNames>();
             if (definedNames != null)
             {
+                var orphanNames = definedNames.Elements<DefinedName>()
+                    .Where(dn => dn.Text?.Contains(sheetName + "!", StringComparison.OrdinalIgnoreCase) == true)
+                    .Select(dn => dn.Name?.Value)
+                    .Where(n => !string.IsNullOrEmpty(n))
+                    .ToList();
+                if (orphanNames.Count > 0)
+                {
+                    var refs = new List<string>();
+                    foreach (var otherWsPart in workbookPart.WorksheetParts)
+                    {
+                        if (sheetWsPartForCheck != null && ReferenceEquals(otherWsPart, sheetWsPartForCheck)) continue;
+                        var otherSheetName = workbook.Sheets!.Elements<Sheet>()
+                            .FirstOrDefault(s => s.Id?.Value == workbookPart.GetIdOfPart(otherWsPart))?.Name?.Value ?? "?";
+                        foreach (var fcell in otherWsPart.Worksheet.Descendants<DocumentFormat.OpenXml.Spreadsheet.Cell>())
+                        {
+                            var f = fcell.CellFormula?.Text;
+                            if (string.IsNullOrEmpty(f)) continue;
+                            foreach (var n in orphanNames)
+                            {
+                                if (Regex.IsMatch(f, @"\b" + Regex.Escape(n!) + @"\b", RegexOptions.IgnoreCase))
+                                {
+                                    refs.Add($"{otherSheetName}!{fcell.CellReference?.Value ?? "?"} (uses '{n}')");
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (refs.Count > 0)
+                        throw new ArgumentException(
+                            $"Cannot remove sheet '{sheetName}': defined name(s) [{string.Join(", ", orphanNames)}] " +
+                            $"are referenced by formulas in {string.Join(", ", refs)}. " +
+                            $"Remove or repoint the formulas first.");
+                }
+
+                // No external usage — safe to drop the orphan names.
                 var toRemove = definedNames.Elements<DefinedName>()
                     .Where(dn => dn.Text?.Contains(sheetName + "!", StringComparison.OrdinalIgnoreCase) == true)
                     .ToList();
@@ -450,6 +490,39 @@ public partial class ExcelHandler
             if (tblIdx < 1 || tblIdx > tableParts.Count)
                 throw new ArgumentException($"Table index {tblIdx} out of range (1..{tableParts.Count})");
             var tablePart = tableParts[tblIdx - 1];
+
+            // CONSISTENCY(remove-refs): mirror sheet-remove DV / sparkline / pivot
+            // guards. Removing a table referenced by structured-ref formulas
+            // (Table1[Col], Table1[#All], or bare Table1) leaves stale formulas
+            // that Excel surfaces as #REF!/#NAME?. Scan every sheet's cell
+            // formulas; throw with the offending cell list.
+            var tableName = tablePart.Table?.Name?.Value;
+            if (!string.IsNullOrEmpty(tableName) && _doc.WorkbookPart != null)
+            {
+                var refs = new List<string>();
+                foreach (var wsp in _doc.WorkbookPart.WorksheetParts)
+                {
+                    var wsName = _doc.WorkbookPart.Workbook.Sheets!
+                        .Elements<Sheet>()
+                        .FirstOrDefault(s => s.Id?.Value == _doc.WorkbookPart.GetIdOfPart(wsp))?
+                        .Name?.Value ?? "?";
+                    foreach (var fcell in wsp.Worksheet.Descendants<DocumentFormat.OpenXml.Spreadsheet.Cell>())
+                    {
+                        var f = fcell.CellFormula?.Text;
+                        if (string.IsNullOrEmpty(f)) continue;
+                        // Match Table1[ ... ] (structured ref) or bare Table1 as a
+                        // word boundary token. Case-insensitive per Excel norms.
+                        var pattern = @"\b" + Regex.Escape(tableName) + @"(\[|\b)";
+                        if (Regex.IsMatch(f, pattern, RegexOptions.IgnoreCase))
+                            refs.Add($"{wsName}!{fcell.CellReference?.Value ?? "?"}");
+                    }
+                }
+                if (refs.Count > 0)
+                    throw new ArgumentException(
+                        $"Cannot remove table '{tableName}': it is referenced by formulas in {string.Join(", ", refs)}. " +
+                        $"Remove or repoint the formulas first.");
+            }
+
             worksheet.DeletePart(tablePart);
             // Also remove the tablePart reference from the TableParts element
             var tblParts = worksheet.Worksheet?.GetFirstChild<TableParts>();
