@@ -331,6 +331,56 @@ public partial class WordHandler
                     }
                 }
             }
+
+            // BUG-R3-09: clean up dead HyperlinkRelationship entries.
+            // Each w:hyperlink carries an r:id pointing at a HyperlinkRelationship
+            // (an external rel, NOT a part). Deleting the containing element
+            // leaves the rel as an orphan that Word silently tolerates but
+            // round-tripping tools and validators flag.
+            //
+            // edge case: same rId may be referenced by multiple hyperlinks. Use
+            // a reference count so we only delete rels still uniquely owned by
+            // the element being removed.
+            var hyperlinksInElement = element.Descendants<Hyperlink>().ToList();
+            if (hyperlinksInElement.Count > 0)
+            {
+                // Collect unique rIds referenced by hyperlinks inside the element.
+                var rIdsToCheck = hyperlinksInElement
+                    .Select(h => h.Id?.Value)
+                    .Where(id => !string.IsNullOrEmpty(id))
+                    .Distinct()
+                    .ToList();
+                foreach (var rId in rIdsToCheck)
+                {
+                    // Count references in body + headers + footers OUTSIDE of
+                    // the element being removed. Deleting `element` would drop
+                    // all in-element refs, so any remaining out-of-element ref
+                    // means the rel is still live elsewhere.
+                    int outsideRefs = 0;
+                    foreach (var hl in mainPart2.Document!.Descendants<Hyperlink>())
+                    {
+                        if (hl.Id?.Value != rId) continue;
+                        // Check whether `hl` lives inside `element` (skip self-refs;
+                        // those go away with the removal).
+                        bool inside = false;
+                        for (var anc = (OpenXmlElement?)hl; anc != null; anc = anc.Parent)
+                        {
+                            if (ReferenceEquals(anc, element)) { inside = true; break; }
+                        }
+                        if (!inside) outsideRefs++;
+                    }
+                    foreach (var hp in mainPart2.HeaderParts)
+                        outsideRefs += hp.Header?.Descendants<Hyperlink>()
+                            .Count(h => h.Id?.Value == rId) ?? 0;
+                    foreach (var fp in mainPart2.FooterParts)
+                        outsideRefs += fp.Footer?.Descendants<Hyperlink>()
+                            .Count(h => h.Id?.Value == rId) ?? 0;
+                    if (outsideRefs == 0)
+                    {
+                        try { mainPart2.DeleteReferenceRelationship(rId!); } catch { }
+                    }
+                }
+            }
         }
 
         // If removing a Comment, also clean up dangling references in the body
