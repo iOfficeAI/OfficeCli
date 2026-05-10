@@ -77,7 +77,50 @@ public partial class PowerPointHandler
             if (rowIdx < 1 || rowIdx > rows.Count)
                 throw new ArgumentException($"Row {rowIdx} not found (total: {rows.Count})");
 
-            rows[rowIdx - 1].Remove();
+            // BUG-R2-table-merge BUG-6b: a table with 0 rows is invalid OOXML —
+            // PowerPoint errors on open. Reject removing the only remaining
+            // row; users must remove the table itself.
+            if (rows.Count == 1)
+                throw new ArgumentException(
+                    "Cannot remove the last row of a table. Remove the table itself instead (a table with 0 rows is invalid OOXML).");
+
+            // BUG-R2-table-merge BUG-4b: snapshot orphan-vMerge fixups before
+            // removal. Any cell in the doomed row with rowSpan>1 anchors a
+            // vertical merge whose continuation cells (vMerge=true) below
+            // become invisible if not promoted. Record the column slot and
+            // remaining-rows budget so the post-Remove pass can clear them.
+            var rowSpanFixups = new List<(int colIdx, int budget)>();
+            var anchorRow = rows[rowIdx - 1];
+            int slotAcc = 0;
+            foreach (var anchorCell in anchorRow.Elements<Drawing.TableCell>())
+            {
+                int gSpan = anchorCell.GridSpan?.Value ?? 1;
+                int rSpan = anchorCell.RowSpan?.Value ?? 1;
+                if (rSpan > 1)
+                    rowSpanFixups.Add((slotAcc, rSpan - 1));
+                slotAcc += gSpan;
+            }
+
+            anchorRow.Remove();
+
+            if (rowSpanFixups.Count > 0)
+            {
+                var rowsAfter = table.Elements<Drawing.TableRow>().ToList();
+                foreach (var (colIdx, budget) in rowSpanFixups)
+                {
+                    int cleared = 0;
+                    for (int ri = rowIdx - 1; ri < rowsAfter.Count && cleared < budget; ri++)
+                    {
+                        var fixCell = ResolvePptxCellAtSlot(rowsAfter[ri], colIdx);
+                        if (fixCell == null) break;
+                        bool isContinuation = fixCell.VerticalMerge?.Value == true;
+                        if (!isContinuation) break;
+                        fixCell.VerticalMerge = null;
+                        cleared++;
+                    }
+                }
+            }
+
             return null;
         }
 
@@ -704,6 +747,21 @@ public partial class PowerPointHandler
         var newPath1 = ComputeElementPath(parentPath, elem1, shapeTree);
         var newPath2 = ComputeElementPath(parentPath, elem2, shapeTree);
         return (newPath1, newPath2);
+    }
+
+    // Resolve the Drawing.TableCell occupying a specific gridCol slot in a
+    // pptx row, accounting for gridSpan-merged cells. Returns null if the
+    // row's total span is shorter than slot+1.
+    private static Drawing.TableCell? ResolvePptxCellAtSlot(Drawing.TableRow trow, int slot)
+    {
+        int acc = 0;
+        foreach (var c in trow.Elements<Drawing.TableCell>())
+        {
+            int span = c.GridSpan?.Value ?? 1;
+            if (slot >= acc && slot < acc + span) return c;
+            acc += span;
+        }
+        return null;
     }
 
     internal static void SwapXmlElements(OpenXmlElement a, OpenXmlElement b)
