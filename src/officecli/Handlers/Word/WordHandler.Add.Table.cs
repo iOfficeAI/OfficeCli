@@ -104,14 +104,46 @@ public partial class WordHandler
             {
                 if (!int.TryParse(parts[ci].Trim(), out colWidthArr[ci]))
                     throw new ArgumentException($"Invalid 'colwidths' value: '{parts[ci].Trim()}'. Each column width must be a positive integer (in twips). Example: colwidths=3000,2000,5000");
+                // BUG-R1-01: reject negative or zero up front (Set already
+                // does this; Add did not). Invalid OOXML otherwise.
+                if (colWidthArr[ci] <= 0)
+                    throw new ArgumentException($"Invalid 'colwidths' value: '{parts[ci].Trim()}'. Each column width must be a positive integer (in twips). Example: colwidths=3000,2000,5000");
             }
         }
 
         // Add table grid
+        // BUG-R1-P0-4: when colWidths is not specified, default per-column
+        // width should be computed from the section's usable body width
+        // (page width − left/right margins) divided by `cols`. The previous
+        // hard-coded 2400-twips default overflowed the page once cols > 3
+        // on default A4 / Letter section properties.
+        long defaultColTwips = 2400;
+        if (colWidthArr == null)
+        {
+            var sectPr = _doc.MainDocumentPart?.Document?.Body?
+                .Descendants<SectionProperties>().LastOrDefault();
+            var pgSz = sectPr?.GetFirstChild<PageSize>();
+            var pgMar = sectPr?.GetFirstChild<PageMargin>();
+            long pageW = pgSz?.Width?.Value ?? 12240u;
+            long mL = pgMar?.Left?.Value ?? 1440u;
+            long mR = pgMar?.Right?.Value ?? 1440u;
+            long usable = Math.Max(1, pageW - mL - mR);
+            defaultColTwips = Math.Max(1, usable / Math.Max(1, cols));
+        }
+
         var tblGrid = new TableGrid();
         for (int gc = 0; gc < cols; gc++)
         {
-            var w = colWidthArr != null && gc < colWidthArr.Length ? colWidthArr[gc].ToString() : "2400";
+            // BUG-R1-01: reject negative or zero gridCol widths up front
+            // (Set already does this; Add did not). Invalid OOXML otherwise.
+            if (colWidthArr != null && gc < colWidthArr.Length)
+            {
+                if (colWidthArr[gc] <= 0)
+                    throw new ArgumentException($"Invalid 'colwidths' value: '{colWidthArr[gc]}'. Each column width must be a positive integer (in twips). Example: colwidths=3000,2000,5000");
+            }
+            var w = colWidthArr != null && gc < colWidthArr.Length
+                ? colWidthArr[gc].ToString()
+                : defaultColTwips.ToString();
             tblGrid.AppendChild(new GridColumn { Width = w });
         }
         table.AppendChild(tblGrid);
@@ -317,11 +349,31 @@ public partial class WordHandler
         if (parent is not Table targetTable)
             throw new ArgumentException("Rows can only be added to a table: /body/tbl[N]");
 
-        var existingCols = targetTable.Elements<TableGrid>().FirstOrDefault()
-            ?.Elements<GridColumn>().Count() ?? 1;
+        var grid = targetTable.GetFirstChild<TableGrid>()
+            ?? targetTable.PrependChild(new TableGrid());
+        var existingGridCols = grid.Elements<GridColumn>().ToList();
+        var existingCols = existingGridCols.Count > 0 ? existingGridCols.Count : 1;
         int newCols = existingCols;
         if (properties.TryGetValue("cols", out var colsVal))
+        {
             newCols = ParseHelpers.SafeParseInt(colsVal, "cols");
+            // BUG-R1-P0-3a: cols=0 silently produces an empty <w:tr> with no
+            // cells; per OOXML spec a row must contain at least one cell.
+            if (newCols <= 0)
+                throw new ArgumentException($"Invalid 'cols' value: '{colsVal}'. Must be a positive integer (> 0); a row with 0 cells is invalid OOXML.");
+        }
+
+        // BUG-R1-P0-3b: cols > existing tblGrid count must expand tblGrid
+        // to keep tcW / gridCol in agreement. Otherwise the extra cells
+        // have no column-width definition and Word misaligns them.
+        if (existingGridCols.Count > 0 && newCols > existingGridCols.Count)
+        {
+            // Width: average of existing cols, falling back to 2400.
+            long avg = (long)existingGridCols.Average(gc =>
+                long.TryParse(gc.Width?.Value, out var w) ? w : 2400L);
+            for (int extra = existingGridCols.Count; extra < newCols; extra++)
+                grid.AppendChild(new GridColumn { Width = avg.ToString() });
+        }
 
         var newRow = new TableRow();
         TableRowProperties? newRowProps = null;
@@ -475,6 +527,15 @@ public partial class WordHandler
         if (parent is not TableRow targetRow)
             throw new ArgumentException("Cells can only be added to a table row: /body/tbl[N]/tr[M]");
 
+        // BUG-R1-P0-2: AddCell on an existing row must keep tblGrid in sync.
+        // Without this, the new cell has no matching <w:gridCol> and the
+        // last "virtual column" collapses in Word. We synchronize lazily:
+        // if the row's total grid-column occupancy after appending exceeds
+        // the existing tblGrid, append matching gridCol entries averaging
+        // the existing widths. Mirrors AddTableColumn's width logic.
+        Table? cellParentTable = targetRow.Parent as Table;
+        TableGrid? cellGrid = cellParentTable?.GetFirstChild<TableGrid>();
+
         var cellParagraph = new Paragraph();
         AssignParaId(cellParagraph);
         if (properties.TryGetValue("text", out var cellTxt))
@@ -560,6 +621,25 @@ public partial class WordHandler
         else
         {
             targetRow.AppendChild(newCell);
+        }
+
+        // BUG-R1-P0-2: expand tblGrid if this row's grid-column occupancy
+        // (sum of gridSpan) now exceeds existing gridCol count.
+        if (cellGrid != null)
+        {
+            var existingGridCount = cellGrid.Elements<GridColumn>().Count();
+            var rowSpan = targetRow.Elements<TableCell>().Sum(tc =>
+                tc.TableCellProperties?.GridSpan?.Val?.Value ?? 1);
+            if (rowSpan > existingGridCount)
+            {
+                long avgWidth;
+                var existingWidths = cellGrid.Elements<GridColumn>().ToList();
+                avgWidth = existingWidths.Count > 0
+                    ? (long)existingWidths.Average(gc => long.TryParse(gc.Width?.Value, out var w) ? w : 2400L)
+                    : 2400L;
+                for (int i = existingGridCount; i < rowSpan; i++)
+                    cellGrid.AppendChild(new GridColumn { Width = avgWidth.ToString() });
+            }
         }
 
         var cellIdx = targetRow.Elements<TableCell>().ToList().IndexOf(newCell) + 1;
