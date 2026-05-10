@@ -161,18 +161,39 @@ public partial class WordHandler
         if (tblGrid != null)
         {
             sb.Append("<colgroup>");
+            // BUG-R1-P3-13: autofit tables previously emitted bare <col> with
+            // no width hint, dropping the proportions encoded in tblGrid.
+            // Now emit proportional column widths (% of total) for autofit
+            // *as well as* fixed pt widths for fixed-layout tables. Browser
+            // honours pct in autofit mode without overriding content sizing.
+            var twipsByCol = tblGrid.Elements<GridColumn>()
+                .Select(c => double.TryParse(c.Width?.Value, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 0.0)
+                .ToList();
+            double colTotal = twipsByCol.Sum();
+            int colIdx = 0;
             foreach (var col in tblGrid.Elements<GridColumn>())
             {
                 var w = col.Width?.Value;
                 if (w != null && isFixedLayout)
                 {
                     var pt = double.Parse(w, System.Globalization.CultureInfo.InvariantCulture) / 20.0; // twips to pt
-                    sb.Append($"<col style=\"width:{pt:0.##}pt\">");
+                    sb.Append($"<col style=\"width:{pt:0.##}pt\" data-col-twips=\"{w}\">");
+                }
+                else if (w != null && colTotal > 0 && twipsByCol[colIdx] > 0)
+                {
+                    // Autofit: emit percentage so the browser respects gridCol
+                    // proportions while still allowing content to expand cells.
+                    // The raw twip count is also exposed via data-col-twips for
+                    // round-trip / verification tooling.
+                    var pct = twipsByCol[colIdx] / colTotal * 100.0;
+                    sb.Append($"<col style=\"width:{pct:0.##}%;--col-twips:{w}\" data-col-twips=\"{w}\">");
                 }
                 else
                 {
                     sb.Append("<col>");
                 }
+                colIdx++;
             }
             sb.AppendLine("</colgroup>");
         }
