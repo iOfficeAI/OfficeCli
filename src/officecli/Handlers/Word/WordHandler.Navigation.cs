@@ -2700,43 +2700,28 @@ public partial class WordHandler
                 // historical-vocabulary parity; values are kept consistent
                 // across both keys (lowercase stores "true"/"false" string,
                 // camelCase stores bool).
+                // BUG-R4-01/06: Get emits ONLY canonical camelCase keys
+                // (firstRow/lastRow/firstCol/lastCol/bandedRows/bandedCols).
+                // Set still accepts lowercase aliases (firstrow/bandrow/etc)
+                // as input — see Set.Element.cs. Internal hex `tblLook.val`
+                // is NOT surfaced (was a dump-poisoning impl detail).
                 var tblLookRead = tp.GetFirstChild<TableLook>();
                 if (tblLookRead != null)
                 {
-                    if (tblLookRead.Val?.HasValue == true && !string.IsNullOrEmpty(tblLookRead.Val.Value))
-                        node.Format["tblLook.val"] = tblLookRead.Val.Value!;
-                    if (tblLookRead.FirstRow?.HasValue == true)
-                    {
-                        var v = tblLookRead.FirstRow.Value;
-                        if (v) { node.Format["firstrow"] = "true"; node.Format["firstRow"] = true; }
-                    }
-                    if (tblLookRead.LastRow?.HasValue == true)
-                    {
-                        var v = tblLookRead.LastRow.Value;
-                        if (v) { node.Format["lastrow"] = "true"; node.Format["lastRow"] = true; }
-                    }
-                    if (tblLookRead.FirstColumn?.HasValue == true)
-                    {
-                        var v = tblLookRead.FirstColumn.Value;
-                        if (v) { node.Format["firstcol"] = "true"; node.Format["firstCol"] = true; }
-                    }
-                    if (tblLookRead.LastColumn?.HasValue == true)
-                    {
-                        var v = tblLookRead.LastColumn.Value;
-                        if (v) { node.Format["lastcol"] = "true"; node.Format["lastCol"] = true; }
-                    }
-                    // banding semantics are inverted: noHBand=true means NO banding (bandrow=false).
-                    // Emit the key only when banding IS active (noHBand=false explicitly set).
-                    if (tblLookRead.NoHorizontalBand?.HasValue == true)
-                    {
-                        var noBand = tblLookRead.NoHorizontalBand.Value;
-                        if (!noBand) { node.Format["bandrow"] = "true"; node.Format["bandedRows"] = true; }
-                    }
-                    if (tblLookRead.NoVerticalBand?.HasValue == true)
-                    {
-                        var noBand = tblLookRead.NoVerticalBand.Value;
-                        if (!noBand) { node.Format["bandcol"] = "true"; node.Format["bandedCols"] = true; }
-                    }
+                    if (tblLookRead.FirstRow?.HasValue == true && tblLookRead.FirstRow.Value)
+                        node.Format["firstRow"] = true;
+                    if (tblLookRead.LastRow?.HasValue == true && tblLookRead.LastRow.Value)
+                        node.Format["lastRow"] = true;
+                    if (tblLookRead.FirstColumn?.HasValue == true && tblLookRead.FirstColumn.Value)
+                        node.Format["firstCol"] = true;
+                    if (tblLookRead.LastColumn?.HasValue == true && tblLookRead.LastColumn.Value)
+                        node.Format["lastCol"] = true;
+                    // banding semantics are inverted: noHBand=true means NO banding.
+                    // Emit only when banding IS active (noHBand=false explicitly set).
+                    if (tblLookRead.NoHorizontalBand?.HasValue == true && !tblLookRead.NoHorizontalBand.Value)
+                        node.Format["bandedRows"] = true;
+                    if (tblLookRead.NoVerticalBand?.HasValue == true && !tblLookRead.NoVerticalBand.Value)
+                        node.Format["bandedCols"] = true;
                 }
             }
 
@@ -3247,14 +3232,22 @@ public partial class WordHandler
             // width readback above (line ~1930) — pct widths are stored as
             // fifths-of-percent, so divide by 50 and append '%' so dump→batch
             // can recognize and re-emit pct cell widths.
+            // BUG-R4-05: emit width with explicit unit suffix (dxa/%) — root
+            // CLAUDE.md mandates unit-qualified width readback. Bare integer
+            // ("3000") is the historic bug.
             if (tcPr.TableCellWidth?.Width?.Value != null)
             {
                 var cwType = tcPr.TableCellWidth.Type?.Value;
                 if (cwType == TableWidthUnitValues.Pct
                     && int.TryParse(tcPr.TableCellWidth.Width.Value, out var pctRaw))
                     node.Format["width"] = (pctRaw / 50) + "%";
+                else if (cwType == TableWidthUnitValues.Auto)
+                    node.Format["width"] = "auto";
+                else if (cwType == TableWidthUnitValues.Nil
+                    || tcPr.TableCellWidth.Width.Value == "0")
+                    node.Format["width"] = "0dxa";
                 else
-                    node.Format["width"] = tcPr.TableCellWidth.Width.Value;
+                    node.Format["width"] = tcPr.TableCellWidth.Width.Value + "dxa";
             }
             // Vertical alignment
             if (tcPr.TableCellVerticalAlignment?.Val?.Value != null)
@@ -3290,6 +3283,34 @@ public partial class WordHandler
             var cnfRead = tcPr.GetFirstChild<ConditionalFormatStyle>();
             if (cnfRead?.Val?.Value is string cnfVal && !string.IsNullOrEmpty(cnfVal))
                 node.Format["cnfStyle"] = cnfVal;
+        }
+        // BUG-R4-05: when no per-cell tcW is set, synthesize width from the
+        // parent table's tblGrid/gridCol so Get always exposes a unit-qualified
+        // width (matches the cross-handler width contract). CONSISTENCY(add-set-symmetry):
+        // Add intentionally does not stamp per-cell tcW (BUG-R6-06) — width
+        // lives in tblGrid as the schema intends — so Get must back-fill.
+        if (!node.Format.ContainsKey("width"))
+        {
+            var parentTbl = cell.Ancestors<Table>().FirstOrDefault();
+            var parentRow = cell.Parent as TableRow;
+            if (parentTbl != null && parentRow != null)
+            {
+                var cellIdx = parentRow.Elements<TableCell>().ToList().IndexOf(cell);
+                var gridCols = parentTbl.GetFirstChild<TableGrid>()?.Elements<GridColumn>().ToList();
+                if (gridCols != null && cellIdx >= 0 && cellIdx < gridCols.Count)
+                {
+                    // Account for gridSpan — sum spanned cols.
+                    var span = (tcPr?.GridSpan?.Val?.Value ?? 1);
+                    long total = 0;
+                    for (int gi = cellIdx; gi < Math.Min(cellIdx + span, gridCols.Count); gi++)
+                    {
+                        if (uint.TryParse(gridCols[gi].Width?.Value, out var gv))
+                            total += gv;
+                    }
+                    if (total > 0)
+                        node.Format["width"] = total + "dxa";
+                }
+            }
         }
         // Alignment from first paragraph
         var firstPara = cell.Elements<Paragraph>().FirstOrDefault();

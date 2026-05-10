@@ -283,6 +283,46 @@ public partial class WordHandler
                     if (ParseDirectionRtl(tv))
                         InsertTblPrChildInOrder(tblProps, new BiDiVisual());
                     break;
+                // BUG-R4-02/08: tblLook props at Add time. Mirrors the Set.Element.cs
+                // tblLook switch — accepts lowercase + camelCase aliases as input.
+                // Without this, dump→batch round-trip silently lost firstRow etc.
+                // CONSISTENCY(add-set-symmetry).
+                case "firstrow":
+                case "lastrow":
+                case "firstcol" or "firstcolumn":
+                case "lastcol" or "lastcolumn":
+                case "bandrow" or "bandedrows" or "bandrows":
+                case "bandcol" or "bandedcols" or "bandcols":
+                case "nohband" or "nohorizontalband":
+                case "novband" or "noverticalband":
+                case "tbllook":
+                    {
+                        var tblLook = tblProps.GetFirstChild<TableLook>();
+                        if (tblLook == null)
+                        {
+                            tblLook = new TableLook { Val = "04A0" };
+                            InsertTblPrChildInOrder(tblProps, tblLook);
+                        }
+                        if (tkl == "tbllook")
+                        {
+                            // raw hex passthrough (e.g. tblLook=04A0)
+                            tblLook.Val = tv;
+                            break;
+                        }
+                        var bv = IsTruthy(tv);
+                        switch (tkl)
+                        {
+                            case "firstrow": tblLook.FirstRow = bv; break;
+                            case "lastrow": tblLook.LastRow = bv; break;
+                            case "firstcol" or "firstcolumn": tblLook.FirstColumn = bv; break;
+                            case "lastcol" or "lastcolumn": tblLook.LastColumn = bv; break;
+                            case "bandrow" or "bandedrows" or "bandrows": tblLook.NoHorizontalBand = !bv; break;
+                            case "bandcol" or "bandedcols" or "bandcols": tblLook.NoVerticalBand = !bv; break;
+                            case "nohband" or "nohorizontalband": tblLook.NoHorizontalBand = bv; break;
+                            case "novband" or "noverticalband": tblLook.NoVerticalBand = bv; break;
+                        }
+                        break;
+                    }
             }
         }
 
