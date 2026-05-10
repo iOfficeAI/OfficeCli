@@ -70,6 +70,32 @@ internal sealed class TrackingPropertyDictionary
     /// <summary>Keys handler accessed (subset of input ∪ keys it added).</summary>
     public IReadOnlyCollection<string> AccessedKeys => _cmp.AccessedKeys;
 
+    /// <summary>
+    /// Explicitly mark a set of keys as consumed by the handler. Use this
+    /// from sites where the property dictionary is rebound to a fresh
+    /// (non-tracking) <see cref="Dictionary{TKey,TValue}"/> downstream — e.g.
+    /// pivot/autoFilter helpers that normalize aliases into a new dict — so
+    /// the original <see cref="UnusedKeys"/> doesn't falsely flag those
+    /// inputs as unsupported. Comparison is case-insensitive (matches the
+    /// underlying comparer); only keys that are actually present in the
+    /// input dictionary are marked, matching how a successful TryGetValue
+    /// would have behaved.
+    /// </summary>
+    public void MarkAllConsumed(IEnumerable<string> keys)
+    {
+        if (keys == null) return;
+        foreach (var k in keys)
+        {
+            if (k == null) continue;
+            // Mirror Dictionary lookup semantics: only mark if the key is
+            // actually present (case-insensitively) in our input set. This
+            // matches the AccessedKeys contract — we only record keys the
+            // handler observed, not arbitrary keys the caller listed.
+            if (_initialKeys.Contains(k))
+                _cmp.AccessedKeys.Add(k);
+        }
+    }
+
     public new IEnumerator<KeyValuePair<string, string>> GetEnumerator()
     {
         // Statically bind to Dictionary<,>.GetEnumerator (struct enumerator)

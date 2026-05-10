@@ -404,6 +404,22 @@ public partial class ExcelHandler
         var afWorksheet = FindWorksheet(afSheetName)
             ?? throw new ArgumentException($"Sheet not found: {afSheetName}");
 
+        // CONSISTENCY(tracking-rebind): the criteriaN.OP loop below iterates
+        // properties via foreach over the static Dictionary<,> type, which
+        // bypasses TrackingPropertyDictionary's comparer. Mark every
+        // criteriaN.OP key (and `range`) as consumed up-front so they
+        // don't surface as false unsupported_property warnings. Keys that
+        // don't match either pattern fall through to the existing UNSUPPORTED
+        // path naturally.
+        if (properties is OfficeCli.Core.TrackingPropertyDictionary afTracking)
+        {
+            var consumed = properties.Keys
+                .Where(k => string.Equals(k, "range", StringComparison.OrdinalIgnoreCase)
+                    || Regex.IsMatch(k, @"^criteria\d+\.[A-Za-z]+$"))
+                .ToList();
+            afTracking.MarkAllConsumed(consumed);
+        }
+
         var afRange = properties.GetValueOrDefault("range")
             ?? throw new ArgumentException("AutoFilter requires 'range' property (e.g. range=A1:F100)");
 
@@ -1228,6 +1244,23 @@ public partial class ExcelHandler
                             $"choose a different anchor (--prop position=...).");
                 }
             }
+        }
+
+        // CONSISTENCY(tracking-rebind): CreatePivotTable internally rebinds
+        // `properties` to a fresh non-tracking dictionary via
+        // NormalizePivotProperties, so all subsequent TryGetValue calls
+        // would never reach our TrackingPropertyDictionary comparer. Mark
+        // every input key whose normalized form is a known pivot property
+        // as consumed up-front, so they don't surface as false
+        // unsupported_property warnings. Keys the helper genuinely doesn't
+        // know about are still flagged via WarnUnknownPivotProperties +
+        // CollectUnknownPivotKeys (R12-1).
+        if (properties is OfficeCli.Core.TrackingPropertyDictionary ptTracking)
+        {
+            var consumed = properties.Keys
+                .Where(k => OfficeCli.Core.PivotTableHelper.IsKnownPivotProperty(k))
+                .ToList();
+            ptTracking.MarkAllConsumed(consumed);
         }
 
         var ptIdx = PivotTableHelper.CreatePivotTable(

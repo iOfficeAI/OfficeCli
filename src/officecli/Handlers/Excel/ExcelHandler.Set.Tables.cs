@@ -249,11 +249,57 @@ public partial class ExcelHandler
                 case "headerrow": table.HeaderRowCount = IsTruthy(value) ? 1u : 0u; break;
                 case "totalrow":
                 case "showtotals":
+                {
+                    // CONSISTENCY(table-totalrow): mirror Add — toggling
+                    // totalRow on must grow the table ref by one row to host
+                    // the totals row OUTSIDE the data area (Excel rejects /
+                    // pops a "found a problem" repair otherwise). Toggling
+                    // off shrinks the ref symmetrically. AutoFilter ref
+                    // tracks the data range only (header..last data row),
+                    // so it stays one row shorter than table.Reference when
+                    // a totals row is shown.
                     var totalRowEnabled = IsTruthy(value);
+                    var prevTotalsCount = table.TotalsRowCount?.Value ?? 0u;
+                    var refStr = table.Reference?.Value;
+                    if (!string.IsNullOrEmpty(refStr) && refStr.Contains(':'))
+                    {
+                        var rParts = refStr.Split(':');
+                        var (sCol, sRow) = ParseCellReference(rParts[0]);
+                        var (eCol, eRow) = ParseCellReference(rParts[1]);
+                        if (totalRowEnabled && prevTotalsCount == 0)
+                        {
+                            eRow += 1;
+                        }
+                        else if (!totalRowEnabled && prevTotalsCount > 0)
+                        {
+                            // Shrink only if there is at least one data row left.
+                            if (eRow - 1 >= sRow) eRow -= 1;
+                        }
+                        var newTblRef = $"{sCol}{sRow}:{eCol}{eRow}";
+                        table.Reference = newTblRef;
+                        var afTbl = table.GetFirstChild<AutoFilter>();
+                        if (afTbl != null)
+                        {
+                            // AutoFilter ref excludes the totals row.
+                            var afEndRow = totalRowEnabled ? eRow - 1 : eRow;
+                            if (afEndRow < sRow) afEndRow = sRow;
+                            afTbl.Reference = $"{sCol}{sRow}:{eCol}{afEndRow}";
+                        }
+                    }
                     table.TotalsRowShown = totalRowEnabled;
                     table.TotalsRowCount = totalRowEnabled ? 1u : 0u;
                     break;
+                }
                 case "style":
+                {
+                    // CONSISTENCY(table-style-validation): mirror Add — short
+                    // names like 'medium2' or 'foo' are not valid OOXML
+                    // tableStyleInfo @name. Excel silently drops the style
+                    // info on open, leaving the user wondering why the
+                    // style didn't apply. Reject up-front with a clear
+                    // message, same vocabulary as Add (see Helpers.cs
+                    // ValidateTableStyleName).
+                    ValidateTableStyleName(value);
                     var styleInfo = table.GetFirstChild<TableStyleInfo>();
                     if (styleInfo != null) styleInfo.Name = value;
                     else table.AppendChild(new TableStyleInfo
@@ -262,6 +308,7 @@ public partial class ExcelHandler
                         ShowRowStripes = true, ShowColumnStripes = false
                     });
                     break;
+                }
                 case "ref":
                 {
                     var newRef = value.ToUpperInvariant();

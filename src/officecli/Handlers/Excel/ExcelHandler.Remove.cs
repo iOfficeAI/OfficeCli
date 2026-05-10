@@ -168,6 +168,23 @@ public partial class ExcelHandler
                             $"Remove or repoint the hyperlink first.");
             }
 
+            // CONSISTENCY(remove-sheet-refs): pivotCacheDefinition parts live
+            // at the workbook level; their <x:cacheSource><x:worksheetSource
+            // sheet="SheetName" .../></x:cacheSource> binds the cache to a
+            // source sheet. Removing that sheet leaves a dangling cache and
+            // Excel surfaces the same "external links" / "found a problem"
+            // dialog as the chart/sparkline/DV/hyperlink cases above.
+            foreach (var cacheDefPart in workbookPart.GetPartsOfType<PivotTableCacheDefinitionPart>())
+            {
+                var wsSource = cacheDefPart.PivotCacheDefinition?.CacheSource?.WorksheetSource;
+                var srcSheet = wsSource?.Sheet?.Value;
+                if (!string.IsNullOrEmpty(srcSheet)
+                    && srcSheet.Equals(sheetName, StringComparison.OrdinalIgnoreCase))
+                    throw new ArgumentException(
+                        $"Cannot remove sheet '{sheetName}': it is referenced as the source of a pivot table in this workbook. " +
+                        $"Remove or repoint the pivot table first.");
+            }
+
             // R10-2: capture pivot cache definitions referenced by this
             // sheet's pivot table parts BEFORE deleting the worksheet part,
             // so we can prune any caches that become orphaned by the
