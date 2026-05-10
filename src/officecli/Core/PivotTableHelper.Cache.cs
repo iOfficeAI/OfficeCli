@@ -1046,4 +1046,273 @@ internal static partial class PivotTableHelper
             if (pc.Id?.Value == rid) return pc.CacheId?.Value;
         return null;
     }
+
+    // ==================== Pivot source resolution v2 (B6 v2) ====================
+    //
+    // v1 only matched explicit "<sheet>!<range>" literally. v2 adds two
+    // common forms so cache sharing also works when the user authors with:
+    //   • Structured table refs:     Table1[#All] / Table1 / Table1[#Data]
+    //   • Workbook-/sheet-scoped name: SalesData  /  Sheet1!SalesData
+    //
+    // Anything we can't or shouldn't resolve (external workbook ref,
+    // dynamic OFFSET-based names, [ColumnName] single-column refs, multi-
+    // range names) falls through to the v1 string-key path: safe — the
+    // caller treats it as "different source" and creates an independent
+    // cache rather than risking an incorrect share.
+
+    /// <summary>
+    /// Try to resolve a pivot source spec into an explicit (sheet, range)
+    /// tuple. Returns null on fall-through (caller should keep using the
+    /// original spec). The returned range is always an "A1:C100"-style
+    /// rectangular reference suitable for cacheSource WorksheetSource.
+    ///
+    /// Resolution priority:
+    ///   1. Explicit "Sheet!Range" → returned as-is (after quote/$ trim).
+    ///   2. Bare "A1:C100" with defaultSheet supplied → (defaultSheet, range).
+    ///   3. Token containing '[' → structured table ref.
+    ///      Supported: Table1, Table1[#All], Table1[#Data]
+    ///      Unsupported (returns null): [#Headers], [#Totals], [ColumnName],
+    ///      compound like Table1[[#Data],[Col]].
+    ///   4. Single token (no '!' / no '[') → defined-name lookup.
+    ///      Supported: workbook-scoped or sheet-scoped name whose body is
+    ///      a single "Sheet!Range" reference.
+    ///      Unsupported (returns null): dynamic body (OFFSET / INDEX),
+    ///      multi-range body ("Sheet1!A1:C5,Sheet1!E1:G5").
+    /// </summary>
+    internal static (string sheet, string rangeRef)? ResolvePivotSourceSpec(
+        WorkbookPart workbookPart, string sourceSpec, string? defaultSheet = null)
+    {
+        if (string.IsNullOrWhiteSpace(sourceSpec)) return null;
+        var spec = sourceSpec.Trim();
+
+        // External workbook ref — explicitly unsupported, fall through.
+        if (spec.StartsWith("[")) return null;
+
+        // 3. Structured table ref — must be checked BEFORE the explicit
+        // "!" path because Excel allows e.g. Table1 in a context that
+        // happens not to contain '!'. We also catch Table1[#All] before
+        // ambiguous '[' parsing in defined names.
+        if (spec.Contains('['))
+        {
+            return ResolveTableRef(workbookPart, spec);
+        }
+
+        // 1. Explicit Sheet!Range
+        if (spec.Contains('!'))
+        {
+            var parts = spec.Split('!', 2);
+            var sheet = parts[0].Trim();
+            if (sheet.Length >= 2 && ((sheet[0] == '\'' && sheet[^1] == '\'')
+                                    || (sheet[0] == '"' && sheet[^1] == '"')))
+                sheet = sheet.Substring(1, sheet.Length - 2);
+            var rangePart = parts[1].Trim();
+
+            // A "Sheet1!SalesData"-style sheet-qualified defined name —
+            // rangePart is a single identifier, not an A1 reference.
+            if (LooksLikeRangeRef(rangePart))
+                return (sheet, rangePart);
+
+            // Sheet-qualified defined name: try sheet-scoped first.
+            var resolvedName = ResolveDefinedName(workbookPart, rangePart, sheetScopeName: sheet);
+            return resolvedName;
+        }
+
+        // 2/4. Bare token — could be range, table name, or defined name.
+        // Try table first because a bare "Tbl1" matches LooksLikeRangeRef
+        // (letters+digits) but isn't a real cell reference; only fall back
+        // to range when no matching table exists.
+        var asTable = ResolveTableRef(workbookPart, spec);
+        if (asTable != null) return asTable;
+        if (LooksLikeRangeRef(spec))
+        {
+            return defaultSheet != null ? (defaultSheet, spec) : null;
+        }
+        return ResolveDefinedName(workbookPart, spec, sheetScopeName: null);
+    }
+
+    private static bool LooksLikeRangeRef(string s)
+    {
+        // "A1" or "A1:C100" — letters then digits, optionally colon-range.
+        // Tolerant of surrounding $ markers.
+        var t = s.Replace("$", "").Trim();
+        return System.Text.RegularExpressions.Regex.IsMatch(t,
+            @"^[A-Za-z]+\d+(:[A-Za-z]+\d+)?$");
+    }
+
+    private static (string sheet, string rangeRef)? ResolveTableRef(
+        WorkbookPart workbookPart, string spec)
+    {
+        // Parse: TableName  |  TableName[#All]  |  TableName[#Data]
+        // Reject anything more complex (column refs, compound).
+        var bracketIdx = spec.IndexOf('[');
+        string tableName;
+        string modifier; // "" (no brackets), "#All", "#Data", or other
+        if (bracketIdx < 0)
+        {
+            tableName = spec.Trim();
+            modifier = "";
+        }
+        else
+        {
+            tableName = spec.Substring(0, bracketIdx).Trim();
+            var inside = spec.Substring(bracketIdx); // "[#All]" etc
+            // Must be exactly "[#X]" with no comma / nested brackets
+            var m = System.Text.RegularExpressions.Regex.Match(inside,
+                @"^\[(#[A-Za-z]+)\]$");
+            if (!m.Success) return null; // [ColumnName] / compound — fall through
+            modifier = m.Groups[1].Value;
+        }
+
+        if (string.IsNullOrEmpty(tableName)) return null;
+
+        // Walk every TableDefinitionPart to find the table by name.
+        foreach (var ws in workbookPart.WorksheetParts)
+        {
+            foreach (var tdp in ws.TableDefinitionParts)
+            {
+                var t = tdp.Table;
+                if (t == null) continue;
+                var name = t.Name?.Value ?? t.DisplayName?.Value;
+                if (name == null) continue;
+                if (!string.Equals(name, tableName, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var refStr = t.Reference?.Value;
+                if (string.IsNullOrEmpty(refStr)) return null;
+                var sheetName = LookupSheetNameForPart(workbookPart, ws);
+                if (sheetName == null) return null;
+
+                bool tableHasHeaders = (t.HeaderRowCount?.Value ?? 1u) >= 1u;
+
+                switch (modifier)
+                {
+                    case "":
+                    case "#All":
+                        // Whole table including header (if any).
+                        return (sheetName, refStr.Replace("$", "").ToUpperInvariant());
+
+                    case "#Data":
+                    {
+                        // Strip header row. If table has no headers, same as #All.
+                        if (!tableHasHeaders)
+                            return (sheetName, refStr.Replace("$", "").ToUpperInvariant());
+                        var stripped = StripHeaderRow(refStr);
+                        if (stripped == null) return null;
+                        return (sheetName, stripped);
+                    }
+
+                    default:
+                        // #Headers / #Totals / unknown — fall through; let
+                        // string key handle (no share, but no crash).
+                        return null;
+                }
+            }
+        }
+        return null; // Table name not found — fall through.
+    }
+
+    private static (string sheet, string rangeRef)? ResolveDefinedName(
+        WorkbookPart workbookPart, string nameToken, string? sheetScopeName)
+    {
+        var definedNames = workbookPart.Workbook?.GetFirstChild<DefinedNames>();
+        if (definedNames == null) return null;
+
+        // Build sheet index map for LocalSheetId resolution.
+        // sheets are 0-indexed in the order they appear under <sheets>.
+        var sheetByLocalId = new Dictionary<uint, string>();
+        var sheetsElem = workbookPart.Workbook?.GetFirstChild<Sheets>();
+        if (sheetsElem != null)
+        {
+            uint i = 0;
+            foreach (var s in sheetsElem.Elements<Sheet>())
+            {
+                if (s.Name?.Value != null) sheetByLocalId[i] = s.Name.Value;
+                i++;
+            }
+        }
+
+        // First pass: matching name + matching scope (sheet-scoped if requested,
+        // else workbook-scoped). Second pass: relax sheet scope.
+        DefinedName? bestMatch = null;
+        uint? scopeSheetIdHint = null;
+        if (sheetScopeName != null)
+        {
+            foreach (var kv in sheetByLocalId)
+                if (string.Equals(kv.Value, sheetScopeName, StringComparison.OrdinalIgnoreCase))
+                    scopeSheetIdHint = kv.Key;
+        }
+
+        foreach (var dn in definedNames.Elements<DefinedName>())
+        {
+            var dnName = dn.Name?.Value;
+            if (dnName == null) continue;
+            if (!string.Equals(dnName, nameToken, StringComparison.OrdinalIgnoreCase)) continue;
+
+            // Scope priority:
+            //   - If caller passed a sheetScopeName: prefer sheet-scoped to
+            //     that sheet; fall back to workbook-scoped.
+            //   - Else: prefer workbook-scoped (LocalSheetId == null).
+            if (scopeSheetIdHint.HasValue && dn.LocalSheetId?.Value == scopeSheetIdHint.Value)
+            { bestMatch = dn; break; }
+            if (sheetScopeName == null && dn.LocalSheetId == null)
+            { bestMatch = dn; break; }
+            if (bestMatch == null) bestMatch = dn; // fallback any
+        }
+        if (bestMatch == null) return null;
+
+        var body = bestMatch.Text?.Trim();
+        if (string.IsNullOrEmpty(body)) return null;
+        if (body.StartsWith("=")) body = body.Substring(1).Trim();
+
+        // Multi-range bodies (commas) — fall through.
+        if (body.Contains(',')) return null;
+        // Dynamic bodies (OFFSET/INDEX/INDIRECT) — fall through.
+        if (System.Text.RegularExpressions.Regex.IsMatch(body,
+                @"\b(OFFSET|INDEX|INDIRECT|CHOOSE)\s*\(", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+            return null;
+
+        // Body should look like "Sheet1!$A$1:$C$5" or "'Sheet 1'!A1:C5".
+        if (!body.Contains('!')) return null;
+        var parts = body.Split('!', 2);
+        var sheet = parts[0].Trim();
+        if (sheet.Length >= 2 && ((sheet[0] == '\'' && sheet[^1] == '\'')
+                                || (sheet[0] == '"' && sheet[^1] == '"')))
+            sheet = sheet.Substring(1, sheet.Length - 2);
+        var rangePart = parts[1].Trim();
+        if (!LooksLikeRangeRef(rangePart)) return null;
+        return (sheet, rangePart.Replace("$", "").ToUpperInvariant());
+    }
+
+    private static string? LookupSheetNameForPart(
+        WorkbookPart workbookPart, WorksheetPart targetWs)
+    {
+        var sheets = workbookPart.Workbook?.GetFirstChild<Sheets>();
+        if (sheets == null) return null;
+        foreach (var s in sheets.Elements<Sheet>())
+        {
+            var rid = s.Id?.Value;
+            if (rid == null) continue;
+            try
+            {
+                if (workbookPart.GetPartById(rid) == targetWs)
+                    return s.Name?.Value;
+            }
+            catch { /* missing rel — ignore */ }
+        }
+        return null;
+    }
+
+    private static string? StripHeaderRow(string reference)
+    {
+        // "$A$1:$C$5" → "A2:C5" (strip $, increment start row).
+        var clean = reference.Replace("$", "").ToUpperInvariant();
+        var parts = clean.Split(':');
+        if (parts.Length != 2) return null;
+        var m1 = System.Text.RegularExpressions.Regex.Match(parts[0], @"^([A-Z]+)(\d+)$");
+        var m2 = System.Text.RegularExpressions.Regex.Match(parts[1], @"^([A-Z]+)(\d+)$");
+        if (!m1.Success || !m2.Success) return null;
+        if (!int.TryParse(m1.Groups[2].Value, out var startRow)) return null;
+        var newStart = $"{m1.Groups[1].Value}{startRow + 1}";
+        return $"{newStart}:{parts[1]}";
+    }
 }

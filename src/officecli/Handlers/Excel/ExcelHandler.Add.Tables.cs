@@ -1171,7 +1171,21 @@ public partial class ExcelHandler
 
         string sourceSheetName;
         string sourceRef;
-        if (sourceSpec.Contains('!'))
+
+        // B6 v2: try resolving structured-table refs (Table1[#All]) and
+        // workbook/sheet-scoped defined names (SalesData, Sheet1!SalesData)
+        // into an explicit (sheet, range) tuple BEFORE the literal-parse
+        // path. Falls through to the literal parser for explicit
+        // "Sheet1!A1:C5" specs and any form the resolver doesn't recognize.
+        // See PivotTableHelper.Cache.cs ResolvePivotSourceSpec for coverage.
+        var resolved = OfficeCli.Core.PivotTableHelper.ResolvePivotSourceSpec(
+            _doc.WorkbookPart!, sourceSpec, defaultSheet: ptSheetName);
+        if (resolved.HasValue)
+        {
+            sourceSheetName = resolved.Value.sheet;
+            sourceRef = resolved.Value.rangeRef;
+        }
+        else if (sourceSpec.Contains('!'))
         {
             var srcParts = sourceSpec.Split('!', 2);
             sourceSheetName = srcParts[0].Trim().Trim('\'', '"').Trim();
