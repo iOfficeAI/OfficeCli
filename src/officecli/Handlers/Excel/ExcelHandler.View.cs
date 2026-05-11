@@ -141,12 +141,16 @@ public partial class ExcelHandler
             int colCount = GetSheetColumnCount(worksheet, sheetData);
 
             int formulaCount = 0;
+            int errorCount = 0;
             if (sheetData != null)
             {
                 formulaCount = sheetData.Descendants<CellFormula>().Count();
+                foreach (var cell in sheetData.Descendants<Cell>())
+                    if (IsExcelErrorValue(cell, GetCellDisplayValue(cell))) errorCount++;
             }
 
             var formulaInfo = formulaCount > 0 ? $", {formulaCount} formula(s)" : "";
+            var errorInfo = errorCount > 0 ? $", {errorCount} error cell(s)" : "";
 
             // Pivot tables are stored as pivotTableDefinition XML; their rendered cells
             // are NOT materialized into sheetData (Excel/Calc re-render from pivotCacheRecords
@@ -159,7 +163,7 @@ public partial class ExcelHandler
             int oleCount = CountSheetOleObjects(worksheetPart);
             var oleInfo = oleCount > 0 ? $", {oleCount} ole object(s)" : "";
 
-            sb.AppendLine($"\u251c\u2500\u2500 \"{name}\" ({rowCount} rows \u00d7 {colCount} cols{formulaInfo}{pivotInfo}{oleInfo})");
+            sb.AppendLine($"\u251c\u2500\u2500 \"{name}\" ({rowCount} rows \u00d7 {colCount} cols{formulaInfo}{errorInfo}{pivotInfo}{oleInfo})");
         }
 
         return sb.ToString().TrimEnd();
@@ -322,6 +326,10 @@ public partial class ExcelHandler
             int rowCount = sheetData?.Elements<Row>().Count() ?? 0;
             int colCount = GetSheetColumnCount(worksheet, sheetData);
             int formulaCount = sheetData?.Descendants<CellFormula>().Count() ?? 0;
+            int errorCount = 0;
+            if (sheetData != null)
+                foreach (var cell in sheetData.Descendants<Cell>())
+                    if (IsExcelErrorValue(cell, GetCellDisplayValue(cell))) errorCount++;
 
             int oleCount = CountSheetOleObjects(worksheetPart);
             var sheetObj = new JsonObject
@@ -330,6 +338,7 @@ public partial class ExcelHandler
                 ["rows"] = rowCount,
                 ["cols"] = colCount,
                 ["formulas"] = formulaCount,
+                ["errorCells"] = errorCount,
                 ["oleObjects"] = oleCount
             };
             sheetsArray.Add((JsonNode)sheetObj);
