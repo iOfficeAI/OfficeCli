@@ -495,40 +495,47 @@ public partial class ExcelHandler
 
                     if (cell.CellFormula != null && value is "#REF!" or "#VALUE!" or "#NAME?" or "#DIV/0!")
                     {
-                        // Surface the specific cause when we can name it.
-                        // A cached #REF! whose formula refs a deleted sheet
-                        // belongs in formula_ref_missing_sheet — agents
-                        // filtering on subtypes need the specific failure
-                        // mode, not a generic "Formula error: #REF!".
+                        // Two-step routing keeps the semantic decision (what
+                        // kind of failure is this?) separate from the filter
+                        // decision (does the user want to see it right now?).
+                        //
+                        // Step 1 — semantic: a cached #REF! whose formula
+                        // refs a deleted sheet is formula_ref_missing_sheet;
+                        // every other #VALUE!/#NAME?/#DIV/0!/etc. is a
+                        // subtype-less generic formula error.
                         var fTextForErr = cell.CellFormula.Text;
-                        var specificSubtype = (value == "#REF!" && fTextForErr != null
-                                && FormulaReferencesMissingSheet(fTextForErr)
-                                && ShouldScan(Core.IssueSubtypes.FormulaRefMissingSheet))
+                        var isMissingSheetCause = value == "#REF!"
+                            && fTextForErr != null
+                            && FormulaReferencesMissingSheet(fTextForErr);
+                        string? semanticSubtype = isMissingSheetCause
                             ? Core.IssueSubtypes.FormulaRefMissingSheet
                             : null;
-                        if (specificSubtype == null && issueType != null
-                            && !ShouldScan(Core.IssueSubtypes.FormulaNotEvaluated))
+
+                        // Step 2 — filter: emit when no filter is active, or
+                        // when the active filter accepts this row. The
+                        // subtype-less generic row is part of the Content
+                        // bucket but does not match any specific-subtype
+                        // filter; the formula_ref_missing_sheet row matches
+                        // its own filter and the Content bucket.
+                        bool shouldEmit = issueType == null
+                            || (semanticSubtype == null
+                                && (string.Equals(issueType, "content", StringComparison.OrdinalIgnoreCase)
+                                    || string.Equals(issueType, "c", StringComparison.OrdinalIgnoreCase)))
+                            || (semanticSubtype != null && ShouldScan(semanticSubtype));
+                        if (!shouldEmit) continue;
+
+                        issues.Add(new DocumentIssue
                         {
-                            // Generic formula-error path only emits under
-                            // no-filter or the broad Content bucket; a
-                            // subtype filter looking for something more
-                            // specific shouldn't see the generic row.
-                        }
-                        else
-                        {
-                            issues.Add(new DocumentIssue
-                            {
-                                Id = $"F{++issueNum}",
-                                Type = IssueType.Content,
-                                Subtype = specificSubtype,
-                                Severity = IssueSeverity.Error,
-                                Path = $"{sheetName}!{cellRef}",
-                                Message = specificSubtype == Core.IssueSubtypes.FormulaRefMissingSheet
-                                    ? $"Formula references missing sheet (cached as {value}; Excel would show #REF!)"
-                                    : $"Formula error: {value}",
-                                Context = $"={cell.CellFormula.Text}"
-                            });
-                        }
+                            Id = $"F{++issueNum}",
+                            Type = IssueType.Content,
+                            Subtype = semanticSubtype,
+                            Severity = IssueSeverity.Error,
+                            Path = $"{sheetName}!{cellRef}",
+                            Message = semanticSubtype == Core.IssueSubtypes.FormulaRefMissingSheet
+                                ? $"Formula references missing sheet (cached as {value}; Excel would show #REF!)"
+                                : $"Formula error: {value}",
+                            Context = $"={cell.CellFormula.Text}"
+                        });
                     }
                     else if (cell.CellFormula?.Text is { } fText
                         && (ShouldScan(Core.IssueSubtypes.FormulaNotEvaluated)
