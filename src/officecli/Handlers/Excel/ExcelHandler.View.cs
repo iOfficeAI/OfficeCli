@@ -560,6 +560,46 @@ public partial class ExcelHandler
             });
         }
 
+        // Chart numCache vs live cell values — stale-cache detection.
+        // Off by default because it walks every chart × every series × every
+        // point and evaluates every referenced range; opt in via
+        // `--type chart_cache_stale`. When a cell's value changed but the
+        // chart hasn't been refreshed by Excel, the chart silently shows
+        // old values. The check requires explicit opt-in because some
+        // numCache deltas are legitimate (rounding, formatting), and we
+        // don't want noise on every casual `view issues`.
+        if (issueType == "chart_cache_stale")
+        {
+            foreach (var (slug, numRef) in EnumerateChartNumberRefs())
+            {
+                if (limit.HasValue && issues.Count >= limit.Value) break;
+                var formula = numRef.Formula?.Text;
+                if (string.IsNullOrWhiteSpace(formula)) continue;
+                if (ChartRefSheetExists(formula, out _)) continue; // skip; #2 already reports
+                var cached = numRef.NumberingCache?.Elements<C.NumericPoint>()
+                    .Select(p => p.NumericValue?.Text ?? "").ToList();
+                if (cached == null || cached.Count == 0) continue;
+                var live = ResolveChartFormulaValues(formula);
+                if (live == null) continue;
+                // Compare cached vs live string-wise — both come from cell text;
+                // numeric formatting normalisation would mask real edits.
+                if (cached.Count != live.Count
+                    || cached.Zip(live, (c, l) => c != l).Any(b => b))
+                {
+                    issues.Add(new DocumentIssue
+                    {
+                        Id = $"C{++issueNum}",
+                        Type = IssueType.Content,
+                        Severity = IssueSeverity.Warning,
+                        Path = slug,
+                        Message = "Chart numCache out of sync with source cells",
+                        Context = $"f=\"{formula}\" cached=[{string.Join(",", cached)}] live=[{string.Join(",", live)}]",
+                        Suggestion = "Open in Excel to refresh, or call validate after data changes."
+                    });
+                }
+            }
+        }
+
         // CONSISTENCY(text-overflow-check): merged in from former `check` command.
         // Emits wrapText-cells whose visible row-height budget can't fit the wrapped text.
         foreach (var (path, msg) in CheckAllCellOverflow())
@@ -579,6 +619,69 @@ public partial class ExcelHandler
     }
 
     // ==================== Chart reference observability ====================
+
+    /// <summary>Yield every &lt;c:numRef&gt; with its slug, for chart-cache-stale
+    /// cross-checks against live cell values.</summary>
+    private IEnumerable<(string Slug, C.NumberReference NumRef)> EnumerateChartNumberRefs()
+    {
+        foreach (var (sheetName, wsPart) in GetWorksheets())
+        {
+            if (wsPart.DrawingsPart is not { } dp) continue;
+            int idx = 0;
+            foreach (var cp in dp.ChartParts)
+            {
+                idx++;
+                if (cp.ChartSpace is null) continue;
+                foreach (var nr in cp.ChartSpace.Descendants<C.NumberReference>())
+                    yield return ($"/{sheetName}/chart[{idx}]", nr);
+            }
+        }
+    }
+
+    /// <summary>Resolve a chart c:f formula like "Sheet1!$A$1:$A$3" against
+    /// current cell values; returns the cell text in row-major order, or null
+    /// if the sheet is missing (caller already reports that via #2).</summary>
+    private List<string>? ResolveChartFormulaValues(string formula)
+    {
+        var bang = formula.IndexOf('!');
+        if (bang <= 0) return null;
+        var sheetPart = formula[..bang].Trim();
+        if (sheetPart.StartsWith('\'') && sheetPart.EndsWith('\''))
+            sheetPart = sheetPart[1..^1].Replace("''", "'");
+        var rangePart = formula[(bang + 1)..].Replace("$", "");
+        var wsPart = GetWorksheets()
+            .FirstOrDefault(w => string.Equals(w.Name, sheetPart, StringComparison.OrdinalIgnoreCase))
+            .Part;
+        if (wsPart == null) return null;
+        var sheetData = GetSheet(wsPart).GetFirstChild<SheetData>();
+        if (sheetData == null) return null;
+
+        // Cell or range A1 / A1:B3 — fall back to null on anything else
+        // (named ranges, table refs); not in scope for this scanner.
+        var parts = rangePart.Split(':');
+        var first = parts[0];
+        var last = parts.Length > 1 ? parts[1] : parts[0];
+        if (!System.Text.RegularExpressions.Regex.IsMatch(first, "^[A-Z]+\\d+$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) return null;
+        if (!System.Text.RegularExpressions.Regex.IsMatch(last, "^[A-Z]+\\d+$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) return null;
+
+        var (col1Str, r1) = ParseCellReference(first.ToUpperInvariant());
+        var (col2Str, r2) = ParseCellReference(last.ToUpperInvariant());
+        int c1 = ColumnNameToIndex(col1Str), c2 = ColumnNameToIndex(col2Str);
+        var cellIndex = new Dictionary<string, Cell>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in sheetData.Elements<Row>())
+            foreach (var cell in row.Elements<Cell>())
+                if (cell.CellReference?.Value is { } cr) cellIndex[cr] = cell;
+
+        var values = new List<string>();
+        for (int r = r1; r <= r2; r++)
+            for (int c = c1; c <= c2; c++)
+            {
+                var addr = $"{IndexToColumnName(c)}{r}";
+                if (!cellIndex.TryGetValue(addr, out var cell)) { values.Add(""); continue; }
+                values.Add(cell.CellValue?.Text ?? "");
+            }
+        return values;
+    }
 
     /// <summary>
     /// Yield every &lt;c:f&gt; formula text across all chart parts (standard and
