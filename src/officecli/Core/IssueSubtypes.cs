@@ -15,6 +15,7 @@ public static class IssueSubtypes
     public const string FormulaNotEvaluated = "formula_not_evaluated";
     public const string FormulaCacheStale = "formula_cache_stale";
     public const string FormulaRefMissingSheet = "formula_ref_missing_sheet";
+    public const string FormulaEvalError = "formula_eval_error";
     public const string FieldNotEvaluated = "field_not_evaluated";
     public const string FieldCacheStale = "field_cache_stale";
     public const string SlideFieldNotEvaluated = "slide_field_not_evaluated";
@@ -43,12 +44,33 @@ public static class IssueSubtypes
     /// <summary>Every subtype the <c>view issues</c> filter accepts by name.</summary>
     public static readonly string[] ValidSubtypes = new[]
     {
-        FormulaNotEvaluated, FormulaCacheStale, FormulaRefMissingSheet,
+        FormulaNotEvaluated, FormulaCacheStale, FormulaRefMissingSheet, FormulaEvalError,
         FieldNotEvaluated, FieldCacheStale,
         SlideFieldNotEvaluated,
         ChartSeriesRefMissingSheet, ChartCacheStale,
         DefinedNameBroken, DefinedNameTargetMissing,
     };
+
+    /// <summary>Subtypes that are scanned by default and surface under
+    /// <c>--type content</c>. Opt-in subtypes (currently only
+    /// <see cref="ChartCacheStale"/>) require an exact-name request.</summary>
+    public static readonly string[] OptInSubtypes = new[] { ChartCacheStale };
+
+    /// <summary>One-line summary suitable for the CLI <c>--type</c> help
+    /// text. Generated from <see cref="ValidSubtypes"/> so the help cannot
+    /// drift from the validator.</summary>
+    public static string TypeHelpDescription()
+    {
+        var defaults = ValidSubtypes.Where(s => !OptInSubtypes.Contains(s));
+        return "Issue type filter. Broad buckets: "
+            + string.Join(", ", BucketNames)
+            + " (alias " + string.Join(", ", BucketAliases) + "). "
+            + "Subtypes (Content bucket, returned by default and via --type content): "
+            + string.Join(", ", defaults) + ". "
+            + "Opt-in only (request by exact name; not included in --type content): "
+            + string.Join(", ", OptInSubtypes) + ". "
+            + "All values are case-insensitive and surrounding whitespace is trimmed.";
+    }
 
     /// <summary>
     /// Validate a user-supplied <c>--type</c> argument and return the

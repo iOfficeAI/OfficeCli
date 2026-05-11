@@ -501,28 +501,18 @@ public partial class ExcelHandler
                         //
                         // Step 1 — semantic: a cached #REF! whose formula
                         // refs a deleted sheet is formula_ref_missing_sheet;
-                        // every other #VALUE!/#NAME?/#DIV/0!/etc. is a
-                        // subtype-less generic formula error.
+                        // every other #VALUE!/#NAME?/#DIV/0!/etc. is the
+                        // generic formula_eval_error — a real Excel-load
+                        // error but without a more specific named cause.
                         var fTextForErr = cell.CellFormula.Text;
                         var isMissingSheetCause = value == "#REF!"
                             && fTextForErr != null
                             && FormulaReferencesMissingSheet(fTextForErr);
-                        string? semanticSubtype = isMissingSheetCause
+                        string semanticSubtype = isMissingSheetCause
                             ? Core.IssueSubtypes.FormulaRefMissingSheet
-                            : null;
+                            : Core.IssueSubtypes.FormulaEvalError;
 
-                        // Step 2 — filter: emit when no filter is active, or
-                        // when the active filter accepts this row. The
-                        // subtype-less generic row is part of the Content
-                        // bucket but does not match any specific-subtype
-                        // filter; the formula_ref_missing_sheet row matches
-                        // its own filter and the Content bucket.
-                        bool shouldEmit = issueType == null
-                            || (semanticSubtype == null
-                                && (string.Equals(issueType, "content", StringComparison.OrdinalIgnoreCase)
-                                    || string.Equals(issueType, "c", StringComparison.OrdinalIgnoreCase)))
-                            || (semanticSubtype != null && ShouldScan(semanticSubtype));
-                        if (!shouldEmit) continue;
+                        if (!ShouldScan(semanticSubtype)) continue;
 
                         issues.Add(new DocumentIssue
                         {

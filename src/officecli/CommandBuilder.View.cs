@@ -16,7 +16,7 @@ static partial class CommandBuilder
         var startLineOpt = new Option<int?>("--start") { Description = "Start line/paragraph number" };
         var endLineOpt = new Option<int?>("--end") { Description = "End line/paragraph number" };
         var maxLinesOpt = new Option<int?>("--max-lines") { Description = "Maximum number of lines/rows/slides to output (truncates with total count)" };
-        var issueTypeOpt = new Option<string?>("--type") { Description = "Issue type filter. Broad buckets: format, content, structure (alias f/c/s). Subtypes (Content bucket, returned by default and via --type content): formula_not_evaluated, formula_cache_stale, formula_ref_missing_sheet, field_not_evaluated, field_cache_stale, slide_field_not_evaluated, chart_series_ref_missing_sheet, definedname_broken, definedname_target_missing. Opt-in only (request by exact name; not included in --type content): chart_cache_stale. All values are case-insensitive and surrounding whitespace is trimmed." };
+        var issueTypeOpt = new Option<string?>("--type") { Description = IssueSubtypes.TypeHelpDescription() };
         var limitOpt = new Option<int?>("--limit") { Description = "Limit number of results" };
 
         var colsOpt = new Option<string?>("--cols") { Description = "Column filter, comma-separated (Excel only, e.g. A,B,C)" };
