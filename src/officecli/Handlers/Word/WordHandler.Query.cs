@@ -1163,18 +1163,20 @@ public partial class WordHandler
         node.Format["instruction"] = instr;
         node.Format["fieldType"] = fieldType;
 
-        // Cross-handler observability protocol — matches xlsx Format["evaluated"]
-        // on formula cells. true = Word has rendered a cached result run.
-        // false = field code written but no cached run yet (typical for newly
-        // authored docs before Word opens them, or after `dirty` was flipped).
-        // `view issues` reports false on *dynamic* field types (PAGE, REF, …)
-        // via field_not_evaluated; user-input fields (FORMTEXT etc) ignore.
-        node.Format["evaluated"] = field.SeparateRun != null && resultText.Length > 0;
-
         // Check dirty flag
         var beginChar = field.BeginRun.GetFirstChild<FieldChar>();
-        if (beginChar?.Dirty?.Value == true)
-            node.Format["dirty"] = true;
+        var isDirty = beginChar?.Dirty?.Value == true;
+        if (isDirty) node.Format["dirty"] = true;
+
+        // Cross-handler observability protocol — matches xlsx Format["evaluated"]
+        // on formula cells. true = Word has rendered a cached result run AND
+        // the cache is not flagged dirty. dirty=true means Word will re-render
+        // on next open, so the current cache cannot be trusted as "evaluated".
+        // `view issues` reports false on *dynamic* field types (PAGE, REF, …)
+        // via field_not_evaluated; user-input fields (FORMTEXT etc) ignore.
+        node.Format["evaluated"] = !isDirty
+            && field.SeparateRun != null
+            && resultText.Length > 0;
 
         return node;
     }

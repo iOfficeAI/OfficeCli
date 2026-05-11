@@ -2063,6 +2063,11 @@ public partial class WordHandler
                     var instrUpper = instr.Trim().Split(' ', 2)[0].ToUpperInvariant();
                     if (!string.IsNullOrEmpty(instrUpper))
                         fldNode.Format["fieldType"] = instrUpper.ToLowerInvariant();
+                    // Cross-handler `evaluated` protocol — mirrors complex-field
+                    // FieldToNode and xlsx Format["evaluated"]. fldSimple's
+                    // cached result lives in its descendant <w:t>s; empty
+                    // means "Word hasn't rendered it yet".
+                    fldNode.Format["evaluated"] = displayText.Length > 0;
                     node.Children.Add(fldNode);
                     fldSimpleIdx++;
                 }
@@ -2085,6 +2090,7 @@ public partial class WordHandler
                         var instrUpper = instr.Trim().Split(' ', 2)[0].ToUpperInvariant();
                         if (!string.IsNullOrEmpty(instrUpper))
                             fldNode.Format["fieldType"] = instrUpper.ToLowerInvariant();
+                        fldNode.Format["evaluated"] = displayText.Length > 0;
                         node.Children.Add(fldNode);
                         perHlFldIdx++;
                     }

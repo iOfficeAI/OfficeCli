@@ -532,23 +532,42 @@ public partial class PowerPointHandler
             // pass with no PPT open-and-save leaves the slot blank, and the
             // slide silently shows nothing where the slide number / date should
             // have been. Issue lets agents detect the gap before the file ships.
-            foreach (var fld in shapeTree.Descendants<Drawing.Field>())
+            // Walk slide AND its layout AND master — slide-number / date-time
+            // placeholders almost always live in layout/master (cSld inherits),
+            // so scanning only the slide's ShapeTree misses the most common
+            // shape of the bug.
+            var allTrees = new List<(string Scope, DocumentFormat.OpenXml.OpenXmlElement Tree)>
             {
-                if (limit.HasValue && issues.Count >= limit.Value) break;
-                var fldType = fld.Type?.Value ?? "";
-                if (!IsDynamicSlideFieldType(fldType)) continue;
-                var cachedText = string.Concat(fld.Elements<Drawing.Text>().Select(t => t.Text));
-                if (!string.IsNullOrEmpty(cachedText)) continue;
-                issues.Add(new DocumentIssue
+                ("slide", shapeTree),
+            };
+            if (slidePart.SlideLayoutPart?.SlideLayout.CommonSlideData?.ShapeTree is { } layoutTree)
+                allTrees.Add(("layout", layoutTree));
+            if (slidePart.SlideLayoutPart?.SlideMasterPart?.SlideMaster.CommonSlideData?.ShapeTree is { } masterTree)
+                allTrees.Add(("master", masterTree));
+            foreach (var (scope, tree) in allTrees)
+            {
+                foreach (var fld in tree.Descendants<Drawing.Field>())
                 {
-                    Id = $"U{++issueNum}",
-                    Type = IssueType.Content,
-                    Severity = IssueSeverity.Warning,
-                    Path = $"/slide[{slideNum}]",
-                    Message = "Slide field written but not evaluated (no cached text, PowerPoint has not rendered it)",
-                    Context = $"<a:fld type=\"{fldType}\">",
-                    Suggestion = "Open in PowerPoint once so <a:t> inside <a:fld> is populated."
-                });
+                    if (limit.HasValue && issues.Count >= limit.Value) break;
+                    var fldType = fld.Type?.Value ?? "";
+                    if (!IsDynamicSlideFieldType(fldType)) continue;
+                    var cachedText = string.Concat(fld.Elements<Drawing.Text>().Select(t => t.Text));
+                    if (!string.IsNullOrEmpty(cachedText)) continue;
+                    issues.Add(new DocumentIssue
+                    {
+                        Id = $"U{++issueNum}",
+                        Type = IssueType.Content,
+                        Subtype = "slide_field_not_evaluated",
+                        Severity = IssueSeverity.Warning,
+                        Path = scope == "slide"
+                            ? $"/slide[{slideNum}]"
+                            : $"/slide[{slideNum}] ({scope})",
+                        Message = "Slide field written but not evaluated (no cached text, PowerPoint has not rendered it)",
+                        Context = $"<a:fld type=\"{fldType}\"> in {scope}",
+                        Suggestion = "Open in PowerPoint once so <a:t> inside <a:fld> is populated."
+                    });
+                }
+                if (limit.HasValue && issues.Count >= limit.Value) break;
             }
 
             if (limit.HasValue && issues.Count >= limit.Value) break;

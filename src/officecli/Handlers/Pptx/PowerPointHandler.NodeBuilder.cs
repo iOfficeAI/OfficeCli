@@ -379,6 +379,30 @@ public partial class PowerPointHandler
         };
 
         node.Format["name"] = name;
+
+        // Cross-handler `evaluated` protocol — surface unevaluated a:fld
+        // descendants on the shape node so agents can find them via Get
+        // without parsing view-issues messages. Emit `false` if any dynamic
+        // a:fld (slidenum / datetime*) inside this shape has an empty <a:t>;
+        // omit the key entirely when there are no dynamic fields at all
+        // (matches Word's pattern: only fields surface `evaluated`).
+        if (shape.TextBody != null)
+        {
+            bool anyDynamic = false;
+            bool anyUnevaluated = false;
+            foreach (var fld in shape.TextBody.Descendants<Drawing.Field>())
+            {
+                var fldType = fld.Type?.Value ?? "";
+                if (string.IsNullOrEmpty(fldType)) continue;
+                if (fldType != "slidenum" && !fldType.StartsWith("datetime", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                anyDynamic = true;
+                var cached = string.Concat(fld.Elements<Drawing.Text>().Select(t => t.Text));
+                if (cached.Length == 0) { anyUnevaluated = true; break; }
+            }
+            if (anyDynamic) node.Format["evaluated"] = !anyUnevaluated;
+        }
+
         // CONSISTENCY(alt-readback): Set accepts alt/altText/description and
         // writes to NonVisualDrawingProperties.Description. Surface it on Get
         // so writes are observable.

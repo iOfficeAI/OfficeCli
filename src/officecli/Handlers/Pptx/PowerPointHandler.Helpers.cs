@@ -642,11 +642,34 @@ public partial class PowerPointHandler
             {
                 if (child is Drawing.Run run)
                     sb.Append(run.Text?.Text ?? "");
+                else if (child is Drawing.Field fld)
+                {
+                    // a:fld renders its cached <a:t> when present; otherwise
+                    // PowerPoint hasn't rendered it yet. Cross-handler
+                    // `evaluated` protocol — emit #OCLI_NOTEVAL!{type} to
+                    // match Word's complex-field sentinel, so agents see the
+                    // unrendered field in view text instead of a silent gap.
+                    var cached = string.Concat(fld.Elements<Drawing.Text>().Select(t => t.Text));
+                    var fldType = fld.Type?.Value ?? "";
+                    if (cached.Length > 0) sb.Append(cached);
+                    else if (IsDynamicSlideFieldTypeStatic(fldType))
+                        sb.Append("#OCLI_NOTEVAL!{").Append(fldType).Append('}');
+                }
                 else if (HasMathContent(child))
                     sb.Append(FormulaParser.ToReadableText(GetMathElement(child)));
             }
         }
         return sb.ToString();
+    }
+
+    // Sibling of PowerPointHandler.View.IsDynamicSlideFieldType, accessible
+    // from the Helpers partial without crossing into View internals.
+    private static bool IsDynamicSlideFieldTypeStatic(string fldType)
+    {
+        if (string.IsNullOrEmpty(fldType)) return false;
+        if (fldType == "slidenum") return true;
+        if (fldType.StartsWith("datetime", StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
     }
 
     /// <summary>

@@ -25,6 +25,17 @@ public class DocumentIssue
     public string Id { get; set; } = "";
     [JsonPropertyName("type")]
     public IssueType Type { get; set; }
+    /// <summary>
+    /// Machine-readable issue subtype. Stable identifier agents can match on
+    /// (snake_case). Doubles as the value accepted by `view issues --type`
+    /// for narrow filtering. Examples: formula_not_evaluated,
+    /// field_not_evaluated, slide_field_not_evaluated,
+    /// chart_series_ref_missing_sheet, chart_cache_stale,
+    /// definedname_broken. Distinct from the broad <see cref="Type"/> enum
+    /// (Format / Content / Structure) which buckets the issue category.
+    /// </summary>
+    [JsonPropertyName("subtype")]
+    public string? Subtype { get; set; }
     [JsonPropertyName("severity")]
     public IssueSeverity Severity { get; set; }
     [JsonPropertyName("path")]

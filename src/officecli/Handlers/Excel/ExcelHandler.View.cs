@@ -432,6 +432,10 @@ public partial class ExcelHandler
     {
         var issues = new List<DocumentIssue>();
         int issueNum = 0;
+        // Reset the per-invocation worksheet cache so a long-lived handler
+        // sees sheet add/rename/delete between successive calls.
+        _viewAsIssuesWorksheetCache = null;
+        _viewAsIssuesSheetNameCache = null;
 
         var sheets = GetWorksheets();
         foreach (var (sheetName, worksheetPart) in sheets)
@@ -474,6 +478,7 @@ public partial class ExcelHandler
                             {
                                 Id = $"U{++issueNum}",
                                 Type = IssueType.Content,
+                                Subtype = "formula_not_evaluated",
                                 Severity = IssueSeverity.Warning,
                                 Path = $"{sheetName}!{cellRef}",
                                 Message = "Formula written but not evaluated (no cachedValue, evaluator unsupported)",
@@ -515,6 +520,7 @@ public partial class ExcelHandler
                     {
                         Id = $"D{++issueNum}",
                         Type = IssueType.Content,
+                        Subtype = "definedname_broken",
                         Severity = IssueSeverity.Error,
                         Path = $"/namedrange[{name}]",
                         Message = $"Defined name '{name}' has error body {body}",
@@ -528,6 +534,7 @@ public partial class ExcelHandler
                 {
                     Id = $"D{++issueNum}",
                     Type = IssueType.Content,
+                    Subtype = "definedname_target_missing",
                     Severity = IssueSeverity.Error,
                     Path = $"/namedrange[{name}]",
                     Message = $"Defined name '{name}' references missing sheet '{missingSheet}'",
@@ -552,6 +559,7 @@ public partial class ExcelHandler
             {
                 Id = $"R{++issueNum}",
                 Type = IssueType.Content,
+                Subtype = "chart_series_ref_missing_sheet",
                 Severity = IssueSeverity.Error,
                 Path = slug,
                 Message = $"Chart series references missing sheet '{missingSheet}'",
@@ -579,7 +587,14 @@ public partial class ExcelHandler
                 var cached = numRef.NumberingCache?.Elements<C.NumericPoint>()
                     .Select(p => p.NumericValue?.Text ?? "").ToList();
                 if (cached == null || cached.Count == 0) continue;
+                // First try the cheap range-only resolver (preserves cell-format
+                // text exactly). If the formula is wrapped in functions like
+                // SUM/AVERAGE/INDEX/OFFSET it returns null — fall back to the
+                // FormulaEvaluator, which produces a single scalar that we
+                // compare against the cached scalar (collapses N points to 1
+                // for aggregate functions; that's the right answer).
                 var live = ResolveChartFormulaValues(formula);
+                if (live == null) live = TryEvaluateChartFormulaScalar(formula);
                 if (live == null) continue;
                 // Compare cached vs live string-wise — both come from cell text;
                 // numeric formatting normalisation would mask real edits.
@@ -590,6 +605,7 @@ public partial class ExcelHandler
                     {
                         Id = $"C{++issueNum}",
                         Type = IssueType.Content,
+                        Subtype = "chart_cache_stale",
                         Severity = IssueSeverity.Warning,
                         Path = slug,
                         Message = "Chart numCache out of sync with source cells",
@@ -620,11 +636,26 @@ public partial class ExcelHandler
 
     // ==================== Chart reference observability ====================
 
+    // Cached worksheet list — ViewAsIssues + EnumerateChartRefFormulas +
+    // EnumerateChartNumberRefs + ChartRefSheetExists + ResolveChartFormulaValues
+    // all call GetWorksheets() repeatedly during a single scan. The underlying
+    // GetPartById walk isn't free on workbooks with many sheets; computing it
+    // once per scan keeps complexity O(sheets + charts) instead of O(sheets ×
+    // charts). The cache is scoped to one ViewAsIssues invocation; subsequent
+    // calls rebuild it (sheet rename/add via Set invalidates).
+    private List<(string Name, WorksheetPart Part)>? _viewAsIssuesWorksheetCache;
+    private HashSet<string>? _viewAsIssuesSheetNameCache;
+    private List<(string Name, WorksheetPart Part)> CachedWorksheets()
+        => _viewAsIssuesWorksheetCache ??= GetWorksheets();
+    private HashSet<string> CachedSheetNames()
+        => _viewAsIssuesSheetNameCache ??= new HashSet<string>(
+            CachedWorksheets().Select(w => w.Name), StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Yield every &lt;c:numRef&gt; with its slug, for chart-cache-stale
     /// cross-checks against live cell values.</summary>
     private IEnumerable<(string Slug, C.NumberReference NumRef)> EnumerateChartNumberRefs()
     {
-        foreach (var (sheetName, wsPart) in GetWorksheets())
+        foreach (var (sheetName, wsPart) in CachedWorksheets())
         {
             if (wsPart.DrawingsPart is not { } dp) continue;
             int idx = 0;
@@ -638,6 +669,26 @@ public partial class ExcelHandler
         }
     }
 
+    /// <summary>Fall back for chart formulas that wrap a range in functions
+    /// (SUM/AVERAGE/INDEX/OFFSET/…). Pipe through FormulaEvaluator and return
+    /// the scalar as a single-element list so the cached/live comparator can
+    /// run uniformly. Returns null when evaluator can't handle the formula
+    /// (then the scanner silently skips — accepted: agent can opt-in to
+    /// formula_not_evaluated for the underlying issue).</summary>
+    private List<string>? TryEvaluateChartFormulaScalar(string formula)
+    {
+        // Use the first worksheet's evaluator — chart c:f formulas can reference
+        // any sheet by name. The evaluator follows Sheet!Ref prefixes itself.
+        var first = CachedWorksheets().FirstOrDefault();
+        if (first.Part == null) return null;
+        var sheetData = GetSheet(first.Part).GetFirstChild<SheetData>();
+        if (sheetData == null) return null;
+        var ev = new Core.FormulaEvaluator(sheetData, _doc.WorkbookPart);
+        var report = ev.EvaluateForReport(formula);
+        if (report.Status != Core.EvalReportStatus.Evaluated) return null;
+        return new List<string> { report.Result!.ToCellValueText() };
+    }
+
     /// <summary>Resolve a chart c:f formula like "Sheet1!$A$1:$A$3" against
     /// current cell values; returns the cell text in row-major order, or null
     /// if the sheet is missing (caller already reports that via #2).</summary>
@@ -649,7 +700,7 @@ public partial class ExcelHandler
         if (sheetPart.StartsWith('\'') && sheetPart.EndsWith('\''))
             sheetPart = sheetPart[1..^1].Replace("''", "'");
         var rangePart = formula[(bang + 1)..].Replace("$", "");
-        var wsPart = GetWorksheets()
+        var wsPart = CachedWorksheets()
             .FirstOrDefault(w => string.Equals(w.Name, sheetPart, StringComparison.OrdinalIgnoreCase))
             .Part;
         if (wsPart == null) return null;
@@ -691,7 +742,7 @@ public partial class ExcelHandler
     /// </summary>
     private IEnumerable<(string Slug, string Formula)> EnumerateChartRefFormulas()
     {
-        foreach (var (sheetName, wsPart) in GetWorksheets())
+        foreach (var (sheetName, wsPart) in CachedWorksheets())
         {
             if (wsPart.DrawingsPart is not { } dp) continue;
             int idx = 0;
@@ -743,9 +794,7 @@ public partial class ExcelHandler
         var colon = sheetPart.IndexOf(':');
         var first = colon >= 0 ? sheetPart[..colon] : sheetPart;
         var second = colon >= 0 ? sheetPart[(colon + 1)..] : null;
-        var liveSheets = new HashSet<string>(
-            GetWorksheets().Select(w => w.Name),
-            StringComparer.OrdinalIgnoreCase);
+        var liveSheets = CachedSheetNames();
         if (!liveSheets.Contains(first)) { missingSheet = first; return true; }
         if (second != null && !liveSheets.Contains(second)) { missingSheet = second; return true; }
         return false;

@@ -213,6 +213,31 @@ public partial class WordHandler
     /// </summary>
     private static string? TryGetParagraphTextWithFieldSentinels(Paragraph para)
     {
+        // fldSimple form: inspect each <w:fldSimple> for an empty body and
+        // emit the sentinel inline. fldSimple coexists with the complex-field
+        // walk below — paragraphs can contain either form (rarely both).
+        if (para.Descendants<SimpleField>().Any(fs =>
+            IsDynamicFieldInstruction(fs.Instruction?.Value?.Trim() ?? "")
+            && fs.Descendants<Text>().All(t => string.IsNullOrEmpty(t.Text))))
+        {
+            var sbS = new StringBuilder();
+            foreach (var child in para.ChildElements)
+            {
+                if (child is SimpleField fs)
+                {
+                    var instr = fs.Instruction?.Value?.Trim() ?? "";
+                    var t = string.Concat(fs.Descendants<Text>().Select(x => x.Text));
+                    if (t.Length == 0 && IsDynamicFieldInstruction(instr))
+                        sbS.Append("#OCLI_NOTEVAL!{").Append(instr).Append('}');
+                    else
+                        sbS.Append(t);
+                }
+                else if (child is Run run)
+                    sbS.Append(string.Concat(run.Elements<Text>().Select(x => x.Text)));
+            }
+            return sbS.ToString();
+        }
+
         // Quick reject: skip the walk if the paragraph has no fldChar at all.
         var anyFldChar = para.Descendants<FieldChar>().Any();
         if (!anyFldChar) return null;
@@ -1315,11 +1340,39 @@ public partial class WordHandler
             var instr = field.InstrCode.Text?.Trim() ?? "";
             if (!IsDynamicFieldInstruction(instr)) continue;
             var resultText = string.Join("", field.ResultRuns.SelectMany(r => r.Elements<Text>()).Select(t => t.Text));
-            if (field.SeparateRun != null && resultText.Length > 0) continue;
+            var isDirty = field.BeginRun.GetFirstChild<FieldChar>()?.Dirty?.Value == true;
+            if (!isDirty && field.SeparateRun != null && resultText.Length > 0) continue;
             issues.Add(new DocumentIssue
             {
                 Id = $"U{++issueNum}",
                 Type = IssueType.Content,
+                Subtype = "field_not_evaluated",
+                Severity = IssueSeverity.Warning,
+                Path = "/body",
+                Message = isDirty
+                    ? "Field marked dirty (cached result may be stale, Word will re-render on open)"
+                    : "Field written but not evaluated (no cached result, Word has not rendered it)",
+                Context = "{ " + instr + " }",
+                Suggestion = "Open the document in Word once (or run a TOC update) so the result run is populated."
+            });
+        }
+
+        // <w:fldSimple instr="..."> form — same observability gap. Some
+        // authoring tools (and our own AddDefault path) emit fldSimple
+        // instead of the complex fldChar triad. The body's <w:r><w:t> is
+        // the cached result; absent or empty means "not evaluated".
+        foreach (var fld in body.Descendants<SimpleField>())
+        {
+            if (limit.HasValue && issues.Count >= limit.Value) break;
+            var instr = fld.Instruction?.Value?.Trim() ?? "";
+            if (!IsDynamicFieldInstruction(instr)) continue;
+            var resultText = string.Join("", fld.Descendants<Text>().Select(t => t.Text));
+            if (resultText.Length > 0) continue;
+            issues.Add(new DocumentIssue
+            {
+                Id = $"U{++issueNum}",
+                Type = IssueType.Content,
+                Subtype = "field_not_evaluated",
                 Severity = IssueSeverity.Warning,
                 Path = "/body",
                 Message = "Field written but not evaluated (no cached result, Word has not rendered it)",
@@ -1328,7 +1381,8 @@ public partial class WordHandler
             });
         }
 
-        // Filter by type
+        // Filter by type. Accepts both broad bucket (format/content/structure)
+        // AND specific subtype identifiers (field_not_evaluated, …).
         if (issueType != null)
         {
             var type = issueType.ToLowerInvariant() switch
@@ -1340,6 +1394,8 @@ public partial class WordHandler
             };
             if (type.HasValue)
                 issues = issues.Where(i => i.Type == type.Value).ToList();
+            else
+                issues = issues.Where(i => string.Equals(i.Subtype, issueType, StringComparison.OrdinalIgnoreCase)).ToList();
         }
 
         return limit.HasValue ? issues.Take(limit.Value).ToList() : issues;
