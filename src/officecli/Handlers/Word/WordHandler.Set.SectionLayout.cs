@@ -384,17 +384,6 @@ public partial class WordHandler
     private Columns EnsureColumns()
     {
         var sectPr = EnsureSectionProperties();
-        var cols = sectPr.GetFirstChild<Columns>();
-        if (cols == null)
-        {
-            cols = new Columns();
-            // Schema order: cols must come before docGrid
-            var docGrid = sectPr.GetFirstChild<DocGrid>();
-            if (docGrid != null)
-                docGrid.InsertBeforeSelf(cols);
-            else
-                sectPr.AppendChild(cols);
-        }
-        return cols;
+        return EnsureSectPrChild<Columns>(sectPr);
     }
 }

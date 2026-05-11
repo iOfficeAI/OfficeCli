@@ -2729,6 +2729,20 @@ public partial class WordHandler
     }
 
     /// <summary>
+    /// Get-or-create a sectPr child in CT_SectPr schema order. Replaces the
+    /// `?? sectPr.AppendChild(new T())` idiom which violated schema order when
+    /// other higher-ranked elements were already present.
+    /// </summary>
+    private static T EnsureSectPrChild<T>(SectionProperties sectPr) where T : OpenXmlElement, new()
+    {
+        var existing = sectPr.GetFirstChild<T>();
+        if (existing != null) return existing;
+        var created = new T();
+        InsertSectPrChildInOrder(sectPr, created);
+        return created;
+    }
+
+    /// <summary>
     /// CT_TblPrBase schema order:
     ///   tblStyle, tblpPr, tblOverlap, bidiVisual, tblStyleRowBandSize,
     ///   tblStyleColBandSize, tblW, jc, tblCellSpacing, tblInd, tblBorders,

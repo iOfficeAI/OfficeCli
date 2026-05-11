@@ -42,7 +42,12 @@ public partial class WordHandler
         var sectPara = new Paragraph();
         var sectPProps = new ParagraphProperties();
         var sectPr = new SectionProperties();
-        sectPr.AppendChild(new SectionType { Val = sectType });
+        // CONSISTENCY(sectpr-schema-order): always route sectPr child inserts
+        // through InsertSectPrChildInOrder. Mixing raw AppendChild with later
+        // schema-aware inserts produced argv-order-dependent invalid OOXML
+        // when e.g. `columns` (rank 11) was appended before `lineNumbers`
+        // (rank 9).
+        InsertSectPrChildInOrder(sectPr, new SectionType { Val = sectType });
 
         // Ensure body-level sectPr has pgSz/pgMar (fix for docs created by older versions)
         var bodySectPr = body.GetFirstChild<SectionProperties>();
@@ -59,14 +64,14 @@ public partial class WordHandler
 
         // Copy page size/margins from document section, or use A4 defaults
         var srcPageSize = bodySectPr?.GetFirstChild<PageSize>();
-        sectPr.AppendChild(new PageSize
+        InsertSectPrChildInOrder(sectPr, new PageSize
         {
             Width = srcPageSize?.Width ?? WordPageDefaults.A4WidthTwips,
             Height = srcPageSize?.Height ?? WordPageDefaults.A4HeightTwips,
             Orient = srcPageSize?.Orient
         });
         var srcMargin = bodySectPr?.GetFirstChild<PageMargin>();
-        sectPr.AppendChild(new PageMargin
+        InsertSectPrChildInOrder(sectPr, new PageMargin
         {
             Top = srcMargin?.Top ?? 1440,
             Bottom = srcMargin?.Bottom ?? 1440,
@@ -77,15 +82,15 @@ public partial class WordHandler
         // Allow per-section overrides
         if (properties.TryGetValue("pagewidth", out var sw) || properties.TryGetValue("pageWidth", out sw) || properties.TryGetValue("width", out sw))
         {
-            (sectPr.GetFirstChild<PageSize>() ?? sectPr.AppendChild(new PageSize())).Width = ParseTwips(sw);
+            (EnsureSectPrChild<PageSize>(sectPr)).Width = ParseTwips(sw);
         }
         if (properties.TryGetValue("pageheight", out var sh) || properties.TryGetValue("pageHeight", out sh) || properties.TryGetValue("height", out sh))
         {
-            (sectPr.GetFirstChild<PageSize>() ?? sectPr.AppendChild(new PageSize())).Height = ParseTwips(sh);
+            (EnsureSectPrChild<PageSize>(sectPr)).Height = ParseTwips(sh);
         }
         if (properties.TryGetValue("orientation", out var orient))
         {
-            var ps = sectPr.GetFirstChild<PageSize>() ?? sectPr.AppendChild(new PageSize());
+            var ps = EnsureSectPrChild<PageSize>(sectPr);
             ps.Orient = orient.ToLowerInvariant() == "landscape"
                 ? PageOrientationValues.Landscape
                 : PageOrientationValues.Portrait;
@@ -104,19 +109,19 @@ public partial class WordHandler
             var cols = new Columns { ColumnCount = count, EqualWidth = true };
             if (parts.Length > 1)
                 cols.Space = ParseTwips(parts[1].Trim()).ToString();
-            sectPr.AppendChild(cols);
+            InsertSectPrChildInOrder(sectPr, cols);
         }
         if (properties.TryGetValue("columns.space", out var colSpace)
             || properties.TryGetValue("columnSpace", out colSpace))
         {
-            var cols = sectPr.GetFirstChild<Columns>() ?? sectPr.AppendChild(new Columns());
+            var cols = EnsureSectPrChild<Columns>(sectPr);
             cols.Space = ParseTwips(colSpace).ToString();
         }
 
         // Per-section margin overrides — mutate the PageMargin child of the
         // new sectPr (not the body sectPr). Margins use Int32Value for Top/
         // Bottom and UInt32Value for Left/Right to match the schema.
-        var pm = sectPr.GetFirstChild<PageMargin>() ?? sectPr.AppendChild(new PageMargin());
+        var pm = EnsureSectPrChild<PageMargin>(sectPr);
         if (properties.TryGetValue("marginTop", out var mTop) || properties.TryGetValue("margintop", out mTop))
             pm.Top = (int)ParseTwips(mTop);
         if (properties.TryGetValue("marginBottom", out var mBot) || properties.TryGetValue("marginbottom", out mBot))
@@ -152,7 +157,7 @@ public partial class WordHandler
                 var by = int.Parse(lnBy!);
                 if (by > 1) lnType.CountBy = (short)by;
             }
-            sectPr.AppendChild(lnType);
+            InsertSectPrChildInOrder(sectPr, lnType);
         }
 
         // Section-level RTL: <w:bidi/> in sectPr flips page direction.
