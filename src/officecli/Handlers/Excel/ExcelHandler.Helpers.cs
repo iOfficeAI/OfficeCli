@@ -84,6 +84,33 @@ public partial class ExcelHandler
     /// + sheet existence checks), function names, and structured table refs.
     /// Throws ArgumentException on the first out-of-range reference. (B15)
     /// </summary>
+    /// <summary>
+    /// Recognise an Excel error sentinel in a cell display value. Covers the
+    /// seven standard ECMA-376 codes (#NULL!, #DIV/0!, #VALUE!, #REF!,
+    /// #NAME?, #NUM!, #N/A) and modern additions (#SPILL!, #CALC!, #FIELD!,
+    /// #BLOCKED!, #CONNECT!, #GETTING_DATA, #UNKNOWN!, …) via structural
+    /// shape match. Used by every consumer that wants to bucket formula
+    /// errors: view issues subtype routing, view stats counter, view
+    /// outline warning. Centralised so the three readers cannot drift on
+    /// which codes count as errors. <paramref name="value"/> is the cell's
+    /// display value (cachedValue text or evaluator result); the synthetic
+    /// <c>#OCLI_NOTEVAL!</c> sentinel is excluded so unevaluated formulas
+    /// route to their own subtype.
+    /// </summary>
+    internal static bool IsExcelErrorValue(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return false;
+        if (value == "#OCLI_NOTEVAL!") return false;
+        if (!value.StartsWith('#') || value.Length < 2) return false;
+        // Every Excel error sentinel starts with `#` followed by an
+        // uppercase letter or `N` (the `N/A` shape). Covers the seven
+        // ECMA-376 codes, the modern additions (#SPILL!, #CALC!,
+        // #FIELD!, #BLOCKED!, #CONNECT!, #UNKNOWN!), and async-fetch
+        // sentinels (#GETTING_DATA) which lack the trailing `!`.
+        char c = value[1];
+        return c == 'N' || (c >= 'A' && c <= 'Z');
+    }
+
     internal static void ValidateFormulaCellRefs(string formula)
     {
         if (string.IsNullOrEmpty(formula)) return;

@@ -104,7 +104,7 @@ public partial class ExcelHandler
 
                     if (string.IsNullOrEmpty(value) && formula == null)
                         warn = " \u26a0 empty";
-                    else if (formula != null && (value == "#REF!" || value == "#VALUE!" || value == "#NAME?"))
+                    else if (formula != null && IsExcelErrorValue(value))
                         warn = " \u26a0 formula error";
 
                     sb.AppendLine($"  {cellRef}: [{value}] \u2190 {annotation}{warn}");
@@ -206,7 +206,7 @@ public partial class ExcelHandler
                     var value = GetCellDisplayValue(cell);
                     if (string.IsNullOrEmpty(value)) emptyCells++;
                     if (cell.CellFormula != null) formulaCells++;
-                    if (value is "#REF!" or "#VALUE!" or "#NAME?" or "#DIV/0!") errorCells++;
+                    if (IsExcelErrorValue(value)) errorCells++;
 
                     var type = GetCellTypeName(cell);
                     typeCounts[type] = typeCounts.GetValueOrDefault(type) + 1;
@@ -263,7 +263,7 @@ public partial class ExcelHandler
                     var value = GetCellDisplayValue(cell);
                     if (string.IsNullOrEmpty(value)) emptyCells++;
                     if (cell.CellFormula != null) formulaCells++;
-                    if (value is "#REF!" or "#VALUE!" or "#NAME?" or "#DIV/0!") errorCells++;
+                    if (IsExcelErrorValue(value)) errorCells++;
                     var type = GetCellTypeName(cell);
                     typeCounts[type] = typeCounts.GetValueOrDefault(type) + 1;
                 }
@@ -494,19 +494,16 @@ public partial class ExcelHandler
                     var value = GetCellDisplayValue(cell);
 
                     // Recognise the full set of Excel error sentinels a
-                    // formula cell can carry as cachedValue, not just the
-                    // four most-common ones. Standard ECMA-376 errors are
-                    // #NULL!, #DIV/0!, #VALUE!, #REF!, #NAME?, #NUM!, #N/A;
-                    // modern additions (Excel 2019+) include #SPILL!,
-                    // #CALC!, #BLOCKED!, #FIELD!, #UNKNOWN!, #GETTING_DATA,
-                    // and #CONNECT!. Detect via cell.DataType==Error when
-                    // the writer tagged it, plus a structural fallback
-                    // (#name! or #N/A shape) for cells where the writer
-                    // forgot the t="e" attribute.
-                    bool isErrorCell = value != "#OCLI_NOTEVAL!"
-                        && (cell.DataType?.Value == CellValues.Error
-                            || (value.StartsWith('#') &&
-                                (value.EndsWith('!') || value == "#N/A")));
+                    // formula cell can carry as cachedValue. Detection
+                    // goes through IsExcelErrorValue (Helpers.cs) so view
+                    // issues, view stats, and view outline agree on which
+                    // values count as an error. cell.DataType==Error is an
+                    // additional positive signal — Excel writers tag the
+                    // cell type explicitly even when the cachedValue text
+                    // round-trips correctly.
+                    bool isErrorCell = IsExcelErrorValue(value)
+                        || (cell.DataType?.Value == CellValues.Error
+                            && value != "#OCLI_NOTEVAL!");
                     if (cell.CellFormula != null && isErrorCell)
                     {
                         // Two-step routing keeps the semantic decision (what
