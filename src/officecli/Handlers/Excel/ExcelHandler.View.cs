@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using OfficeCli.Core;
+using C = DocumentFormat.OpenXml.Drawing.Charts;
 
 namespace OfficeCli.Handlers;
 
@@ -487,6 +488,29 @@ public partial class ExcelHandler
             }
         }
 
+        // Chart series references pointing at sheets / cells that no longer
+        // exist — same observability family as formula_not_evaluated.
+        // Excel won't refuse to load a chart whose series formula references
+        // a deleted sheet; it just renders the last cached values and the
+        // ref becomes a silent landmine for the next refresh. Detect by
+        // scanning every chart's c:f formulas and matching the sheet prefix
+        // against the live workbook.
+        foreach (var (slug, formula) in EnumerateChartRefFormulas())
+        {
+            if (limit.HasValue && issues.Count >= limit.Value) break;
+            if (!ChartRefSheetExists(formula, out var missingSheet)) continue;
+            issues.Add(new DocumentIssue
+            {
+                Id = $"R{++issueNum}",
+                Type = IssueType.Content,
+                Severity = IssueSeverity.Error,
+                Path = slug,
+                Message = $"Chart series references missing sheet '{missingSheet}'",
+                Context = formula,
+                Suggestion = "Restore the sheet, or rebuild the chart against an existing range."
+            });
+        }
+
         // CONSISTENCY(text-overflow-check): merged in from former `check` command.
         // Emits wrapText-cells whose visible row-height budget can't fit the wrapped text.
         foreach (var (path, msg) in CheckAllCellOverflow())
@@ -503,5 +527,75 @@ public partial class ExcelHandler
         }
 
         return issues;
+    }
+
+    // ==================== Chart reference observability ====================
+
+    /// <summary>
+    /// Yield every &lt;c:f&gt; formula text across all chart parts (standard and
+    /// extended) attached to any worksheet. The slug identifies the chart for
+    /// the issue Path — sheet name plus chart index, matching what ExcelHandler
+    /// already emits for chart-level Set/Get paths.
+    /// </summary>
+    private IEnumerable<(string Slug, string Formula)> EnumerateChartRefFormulas()
+    {
+        foreach (var (sheetName, wsPart) in GetWorksheets())
+        {
+            if (wsPart.DrawingsPart is not { } dp) continue;
+            int idx = 0;
+            foreach (var cp in dp.ChartParts)
+            {
+                idx++;
+                if (cp.ChartSpace is null) continue;
+                foreach (var f in cp.ChartSpace.Descendants<C.Formula>())
+                {
+                    var t = f.Text;
+                    if (!string.IsNullOrWhiteSpace(t))
+                        yield return ($"/{sheetName}/chart[{idx}]", t);
+                }
+            }
+            foreach (var ep in dp.ExtendedChartParts)
+            {
+                idx++;
+                if (ep.ChartSpace is null) continue;
+                // Extended charts use the same c:f shape via cx:formula-equivalent
+                // descendants — defensive descendant scan picks them up.
+                foreach (var e in ep.ChartSpace.Descendants())
+                {
+                    if (e.LocalName == "f" && !string.IsNullOrWhiteSpace(e.InnerText))
+                        yield return ($"/{sheetName}/chart[{idx}]", e.InnerText);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Parse a chart c:f formula like "Sheet1!$A$1:$B$5" or "'Quoted Sheet'!A1"
+    /// and return true if the sheet prefix names a sheet that no longer exists
+    /// in the workbook. Out-parameter receives the missing sheet name. Returns
+    /// false (no issue) when the formula has no sheet prefix or the sheet
+    /// resolves cleanly. Range / cell validity itself is intentionally not
+    /// checked here — that's the chart-cache-stale gap (#5).
+    /// </summary>
+    private bool ChartRefSheetExists(string formula, out string missingSheet)
+    {
+        missingSheet = "";
+        var bang = formula.IndexOf('!');
+        if (bang <= 0) return false;
+        var sheetPart = formula[..bang].Trim();
+        // Quoted sheet names: 'Sheet Name'; '' escapes a literal apostrophe.
+        if (sheetPart.StartsWith('\'') && sheetPart.EndsWith('\''))
+            sheetPart = sheetPart[1..^1].Replace("''", "'");
+        // Multi-sheet 3D refs (Sheet1:Sheet3) — split at colon. If either end
+        // missing, report the first one to keep messaging concrete.
+        var colon = sheetPart.IndexOf(':');
+        var first = colon >= 0 ? sheetPart[..colon] : sheetPart;
+        var second = colon >= 0 ? sheetPart[(colon + 1)..] : null;
+        var liveSheets = new HashSet<string>(
+            GetWorksheets().Select(w => w.Name),
+            StringComparer.OrdinalIgnoreCase);
+        if (!liveSheets.Contains(first)) { missingSheet = first; return true; }
+        if (second != null && !liveSheets.Contains(second)) { missingSheet = second; return true; }
+        return false;
     }
 }
