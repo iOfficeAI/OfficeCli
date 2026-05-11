@@ -1168,15 +1168,14 @@ public partial class WordHandler
         var isDirty = beginChar?.Dirty?.Value == true;
         if (isDirty) node.Format["dirty"] = true;
 
-        // Cross-handler observability protocol — matches xlsx Format["evaluated"]
-        // on formula cells. true = Word has rendered a cached result run AND
-        // the cache is not flagged dirty. dirty=true means Word will re-render
-        // on next open, so the current cache cannot be trusted as "evaluated".
-        // `view issues` reports false on *dynamic* field types (PAGE, REF, …)
-        // via field_not_evaluated; user-input fields (FORMTEXT etc) ignore.
-        node.Format["evaluated"] = !isDirty
-            && field.SeparateRun != null
-            && resultText.Length > 0;
+        // Cross-handler evaluated protocol: true whenever the caller can read
+        // some value from the field — i.e. when a cached result run exists.
+        // dirty=true (Word will re-render on open) keeps evaluated=true
+        // because a value is still readable; the stale-ness is surfaced
+        // separately as the field_cache_stale view-issues subtype. Mirrors
+        // xlsx where a formula cell with cachedValue keeps evaluated=true
+        // even when re-evaluation disagrees (formula_cache_stale fires).
+        node.Format["evaluated"] = field.SeparateRun != null && resultText.Length > 0;
 
         return node;
     }

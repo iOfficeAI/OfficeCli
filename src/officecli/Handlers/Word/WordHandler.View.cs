@@ -1358,16 +1358,23 @@ public partial class WordHandler
             if (!IsDynamicFieldInstruction(instr)) continue;
             var resultText = string.Join("", field.ResultRuns.SelectMany(r => r.Elements<Text>()).Select(t => t.Text));
             var isDirty = field.BeginRun.GetFirstChild<FieldChar>()?.Dirty?.Value == true;
-            if (!isDirty && field.SeparateRun != null && resultText.Length > 0) continue;
+            var hasResult = field.SeparateRun != null && resultText.Length > 0;
+            if (!isDirty && hasResult) continue;
+            // Mirror xlsx formula_cache_stale vs formula_not_evaluated split.
+            // Word's dirty bit means "Word will re-render on open" — when the
+            // result run is still populated, the cache exists but Word itself
+            // is flagging it as stale. That's the field-side analogue of
+            // cached <v> disagreeing with computed value.
+            var isStale = isDirty && hasResult;
             issues.Add(new DocumentIssue
             {
                 Id = $"U{++issueNum}",
                 Type = IssueType.Content,
-                Subtype = "field_not_evaluated",
+                Subtype = isStale ? "field_cache_stale" : "field_not_evaluated",
                 Severity = IssueSeverity.Warning,
                 Path = "/body",
-                Message = isDirty
-                    ? "Field marked dirty (cached result may be stale, Word will re-render on open)"
+                Message = isStale
+                    ? "Field marked dirty with cached result (Word will re-render on open; cached value may differ from re-evaluation)"
                     : "Field written but not evaluated (no cached result, Word has not rendered it)",
                 Context = "{ " + instr + " }",
                 Suggestion = "Open the document in Word once (or run a TOC update) so the result run is populated."
@@ -1399,16 +1406,18 @@ public partial class WordHandler
                 if (!IsDynamicFieldInstruction(instr)) continue;
                 var resultText = string.Join("", fld.Descendants<Text>().Select(t => t.Text));
                 var isDirty = fld.Dirty?.Value == true;
-                if (!isDirty && resultText.Length > 0) continue;
+                var hasResult = resultText.Length > 0;
+                if (!isDirty && hasResult) continue;
+                var isStale = isDirty && hasResult;
                 issues.Add(new DocumentIssue
                 {
                     Id = $"U{++issueNum}",
                     Type = IssueType.Content,
-                    Subtype = "field_not_evaluated",
+                    Subtype = isStale ? "field_cache_stale" : "field_not_evaluated",
                     Severity = IssueSeverity.Warning,
                     Path = "/body",
-                    Message = isDirty
-                        ? "Field marked dirty (cached result may be stale, Word will re-render on open)"
+                    Message = isStale
+                        ? "Field marked dirty with cached result (Word will re-render on open; cached value may differ from re-evaluation)"
                         : "Field written but not evaluated (no cached result, Word has not rendered it)",
                     Context = "{ " + instr + " }",
                     Suggestion = "Open the document in Word once (or run a TOC update) so the result run is populated."

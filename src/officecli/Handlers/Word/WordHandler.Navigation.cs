@@ -2063,16 +2063,14 @@ public partial class WordHandler
                     var instrUpper = instr.Trim().Split(' ', 2)[0].ToUpperInvariant();
                     if (!string.IsNullOrEmpty(instrUpper))
                         fldNode.Format["fieldType"] = instrUpper.ToLowerInvariant();
-                    // Cross-handler `evaluated` protocol — mirrors complex-field
-                    // FieldToNode and xlsx Format["evaluated"]. fldSimple's
-                    // cached result lives in its descendant <w:t>s; empty
-                    // means "Word hasn't rendered it yet". Also check w:dirty
-                    // — fldSimple supports the same dirty attribute as
-                    // fldChar, and Word re-renders dirty fields on open
-                    // regardless of cached text presence.
+                    // Cross-handler `evaluated` protocol — true whenever
+                    // there's a readable cached result. dirty=true (Word
+                    // re-renders on open) keeps evaluated=true since a value
+                    // is still available; view issues field_cache_stale
+                    // surfaces the dirty + cached combination separately.
                     var fldDirty = fld.Dirty?.Value == true;
                     if (fldDirty) fldNode.Format["dirty"] = true;
-                    fldNode.Format["evaluated"] = !fldDirty && displayText.Length > 0;
+                    fldNode.Format["evaluated"] = displayText.Length > 0;
                     node.Children.Add(fldNode);
                     fldSimpleIdx++;
                 }
@@ -2097,7 +2095,7 @@ public partial class WordHandler
                             fldNode.Format["fieldType"] = instrUpper.ToLowerInvariant();
                         var fldDirtyHl = fld.Dirty?.Value == true;
                         if (fldDirtyHl) fldNode.Format["dirty"] = true;
-                        fldNode.Format["evaluated"] = !fldDirtyHl && displayText.Length > 0;
+                        fldNode.Format["evaluated"] = displayText.Length > 0;
                         node.Children.Add(fldNode);
                         perHlFldIdx++;
                     }

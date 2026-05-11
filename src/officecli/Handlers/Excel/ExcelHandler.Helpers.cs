@@ -1217,6 +1217,14 @@ public partial class ExcelHandler
         // so it sorts visually next to #REF!/#VALUE!/etc.
         if (string.IsNullOrEmpty(value) && cell.CellFormula?.Text != null)
         {
+            // Missing-sheet refs: ResolveSheetCellResult silently returns 0
+            // and the error path surfaces a fake #REF!. Neither value is
+            // trustworthy, so this branch matches the BuildCellNode contract
+            // that suppresses computedValue and reports evaluated=false —
+            // view text must emit the sentinel to keep the two readbacks
+            // (view text vs Format["evaluated"]) consistent.
+            if (FormulaReferencesMissingSheet(cell.CellFormula.Text))
+                return "#OCLI_NOTEVAL!";
             if (evaluator != null)
             {
                 var report = evaluator.EvaluateForReport(cell.CellFormula.Text);
