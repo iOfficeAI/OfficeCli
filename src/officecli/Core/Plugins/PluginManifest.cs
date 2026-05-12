@@ -111,4 +111,5 @@ public sealed class PluginVocabulary
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(PluginManifest))]
 [JsonSerializable(typeof(PluginVocabulary))]
+[JsonSerializable(typeof(List<string>))]
 internal partial class PluginJsonContext : JsonSerializerContext;
