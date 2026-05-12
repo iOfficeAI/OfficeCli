@@ -64,7 +64,7 @@ static partial class CommandBuilder
                 "  officecli skills list                   List all available skills",
                 "",
                 "Skills: pptx, word, excel, morph-ppt, pitch-deck, academic-paper, data-dashboard, financial-model",
-                "Agents: claude, copilot, codex, cursor, windsurf, minimax, openclaw, nanobot, zeroclaw, hermes, all",
+                "Agents: claude, copilot, codex, cursor, windsurf, minimax, opencode, openclaw, nanobot, zeroclaw, hermes, all",
             },
             ["load_skill"] = new[]
             {
@@ -81,7 +81,7 @@ static partial class CommandBuilder
                 "  officecli install <target>  Install to a specific agent (claude, copilot, cursor, vscode, ...)",
                 "",
                 "Equivalent to: installing the binary, then `officecli skills install` and `officecli mcp <target>`.",
-                "Targets: claude, copilot, codex, cursor, windsurf, vscode, minimax, openclaw, nanobot, zeroclaw, hermes, all",
+                "Targets: claude, copilot, codex, cursor, windsurf, vscode, minimax, opencode, openclaw, nanobot, zeroclaw, hermes, all",
             },
         };
 
