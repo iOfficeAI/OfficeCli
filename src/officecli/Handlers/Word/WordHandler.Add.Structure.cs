@@ -242,6 +242,11 @@ public partial class WordHandler
         foreach (var (key, value) in properties)
         {
             if (!key.Contains('.')) continue;
+            // ACCOUNTING(handler-as-truth): see AddStyle for rationale.
+            // ContainsKey fires the TrackingComparer; without it, dotted
+            // props consumed by TypedAttributeFallback leak as false
+            // unsupported via TrackingPropertyDictionary.UnusedKeys.
+            properties.ContainsKey(key);
             if (sectionAlreadyConsumed.Contains(key)) continue;
             if (Core.TypedAttributeFallback.TrySet(sectPr, key, value)) continue;
             LastAddUnsupportedProps.Add(key);

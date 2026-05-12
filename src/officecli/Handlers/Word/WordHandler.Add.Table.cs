@@ -443,6 +443,8 @@ public partial class WordHandler
         foreach (var (key, value) in properties)
         {
             if (!key.Contains('.')) continue;
+            // ACCOUNTING(handler-as-truth): see AddStyle for rationale.
+            properties.ContainsKey(key);
             // border.{top,bottom,left,right,insideH,insideV,all} were already
             // applied at the top of AddTable via ApplyTableBorders. Skip them
             // here so they don't get mis-flagged UNSUPPORTED by the generic
@@ -549,6 +551,8 @@ public partial class WordHandler
         foreach (var (key, value) in properties)
         {
             if (!key.Contains('.')) continue;
+            // ACCOUNTING(handler-as-truth): see AddStyle for rationale.
+            properties.ContainsKey(key);
             var trPrTarget = newRowProps ?? new TableRowProperties();
             if (Core.TypedAttributeFallback.TrySet(trPrTarget, key, value))
             {
@@ -766,6 +770,8 @@ public partial class WordHandler
         foreach (var (key, value) in properties)
         {
             if (!key.Contains('.')) continue;
+            // ACCOUNTING(handler-as-truth): see AddStyle for rationale.
+            properties.ContainsKey(key);
             var tcPr = newCell.GetFirstChild<TableCellProperties>();
             var lazyTcPr = tcPr ?? new TableCellProperties();
             // CONSISTENCY(add-set-symmetry): route border.{top,bottom,left,
