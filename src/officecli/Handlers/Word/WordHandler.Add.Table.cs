@@ -175,6 +175,15 @@ public partial class WordHandler
         }
 
         // Apply table-level properties from Add parameters
+        // Set of keys the switch below consumes. Used to mark a key as
+        // accessed via ContainsKey only when a case actually matched, so
+        // genuine typos still fall through to the tracker's UnusedKeys.
+        var tblBareConsumed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "align", "alignment", "width", "indent", "cellspacing", "layout",
+            "padding", "padding.top", "padding.bottom", "padding.left", "padding.right",
+            "style", "shd", "shading", "direction", "dir", "bidi",
+        };
         foreach (var (tk, tv) in properties)
         {
             var tkl = tk.ToLowerInvariant();
@@ -201,6 +210,10 @@ public partial class WordHandler
                         $"noHBand, noVBand. Or use the bare hex form tblLook=04A0.");
             }
             if (tkl is "rows" or "cols" or "colwidths" || tkl.StartsWith("border")) continue;
+            // ACCOUNTING(handler-as-truth): see AddStyle. ContainsKey only
+            // when the switch will consume this key — otherwise typos would
+            // leak past UnusedKeys detection.
+            if (tblBareConsumed.Contains(tkl)) properties.ContainsKey(tk);
             switch (tkl)
             {
                 case "align" or "alignment":
