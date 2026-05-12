@@ -226,6 +226,33 @@ public partial class PowerPointHandler
                 if (!properties.TryGetValue("shapes", out var shapesStr))
                     throw new ArgumentException("'shapes' property required: comma-separated shape indices to group (e.g. shapes=1,2,3)");
 
+                // CONSISTENCY(query-path-roundtrip): help advertises @id=/@name=
+                // path forms for shapes=; query shape returns @id form. Resolve
+                // against the same heterogeneous frame list AddGroup uses below
+                // so groups can include pictures / graphicFrames / connectors.
+                var grpFrameList = grpShapeTree.ChildElements
+                    .Where(c => c is Shape || c is GroupShape || c is Picture
+                        || c is GraphicFrame || c is ConnectionShape)
+                    .ToList();
+                static uint? FrameId(OpenXmlElement e) => e switch
+                {
+                    Shape s => s.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value,
+                    GroupShape g => g.NonVisualGroupShapeProperties?.NonVisualDrawingProperties?.Id?.Value,
+                    Picture p => p.NonVisualPictureProperties?.NonVisualDrawingProperties?.Id?.Value,
+                    GraphicFrame gf => gf.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties?.Id?.Value,
+                    ConnectionShape c => c.NonVisualConnectionShapeProperties?.NonVisualDrawingProperties?.Id?.Value,
+                    _ => null,
+                };
+                static string? FrameName(OpenXmlElement e) => e switch
+                {
+                    Shape s => s.NonVisualShapeProperties?.NonVisualDrawingProperties?.Name?.Value,
+                    GroupShape g => g.NonVisualGroupShapeProperties?.NonVisualDrawingProperties?.Name?.Value,
+                    Picture p => p.NonVisualPictureProperties?.NonVisualDrawingProperties?.Name?.Value,
+                    GraphicFrame gf => gf.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties?.Name?.Value,
+                    ConnectionShape c => c.NonVisualConnectionShapeProperties?.NonVisualDrawingProperties?.Name?.Value,
+                    _ => null,
+                };
+
                 var shapeParts = shapesStr.Split(',');
                 var shapeIndices = new List<int>();
                 foreach (var sp in shapeParts)
@@ -233,10 +260,32 @@ public partial class PowerPointHandler
                     var trimmed = sp.Trim();
                     if (trimmed.StartsWith("/"))
                     {
-                        // DOM path: extract shape index from /slide[N]/shape[M]
+                        // @id path: /slide[N]/shape[@id=M] — round-trips from `query shape`
+                        var atIdMatch = Regex.Match(trimmed, @"/slide\[\d+\]/shape\[@id=(\d+)\]");
+                        if (atIdMatch.Success)
+                        {
+                            var atId = uint.Parse(atIdMatch.Groups[1].Value);
+                            var idx = grpFrameList.FindIndex(e => FrameId(e) == atId);
+                            if (idx < 0)
+                                throw new ArgumentException($"Shape @id={atId} not found on this slide");
+                            shapeIndices.Add(idx + 1);
+                            continue;
+                        }
+                        // @name path: /slide[N]/shape[@name=Foo]
+                        var atNameMatch = Regex.Match(trimmed, @"/slide\[\d+\]/shape\[@name=([^\]]+)\]");
+                        if (atNameMatch.Success)
+                        {
+                            var atName = atNameMatch.Groups[1].Value;
+                            var idx = grpFrameList.FindIndex(e => FrameName(e) == atName);
+                            if (idx < 0)
+                                throw new ArgumentException($"Shape @name={atName} not found on this slide");
+                            shapeIndices.Add(idx + 1);
+                            continue;
+                        }
+                        // Positional path: /slide[N]/shape[M]
                         var pathMatch = Regex.Match(trimmed, @"/slide\[\d+\]/shape\[(\d+)\]");
                         if (!pathMatch.Success)
-                            throw new ArgumentException($"Invalid shape path: '{trimmed}'. Expected format: /slide[N]/shape[M]");
+                            throw new ArgumentException($"Invalid shape path: '{trimmed}'. Expected /slide[N]/shape[M], /slide[N]/shape[@id=ID], or /slide[N]/shape[@name=Foo]");
                         shapeIndices.Add(int.Parse(pathMatch.Groups[1].Value));
                     }
                     else if (int.TryParse(trimmed, out var idx))

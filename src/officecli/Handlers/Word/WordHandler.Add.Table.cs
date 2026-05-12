@@ -175,6 +175,17 @@ public partial class WordHandler
         }
 
         // Apply table-level properties from Add parameters
+        // Set of keys the switch below consumes. Used to mark a key as
+        // accessed via ContainsKey only when a case actually matched, so
+        // genuine typos still fall through to the tracker's UnusedKeys.
+        var tblBareConsumed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "align", "alignment", "width", "indent", "cellspacing", "layout",
+            "padding", "padding.top", "padding.bottom", "padding.left", "padding.right",
+            "style", "shd", "shading", "direction", "dir", "bidi",
+            // CONSISTENCY(add-set-symmetry): mirror Set's tblPr-level cases.
+            "overlap",
+        };
         foreach (var (tk, tv) in properties)
         {
             var tkl = tk.ToLowerInvariant();
@@ -201,6 +212,10 @@ public partial class WordHandler
                         $"noHBand, noVBand. Or use the bare hex form tblLook=04A0.");
             }
             if (tkl is "rows" or "cols" or "colwidths" || tkl.StartsWith("border")) continue;
+            // ACCOUNTING(handler-as-truth): see AddStyle. ContainsKey only
+            // when the switch will consume this key — otherwise typos would
+            // leak past UnusedKeys detection.
+            if (tblBareConsumed.Contains(tkl)) properties.ContainsKey(tk);
             switch (tkl)
             {
                 case "align" or "alignment":
@@ -356,6 +371,34 @@ public partial class WordHandler
                         tblProps.Shading = tShd;
                     }
                     break;
+                case "overlap":
+                {
+                    // CONSISTENCY(add-set-symmetry): mirror Set's overlap case
+                    // (Set.Element.cs:1752). CT_TblPr schema:
+                    // tblStyle → tblpPr → tblOverlap → ...
+                    tblProps.RemoveAllChildren<TableOverlap>();
+                    if (!tv.Equals("none", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var overlapEl = new TableOverlap
+                        {
+                            Val = tv.ToLowerInvariant() switch
+                            {
+                                "overlap" or "true" or "always" => TableOverlapValues.Overlap,
+                                "never" or "false" => TableOverlapValues.Never,
+                                _ => throw new ArgumentException($"Invalid overlap: '{tv}'. Valid: overlap, never, none.")
+                            }
+                        };
+                        var tppRef = tblProps.GetFirstChild<TablePositionProperties>();
+                        if (tppRef != null) tppRef.InsertAfterSelf(overlapEl);
+                        else
+                        {
+                            var styleRef = tblProps.GetFirstChild<TableStyle>();
+                            if (styleRef != null) styleRef.InsertAfterSelf(overlapEl);
+                            else tblProps.PrependChild(overlapEl);
+                        }
+                    }
+                    break;
+                }
                 case "direction" or "dir" or "bidi":
                     // Table-level bidi: emit <w:bidiVisual/> on tblPr in schema
                     // order. Mirrors paragraph/cell direction=rtl vocabulary.
@@ -443,6 +486,8 @@ public partial class WordHandler
         foreach (var (key, value) in properties)
         {
             if (!key.Contains('.')) continue;
+            // ACCOUNTING(handler-as-truth): see AddStyle for rationale.
+            properties.ContainsKey(key);
             // border.{top,bottom,left,right,insideH,insideV,all} were already
             // applied at the top of AddTable via ApplyTableBorders. Skip them
             // here so they don't get mis-flagged UNSUPPORTED by the generic
@@ -532,6 +577,18 @@ public partial class WordHandler
             newRowProps ??= newRow.AppendChild(new TableRowProperties());
             newRowProps.AppendChild(new TableHeader());
         }
+        // CONSISTENCY(add-set-symmetry): mirror Set's cantsplit case
+        // (Set.Element.cs:1504). Row stays together across pages when true.
+        if (properties.TryGetValue("cantSplit", out var cantSplitVal)
+            || properties.TryGetValue("cantsplit", out cantSplitVal))
+        {
+            if (IsTruthy(cantSplitVal))
+            {
+                newRowProps ??= newRow.AppendChild(new TableRowProperties());
+                if (newRowProps.GetFirstChild<CantSplit>() == null)
+                    newRowProps.AppendChild(new CantSplit());
+            }
+        }
 
         for (int c = 0; c < newCols; c++)
         {
@@ -549,6 +606,8 @@ public partial class WordHandler
         foreach (var (key, value) in properties)
         {
             if (!key.Contains('.')) continue;
+            // ACCOUNTING(handler-as-truth): see AddStyle for rationale.
+            properties.ContainsKey(key);
             var trPrTarget = newRowProps ?? new TableRowProperties();
             if (Core.TypedAttributeFallback.TrySet(trPrTarget, key, value))
             {
@@ -760,12 +819,38 @@ public partial class WordHandler
             }
         }
 
+        // CONSISTENCY(add-set-symmetry): mirror Set's noWrap / hideMark cases
+        // (Set.Element.cs:1342 + TryCreateTypedChild path).
+        if (properties.TryGetValue("noWrap", out var noWrapVal)
+            || properties.TryGetValue("nowrap", out noWrapVal))
+        {
+            if (IsTruthy(noWrapVal))
+            {
+                var tcPr = newCell.GetFirstChild<TableCellProperties>()
+                    ?? newCell.PrependChild(new TableCellProperties());
+                if (tcPr.NoWrap == null) tcPr.NoWrap = new NoWrap();
+            }
+        }
+        if (properties.TryGetValue("hideMark", out var hideMarkVal)
+            || properties.TryGetValue("hidemark", out hideMarkVal))
+        {
+            if (IsTruthy(hideMarkVal))
+            {
+                var tcPr = newCell.GetFirstChild<TableCellProperties>()
+                    ?? newCell.PrependChild(new TableCellProperties());
+                if (tcPr.GetFirstChild<HideMark>() == null)
+                    tcPr.AppendChild(new HideMark());
+            }
+        }
+
         // Dotted-key fallback for tcPr-level attrs (shd.fill, etc.) not
         // modeled by hand-rolled blocks. Lazy-create tcPr if any dotted
         // attr binds. CONSISTENCY(add-set-symmetry).
         foreach (var (key, value) in properties)
         {
             if (!key.Contains('.')) continue;
+            // ACCOUNTING(handler-as-truth): see AddStyle for rationale.
+            properties.ContainsKey(key);
             var tcPr = newCell.GetFirstChild<TableCellProperties>();
             var lazyTcPr = tcPr ?? new TableCellProperties();
             // CONSISTENCY(add-set-symmetry): route border.{top,bottom,left,

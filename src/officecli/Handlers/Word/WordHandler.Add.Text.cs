@@ -785,6 +785,10 @@ public partial class WordHandler
         };
         foreach (var (key, value) in properties)
         {
+            // ACCOUNTING(handler-as-truth): see AddStyle for rationale.
+            // Keys consumed by ApplyRunFormatting / TypedAttributeFallback /
+            // GenericXmlQuery below leak as false unsupported without this.
+            properties.ContainsKey(key);
             // BUG-DUMP9-02: paragraph-mark-only run formatting written under
             // the markRPr.* namespace. Mirrors SetElementParagraph; targets
             // ParagraphMarkRunProperties exclusively (does NOT propagate to
@@ -1523,6 +1527,8 @@ public partial class WordHandler
         foreach (var (key, value) in properties)
         {
             if (key.Contains('.')) continue;
+            // ACCOUNTING(handler-as-truth): see AddStyle for rationale.
+            properties.ContainsKey(key);
             if (addRunCuratedBare.Contains(key)) continue;
             if (ApplyRunFormatting(newRProps, key, value)) continue;
             // BUG-DUMP8-07: rescue dump-emitted run props (specVanish,
@@ -1537,6 +1543,8 @@ public partial class WordHandler
         foreach (var (key, value) in properties)
         {
             if (!key.Contains('.')) continue;
+            // ACCOUNTING(handler-as-truth): see AddStyle for rationale.
+            properties.ContainsKey(key);
             // CONSISTENCY(font-dotted-alias): font.name/font.bold/font.size/
             // font.italic/font.color/font.underline/font.strike are consumed
             // above by the curated alias blocks; skip the typed-attr fallback

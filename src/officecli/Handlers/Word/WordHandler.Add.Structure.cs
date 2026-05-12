@@ -242,6 +242,11 @@ public partial class WordHandler
         foreach (var (key, value) in properties)
         {
             if (!key.Contains('.')) continue;
+            // ACCOUNTING(handler-as-truth): see AddStyle for rationale.
+            // ContainsKey fires the TrackingComparer; without it, dotted
+            // props consumed by TypedAttributeFallback leak as false
+            // unsupported via TrackingPropertyDictionary.UnusedKeys.
+            properties.ContainsKey(key);
             if (sectionAlreadyConsumed.Contains(key)) continue;
             if (Core.TypedAttributeFallback.TrySet(sectPr, key, value)) continue;
             LastAddUnsupportedProps.Add(key);
@@ -814,6 +819,18 @@ public partial class WordHandler
         foreach (var (key, value) in properties)
         {
             if (addStyleConsumed.Contains(key)) continue;
+
+            // ACCOUNTING(handler-as-truth): AddStyle's `foreach` over a
+            // Dictionary<,>-typed parameter never fires the TrackingComparer
+            // (Dictionary<>.Enumerator iterates entries[] directly). Keys that
+            // succeed through the fallback probes below — ApplyRunFormatting,
+            // TypedAttributeFallback, GenericXmlQuery — would otherwise leak
+            // through as `unsupported_property` warnings even when the XML is
+            // correctly written. ContainsKey forces a hash lookup that runs
+            // the comparer, marking the key as accessed. Typos still surface:
+            // anything unrecognized falls through to LastAddUnsupportedProps
+            // below, which the CLI layer reports independently of Tracking.
+            properties.ContainsKey(key);
 
             // 1) Run-formatting helper (covers underline/strike/highlight/caps/
             //    smallCaps/dstrike/vanish/shadow/emboss/imprint/noProof/rtl/
