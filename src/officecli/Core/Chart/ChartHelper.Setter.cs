@@ -1356,8 +1356,15 @@ internal static partial class ChartHelper
 
                 case "autotitledeleted":
                 {
+                    // ECMA-376: <c:autoTitleDeleted> must immediately follow
+                    // <c:title> in the c:chart sequence. AppendChild puts it at
+                    // the end (after plotArea/legend/plotVisOnly/dispBlanksAs)
+                    // which OpenXmlValidator rejects.
                     chart.RemoveAllChildren<C.AutoTitleDeleted>();
-                    chart.AppendChild(new C.AutoTitleDeleted { Val = ParseHelpers.IsTruthy(value) });
+                    var atd = new C.AutoTitleDeleted { Val = ParseHelpers.IsTruthy(value) };
+                    var atdTitle = chart.GetFirstChild<C.Title>();
+                    if (atdTitle != null) chart.InsertAfter(atd, atdTitle);
+                    else chart.PrependChild(atd);
                     break;
                 }
 
