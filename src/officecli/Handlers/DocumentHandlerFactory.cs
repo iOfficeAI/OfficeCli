@@ -5,6 +5,7 @@ using System.IO.Compression;
 using System.Text;
 using System.Text.RegularExpressions;
 using OfficeCli.Core;
+using OfficeCli.Core.Plugins;
 
 namespace OfficeCli.Handlers;
 
@@ -72,13 +73,54 @@ public static class DocumentHandlerFactory
             ".docx" => new WordHandler(filePath, editable),
             ".xlsx" => new ExcelHandler(filePath, editable),
             ".pptx" => new PowerPointHandler(filePath, editable),
-            _ => throw new CliException($"Unsupported file type: {ext}. Supported: .docx, .xlsx, .pptx")
-            {
-                Code = "unsupported_type",
-                ValidValues = [".docx", ".xlsx", ".pptx"]
-            }
+            _      => TryOpenViaPlugin(filePath, ext, editable)
+                   ?? throw UnsupportedTypeException(ext)
         };
     }
+
+    /// <summary>
+    /// Look for an installed plugin that handles <paramref name="ext"/> and, if
+    /// found, return a handler that delegates to it. Returns null when no
+    /// plugin is installed — callers fall back to the unsupported-type error.
+    ///
+    /// IPC wiring (in-process resident host for dump-reader, ProxyHandler for
+    /// format-handler) is intentionally not implemented yet: this commit only
+    /// surfaces the existence of a plugin so that <c>officecli plugins install</c>
+    /// has an observable effect on the error path. Until the wiring lands, a
+    /// resolved plugin produces a clear "found but not yet wired" exception.
+    /// </summary>
+    private static IDocumentHandler? TryOpenViaPlugin(string filePath, string ext, bool editable)
+    {
+        var dumpReader = PluginRegistry.FindFor(PluginKind.DumpReader, ext);
+        if (dumpReader is not null)
+            throw new CliException(
+                $"Plugin '{dumpReader.Manifest.Name}' is installed for {ext} but plugin invocation is not yet wired up in this build.")
+            {
+                Code = "plugin_not_wired",
+                Suggestion = "Plugin discovery works; runtime IPC integration is pending. Track in docs/plugin-protocol.md."
+            };
+
+        var formatHandler = PluginRegistry.FindFor(PluginKind.FormatHandler, ext);
+        if (formatHandler is not null)
+            throw new CliException(
+                $"Plugin '{formatHandler.Manifest.Name}' is installed for {ext} but plugin invocation is not yet wired up in this build.")
+            {
+                Code = "plugin_not_wired",
+                Suggestion = "Plugin discovery works; runtime IPC integration is pending. Track in docs/plugin-protocol.md."
+            };
+
+        return null;
+    }
+
+    private static CliException UnsupportedTypeException(string ext) =>
+        new CliException(
+            $"Unsupported file type: {ext}. Supported: .docx, .xlsx, .pptx. " +
+            $"Other formats may be opened via plugins — run `officecli plugins list` to see installed plugins, " +
+            $"or see docs/plugin-protocol.md for installation paths.")
+        {
+            Code = "unsupported_type",
+            ValidValues = [".docx", ".xlsx", ".pptx"]
+        };
 
     private static bool IsEncodingException(Exception ex)
     {
