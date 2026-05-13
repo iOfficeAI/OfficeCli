@@ -569,6 +569,45 @@ public static class BatchEmitter
         "columns.",
     };
 
+    // Captured once per process: blank doc's `Get("/")` root Format, normalized
+    // to string values. Used by EmitSection to skip keys whose source value
+    // matches what BlankDocCreator stamps — those keys would otherwise leak
+    // from blank into the replay target and re-appear on the next dump,
+    // breaking dump-then-replay-then-dump idempotency.
+    private static readonly Lazy<IReadOnlyDictionary<string, string>> _blankRootBaseline =
+        new(ComputeBlankRootBaseline);
+
+    private static IReadOnlyDictionary<string, string> ComputeBlankRootBaseline()
+    {
+        var tempPath = Path.Combine(Path.GetTempPath(),
+            $"officecli_blank_baseline_{Guid.NewGuid():N}.docx");
+        try
+        {
+            OfficeCli.BlankDocCreator.Create(tempPath);
+            using var handler = new OfficeCli.Handlers.WordHandler(tempPath, editable: false);
+            var root = handler.Get("/");
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (k, v) in root.Format)
+            {
+                if (v == null) continue;
+                var s = v switch { bool b => b ? "true" : "false", _ => v.ToString() ?? "" };
+                if (s.Length > 0) result[k] = s;
+            }
+            return result;
+        }
+        catch
+        {
+            // If baseline computation fails (test harness with no temp path
+            // access, etc.), fall back to an empty baseline. EmitSection then
+            // behaves as it did before this change.
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            try { File.Delete(tempPath); } catch { }
+        }
+    }
+
     private static void EmitSection(WordHandler word, List<BatchItem> items)
     {
         var root = word.Get("/");
@@ -585,6 +624,7 @@ public static class BatchEmitter
         {
             root.Format.Remove("protection");
         }
+        var blankBaseline = _blankRootBaseline.Value;
         var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (k, v) in root.Format)
         {
@@ -603,7 +643,21 @@ public static class BatchEmitter
             if (!include) continue;
             if (v == null) continue;
             var s = v switch { bool b => b ? "true" : "false", _ => v.ToString() ?? "" };
-            if (s.Length > 0) props[k] = s;
+            if (s.Length == 0) continue;
+            // Skip when the source's value already matches what BlankDocCreator
+            // would stamp. Otherwise dump-then-replay leaves blank's value on
+            // the target unchanged, but the SECOND dump picks it up (because
+            // the value is now explicit in the part) and emits a `set /` row
+            // dump-1 had skipped — losing idempotency. Symmetry: dump-2
+            // applies the same rule and also skips. The existing
+            // docDefaults.font.latin="" clear below is the inverse case
+            // (blank's value is undesirable — actively clear it).
+            if (blankBaseline.TryGetValue(k, out var blankVal)
+                && string.Equals(blankVal, s, StringComparison.Ordinal))
+            {
+                continue;
+            }
+            props[k] = s;
         }
         // docDefaults.font side-effect: the bare TrySetDocDefaults("docdefaults.font", v)
         // case writes ALL four font slots (Ascii/HAnsi/EastAsia/ComplexScript)
