@@ -150,9 +150,19 @@ public static class BatchEmitter
         EmitThemeRaw(word, items);
         EmitSettingsRaw(word, items);
         EmitSection(word, items);
-        EmitHeadersFooters(word, items);
+        // Headers/footers run AFTER body: multi-section docs now emit
+        // `add header parent="/section[N]"` (see EmitHeaderFooterPart), and
+        // the /section[N] resolver only finds the carrier paragraph after
+        // EmitBody has added it. Without body in place, every /section[N]
+        // resolved to the body-level sectPr (the last section's), so
+        // adding header type=default to two different sections collided
+        // ("already exists in this section"). Body→header direction has
+        // no replay-time dependency: header parts (PAGE/PAGEREF fields,
+        // etc.) resolve their cross-refs at render time, not at batch-
+        // apply time.
         var paraIdToTargetIdx = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         EmitBody(word, items, paraIdToTargetIdx);
+        EmitHeadersFooters(word, items);
         EmitComments(word, items, paraIdToTargetIdx);
         return items;
     }
@@ -240,15 +250,23 @@ public static class BatchEmitter
         // `type` prop (default/first/even) instead of always emitting
         // "default" — which on a doc with both default + first headers
         // throws "Header of type 'default' already exists" on replay.
-        var headerPathToType = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var footerPathToType = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        // BUG-R5-2 / R5-F2: headerRef.<type> / footerRef.<type> live on
-        // **section** nodes (see WordHandler.Query.cs:902), not on root.
-        // The earlier R4 fix scanned root.Format and silently found nothing,
-        // so every emitted header/footer was typed "default" — round-trip
-        // failed when a doc had both default + first headers. Walk all
-        // section children to build the path→type map.
-        void HarvestRefs(DocumentNode node)
+        // In addition to (path → type), track which section's headerRef /
+        // footerRef points at the part. Multi-section docs with per-section
+        // default headers used to all emit `add header parent="/"` —
+        // AddHeader resolves "/" to a single sectPr, so the 2nd-and-later
+        // default headers tripped "Header of type 'default' already exists"
+        // on replay. Emit `parent=/section[N]` so each header targets its
+        // true owning section (mirrors ResolveTargetSectPrForHeaderFooter's
+        // /section[N] resolver).
+        var headerPathInfo = new Dictionary<string, (string Type, string? SectionPath)>(StringComparer.OrdinalIgnoreCase);
+        var footerPathInfo = new Dictionary<string, (string Type, string? SectionPath)>(StringComparer.OrdinalIgnoreCase);
+        // headerRef.<type> / footerRef.<type> live on **section** nodes
+        // (see WordHandler.Query.cs:902), not on root. An earlier fix
+        // scanned root.Format and silently found nothing, so every emitted
+        // header/footer was typed "default" — round-trip failed when a doc
+        // had both default + first headers. Walk all section children to
+        // build the path→type map.
+        void HarvestRefs(DocumentNode node, string? sectionPath)
         {
             foreach (var (key, val) in node.Format)
             {
@@ -258,54 +276,66 @@ public static class BatchEmitter
                 if (key.StartsWith("headerRef.", StringComparison.OrdinalIgnoreCase))
                 {
                     var t = key["headerRef.".Length..];
-                    if (!headerPathToType.ContainsKey(s)) headerPathToType[s] = t;
+                    if (!headerPathInfo.ContainsKey(s))
+                        headerPathInfo[s] = (t, sectionPath);
                 }
                 else if (key.StartsWith("footerRef.", StringComparison.OrdinalIgnoreCase))
                 {
                     var t = key["footerRef.".Length..];
-                    if (!footerPathToType.ContainsKey(s)) footerPathToType[s] = t;
+                    if (!footerPathInfo.ContainsKey(s))
+                        footerPathInfo[s] = (t, sectionPath);
                 }
             }
         }
-        HarvestRefs(root);
+        // Harvest sections FIRST so real section attribution wins over the
+        // body-level sectPr fallback. Then harvest root: root.Format mirrors
+        // the body-level <w:sectPr> (which OOXML treats as the FINAL section's
+        // properties), so any ref that only appears at root belongs to the
+        // last section. Emitting `parent="/"` for those is fine because
+        // AddHeader's `/` resolver also falls back to the body-level sectPr —
+        // both ends agree on the same section. Earlier the order was reversed
+        // (root first, sections second) and the `if !ContainsKey` guard
+        // wrongly let root entries shadow real section attribution.
+        List<DocumentNode> sectionList = new();
         try
         {
             var sections = word.Query("section");
-            if (sections != null)
-            {
-                foreach (var sec in sections) HarvestRefs(sec);
-            }
+            if (sections != null) sectionList = sections.ToList();
         }
         catch { /* missing section info — fall through with default typing */ }
+        foreach (var sec in sectionList) HarvestRefs(sec, sec.Path);
+        var rootFallbackSection = sectionList.Count > 0 ? sectionList[^1].Path : null;
+        HarvestRefs(root, rootFallbackSection);
 
         int hIdx = 0, fIdx = 0;
         foreach (var child in root.Children)
         {
             if (child.Type == "header")
             {
-                // BUG-DUMP23-03: skip orphaned header parts (present in the
-                // package but not referenced by any section's w:headerReference).
-                // Re-emitting them as `add header type=default` collides with
+                // Skip orphaned header parts (present in the package but
+                // not referenced by any section's w:headerReference). Re-
+                // emitting them as `add header type=default` collides with
                 // the real default header on batch replay ("Header of type
-                // 'default' already exists"). Only re-emit parts that a section
-                // actually links to.
-                if (!headerPathToType.TryGetValue(child.Path, out var ht)) continue;
+                // 'default' already exists"). Only re-emit parts that a
+                // section actually links to.
+                if (!headerPathInfo.TryGetValue(child.Path, out var hi)) continue;
                 hIdx++;
-                EmitHeaderFooterPart(word, child.Path, "header", hIdx, items, ht);
+                EmitHeaderFooterPart(word, child.Path, "header", hIdx, items, hi.Type, hi.SectionPath);
             }
             else if (child.Type == "footer")
             {
-                // BUG-DUMP23-03: same orphan guard as header above.
-                if (!footerPathToType.TryGetValue(child.Path, out var ft)) continue;
+                // Same orphan guard as header above.
+                if (!footerPathInfo.TryGetValue(child.Path, out var fi)) continue;
                 fIdx++;
-                EmitHeaderFooterPart(word, child.Path, "footer", fIdx, items, ft);
+                EmitHeaderFooterPart(word, child.Path, "footer", fIdx, items, fi.Type, fi.SectionPath);
             }
         }
     }
 
     private static void EmitHeaderFooterPart(WordHandler word, string sourcePath, string kind,
                                              int targetIndex, List<BatchItem> items,
-                                             string subTypeOverride = "default")
+                                             string subTypeOverride = "default",
+                                             string? sectionParent = null)
     {
         var partNode = word.Get(sourcePath);
         // BUG-DUMP9-08: tables are valid block-level OOXML inside hdr/ftr
@@ -332,7 +362,13 @@ public static class BatchEmitter
         items.Add(new BatchItem
         {
             Command = "add",
-            Parent = "/",
+            // Route per-section headers/footers to their owning section
+            // (e.g. /section[2]) instead of root "/", so multi-section docs
+            // that carry one default header per section don't collide on
+            // replay. Falls back to "/" when the part is not owned by any
+            // section in the harvested map (defensive — EmitHeadersFooters
+            // already filters orphans before reaching here).
+            Parent = sectionParent ?? "/",
             Type = kind,
             Props = new Dictionary<string, string> { ["type"] = subType }
         });
