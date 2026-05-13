@@ -442,6 +442,26 @@ public static class BatchEmitter
         // `add field` row instead of being baked into static "1" text on the
         // seed paragraph (BUG-R4-T3). Run-level formatting on multi-run
         // first paragraphs is preserved by the per-run emit path below.
+        var addHeaderProps = new Dictionary<string, string> { ["type"] = subType };
+        // First-page header auto-stamps <w:titlePg/> on its section (UX:
+        // without titlePg, Word silently ignores type="first" headerRef).
+        // Source may have headerRef-first WITHOUT titlePg — preserve that
+        // shape by passing noTitlePg=true so AddHeader skips the auto-stamp.
+        // Otherwise the next dump would emit a phantom `titlePage=true` key.
+        if (kind == "header"
+            && string.Equals(subType, "first", StringComparison.OrdinalIgnoreCase)
+            && sectionParent != null)
+        {
+            try
+            {
+                var sectionNode = word.Get(sectionParent);
+                bool sourceHadTitlePg = sectionNode.Format.TryGetValue("titlePage", out var tpv)
+                                     && tpv is bool b && b;
+                if (!sourceHadTitlePg)
+                    addHeaderProps["noTitlePg"] = "true";
+            }
+            catch { /* section path unresolved — fall through with auto-stamp */ }
+        }
         items.Add(new BatchItem
         {
             Command = "add",
@@ -453,7 +473,7 @@ public static class BatchEmitter
             // already filters orphans before reaching here).
             Parent = sectionParent ?? "/",
             Type = kind,
-            Props = new Dictionary<string, string> { ["type"] = subType }
+            Props = addHeaderProps
         });
 
         var partTargetPath = $"/{kind}[{targetIndex}]";

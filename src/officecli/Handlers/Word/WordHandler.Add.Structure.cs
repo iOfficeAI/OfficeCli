@@ -1707,7 +1707,16 @@ public partial class WordHandler
 
         if (headerType == HeaderFooterValues.First)
         {
-            if (hSectPr.GetFirstChild<TitlePage>() == null)
+            // UX convenience: stamp <w:titlePg/> so the first-page header is
+            // actually rendered (Word ignores type="first" headerRef when
+            // titlePg is absent). Round-trip emit short-circuits this with
+            // `noTitlePg=true` so a source whose sectPr lacks <w:titlePg/>
+            // round-trips with the same shape — emitting `titlePage=true`
+            // there would surface a phantom key the source never had.
+            bool skipTitlePg = properties.TryGetValue("notitlepg", out var ntp)
+                            || properties.TryGetValue("noTitlePg", out ntp);
+            if (!(skipTitlePg && IsTruthy(ntp))
+                && hSectPr.GetFirstChild<TitlePage>() == null)
                 hSectPr.AddChild(new TitlePage(), throwOnError: false);
         }
         // CONSISTENCY(headerfooter-effective-toggle): mirror the type=first
