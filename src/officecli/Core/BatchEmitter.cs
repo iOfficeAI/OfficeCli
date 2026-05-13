@@ -1956,7 +1956,31 @@ public static class BatchEmitter
             bool hasBorderAll = tableProps.ContainsKey("border") || tableProps.ContainsKey("border.all");
             if (presentSides < 6 && !hasBorderAll)
             {
-                tableProps["border"] = "none";
+                // Use the canonical "style;size" form: ApplyTableBorders'
+                // ParseBorderValue defaults size=4 for `none`, so writing
+                // `none;4` matches what the round-trip produces (six explicit
+                // <w:none w:sz="4"> elements collapsed by the all-same fold
+                // below). Without the `;4`, the FIRST dump emits `border=none`
+                // and the SECOND dump emits `border=none;4` — non-idempotent
+                // value shape.
+                tableProps["border"] = "none;4";
+            }
+            // Symmetric collapse: when all 6 sides carry the IDENTICAL folded
+            // value (same style + sz + color + space), prefer the compact
+            // `border=<v>` form so dump round-trips that started from
+            // "no <w:tblBorders>" (whose first emit becomes `border=none`)
+            // re-emit the same single key after replay rather than fanning
+            // out to six explicit per-side rows. ApplyTableBorders interprets
+            // `border=<v>` as "set all 6 sides to <v>", so the visible result
+            // is identical either way.
+            else if (presentSides == 6 && !hasBorderAll)
+            {
+                var first = tableProps[sideKeys[0]];
+                if (sideKeys.All(s => tableProps[s] == first))
+                {
+                    foreach (var s in sideKeys) tableProps.Remove(s);
+                    tableProps["border"] = first;
+                }
             }
         }
         // Nested tables sit inside a parent table cell; AddTable accepts
