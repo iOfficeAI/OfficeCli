@@ -18,49 +18,66 @@ public partial class PowerPointHandler
         var children = new List<DocumentNode>();
         var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree;
         if (shapeTree == null) return children;
+        BuildChildNodesIntoContainer(children, shapeTree, slidePart, slideNum, depth, $"/slide[{slideNum}]", isSlideRoot: true);
+        return children;
+    }
 
+    // CONSISTENCY(pptx-group-flatten): Get/dump now descends into GroupShape
+    // so group-internal picture/table/chart/connector are visible in the
+    // returned tree. Each leaf carries its honest path via parentPathPrefix
+    // so callers can pipe a Get-emitted path back to Set/Remove. Zoom and
+    // 3DModel only enumerate at slide root — they aren't legal group content.
+    private void BuildChildNodesIntoContainer(
+        List<DocumentNode> children,
+        OpenXmlCompositeElement container,
+        SlidePart slidePart,
+        int slideNum,
+        int depth,
+        string parentPathPrefix,
+        bool isSlideRoot)
+    {
         int shapeIdx = 0;
-        foreach (var shape in shapeTree.Elements<Shape>())
+        foreach (var shape in container.Elements<Shape>())
         {
-            children.Add(ShapeToNode(shape, slideNum, shapeIdx + 1, depth, slidePart));
+            children.Add(ShapeToNode(shape, slideNum, shapeIdx + 1, depth, slidePart, parentPathPrefix));
             shapeIdx++;
         }
 
         int tblIdx = 0;
         int chartIdx = 0;
-        foreach (var gf in shapeTree.Elements<GraphicFrame>())
+        foreach (var gf in container.Elements<GraphicFrame>())
         {
             if (gf.Descendants<Drawing.Table>().Any())
             {
                 tblIdx++;
-                children.Add(TableToNode(gf, slideNum, tblIdx, depth));
+                children.Add(TableToNode(gf, slideNum, tblIdx, depth, parentPathPrefix));
             }
             else if (gf.Descendants<C.ChartReference>().Any() || IsExtendedChartFrame(gf))
             {
                 chartIdx++;
-                children.Add(ChartToNode(gf, slidePart, slideNum, chartIdx, depth));
+                children.Add(ChartToNode(gf, slidePart, slideNum, chartIdx, depth, parentPathPrefix));
             }
         }
 
         int picIdx = 0;
-        foreach (var pic in shapeTree.Elements<Picture>())
+        foreach (var pic in container.Elements<Picture>())
         {
-            children.Add(PictureToNode(pic, slideNum, picIdx + 1, slidePart));
+            children.Add(PictureToNode(pic, slideNum, picIdx + 1, slidePart, parentPathPrefix));
             picIdx++;
         }
 
-        var contentElements = shapeTree.ChildElements
+        var contentElements = container.ChildElements
             .Where(e => e is Shape or Picture or GraphicFrame or GroupShape or ConnectionShape).ToList();
 
         int grpIdx = 0;
-        foreach (var grp in shapeTree.Elements<GroupShape>())
+        foreach (var grp in container.Elements<GroupShape>())
         {
             grpIdx++;
             var grpName = grp.NonVisualGroupShapeProperties?.NonVisualDrawingProperties?.Name?.Value ?? "Group";
             var grpPathSeg = BuildElementPathSegment("group", grp, grpIdx);
             var grpNode = new DocumentNode
             {
-                Path = $"/slide[{slideNum}]/{grpPathSeg}",
+                Path = $"{parentPathPrefix}/{grpPathSeg}",
                 Type = "group",
                 Preview = grpName,
                 ChildCount = grp.Elements<Shape>().Count() + grp.Elements<Picture>().Count()
@@ -81,33 +98,47 @@ public partial class PowerPointHandler
             else if (grp.GroupShapeProperties?.GetFirstChild<Drawing.GradientFill>() != null) grpNode.Format["fill"] = "gradient";
             var grpZIdx = contentElements.IndexOf(grp);
             if (grpZIdx >= 0) grpNode.Format["zorder"] = grpZIdx + 1;
+
+            // Recurse into the group's contents when depth allows, so callers
+            // see the same iceberg-free view through Get that Query already
+            // provides. Group content paths become /slide[N]/group[K]/<type>[L].
+            if (depth > 0)
+            {
+                BuildChildNodesIntoContainer(
+                    grpNode.Children, grp, slidePart, slideNum, depth - 1,
+                    $"{parentPathPrefix}/{grpPathSeg}", isSlideRoot: false);
+            }
             children.Add(grpNode);
         }
 
         int cxnIdx = 0;
-        foreach (var cxn in shapeTree.Elements<ConnectionShape>())
+        foreach (var cxn in container.Elements<ConnectionShape>())
         {
             cxnIdx++;
-            children.Add(ConnectorToNode(cxn, slideNum, cxnIdx));
+            children.Add(ConnectorToNode(cxn, slideNum, cxnIdx, parentPathPrefix));
         }
 
-        var zoomElements = GetZoomElements(shapeTree);
-        int zmIdx = 0;
-        foreach (var zmEl in zoomElements)
+        // Zoom and 3D model are slide-level only; they are not valid
+        // children of a GroupShape per the OOXML schema, so only enumerate
+        // them when we're at the slide root.
+        if (isSlideRoot && container is ShapeTree rootShapeTree)
         {
-            zmIdx++;
-            children.Add(ZoomToNode(zmEl, slideNum, zmIdx));
-        }
+            var zoomElements = GetZoomElements(rootShapeTree);
+            int zmIdx = 0;
+            foreach (var zmEl in zoomElements)
+            {
+                zmIdx++;
+                children.Add(ZoomToNode(zmEl, slideNum, zmIdx));
+            }
 
-        var model3dElements = GetModel3DElements(shapeTree);
-        int m3dIdx = 0;
-        foreach (var m3dEl in model3dElements)
-        {
-            m3dIdx++;
-            children.Add(Model3DToNode(m3dEl, slideNum, m3dIdx));
+            var model3dElements = GetModel3DElements(rootShapeTree);
+            int m3dIdx = 0;
+            foreach (var m3dEl in model3dElements)
+            {
+                m3dIdx++;
+                children.Add(Model3DToNode(m3dEl, slideNum, m3dIdx));
+            }
         }
-
-        return children;
     }
 
     private static DocumentNode TableToNode(GraphicFrame gf, int slideNum, int tblIdx, int depth, string? parentPathPrefix = null)
