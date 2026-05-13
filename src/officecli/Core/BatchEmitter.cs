@@ -173,12 +173,27 @@ public static class BatchEmitter
         // XML that users rarely modify property-by-property; the natural
         // operation is "swap the entire theme block". Raw-set replace fits
         // that model exactly. Word.Raw returns the literal string
-        // "(no theme)" when the part is missing — gate on a leading '<' so
-        // we only emit when there's real XML to ship.
+        // "(no theme)" when the part is missing.
+        //
+        // ALWAYS emit, even for source docs that have no theme part. The
+        // blank target auto-stamps theme1.xml (for Word/LibreOffice render
+        // parity), so silently skipping the emit caused dump∘replay∘dump
+        // to drift by +1 item every pass: dump-1 saw no theme and
+        // emitted nothing; replay left blank's theme in place; dump-2
+        // saw blank's theme and emitted it. Dump-1 now emits an empty
+        // <a:theme/> placeholder for theme-less sources, which the apply
+        // path overwrites blank's seeded theme with — making dump-2 see
+        // the same empty theme and emit the same placeholder. Fixed point.
         string xml;
         try { xml = word.Raw("/theme"); }
-        catch { return; }
-        if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<")) return;
+        catch { xml = ""; }
+        if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<"))
+            // name="Office Theme" matches what Open XML SDK's Theme class
+            // auto-stamps on save. Without it, dump-2's read-back picks up
+            // the SDK-added attribute and emits a name-bearing placeholder,
+            // breaking the fixed point on the very first byte after the
+            // namespace declaration.
+            xml = "<a:theme xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" name=\"Office Theme\" />";
 
         items.Add(new BatchItem
         {
@@ -198,10 +213,19 @@ public static class BatchEmitter
         // way to keep Word feature toggles (evenAndOddHeaders, mirrorMargins,
         // schema-pegged compat options, …) round-tripped without
         // per-property allowlisting.
+        //
+        // ALWAYS emit, even for source docs without a settings part. The
+        // blank target auto-stamps a settings.xml (characterSpacingControl
+        // + compat block), so silently skipping the emit caused the same
+        // idempotency drift as EmitThemeRaw: dump-1 saw no settings and
+        // emitted nothing, dump-2 saw blank's leftover and emitted it.
+        // Empty placeholder clears blank's seeded settings so dump-2
+        // reads the same empty state and emits the same placeholder.
         string xml;
         try { xml = word.Raw("/settings"); }
-        catch { return; }
-        if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<")) return;
+        catch { xml = ""; }
+        if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<"))
+            xml = "<w:settings xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" />";
 
         items.Add(new BatchItem
         {
@@ -625,6 +649,28 @@ public static class BatchEmitter
         // addressable on the Get side (style paths resolve by id, not by
         // index). Query produces id-based paths and excludes docDefaults.
         var styles = word.Query("style");
+        // Blank-baseline cleanup: BlankDocCreator always stamps a Normal
+        // style (for Word/LibreOffice render parity — Calibri 11pt, 1.08x
+        // line). When the source has no entry for styleId="Normal",
+        // skipping the emit leaks the blank's stamped Normal into the
+        // replay target — dump-2's dump then emits it as a phantom
+        // `add /styles Normal`, breaking idempotency. Always prepend a
+        // remove-Normal so target's styles end up matching source's
+        // (idempotent: Remove of a missing style is a soft success).
+        // When source HAS Normal, EmitStyles below recreates it via the
+        // builtin-name upsert path; the redundant remove is harmless and
+        // keeps the wire format independent of source/blank divergence.
+        bool sourceHasNormal = styles.Any(s =>
+            string.Equals(s.Format.TryGetValue("id", out var v) ? v?.ToString() : null,
+                          "Normal", StringComparison.Ordinal));
+        if (!sourceHasNormal)
+        {
+            items.Add(new BatchItem
+            {
+                Command = "remove",
+                Path = "/styles/Normal",
+            });
+        }
         foreach (var stub in styles)
         {
             // CONSISTENCY(slash-in-style-id): style ids/names containing '/'

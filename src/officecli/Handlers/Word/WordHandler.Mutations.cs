@@ -45,6 +45,30 @@ public partial class WordHandler
             return null;
         }
 
+        // /styles/<id> removal is idempotent: missing-style is a soft
+        // success. Dump→batch emits a "clear blank's auto-stamped Normal
+        // style" preamble so dump∘replay∘dump is a fixed point even when
+        // the source doc lacks a Normal style (blank's leftover would
+        // otherwise show up on dump-2). On replay of that emit, when
+        // the target already lacks Normal (e.g. dump-2's replay onto a
+        // future bare target), Path-not-found would abort an entire
+        // batch — even though the post-state ("Normal absent") matches
+        // intent. Narrow scope to /styles/<id> only; generic remove
+        // (e.g. /body/p[N] out-of-range) keeps strict semantics.
+        var styleRemoveMatch = Regex.Match(path, @"^/styles/([^/]+)/?$", RegexOptions.IgnoreCase);
+        if (styleRemoveMatch.Success)
+        {
+            var styleKey = styleRemoveMatch.Groups[1].Value;
+            var stylesPart = _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles;
+            var target = stylesPart?.Elements<Style>().FirstOrDefault(s =>
+                string.Equals(s.StyleId?.Value, styleKey, StringComparison.Ordinal)
+                || string.Equals(s.StyleName?.Val?.Value, styleKey, StringComparison.Ordinal));
+            if (target == null) return null; // soft success on missing
+            target.Remove();
+            stylesPart!.Save();
+            return null;
+        }
+
         // BUG-R10-03: support /header[N]/ole[M] and /footer[N]/ole[M] shorthand
         // in Remove, mirroring the Get shorthand added in Round 9. Users
         // cannot easily discover the underlying run path, so without this
