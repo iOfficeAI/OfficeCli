@@ -2477,9 +2477,25 @@ public static class BatchEmitter
                 else if (string.Equals(k, "shading.fill", StringComparison.OrdinalIgnoreCase)) sFill = v.ToString();
                 else if (string.Equals(k, "shading.color", StringComparison.OrdinalIgnoreCase)) sColor = v.ToString();
             }
+            // shading.val="clear" with no fill/color is OOXML's "no shading"
+            // form (<w:shd w:val="clear" w:fill="auto"/>). Emitting bare
+            // "clear" without semicolons makes the Set/Add color parser
+            // treat the whole value as a color name and reject it. Skip
+            // the shading emit in this case — semantically identical to
+            // the schema default (no shading).
+            bool shadingIsEffectivelyNone = sVal != null
+                && string.Equals(sVal, "clear", StringComparison.OrdinalIgnoreCase)
+                && string.IsNullOrEmpty(sFill)
+                && string.IsNullOrEmpty(sColor);
+            // shadingPresent gates the drop-subkeys loop below. Set true in
+            // both the real-shading case and the effectively-none case so
+            // the raw `shading.val=clear` etc. don't leak through as
+            // UNSUPPORTED top-level props on Add. Only the real-shading
+            // case populates shadingFolded; effectively-none emits nothing.
             if (sVal != null || sFill != null || sColor != null)
-            {
                 shadingPresent = true;
+            if (!shadingIsEffectivelyNone && shadingPresent)
+            {
                 // AddText format: VAL;FILL[;COLOR]. Default val to "clear" when
                 // only fill is present (mirrors AddText's single-arg path).
                 var val = string.IsNullOrEmpty(sVal) ? "clear" : sVal;
@@ -2528,11 +2544,35 @@ public static class BatchEmitter
             // UNSUPPORTED, silently losing every asymmetric per-cell margin.
         }
 
+        // <w:spacing w:line="0" w:lineRule="atLeast"> in the source means
+        // "no minimum line height" — Word treats it as auto. Get surfaces
+        // it as lineSpacing="0pt", but SpacingConverter rejects 0 on the
+        // Set/Add path (w:line=0 is undefined OOXML; Word silently single-
+        // spaces). Round-trip would fail with "Line spacing must be greater
+        // than 0". Drop the zero-value pair on emit so the replayed
+        // paragraph/style inherits the carrier's default — same visible
+        // result as the source's "no minimum" semantics.
+        bool dropLineSpacingZero = false;
+        if (raw.TryGetValue("lineSpacing", out var lsVal) && lsVal is string lsStr)
+        {
+            var t = lsStr.Trim();
+            if (t == "0" || t == "0pt" || t == "0.0pt" || t == "0x" || t == "0%")
+                dropLineSpacingZero = true;
+        }
+
         foreach (var (key, val) in raw)
         {
             if (SkipKeys.Contains(key)) continue;
             if (key.StartsWith("effective.", StringComparison.OrdinalIgnoreCase)) continue;
             if (key.EndsWith(".cs.source", StringComparison.OrdinalIgnoreCase)) continue;
+
+            // lineSpacing="0pt" companion drop — see fold comment above the loop.
+            if (dropLineSpacingZero &&
+                (string.Equals(key, "lineSpacing", StringComparison.OrdinalIgnoreCase)
+                 || string.Equals(key, "lineRule", StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
 
             // padding.* fold: drop sub-keys; emit single `padding` if uniform.
             if (paddingFoldable && key.StartsWith("padding.", StringComparison.OrdinalIgnoreCase))
