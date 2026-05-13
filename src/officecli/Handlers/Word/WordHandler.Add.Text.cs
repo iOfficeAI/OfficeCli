@@ -777,15 +777,16 @@ public partial class WordHandler
             "caps", "smallcaps",
             "boldcs", "italiccs", "sizecs",
             "field", "formula", "ref", "id",
-            // BUG-R7-06: kern (kerning) is a run-level OOXML key — handled
-            // via ApplyRunFormatting on the bare-key fallback path below.
-            // Listing it here just prevents double-routing through
-            // TypedAttributeFallback.
             // BUG-DUMP23-01: bdr was previously listed here, which made the
             // fallback `continue` at line 765 skip it entirely (no curated
             // handler exists in the rProps block above either). Removed so
             // bdr falls through to ApplyRunFormatting like kern does.
-            "kern",
+            // kern was historically here too, "to prevent double-routing
+            // through TypedAttributeFallback" — but the continue at the bare-
+            // key fallback gate also skipped ApplyRunFormatting itself, so
+            // kern was silently dropped on `add p kern=36` even though it
+            // round-trips fine on `set r[N] kern=36`. Removed so kern reaches
+            // ApplyRunFormatting on the bare-key fallback path below.
         };
         foreach (var (key, value) in properties)
         {
