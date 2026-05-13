@@ -1918,12 +1918,21 @@ public static class BatchEmitter
         // If the source table emits only a subset of the 6 sides, prepend an
         // explicit `border=none` wipe so the visible result round-trips.
         // CONSISTENCY(border-default-overlay).
+        //
+        // The same fix applies to the zero-sides case: source tables with no
+        // <w:tblBorders> at all (Word treats as no rules) used to replay as
+        // 6 single-borders because EmitTable emitted no border prop and
+        // AddTable's default-overlay won. The second dump then saw the
+        // stamped borders and emitted six border.* props that the first
+        // dump didn't — a 6× length asymmetry per affected table. Extend
+        // the wipe to fire whenever no per-side / no-border-all key is
+        // present in source's emit.
         {
             var sideKeys = new[] { "border.top", "border.bottom", "border.left",
                 "border.right", "border.insideH", "border.insideV" };
             int presentSides = sideKeys.Count(s => tableProps.ContainsKey(s));
             bool hasBorderAll = tableProps.ContainsKey("border") || tableProps.ContainsKey("border.all");
-            if (presentSides > 0 && presentSides < 6 && !hasBorderAll)
+            if (presentSides < 6 && !hasBorderAll)
             {
                 tableProps["border"] = "none";
             }
