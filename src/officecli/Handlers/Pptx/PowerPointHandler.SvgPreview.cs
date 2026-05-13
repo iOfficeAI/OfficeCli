@@ -29,6 +29,7 @@ public partial class PowerPointHandler
     /// </summary>
     public string ViewAsSvg(int slideNum)
     {
+        using var _cul = InvariantCultureScope.Enter();
         var slideParts = GetSlideParts().ToList();
         if (slideNum < 1 || slideNum > slideParts.Count)
             throw new CliException($"Slide {slideNum} does not exist. This presentation has {slideParts.Count} slide(s).")

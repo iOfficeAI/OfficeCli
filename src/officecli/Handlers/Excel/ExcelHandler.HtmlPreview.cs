@@ -84,6 +84,7 @@ public partial class ExcelHandler
     /// </summary>
     public string ViewAsHtml()
     {
+        using var _cul = InvariantCultureScope.Enter();
         var sb = new StringBuilder();
         var sheets = GetWorksheets();
         var wbStylesPart = _doc.WorkbookPart?.WorkbookStylesPart;

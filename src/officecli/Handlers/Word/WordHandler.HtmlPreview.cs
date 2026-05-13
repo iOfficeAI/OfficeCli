@@ -74,6 +74,7 @@ public partial class WordHandler
     /// </summary>
     public string ViewAsHtml(string? pageFilter = null)
     {
+        using var _cul = InvariantCultureScope.Enter();
         try
         {
             return ViewAsHtmlCore(pageFilter);

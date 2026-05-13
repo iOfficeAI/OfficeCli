@@ -71,6 +71,12 @@ public partial class PowerPointHandler
     /// </summary>
     public string ViewAsHtml(int? startSlide = null, int? endSlide = null, int gridCols = 0, int viewportPx = 1600)
     {
+        // CSS demands '.' as the decimal separator; under comma-decimal locales
+        // (de-DE, fr-FR, …) every `$"{double}pt"` interpolation deep in the
+        // renderer would emit `141,73pt`, producing invalid CSS. Switching the
+        // thread culture once at the entry point covers every nested helper
+        // without auditing each interpolation.
+        using var _cul = InvariantCultureScope.Enter();
         ResetModel3DRenderState();
         var sb = new StringBuilder();
         var slideParts = GetSlideParts().ToList();
