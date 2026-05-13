@@ -12,9 +12,10 @@ namespace OfficeCli.Core.Plugins;
 /// docs/plugin-protocol.md §2.3, this is what wraps the plugin so existing
 /// get/view/query pipelines work transparently on foreign formats.
 ///
-/// v0 scope: read-path methods (ViewAs*, Get, Query) and Validate are
-/// proxied. Mutation methods throw a clear "not yet proxied" error. Future
-/// versions will widen the surface as plugin authors need it.
+/// Scope: read-path (ViewAs*, Get, Query, Validate) and mutation
+/// (Set/Add/Remove/Move/CopyFrom/Raw/RawSet/AddPart/TryExtractBinary)
+/// are all proxied. Plugins that don't implement a given verb should
+/// reply with error code <c>unsupported_command</c> per docs/plugin-protocol.md §5.3.
 /// </summary>
 internal sealed class FormatHandlerProxy : IDocumentHandler
 {
@@ -80,22 +81,117 @@ internal sealed class FormatHandlerProxy : IDocumentHandler
         return JsonSerializer.Deserialize(result.ToJsonString(), PluginJsonContext.Default.ListValidationError) ?? new List<ValidationError>();
     }
 
-    // ----- Mutation layer: v0 stubbed out -------------------------------
+    // ----- Mutation layer ----------------------------------------------
 
-    public List<string> Set(string path, Dictionary<string, string> properties) => throw NotProxied("set");
-    public string Add(string parentPath, string type, InsertPosition? position, Dictionary<string, string> properties) => throw NotProxied("add");
-    public string? Remove(string path) => throw NotProxied("remove");
-    public string Move(string sourcePath, string? targetParentPath, InsertPosition? position) => throw NotProxied("move");
-    public string CopyFrom(string sourcePath, string targetParentPath, InsertPosition? position) => throw NotProxied("copy");
-    public string Raw(string partPath, int? startRow = null, int? endRow = null, HashSet<string>? cols = null) => throw NotProxied("raw");
-    public void RawSet(string partPath, string xpath, string action, string? xml) => throw NotProxied("raw-set");
-    public (string RelId, string PartPath) AddPart(string parentPartPath, string partType, Dictionary<string, string>? properties = null) => throw NotProxied("add-part");
+    public List<string> Set(string path, Dictionary<string, string> properties)
+    {
+        var args = new JsonObject { ["path"] = path };
+        var props = PropsToJson(properties);
+        var result = _session.Send("command", "set", args, props);
+        if (result is null) return new List<string>();
+        return JsonSerializer.Deserialize(result.ToJsonString(), PluginJsonContext.Default.ListString) ?? new List<string>();
+    }
+
+    public string Add(string parentPath, string type, InsertPosition? position, Dictionary<string, string> properties)
+    {
+        var args = new JsonObject
+        {
+            ["parent_path"] = parentPath,
+            ["type"] = type,
+        };
+        if (position is not null) args["position"] = PositionToJson(position);
+        var props = PropsToJson(properties);
+        var result = _session.Send("command", "add", args, props);
+        return result?.GetValue<string>() ?? "";
+    }
+
+    public string? Remove(string path)
+    {
+        var result = _session.Send("command", "remove", new JsonObject { ["path"] = path });
+        return result?.GetValue<string>();
+    }
+
+    public string Move(string sourcePath, string? targetParentPath, InsertPosition? position)
+    {
+        var args = new JsonObject { ["source_path"] = sourcePath };
+        if (targetParentPath is not null) args["target_parent_path"] = targetParentPath;
+        if (position is not null) args["position"] = PositionToJson(position);
+        var result = _session.Send("command", "move", args);
+        return result?.GetValue<string>() ?? "";
+    }
+
+    public string CopyFrom(string sourcePath, string targetParentPath, InsertPosition? position)
+    {
+        var args = new JsonObject
+        {
+            ["source_path"] = sourcePath,
+            ["target_parent_path"] = targetParentPath,
+        };
+        if (position is not null) args["position"] = PositionToJson(position);
+        var result = _session.Send("command", "copy", args);
+        return result?.GetValue<string>() ?? "";
+    }
+
+    public string Raw(string partPath, int? startRow = null, int? endRow = null, HashSet<string>? cols = null)
+    {
+        var args = new JsonObject { ["part_path"] = partPath };
+        if (startRow.HasValue) args["start_row"] = startRow.Value;
+        if (endRow.HasValue) args["end_row"] = endRow.Value;
+        if (cols != null && cols.Count > 0) args["cols"] = string.Join(",", cols);
+        var result = _session.Send("command", "raw", args);
+        return result?.GetValue<string>() ?? "";
+    }
+
+    public void RawSet(string partPath, string xpath, string action, string? xml)
+    {
+        var args = new JsonObject
+        {
+            ["part_path"] = partPath,
+            ["xpath"] = xpath,
+            ["action"] = action,
+        };
+        if (xml is not null) args["xml"] = xml;
+        _session.Send("command", "raw-set", args);
+    }
+
+    public (string RelId, string PartPath) AddPart(string parentPartPath, string partType, Dictionary<string, string>? properties = null)
+    {
+        var args = new JsonObject
+        {
+            ["parent_part_path"] = parentPartPath,
+            ["part_type"] = partType,
+        };
+        var props = properties is not null ? PropsToJson(properties) : null;
+        var result = _session.Send("command", "add-part", args, props)?.AsObject();
+        if (result is null)
+            throw new CliException("Format-handler add-part returned null.") { Code = "protocol_mismatch" };
+        var relId = result["rel_id"]?.GetValue<string>() ?? "";
+        var partPath = result["part_path"]?.GetValue<string>() ?? "";
+        return (relId, partPath);
+    }
 
     public bool TryExtractBinary(string path, string destPath, out string? contentType, out long byteCount)
     {
         contentType = null;
         byteCount = 0;
-        return false;
+        try
+        {
+            var result = _session.Send("command", "extract-binary", new JsonObject
+            {
+                ["path"] = path,
+                ["dest_path"] = destPath,
+            })?.AsObject();
+            if (result is null) return false;
+            var found = result["found"]?.GetValue<bool>() ?? false;
+            if (!found) return false;
+            contentType = result["content_type"]?.GetValue<string>();
+            byteCount = result["byte_count"]?.GetValue<long>() ?? 0;
+            return true;
+        }
+        catch (CliException ex) when (ex.Code == "unsupported_command")
+        {
+            return false;
+        }
     }
 
     public void Dispose() => _session.Dispose();
@@ -127,7 +223,20 @@ internal sealed class FormatHandlerProxy : IDocumentHandler
         return args;
     }
 
-    private static CliException NotProxied(string op) =>
-        new CliException($"Format-handler v0 does not yet proxy `{op}`. Only view/get/query are wired through.")
-        { Code = "format_handler_not_supported" };
+    private static JsonObject PropsToJson(Dictionary<string, string> properties)
+    {
+        var obj = new JsonObject();
+        foreach (var kv in properties)
+            obj[kv.Key] = kv.Value;
+        return obj;
+    }
+
+    private static JsonObject PositionToJson(InsertPosition pos)
+    {
+        var obj = new JsonObject();
+        if (pos.Index.HasValue) obj["index"] = pos.Index.Value;
+        if (pos.After != null) obj["after"] = pos.After;
+        if (pos.Before != null) obj["before"] = pos.Before;
+        return obj;
+    }
 }

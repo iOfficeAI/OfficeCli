@@ -28,31 +28,32 @@ responsibility, lifecycle, and IPC pattern. v1 defines three kinds.
 
 ### 2.1 `dump-reader` — read a foreign format, emit officecli commands
 
-Used to **migrate** a foreign format into the main repo's native format (currently
-`.docx`).
+Used to **migrate** a foreign format into one of main's native formats
+(`.docx`/`.xlsx`/`.pptx`). The output format is declared by the plugin's
+manifest `target` field (default `"docx"`).
 
 | Aspect | Value |
 |---|---|
 | Lifecycle | Short-lived (one shot) |
 | Source file handle | Plugin (read-only) |
-| Target file handle | Main (replays plugin's batch into a sibling .docx) |
-| Vocabulary | **Main's docx command vocabulary** (no plugin-defined extensions) |
+| Target file handle | Main (replays plugin's batch into a sibling native file) |
+| Vocabulary | **Main's `<target>` command vocabulary** (no plugin-defined extensions) |
 | IPC | None — plugin writes a `BatchItem[]` JSON array to stdout and exits |
-| Output extension | Sibling `<source-stem>.docx` next to the source |
+| Output extension | Sibling `<source-stem>.<target>` next to the source |
 
 Flow:
 
 1. User invokes a command that opens a `.doc` file
-2. Main checks for a sibling `<source-stem>.docx` next to the source. If it
-   exists and is newer than the source, main opens it directly and skips
+2. Main checks for a sibling `<source-stem>.<target>` next to the source. If
+   it exists and is newer than the source, main opens it directly and skips
    steps 3–5
 3. Main spawns the plugin: `<plugin> dump <source>`
 4. Plugin parses the source and prints a JSON array of `add`/`set`/`batch` items
    (same schema as `officecli batch --commands`) to stdout, then exits 0
-5. Main creates a blank docx skeleton, replays the batch against it, and moves
-   it to the sibling path. Subsequent invocations reuse the sibling
+5. Main creates a blank `<target>` skeleton, replays the batch against it, and
+   moves it to the sibling path. Subsequent invocations reuse the sibling
 
-Edits target the sibling `.docx`, not the original source. Source-side changes
+Edits target the sibling native file, not the original source. Source-side changes
 invalidate the cache automatically via mtime comparison; delete the sibling to
 force reconversion.
 
@@ -157,6 +158,7 @@ to stdout and exiting 0. The object describes the plugin to the main binary.
 | Field | Type | Description |
 |---|---|---|
 | `description` | string | Short human-readable description |
+| `target` | string | Native format the plugin produces (`"docx"`/`"xlsx"`/`"pptx"`). Required-by-convention for `dump-reader`; defaults to `"docx"` if omitted. Determines the sibling-cache extension, the lint schema, and the handler that opens the replay output. |
 | `tier` | string | Free-form tier identifier (`basic`/`pro`/`enterprise`) |
 | `vocabulary` | object | Required for `format-handler`. See §4.3 |
 | `supports` | array | Capability tags (e.g. `["tables","images","fields"]`) |
@@ -195,6 +197,7 @@ vocabulary.
   "protocol": 1,
   "kinds": ["dump-reader"],
   "extensions": [".doc"],
+  "target": "docx",
   "tier": "basic",
   "supports": ["paragraphs", "runs", "tables", "images", "lists"]
 }
@@ -288,7 +291,9 @@ Request envelope (main → plugin):
 {"protocol":1, "msg_type":"command", "command":"<verb>", "args":{...}}
 ```
 
-Currently-proxied verbs (v0 read path):
+Proxied verbs:
+
+**Read path:**
 
 | `command` | `args` keys | `result` shape on `ok` |
 |---|---|---|
@@ -297,6 +302,24 @@ Currently-proxied verbs (v0 read path):
 | `query` | `selector` | array of DocumentNode |
 | `validate` | (none) | array of `{errorType,description,path,part}` |
 
+**Mutation path** (envelope carries `args` and `props` separately; `props` is
+the user's `--prop key=value` dictionary, always string-to-string):
+
+| `command` | `args` keys | `props` | `result` shape on `ok` |
+|---|---|---|---|
+| `set` | `path` | yes | array of string — names of props the plugin did **not** apply (`unsupported_property` UX) |
+| `add` | `parent_path`, `type`, optional `position` | yes | string — path of the newly created element |
+| `remove` | `path` | no | string or null — optional warning text (e.g. cells shifted) |
+| `move` | `source_path`, optional `target_parent_path`, optional `position` | no | string — new path |
+| `copy` | `source_path`, `target_parent_path`, optional `position` | no | string — new path |
+| `raw` | `part_path`, optional `start_row`/`end_row`/`cols` | no | string — raw XML (or CSV-of-rows for spreadsheet parts) |
+| `raw-set` | `part_path`, `xpath`, `action`, optional `xml` | no | null |
+| `add-part` | `parent_part_path`, `part_type` | optional | object `{"rel_id":"...","part_path":"..."}` |
+| `extract-binary` | `path`, `dest_path` | no | object `{"found":true,"content_type":"...","byte_count":N}` or `{"found":false}` |
+
+`position` (when present) is `{"index":N}` OR `{"after":"<path>"}` OR
+`{"before":"<path>"}` — at most one field set; all-null means append.
+
 Reply envelopes (plugin → main):
 
 ```json
@@ -304,10 +327,10 @@ Reply envelopes (plugin → main):
 {"protocol":1, "msg_type":"error", "error":{"code":"<code>","message":"...","detail":"..."}}
 ```
 
-Mutation verbs (`set`, `add`, `remove`, `move`, `copy`, `raw-set`, `add-part`)
-are reserved but not yet wired through the proxy; plugins may stub them out
-or reply with `error` code `unsupported_command`. They will be added in a
-future minor release.
+A plugin that doesn't implement a given verb should reply with `error`
+code `unsupported_command`; main translates this into the matching
+user-facing error and (for `extract-binary` specifically) into a
+`false` return so existing callers stay happy.
 
 ### 5.4 Universal options
 
