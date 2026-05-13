@@ -67,65 +67,76 @@ public partial class PowerPointHandler
             sb.AppendLine($"[/slide[{slideNum}]]");
             var shapes = GetSlide(slidePart).CommonSlideData?.ShapeTree?.ChildElements ?? Enumerable.Empty<OpenXmlElement>();
 
-            int shapeIdx = 0;
-            foreach (var child in shapes)
-            {
-                if (child is Shape shape)
-                {
-                    // Check if shape contains equations
-                    var mathElements = FindShapeMathElements(shape);
-                    if (mathElements.Count > 0)
-                    {
-                        var latex = string.Concat(mathElements.Select(FormulaParser.ToLatex));
-                        var text = GetShapeText(shape);
-                        // Check for text runs NOT inside mc:Fallback
-                        var hasOtherText = shape.TextBody?.Elements<Drawing.Paragraph>()
-                            .SelectMany(p => p.Elements<Drawing.Run>())
-                            .Any(r => !string.IsNullOrWhiteSpace(r.Text?.Text)) == true;
-                        if (hasOtherText)
-                            sb.AppendLine($"  [Text Box] \"{text}\" \u2190 contains equation: \"{latex}\"");
-                        else
-                            sb.AppendLine($"  [Equation] \"{latex}\"");
-                    }
-                    else
-                    {
-                        var text = GetShapeText(shape);
-                        var type = IsTitle(shape) ? "Title" : "Text Box";
-
-                        if (!string.IsNullOrWhiteSpace(text))
-                        {
-                            var firstRun = shape.TextBody?.Descendants<Drawing.Run>().FirstOrDefault();
-                            var font = firstRun?.RunProperties?.GetFirstChild<Drawing.LatinFont>()?.Typeface
-                                ?? firstRun?.RunProperties?.GetFirstChild<Drawing.EastAsianFont>()?.Typeface
-                                ?? "(default)";
-                            var fontSize = firstRun?.RunProperties?.FontSize?.Value;
-                            var sizeStr = fontSize.HasValue ? $"{fontSize.Value / 100}pt" : "";
-
-                            sb.AppendLine($"  [{type}] \"{text}\" \u2190 {font} {sizeStr}");
-                        }
-                    }
-                    shapeIdx++;
-                }
-                else if (child is GraphicFrame gf && gf.Descendants<Drawing.Table>().Any())
-                {
-                    var table = gf.Descendants<Drawing.Table>().First();
-                    var tblRows = table.Elements<Drawing.TableRow>().Count();
-                    var tblCols = table.Elements<Drawing.TableRow>().FirstOrDefault()?.Elements<Drawing.TableCell>().Count() ?? 0;
-                    var tblName = gf.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties?.Name?.Value ?? "Table";
-                    sb.AppendLine($"  [Table] \"{tblName}\" \u2190 {tblRows}x{tblCols}");
-                }
-                else if (child is Picture pic)
-                {
-                    var name = pic.NonVisualPictureProperties?.NonVisualDrawingProperties?.Name?.Value ?? "Picture";
-                    var altText = pic.NonVisualPictureProperties?.NonVisualDrawingProperties?.Description?.Value;
-                    var altInfo = string.IsNullOrEmpty(altText) ? "\u26a0 no alt text" : $"alt=\"{altText}\"";
-                    sb.AppendLine($"  [Picture] \"{name}\" \u2190 {altInfo}");
-                }
-            }
+            RenderAnnotatedChildren(sb, shapes, indent: 1);
             sb.AppendLine();
         }
 
         return sb.ToString().TrimEnd();
+    }
+
+    private void RenderAnnotatedChildren(StringBuilder sb, IEnumerable<OpenXmlElement> children, int indent)
+    {
+        var pad = new string(' ', indent * 2);
+        foreach (var child in children)
+        {
+            if (child is Shape shape)
+            {
+                var mathElements = FindShapeMathElements(shape);
+                if (mathElements.Count > 0)
+                {
+                    var latex = string.Concat(mathElements.Select(FormulaParser.ToLatex));
+                    var text = GetShapeText(shape);
+                    var hasOtherText = shape.TextBody?.Elements<Drawing.Paragraph>()
+                        .SelectMany(p => p.Elements<Drawing.Run>())
+                        .Any(r => !string.IsNullOrWhiteSpace(r.Text?.Text)) == true;
+                    if (hasOtherText)
+                        sb.AppendLine($"{pad}[Text Box] \"{text}\" \u2190 contains equation: \"{latex}\"");
+                    else
+                        sb.AppendLine($"{pad}[Equation] \"{latex}\"");
+                }
+                else
+                {
+                    var text = GetShapeText(shape);
+                    var type = IsTitle(shape) ? "Title" : "Text Box";
+
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        var firstRun = shape.TextBody?.Descendants<Drawing.Run>().FirstOrDefault();
+                        var font = firstRun?.RunProperties?.GetFirstChild<Drawing.LatinFont>()?.Typeface
+                            ?? firstRun?.RunProperties?.GetFirstChild<Drawing.EastAsianFont>()?.Typeface
+                            ?? "(default)";
+                        var fontSize = firstRun?.RunProperties?.FontSize?.Value;
+                        var sizeStr = fontSize.HasValue ? $"{fontSize.Value / 100}pt" : "";
+
+                        sb.AppendLine($"{pad}[{type}] \"{text}\" \u2190 {font} {sizeStr}");
+                    }
+                }
+            }
+            else if (child is GraphicFrame gf && gf.Descendants<Drawing.Table>().Any())
+            {
+                var table = gf.Descendants<Drawing.Table>().First();
+                var tblRows = table.Elements<Drawing.TableRow>().Count();
+                var tblCols = table.Elements<Drawing.TableRow>().FirstOrDefault()?.Elements<Drawing.TableCell>().Count() ?? 0;
+                var tblName = gf.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties?.Name?.Value ?? "Table";
+                sb.AppendLine($"{pad}[Table] \"{tblName}\" \u2190 {tblRows}x{tblCols}");
+            }
+            else if (child is Picture pic)
+            {
+                var name = pic.NonVisualPictureProperties?.NonVisualDrawingProperties?.Name?.Value ?? "Picture";
+                var altText = pic.NonVisualPictureProperties?.NonVisualDrawingProperties?.Description?.Value;
+                var altInfo = string.IsNullOrEmpty(altText) ? "\u26a0 no alt text" : $"alt=\"{altText}\"";
+                sb.AppendLine($"{pad}[Picture] \"{name}\" \u2190 {altInfo}");
+            }
+            else if (child is GroupShape group)
+            {
+                var groupName = group.NonVisualGroupShapeProperties?.NonVisualDrawingProperties?.Name?.Value ?? "Group";
+                var nested = group.ChildElements
+                    .Where(e => e is Shape || e is GroupShape || e is Picture || e is GraphicFrame || e is ConnectionShape)
+                    .ToList();
+                sb.AppendLine($"{pad}[Group] \"{groupName}\" \u2190 {nested.Count} item(s)");
+                RenderAnnotatedChildren(sb, nested, indent + 1);
+            }
+        }
     }
 
     public string ViewAsOutline()
