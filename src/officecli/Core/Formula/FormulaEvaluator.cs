@@ -535,7 +535,11 @@ internal partial class FormulaEvaluator
             // 0/1 doubles (not Bool) so downstream `*1` stays in numeric domain
             // matching POI's TwoOperandNumericOperation+ArrayFunction policy.
             if (HasArrayShape(left) || HasArrayShape(right))
-            { left = ApplyComparison(left, right, op); continue; }
+            {
+                left = ApplyComparison(left, right, op);
+                if (left == null) return null;
+                continue;
+            }
             var cmp = CompareValues(left, right);
             left = op switch { "=" => FormulaResult.Bool(cmp == 0), "<>" => FormulaResult.Bool(cmp != 0),
                 "<" => FormulaResult.Bool(cmp < 0), ">" => FormulaResult.Bool(cmp > 0),

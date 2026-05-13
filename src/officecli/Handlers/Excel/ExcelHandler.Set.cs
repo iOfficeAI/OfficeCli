@@ -1716,6 +1716,29 @@ public partial class ExcelHandler
                         || value == "1" || value.Equals("yes", StringComparison.OrdinalIgnoreCase);
                     bool doSweep = value.Equals("sweep", StringComparison.OrdinalIgnoreCase);
 
+                    // CONSISTENCY(cell-merge): cell-anchor Set accepts merge=<range>
+                    // as the merge target; range-path Set must mirror that. If the
+                    // value is a range-shaped literal that matches the path's rangeRef,
+                    // treat it as merge=true (the range is already encoded in the path).
+                    // A mismatch is a path-vs-value disagreement and must not be silent
+                    // — historically it fell through to the unmerge branch and on a
+                    // blank sheet became a silent no-op (issue #108).
+                    if (!doMerge && !doSweep
+                        && SingleMergeRefPattern.IsMatch(value.ToUpperInvariant()))
+                    {
+                        if (string.Equals(value, rangeRef, StringComparison.OrdinalIgnoreCase))
+                        {
+                            doMerge = true;
+                        }
+                        else
+                        {
+                            throw new ArgumentException(
+                                $"merge value '{value}' does not match the range path '{rangeRef}'. " +
+                                $"The range is already encoded in the path — pass merge=true, " +
+                                $"or fix the path to match the intended merge range.");
+                        }
+                    }
+
                     if (doMerge)
                     {
                         // CONSISTENCY(merge-empty-container): pre-validate before container

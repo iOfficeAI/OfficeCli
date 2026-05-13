@@ -540,9 +540,9 @@ public partial class PowerPointHandler
             {
                 ("slide", shapeTree),
             };
-            if (slidePart.SlideLayoutPart?.SlideLayout.CommonSlideData?.ShapeTree is { } layoutTree)
+            if (slidePart.SlideLayoutPart?.SlideLayout?.CommonSlideData?.ShapeTree is { } layoutTree)
                 allTrees.Add(("layout", layoutTree));
-            if (slidePart.SlideLayoutPart?.SlideMasterPart?.SlideMaster.CommonSlideData?.ShapeTree is { } masterTree)
+            if (slidePart.SlideLayoutPart?.SlideMasterPart?.SlideMaster?.CommonSlideData?.ShapeTree is { } masterTree)
                 allTrees.Add(("master", masterTree));
             foreach (var (scope, tree) in allTrees)
             {

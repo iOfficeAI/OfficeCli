@@ -18,7 +18,7 @@
   "properties": {
     "merge": {
       "type": "bool",
-      "description": "merge all cells in the range into a single cell. Set merge=false to unmerge — the range must exactly match an existing merge, otherwise the call fails with the precise refs to use. Pass merge=sweep to bulk-clear every merge contained in the range (destructive, no precision check). For multiple disjoint ranges in one call, use the prop value form on a sheet- or cell-anchored set (e.g. `set '/Sheet1' --prop merge=A1:B1,A2:B2`).",
+      "description": "merge all cells in the range into a single cell. Pass merge=true to merge; the range is taken from the path. A range-shaped value equal to the path's range (e.g. `set '/Sheet1/B2:C2' --prop merge=B2:C2`) is accepted as a convenience and is equivalent to merge=true; a range-shaped value that disagrees with the path is rejected. Set merge=false to unmerge — the range must exactly match an existing merge, otherwise the call fails with the precise refs to use. Pass merge=sweep to bulk-clear every merge contained in the range (destructive, no precision check). For multiple disjoint ranges in one call, use the prop value form on a sheet- or cell-anchored set (e.g. `set '/Sheet1' --prop merge=A1:B1,A2:B2`).",
       "add": false, "set": true, "get": true,
       "examples": ["--prop merge=true", "--prop merge=false", "--prop merge=sweep"],
       "readback": "true/false",
