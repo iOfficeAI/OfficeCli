@@ -15,6 +15,11 @@ public partial class PowerPointHandler
 {
     public string? Remove(string path)
     {
+        // CONSISTENCY(null-path-guard): callers that pass null get an
+        // ArgumentNullException instead of a confusing downstream NRE.
+        // Mirrors the Word/Excel guards on the same surface.
+        ArgumentNullException.ThrowIfNull(path);
+
         // CONSISTENCY(container-remove-guard): reject removal of required
         // structural container paths. Matches the Word/Excel guards.
         if (IsProtectedPptxContainerPath(path))
