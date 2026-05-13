@@ -2603,16 +2603,33 @@ public partial class WordHandler
                 // with empty string) must NOT surface as a "style" key.
                 if (!string.IsNullOrEmpty(tp.TableStyle?.Val?.Value))
                     node.Format["style"] = tp.TableStyle.Val.Value!;
-                // Table borders
+                // Table borders. `LeftBorder`/`RightBorder` only catch
+                // <w:left>/<w:right>; bidi-aware sources use <w:start>/<w:end>
+                // which the SDK does NOT alias onto Left/Right (the typed
+                // properties stay null). Walk all border children by local
+                // name and map both forms onto the same canonical key — the
+                // alternative is dropping borders for any doc whose tblBorders
+                // uses the start/end naming (three-line-table2.docx).
                 var tblBorders = tp.TableBorders;
                 if (tblBorders != null)
                 {
                     ReadBorder(tblBorders.TopBorder, "border.top", node);
                     ReadBorder(tblBorders.BottomBorder, "border.bottom", node);
-                    ReadBorder(tblBorders.LeftBorder, "border.left", node);
-                    ReadBorder(tblBorders.RightBorder, "border.right", node);
                     ReadBorder(tblBorders.InsideHorizontalBorder, "border.insideH", node);
                     ReadBorder(tblBorders.InsideVerticalBorder, "border.insideV", node);
+                    foreach (var bChild in tblBorders.ChildElements)
+                    {
+                        if (bChild is BorderType bt)
+                        {
+                            var ln = bChild.LocalName;
+                            if (ln.Equals("left", StringComparison.OrdinalIgnoreCase)
+                                || ln.Equals("start", StringComparison.OrdinalIgnoreCase))
+                                ReadBorder(bt, "border.left", node);
+                            else if (ln.Equals("right", StringComparison.OrdinalIgnoreCase)
+                                     || ln.Equals("end", StringComparison.OrdinalIgnoreCase))
+                                ReadBorder(bt, "border.right", node);
+                        }
+                    }
                 }
                 // Table width
                 if (tp.TableWidth?.Width?.Value != null)
