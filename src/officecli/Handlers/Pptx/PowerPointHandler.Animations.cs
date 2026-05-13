@@ -1840,7 +1840,10 @@ public partial class PowerPointHandler
             var shapeTree = GetSlide(sp).CommonSlideData?.ShapeTree;
             if (shapeTree == null) continue;
 
-            foreach (var shape in shapeTree.Elements<Shape>())
+            // CONSISTENCY(pptx-group-flatten): morph pairs by shape name, and
+            // PowerPoint matches names regardless of group nesting, so the
+            // auto-prefix has to reach grouped shapes too.
+            foreach (var shape in shapeTree.Descendants<Shape>())
             {
                 var nvPr = shape.NonVisualShapeProperties?.NonVisualDrawingProperties;
                 if (nvPr?.Name == null) continue;
@@ -1892,7 +1895,9 @@ public partial class PowerPointHandler
             var shapeTree = GetSlide(sp).CommonSlideData?.ShapeTree;
             if (shapeTree == null) continue;
 
-            foreach (var shape in shapeTree.Elements<Shape>())
+            // CONSISTENCY(pptx-group-flatten): mirrors AutoPrefixMorphNames so
+            // the strip pass undoes every prefix the prefix pass added.
+            foreach (var shape in shapeTree.Descendants<Shape>())
             {
                 var nvPr = shape.NonVisualShapeProperties?.NonVisualDrawingProperties;
                 if (nvPr?.Name == null) continue;
