@@ -2072,6 +2072,25 @@ public static class BatchEmitter
                     }
                 }
             }
+            // Trim trailing cells when source row is underfilled (sum of
+            // source spans < gridCols). AddTable seeds `cols` cells per row;
+            // `set tc[i] colspan=N` removes excess cells DOWN TO gridCols but
+            // also PADS UP TO gridCols when the post-set total is short — so
+            // a source row like [colspan=3] in a 4-col grid lands at 2 cells
+            // post-replay (1 spanning + 1 pad). Source-shape preservation
+            // demands removing (gridCols - sum_of_source_spans) trailing
+            // cells AFTER all per-cell sets. The remove path is non-padding,
+            // so the final cell count matches source. CONSISTENCY(table-row-
+            // cell-count).
+            int excessTrail = cols - rowEffectiveWidths[r];
+            for (int e = 0; e < excessTrail; e++)
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "remove",
+                    Path = $"{tablePath}/tr[{r + 1}]/tc[last()]",
+                });
+            }
         }
     }
 
