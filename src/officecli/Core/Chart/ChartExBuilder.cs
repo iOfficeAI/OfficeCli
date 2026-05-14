@@ -32,7 +32,7 @@ internal static partial class ChartExBuilder
 
     internal static bool IsExtendedChartType(string chartType)
     {
-        var normalized = chartType.ToLowerInvariant().Replace(" ", "").Replace("_", "").Replace("-", "");
+        var normalized = SchemaKeyNormalizer.Normalize(chartType);
         return ExtendedChartTypes.Contains(normalized);
     }
 
@@ -46,7 +46,7 @@ internal static partial class ChartExBuilder
         List<(string name, double[] values)> seriesData,
         Dictionary<string, string> properties)
     {
-        var normalized = chartType.ToLowerInvariant().Replace(" ", "").Replace("_", "").Replace("-", "");
+        var normalized = SchemaKeyNormalizer.Normalize(chartType);
 
         // Pareto pre-sorts descending and keeps a single series. The
         // paretoLine series is appended after the main loop with ownerIdx=0
@@ -407,7 +407,7 @@ internal static partial class ChartExBuilder
         // value for the regular cChart variant and users may pass it through.
         // CONSISTENCY(legend-separator-normalize): mirror SetterHelpers — dash
         // and underscore separators are equivalent (top-right == top_right).
-        var posSpecNorm = (posSpec ?? string.Empty).ToLowerInvariant().Replace("-", "").Replace("_", "");
+        var posSpecNorm = SchemaKeyNormalizer.Normalize(posSpec);
         legend.Pos = posSpecNorm switch
         {
             "top" or "t" or "topright" or "tr" => CX.SidePos.T,

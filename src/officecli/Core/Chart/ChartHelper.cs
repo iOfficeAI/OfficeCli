@@ -16,7 +16,7 @@ internal static partial class ChartHelper
 
     internal static (string kind, bool is3D, bool stacked, bool percentStacked) ParseChartType(string chartType)
     {
-        var ct = chartType.ToLowerInvariant().Replace(" ", "").Replace("_", "").Replace("-", "");
+        var ct = SchemaKeyNormalizer.Normalize(chartType);
         var is3D = ct.EndsWith("3d") || ct.Contains("3d");
         ct = ct.Replace("3d", "");
 

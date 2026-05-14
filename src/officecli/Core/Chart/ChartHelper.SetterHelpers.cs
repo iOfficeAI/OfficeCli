@@ -29,7 +29,7 @@ internal static partial class ChartHelper
         // as separators (`top-right`, `top_right`, `TOP_RIGHT`) by stripping
         // both before comparison. Without this, `TOP_RIGHT` threw while
         // `top-right` succeeded — punctuation variants should be uniform.
-        var norm = (value ?? string.Empty).ToLowerInvariant().Replace("-", "").Replace("_", "");
+        var norm = SchemaKeyNormalizer.Normalize(value);
         return norm switch
         {
             "top" or "t" => C.LegendPositionValues.Top,
