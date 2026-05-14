@@ -2236,6 +2236,14 @@ public static class BatchEmitter
                 var cellProps = ExtractCellOnlyProps(cellNode.Format);
                 if (cellProps.Count > 0)
                 {
+                    // CONSISTENCY(tblgrid-preserve): tcW values in the source
+                    // are allowed to disagree with the gridCol widths (Word
+                    // renders by tcW; tblGrid is a layout hint). Suppress
+                    // Set.tc's tblGrid-sync side effect so AddTable's
+                    // authoritative colWidths survives subsequent per-cell
+                    // width sets.
+                    if (cellProps.ContainsKey("width"))
+                        cellProps["skipGridSync"] = "true";
                     items.Add(new BatchItem
                     {
                         Command = "set",

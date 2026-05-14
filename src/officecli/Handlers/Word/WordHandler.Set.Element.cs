@@ -1378,7 +1378,16 @@ public partial class WordHandler
                         // gridCol slot it occupies and Word's column-boundary
                         // inference breaks across all other rows. Mirrors the
                         // startCol calculation used by the gridspan branch.
-                        if (cell.Parent is TableRow widthRow
+                        // CONSISTENCY(tblgrid-preserve): dump→batch can disable
+                        // the tblGrid sync via skipGridSync=true on the tc set
+                        // because AddTable wrote authoritative colWidths and
+                        // sources are allowed to carry per-cell tcW values that
+                        // disagree with the gridCol widths (Word renders cells
+                        // by their own tcW; tblGrid is just a layout hint).
+                        bool skipGridSync = properties.TryGetValue("skipgridsync", out var sgs)
+                                         || properties.TryGetValue("skipGridSync", out sgs);
+                        if (!(skipGridSync && IsTruthy(sgs))
+                            && cell.Parent is TableRow widthRow
                             && widthRow.Parent is Table widthTbl)
                         {
                             var widthGrid = widthTbl.GetFirstChild<TableGrid>();
