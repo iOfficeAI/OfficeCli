@@ -1292,6 +1292,71 @@ public partial class WordHandler
                     else InsertRunPropInSchemaOrder(props, new RunFonts { EastAsia = fv });
                 }
                 return true;
+            // CONSISTENCY(font-theme-slot): theme-font slots bind to a theme
+            // major/minor face instead of a literal typeface. Mirrors the
+            // text-run additions in AddRun/AddParagraph but routed through
+            // ApplyRunFormatting so Set paragraph (and any other call site
+            // that funnels through this helper) honours them too.
+            case "font.asciitheme" or "font.asciiTheme":
+                {
+                    var rfAT = props.GetFirstChild<RunFonts>();
+                    if (string.IsNullOrEmpty(value))
+                    {
+                        if (rfAT != null) { rfAT.AsciiTheme = null; if (RunFontsIsEmpty(rfAT)) rfAT.Remove(); }
+                    }
+                    else
+                    {
+                        var enumAT = new EnumValue<ThemeFontValues>(new ThemeFontValues(value));
+                        if (rfAT != null) rfAT.AsciiTheme = enumAT;
+                        else InsertRunPropInSchemaOrder(props, new RunFonts { AsciiTheme = enumAT });
+                    }
+                }
+                return true;
+            case "font.hansitheme" or "font.hAnsiTheme":
+                {
+                    var rfHAT = props.GetFirstChild<RunFonts>();
+                    if (string.IsNullOrEmpty(value))
+                    {
+                        if (rfHAT != null) { rfHAT.HighAnsiTheme = null; if (RunFontsIsEmpty(rfHAT)) rfHAT.Remove(); }
+                    }
+                    else
+                    {
+                        var enumHAT = new EnumValue<ThemeFontValues>(new ThemeFontValues(value));
+                        if (rfHAT != null) rfHAT.HighAnsiTheme = enumHAT;
+                        else InsertRunPropInSchemaOrder(props, new RunFonts { HighAnsiTheme = enumHAT });
+                    }
+                }
+                return true;
+            case "font.eatheme" or "font.eaTheme" or "font.eastasiatheme":
+                {
+                    var rfEAT = props.GetFirstChild<RunFonts>();
+                    if (string.IsNullOrEmpty(value))
+                    {
+                        if (rfEAT != null) { rfEAT.EastAsiaTheme = null; if (RunFontsIsEmpty(rfEAT)) rfEAT.Remove(); }
+                    }
+                    else
+                    {
+                        var enumEAT = new EnumValue<ThemeFontValues>(new ThemeFontValues(value));
+                        if (rfEAT != null) rfEAT.EastAsiaTheme = enumEAT;
+                        else InsertRunPropInSchemaOrder(props, new RunFonts { EastAsiaTheme = enumEAT });
+                    }
+                }
+                return true;
+            case "font.cstheme" or "font.csTheme":
+                {
+                    var rfCST = props.GetFirstChild<RunFonts>();
+                    if (string.IsNullOrEmpty(value))
+                    {
+                        if (rfCST != null) { rfCST.ComplexScriptTheme = null; if (RunFontsIsEmpty(rfCST)) rfCST.Remove(); }
+                    }
+                    else
+                    {
+                        var enumCST = new EnumValue<ThemeFontValues>(new ThemeFontValues(value));
+                        if (rfCST != null) rfCST.ComplexScriptTheme = enumCST;
+                        else InsertRunPropInSchemaOrder(props, new RunFonts { ComplexScriptTheme = enumCST });
+                    }
+                }
+                return true;
             case "font.cs" or "font.complexscript" or "font.complex":
                 {
                     var fv = SanitizeFontTokenInput(value);
