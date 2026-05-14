@@ -77,14 +77,33 @@ internal sealed class FormatHandlerSession : IDisposable
             ?? throw new CliException($"Failed to start format-handler plugin '{_plugin.Manifest.Name}'.")
                 { Code = "plugin_spawn_failed" };
 
+        // Race the pipe connection against process exit and a wall-clock
+        // timeout. Without the exit branch, an immediate plugin crash would
+        // make the caller wait out the full connect timeout for nothing —
+        // the real cause (exit code + stderr) is swallowed.
         var connectTask = _pipe.WaitForConnectionAsync();
-        if (!connectTask.Wait(connectTimeoutMs))
+        var exitTask = _proc.WaitForExitAsync();
+        var timeoutTask = Task.Delay(connectTimeoutMs);
+        var winner = Task.WhenAny(connectTask, exitTask, timeoutTask)
+            .GetAwaiter().GetResult();
+
+        if (winner == exitTask)
+        {
+            var stderr = "";
+            try { stderr = _proc.StandardError.ReadToEnd(); } catch { }
+            throw new CliException(
+                $"Format-handler plugin '{_plugin.Manifest.Name}' exited (code {_proc.ExitCode}) before connecting to pipe: {Truncate(stderr, 500)}")
+            { Code = "plugin_spawn_failed" };
+        }
+        if (winner == timeoutTask)
         {
             TryKill();
             throw new CliException(
                 $"Format-handler plugin '{_plugin.Manifest.Name}' did not connect to pipe within {connectTimeoutMs}ms.")
             { Code = "plugin_pipe_timeout" };
         }
+        // connectTask won — propagate any exception that may have completed it
+        connectTask.GetAwaiter().GetResult();
 
         // Buffered reader/writer over the pipe. Raw newline-delimited UTF-8.
         // We don't reuse the resident-pipe helpers here because the pipe lives
@@ -162,8 +181,10 @@ internal sealed class FormatHandlerSession : IDisposable
         if (_disposed) return;
         _disposed = true;
 
-        // Ask the plugin to shut down cleanly. If it doesn't acknowledge,
-        // we'll fall through to a hard kill below.
+        // Ask the plugin to shut down cleanly. If it doesn't acknowledge
+        // within a short window we drop through to stream disposal and the
+        // hard-kill timer below — a hung plugin must not be allowed to wedge
+        // Dispose() indefinitely.
         try
         {
             if (_writer is not null && _reader is not null && _pipe?.IsConnected == true)
@@ -174,7 +195,12 @@ internal sealed class FormatHandlerSession : IDisposable
                     ["msg_type"] = "close",
                 };
                 _writer.WriteLine(close.ToJsonString());
-                _reader.ReadLine(); // best-effort drain of ack
+                using var ackCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                try
+                {
+                    _reader.ReadLineAsync(ackCts.Token).AsTask().GetAwaiter().GetResult();
+                }
+                catch { /* ack timeout / EOF / IO — proceed to forced teardown */ }
             }
         }
         catch { /* shutting down; ignore */ }
@@ -199,4 +225,7 @@ internal sealed class FormatHandlerSession : IDisposable
     {
         try { _proc?.Kill(entireProcessTree: true); } catch { }
     }
+
+    private static string Truncate(string s, int max) =>
+        s.Length <= max ? s : s.Substring(0, max) + "...";
 }
