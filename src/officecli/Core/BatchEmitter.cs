@@ -164,6 +164,20 @@ public static class BatchEmitter
         EmitBody(word, items, paraIdToTargetIdx);
         EmitHeadersFooters(word, items);
         EmitComments(word, items, paraIdToTargetIdx);
+        // CONSISTENCY(markRPr-inherit-opt-out): dump emits each run's props
+        // verbatim from the source; we never want AddRun's UX-convenience
+        // markRPr→rPr type-fill to add a w:rFonts (or any other) child the
+        // source never had. Stamp the opt-out on every emitted `add r` once
+        // here, instead of threading it through five EmitParagraph branches.
+        foreach (var it in items)
+        {
+            if (it.Command == "add" && (it.Type == "r" || it.Type == "run"))
+            {
+                it.Props ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (!it.Props.ContainsKey("noMarkRPrInherit") && !it.Props.ContainsKey("nomarkrprinherit"))
+                    it.Props["noMarkRPrInherit"] = "true";
+            }
+        }
         return items;
     }
 

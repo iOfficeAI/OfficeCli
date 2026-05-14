@@ -1476,9 +1476,16 @@ public partial class WordHandler
         // Detach rPr from temp run for re-attachment to actual run
         newRProps.Remove();
 
-        // Inherit default formatting from paragraph mark run properties
+        // Inherit default formatting from paragraph mark run properties.
+        // CONSISTENCY(markRPr-inherit-opt-out): dump→batch sets the exact
+        // run props it observed (no font.ea, no rFonts at all → no
+        // inheritance wanted). Caller passes noMarkRPrInherit=true to
+        // suppress the markRPr→rPr type-fill so the round-trip preserves
+        // the source's "run has no rFonts even though para mark does" shape.
+        bool noMarkInherit = properties.TryGetValue("nomarkrprinherit", out var nMri)
+                          || properties.TryGetValue("noMarkRPrInherit", out nMri);
         var markRProps = targetPara.ParagraphProperties?.ParagraphMarkRunProperties;
-        if (markRProps != null)
+        if (markRProps != null && !(noMarkInherit && IsTruthy(nMri)))
         {
             foreach (var child in markRProps.ChildElements)
             {

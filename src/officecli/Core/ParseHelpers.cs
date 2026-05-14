@@ -341,10 +341,16 @@ internal static class ParseHelpers
         // dark1/light1 in writes, but accept both on read).
         return v switch
         {
-            "text1" => "dark1",
-            "text2" => "dark2",
-            "background1" => "light1",
-            "background2" => "light2",
+            // CONSISTENCY(scheme-color-roundtrip): text1/text2/background1/background2
+            // are valid w:themeColor values in their own right (Word writes
+            // either form depending on origin app). Pass through unchanged so
+            // dump round-trip preserves the source's literal value. Only the
+            // ambiguous-alias forms (windowText / OOXML short forms) need
+            // canonicalisation.
+            "text1" => "text1",
+            "text2" => "text2",
+            "background1" => "background1",
+            "background2" => "background2",
             "windowtext" => "dark1",
             "windowbackground" => "light1",
             // OOXML internal short forms (used by PPT a:schemeClr@val).
