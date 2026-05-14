@@ -1276,6 +1276,36 @@ public partial class WordHandler
                     else InsertRunPropInSchemaOrder(props, new RunFonts { Ascii = fv, HighAnsi = fv });
                 }
                 return true;
+            // CONSISTENCY(font-slot-asymmetric): Navigation surfaces ascii and
+            // hAnsi separately when their values disagree (font.ascii vs
+            // font.hAnsi); the bare `font.latin` shorthand only handles the
+            // symmetric case. Without these, sources with asymmetric Latin
+            // fonts (e.g. ascii=黑体 hAnsi=宋体, common in CJK docs to fork
+            // ASCII vs extended-Latin glyphs) round-trip with the keys lost.
+            case "font.ascii":
+                {
+                    var fv = SanitizeFontTokenInput(value);
+                    var rfA = props.GetFirstChild<RunFonts>();
+                    if (string.IsNullOrEmpty(fv))
+                    {
+                        if (rfA != null) { rfA.Ascii = null; if (RunFontsIsEmpty(rfA)) rfA.Remove(); }
+                    }
+                    else if (rfA != null) rfA.Ascii = fv;
+                    else InsertRunPropInSchemaOrder(props, new RunFonts { Ascii = fv });
+                }
+                return true;
+            case "font.hansi" or "font.hAnsi":
+                {
+                    var fv = SanitizeFontTokenInput(value);
+                    var rfHA = props.GetFirstChild<RunFonts>();
+                    if (string.IsNullOrEmpty(fv))
+                    {
+                        if (rfHA != null) { rfHA.HighAnsi = null; if (RunFontsIsEmpty(rfHA)) rfHA.Remove(); }
+                    }
+                    else if (rfHA != null) rfHA.HighAnsi = fv;
+                    else InsertRunPropInSchemaOrder(props, new RunFonts { HighAnsi = fv });
+                }
+                return true;
             case "font.ea" or "font.eastasia" or "font.eastasian":
                 {
                     var fv = SanitizeFontTokenInput(value);
@@ -1376,28 +1406,37 @@ public partial class WordHandler
                     else InsertRunPropInSchemaOrder(props, new RunFonts { ComplexScript = fv });
                 }
                 return true;
+            // CONSISTENCY(toggle-explicit-false): preserve `<w:b w:val="false"/>`
+            // as an explicit style override. Sources whose style chain asserts
+            // bold/italic and need a per-run/markRPr toggle off rely on the
+            // val=false marker; without it the override silently disappears
+            // on dump round-trip. Pure "remove" semantics still apply when
+            // value is null/empty (unset).
             case "bold":
             case "font.bold":
                 props.RemoveAllChildren<Bold>();
                 if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Bold());
+                else if (IsExplicitFalseAddOverride(value))
+                    InsertRunPropInSchemaOrder(props, new Bold { Val = DocumentFormat.OpenXml.OnOffValue.FromBoolean(false) });
                 return true;
             case "bold.cs" or "font.bold.cs" or "boldcs":
-                // Complex-script bold (<w:bCs/>). Word renders Arabic / Hebrew
-                // bold via this flag, NOT <w:b/>. Required for Arabic bold to
-                // actually render as bold.
                 props.RemoveAllChildren<BoldComplexScript>();
                 if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new BoldComplexScript());
+                else if (IsExplicitFalseAddOverride(value))
+                    InsertRunPropInSchemaOrder(props, new BoldComplexScript { Val = DocumentFormat.OpenXml.OnOffValue.FromBoolean(false) });
                 return true;
             case "italic":
             case "font.italic":
                 props.RemoveAllChildren<Italic>();
                 if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Italic());
+                else if (IsExplicitFalseAddOverride(value))
+                    InsertRunPropInSchemaOrder(props, new Italic { Val = DocumentFormat.OpenXml.OnOffValue.FromBoolean(false) });
                 return true;
             case "italic.cs" or "font.italic.cs" or "italiccs":
-                // Complex-script italic (<w:iCs/>). Same rationale as bold.cs —
-                // Arabic / Hebrew italic ignores <w:i/>.
                 props.RemoveAllChildren<ItalicComplexScript>();
                 if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new ItalicComplexScript());
+                else if (IsExplicitFalseAddOverride(value))
+                    InsertRunPropInSchemaOrder(props, new ItalicComplexScript { Val = DocumentFormat.OpenXml.OnOffValue.FromBoolean(false) });
                 return true;
             case "size.cs" or "font.size.cs" or "sizecs":
                 // Complex-script font size (<w:szCs/>, half-points). When set,

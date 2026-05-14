@@ -1008,14 +1008,20 @@ public partial class WordHandler
                     break;
                 }
                 case "size" or "font" or "bold" or "italic" or "color" or "highlight" or "underline" or "strike"
-                  or "font.latin" or "font.ea" or "font.eastasia" or "font.eastasian"
+                  or "font.latin" or "font.ascii" or "font.hansi" or "font.hAnsi"
+                  or "font.ea" or "font.eastasia" or "font.eastasian"
                   or "font.cs" or "font.complexscript" or "font.complex"
                   or "bold.cs" or "italic.cs" or "size.cs"
                   or "font.bold.cs" or "font.italic.cs" or "font.size.cs"
                   or "font.asciitheme" or "font.asciiTheme"
                   or "font.hansitheme" or "font.hAnsiTheme"
                   or "font.eatheme" or "font.eaTheme" or "font.eastasiatheme"
-                  or "font.cstheme" or "font.csTheme":
+                  or "font.cstheme" or "font.csTheme"
+                  // CONSISTENCY(set-para-run-keys): rPr-bound keys that also
+                  // belong on the paragraph mark when no runs exist yet.
+                  // ApplyRunFormatting handles each individually.
+                  or "kern" or "bdr" or "lang" or "lang.latin" or "lang.val"
+                  or "lang.ea" or "lang.eastasia" or "lang.cs" or "lang.bidi":
                     // Apply run-level formatting to all runs in the paragraph.
                     var allParaRuns = para.Descendants<Run>().ToList();
                     // Paragraph-mark run properties (<w:rPr> inside <w:pPr>)

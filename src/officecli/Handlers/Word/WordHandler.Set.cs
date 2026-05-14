@@ -684,16 +684,26 @@ public partial class WordHandler
             // by external tooling is correctly overridden when the new value
             // is true. With `??=` the val=false sticks and the toggle never
             // flips back to true (BUG-LT3).
+            // CONSISTENCY(toggle-explicit-false): keepNext / keepLines /
+            // pageBreakBefore are <w:onOff>-typed paragraph toggles. Falsy
+            // sets the element to null (remove) by default, but when the
+            // user typed an explicit "false"/"0"/"off" — the dump→batch
+            // signal that the source asserted an explicit override of a
+            // style-chain-inherited true — preserve it as
+            // <w:keepNext w:val="false"/>. Empty/null still removes.
             case "keepnext" or "keepwithnext":
                 if (IsTruthy(value)) pProps.KeepNext = new KeepNext();
+                else if (IsExplicitFalseAddOverride(value)) pProps.KeepNext = new KeepNext { Val = DocumentFormat.OpenXml.OnOffValue.FromBoolean(false) };
                 else pProps.KeepNext = null;
                 return true;
             case "keeplines" or "keeptogether":
                 if (IsTruthy(value)) pProps.KeepLines = new KeepLines();
+                else if (IsExplicitFalseAddOverride(value)) pProps.KeepLines = new KeepLines { Val = DocumentFormat.OpenXml.OnOffValue.FromBoolean(false) };
                 else pProps.KeepLines = null;
                 return true;
             case "pagebreakbefore":
                 if (IsTruthy(value)) pProps.PageBreakBefore = new PageBreakBefore();
+                else if (IsExplicitFalseAddOverride(value)) pProps.PageBreakBefore = new PageBreakBefore { Val = DocumentFormat.OpenXml.OnOffValue.FromBoolean(false) };
                 else pProps.PageBreakBefore = null;
                 return true;
             // fuzz-2: 'break=newPage' is the natural paragraph-context spelling
