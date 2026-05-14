@@ -374,6 +374,62 @@ public partial class WordHandler
             var ind = pProps.Indentation ?? (pProps.Indentation = new Indentation());
             ind.HangingChars = ParseHelpers.SafeParseInt(addHC, "hangingChars");
         }
+        // v6.4: paragraph frame (<w:framePr/>). doc2 emits framePr.w /
+        // framePr.h / framePr.x / framePr.y / framePr.hSpace / framePr.vSpace
+        // (twips) plus framePr.wrap / framePr.hAnchor / framePr.vAnchor
+        // (docx enum keywords). Each is optional — we only attach a
+        // FrameProperties child when at least one frame-* prop was set.
+        // SDK API: Width/X/Y/HorizontalSpace/VerticalSpace are StringValue,
+        // Height is UInt32Value, HorizontalPosition/VerticalPosition carry
+        // the anchor enums.
+        FrameProperties? frameProps = null;
+        FrameProperties EnsureFramePr() => frameProps ??= new FrameProperties();
+        if (properties.TryGetValue("framePr.w", out var fpW) || properties.TryGetValue("framepr.w", out fpW))
+            EnsureFramePr().Width = fpW;
+        if (properties.TryGetValue("framePr.h", out var fpH) || properties.TryGetValue("framepr.h", out fpH))
+            if (uint.TryParse(fpH, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var fhV))
+                EnsureFramePr().Height = fhV;
+        if (properties.TryGetValue("framePr.x", out var fpX) || properties.TryGetValue("framepr.x", out fpX))
+            EnsureFramePr().X = fpX;
+        if (properties.TryGetValue("framePr.y", out var fpY) || properties.TryGetValue("framepr.y", out fpY))
+            EnsureFramePr().Y = fpY;
+        if (properties.TryGetValue("framePr.hSpace", out var fpHS) || properties.TryGetValue("framepr.hspace", out fpHS))
+            EnsureFramePr().HorizontalSpace = fpHS;
+        if (properties.TryGetValue("framePr.vSpace", out var fpVS) || properties.TryGetValue("framepr.vspace", out fpVS))
+            EnsureFramePr().VerticalSpace = fpVS;
+        if (properties.TryGetValue("framePr.wrap", out var fpWrap) || properties.TryGetValue("framepr.wrap", out fpWrap))
+        {
+            EnsureFramePr().Wrap = fpWrap.ToLowerInvariant() switch
+            {
+                "auto"      => TextWrappingValues.Auto,
+                "around"    => TextWrappingValues.Around,
+                "none"      => TextWrappingValues.None,
+                "notbeside" => TextWrappingValues.NotBeside,
+                "through"   => TextWrappingValues.Through,
+                _ => TextWrappingValues.Auto,
+            };
+        }
+        if (properties.TryGetValue("framePr.hAnchor", out var fpHA) || properties.TryGetValue("framepr.hanchor", out fpHA))
+        {
+            EnsureFramePr().HorizontalPosition = fpHA.ToLowerInvariant() switch
+            {
+                "page"   => HorizontalAnchorValues.Page,
+                "margin" => HorizontalAnchorValues.Margin,
+                _ => HorizontalAnchorValues.Text,
+            };
+        }
+        if (properties.TryGetValue("framePr.vAnchor", out var fpVA) || properties.TryGetValue("framepr.vanchor", out fpVA))
+        {
+            EnsureFramePr().VerticalPosition = fpVA.ToLowerInvariant() switch
+            {
+                "page"   => VerticalAnchorValues.Page,
+                "margin" => VerticalAnchorValues.Margin,
+                _ => VerticalAnchorValues.Text,
+            };
+        }
+        if (frameProps != null)
+            pProps.FrameProperties = frameProps;
+
         // keepNext / keepLines / pageBreakBefore are <w:onOff>-typed: the
         // bare element means "true", and an explicit <w:keepNext w:val="0"/>
         // means "false" (and OVERRIDES a true inherited from a paragraph
@@ -803,6 +859,12 @@ public partial class WordHandler
             // kern was silently dropped on `add p kern=36` even though it
             // round-trips fine on `set r[N] kern=36`. Removed so kern reaches
             // ApplyRunFormatting on the bare-key fallback path below.
+            // v5.9: paragraph-level format-revision marker keys consumed
+            // by the pPrChange block at the end of AddParagraph.
+            "trackChange", "trackchange",
+            "trackChange.author", "trackchange.author",
+            "trackChange.date",   "trackchange.date",
+            "trackChange.id",     "trackchange.id",
         };
         foreach (var (key, value) in properties)
         {
@@ -851,6 +913,11 @@ public partial class WordHandler
             }
             if (key.StartsWith("pbdr", StringComparison.OrdinalIgnoreCase)) continue;
             if (!key.Contains('.') && bareConsumed.Contains(key)) continue;
+            // v5.9: trackChange.author / trackChange.date / trackChange.id —
+            // consumed by AddParagraph's pPrChange block at end-of-function.
+            if (key.StartsWith("trackChange.", StringComparison.OrdinalIgnoreCase)
+                || key.StartsWith("trackchange.", StringComparison.OrdinalIgnoreCase))
+                continue;
             if (!key.Contains('.'))
             {
                 // Bare run-level key (lang, bidi, kern, …) — try
@@ -993,6 +1060,35 @@ public partial class WordHandler
         if (paraRtl == false && pProps.GetFirstChild<BiDi>() == null && HasInheritedBidi(para))
         {
             pProps.BiDi = new BiDi { Val = new DocumentFormat.OpenXml.OnOffValue(false) };
+        }
+
+        // v5.9: paragraph-level trackChange=format → <w:pPrChange>.
+        // Mirrors the run-side rPrChange path in AddRun. .doc carries
+        // sprmPPropRMark (0xC63F); we stamp the marker with optional
+        // author/date/id and leave the inner pPr empty (no recoverable
+        // prior-property snapshot at v1).
+        if ((properties.TryGetValue("trackChange", out var pTcKind)
+             || properties.TryGetValue("trackchange", out pTcKind))
+            && pTcKind?.Trim().ToLowerInvariant() == "format")
+        {
+            string? pTcAuthor = null;
+            string? pTcDate = null;
+            string? pTcId = null;
+            properties.TryGetValue("trackChange.author", out pTcAuthor);
+            if (pTcAuthor == null) properties.TryGetValue("trackchange.author", out pTcAuthor);
+            properties.TryGetValue("trackChange.date", out pTcDate);
+            if (pTcDate == null) properties.TryGetValue("trackchange.date", out pTcDate);
+            properties.TryGetValue("trackChange.id", out pTcId);
+            if (pTcId == null) properties.TryGetValue("trackchange.id", out pTcId);
+            var pprChange = new ParagraphPropertiesChange();
+            if (!string.IsNullOrEmpty(pTcAuthor)) pprChange.Author = pTcAuthor;
+            if (!string.IsNullOrEmpty(pTcDate) && DateTime.TryParse(pTcDate, out var pTcDt))
+                pprChange.Date = pTcDt;
+            pprChange.Id = !string.IsNullOrEmpty(pTcId)
+                ? pTcId
+                : (GenerateParaId().GetHashCode() & 0x7FFFFFFF).ToString();
+            pprChange.AppendChild(new PreviousParagraphProperties());
+            pProps.AppendChild(pprChange);
         }
         return resultPath;
     }
@@ -1716,6 +1812,30 @@ public partial class WordHandler
         // dump→batch round-trip. The path computed above remains valid:
         // GetAllRuns walks Descendants<Run>() which descends into the
         // wrapper, so the run keeps its r[N] index.
+        // v5.9: trackChange=format → <w:rPrChange> inside the run's rPr.
+        // Carries author/date/id; the OLD rPr child is left empty (the
+        // .doc-side sprmCPropRMark fires without the prior property
+        // snapshot, so we just stamp the format-revision marker without
+        // a recoverable before-state).
+        if (trackChangeKind == "format")
+        {
+            var rPr = newRun.GetFirstChild<RunProperties>()
+                   ?? newRun.PrependChild(new RunProperties());
+            var rprChange = new RunPropertiesChange();
+            if (!string.IsNullOrEmpty(trackChangeAuthor))
+                rprChange.Author = trackChangeAuthor;
+            if (!string.IsNullOrEmpty(trackChangeDate)
+                && DateTime.TryParse(trackChangeDate, out var tcfDate))
+                rprChange.Date = tcfDate;
+            rprChange.Id = !string.IsNullOrEmpty(trackChangeId)
+                ? trackChangeId
+                : (GenerateParaId().GetHashCode() & 0x7FFFFFFF).ToString();
+            // Schema: w:rPrChange child of w:rPr; ECMA-376 §17.13.5.31.
+            // Empty inner rPr is schema-valid (means "no recorded prior
+            // property set" — minimal marker form).
+            rprChange.AppendChild(new RunProperties());
+            rPr.AppendChild(rprChange);
+        }
         if (trackChangeKind == "ins" || trackChangeKind == "del")
         {
             var parentEl = newRun.Parent;

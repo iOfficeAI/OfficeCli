@@ -27,8 +27,47 @@ public static class BlankDocCreator
                 CreatePowerPoint(path);
                 break;
             default:
-                throw new NotSupportedException($"Unsupported file type: {ext}. Supported: .docx, .xlsx, .pptx");
+                if (TryCreateViaPlugin(path, ext)) break;
+                throw new NotSupportedException($"Unsupported file type: {ext}. Supported: .docx, .xlsx, .pptx, or any extension served by an installed format-handler plugin that implements `create`.");
         }
+    }
+
+    /// <summary>
+    /// Delegate creation of an unknown extension to a registered format-handler
+    /// plugin, if one exists for that extension and exposes a `create &lt;path&gt;`
+    /// CLI subcommand. Returns <c>true</c> if a plugin was found and produced
+    /// the file successfully. Generic per docs/plugin-protocol.md — keeps
+    /// BlankDocCreator format-agnostic; any plugin that implements the
+    /// `create` subcommand on its executable participates.
+    /// </summary>
+    private static bool TryCreateViaPlugin(string path, string ext)
+    {
+        var plugin = OfficeCli.Core.Plugins.PluginRegistry.FindFor(
+            OfficeCli.Core.Plugins.PluginKind.FormatHandler, ext);
+        if (plugin is null) return false;
+        var psi = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = plugin.ExecutablePath,
+            ArgumentList = { "create", System.IO.Path.GetFullPath(path) },
+            UseShellExecute = false,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+        using var proc = System.Diagnostics.Process.Start(psi);
+        if (proc is null) return false;
+        var stderr = proc.StandardError.ReadToEnd();
+        proc.WaitForExit();
+        if (proc.ExitCode != 0)
+        {
+            // Treat unknown-subcommand exit-64 as "plugin doesn't implement
+            // create" — fall back to NotSupportedException so the user sees
+            // the same error they'd see without any plugin installed.
+            if (proc.ExitCode == 64) return false;
+            throw new OfficeCli.Core.CliException(
+                $"Format-handler plugin '{plugin.Manifest.Name}' failed to create {path}: {stderr.Trim()}")
+            { Code = "plugin_create_failed" };
+        }
+        return true;
     }
 
     private static void CreateExcel(string path)

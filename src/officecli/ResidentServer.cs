@@ -17,6 +17,14 @@ public class ResidentServer : IDisposable
     private readonly string _filePath;
     private readonly string _pipeName;
     private readonly bool _editable;
+    // Stderr captured during DocumentHandlerFactory.Open (i.e. while the
+    // constructor was building _handler). At that point there's no
+    // per-command Console.SetError scope, so warnings written by plugin
+    // invokers (e.g. "dump-reader produced no commands") would otherwise
+    // be swallowed by the un-drained resident-stderr pipe. Held until the
+    // first HandleRequest, which folds it into that command's stderr
+    // envelope and clears the buffer.
+    private string? _startupStderr;
     // Shutdown uses TWO independent CTSs so the ping pipe can outlive the
     // handler dispose. This establishes the critical invariant that
     // TryResident relies on:
@@ -113,7 +121,20 @@ public class ResidentServer : IDisposable
         _filePath = Path.GetFullPath(filePath);
         _pipeName = GetPipeName(_filePath);
         _editable = editable;
-        _handler = DocumentHandlerFactory.Open(_filePath, editable);
+
+        // Capture Console.Error during handler open so any warnings emitted
+        // by the dump-reader / format-handler open path (which run before
+        // any per-command stderr scope exists) are routed to the first
+        // command's reply envelope. Without this, plugin-side notices like
+        // "dump-reader produced no commands" disappear into the resident's
+        // own unread stderr pipe.
+        var startupErrSink = new StringWriter();
+        var origErr = Console.Error;
+        Console.SetError(startupErrSink);
+        try { _handler = DocumentHandlerFactory.Open(_filePath, editable); }
+        finally { Console.SetError(origErr); }
+        var captured = startupErrSink.ToString().TrimEnd('\r', '\n');
+        if (captured.Length > 0) _startupStderr = captured;
     }
 
     public static string GetPipeName(string filePath)
@@ -513,6 +534,17 @@ public class ResidentServer : IDisposable
             var origErr = Console.Error;
             Console.SetOut(stdoutWriter);
             Console.SetError(stderrWriter);
+
+            // Replay any stderr captured during the constructor's
+            // DocumentHandlerFactory.Open so plugin-side warnings (e.g.
+            // "dump-reader produced no commands") reach the user on the
+            // first command's reply. One-shot drain: subsequent commands
+            // see an empty buffer.
+            if (_startupStderr is not null)
+            {
+                Console.Error.WriteLine(_startupStderr);
+                _startupStderr = null;
+            }
 
             try
             {
@@ -927,6 +959,8 @@ public class ResidentServer : IDisposable
                 html = excelHandler.ViewAsHtml();
             else if (_handler is OfficeCli.Handlers.WordHandler wordHandler)
                 html = wordHandler.ViewAsHtml(pageFilter);
+            else if (_handler is OfficeCli.Core.Plugins.FormatHandlerProxy proxy)
+                html = proxy.ViewAsHtml(int.TryParse(pageFilter, out var pp) ? pp : (int?)null);
 
             if (html != null)
             {
@@ -1063,6 +1097,18 @@ public class ResidentServer : IDisposable
                 var svg = pptSvgHandler.ViewAsSvg(slideNum);
                 Console.Write(svg);
             }
+            else if (_handler is OfficeCli.Core.Plugins.FormatHandlerProxy svgProxy)
+            {
+                int? svgPage = null;
+                if (!string.IsNullOrEmpty(pageFilter)
+                    && int.TryParse(pageFilter.Split(',')[0].Split('-')[0].Trim(), out var sp))
+                    svgPage = sp;
+                var svg = svgProxy.ViewAsSvg(svgPage);
+                if (svg is null)
+                    Console.Error.WriteLine("SVG preview is not supported by the format-handler plugin.");
+                else
+                    Console.Write(svg);
+            }
             else
             {
                 Console.Error.WriteLine("SVG preview is only supported for .pptx files.");
@@ -1118,6 +1164,14 @@ public class ResidentServer : IDisposable
             {
                 if (_handler is OfficeCli.Handlers.WordHandler wordFormsHandler)
                     Console.WriteLine(wordFormsHandler.ViewAsFormsJson().ToJsonString(OutputFormatter.PublicJsonOptions));
+                else if (_handler is OfficeCli.Core.Plugins.FormatHandlerProxy formsProxy)
+                {
+                    var formsJson = formsProxy.ViewAsFormsJson();
+                    if (formsJson is null)
+                        Console.Error.WriteLine($"Forms view is not supported by the format-handler plugin.");
+                    else
+                        Console.WriteLine(formsJson.ToJsonString(OutputFormatter.PublicJsonOptions));
+                }
                 else
                     Console.Error.WriteLine("Forms view is only supported for .docx files.");
             }
@@ -1135,9 +1189,14 @@ public class ResidentServer : IDisposable
                     ? $"Pages: {pageCountValue}\n" + _handler.ViewAsStats()
                     : _handler.ViewAsStats(),
                 "issues" or "i" => OutputFormatter.FormatIssues(_handler.ViewAsIssues(issueType, limit), format),
-                "forms" or "f" => _handler is OfficeCli.Handlers.WordHandler wfh
-                    ? wfh.ViewAsForms()
-                    : "Forms view is only supported for .docx files.",
+                "forms" or "f" => _handler switch
+                {
+                    OfficeCli.Handlers.WordHandler wfh => wfh.ViewAsForms(),
+                    OfficeCli.Core.Plugins.FormatHandlerProxy fp
+                        => fp.ViewAsFormsJson()?.ToJsonString(OutputFormatter.PublicJsonOptions)
+                           ?? "Forms view is not supported by the format-handler plugin.",
+                    _ => "Forms view is only supported for .docx files."
+                },
                 _ => $"Unknown mode: {mode}. Available: text, annotated, outline, stats, issues, html, svg, screenshot, forms"
             };
             Console.WriteLine(output);
