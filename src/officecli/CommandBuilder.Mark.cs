@@ -21,7 +21,7 @@ static partial class CommandBuilder
     private static Command BuildMarkCommand(Option<bool> jsonOption)
     {
         var fileArg = new Argument<FileInfo>("file") { Description = "Office document path (.pptx, .xlsx, .docx)" };
-        var pathArg = new Argument<string>("path") { Description = "DOM path to the element to mark" };
+        var pathArg = new Argument<string>("path") { Description = "DOM path to the element to mark. The 'selected' pseudo-path still works but is discouraged: prefer `get selected` first, then `mark <path>` per path, so the target lives in the command line." };
         var propsOpt = new Option<string[]>("--prop")
         {
             Description = "Mark property: find=..., color=..., note=..., tofix=..., regex=true",
@@ -120,6 +120,11 @@ static partial class CommandBuilder
             // elements is conceptually N independent marks (one per element); a
             // single mark with N paths would need new wire-format plumbing and
             // make find/stale semantics ambiguous.
+            //
+            // mark is advisory (no OOXML write), so the silent-retarget hazard
+            // that makes `set selected` discouraged-by-default is milder here.
+            // See CommandBuilder.Set.cs `selected` branch for the full rationale
+            // before extending this pseudo-path to additional mutation commands.
             List<string> targetPaths;
             if (string.Equals(path, "selected", StringComparison.Ordinal))
             {
