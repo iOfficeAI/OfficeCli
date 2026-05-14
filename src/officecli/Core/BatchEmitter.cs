@@ -1111,34 +1111,7 @@ public static class BatchEmitter
     {
         var pNode = word.Get(sourcePath);
 
-        // Display-mode equations (<m:oMathPara>) surface in EmitBody's
-        // bodyNode.Children as type=paragraph, but a direct Get on the
-        // path returns type=equation with the LaTeX-ish formula in
-        // DocumentNode.Text. EmitParagraph would otherwise emit an empty
-        // `add p` and lose the entire formula. Route to typed
-        // `add /body --type equation` instead.
-        if (pNode.Type == "equation" && parentPath == "/body" && !autoPresent)
-        {
-            var mode = pNode.Format.TryGetValue("mode", out var m) ? m?.ToString() : "display";
-            var eqProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["mode"] = string.IsNullOrEmpty(mode) ? "display" : mode
-            };
-            if (!string.IsNullOrEmpty(pNode.Text))
-                eqProps["formula"] = pNode.Text!;
-            // BUG-DUMP19-02: forward block-equation alignment.
-            if (pNode.Format.TryGetValue("align", out var eqAlign)
-                && eqAlign != null && !string.IsNullOrEmpty(eqAlign.ToString()))
-                eqProps["align"] = eqAlign.ToString()!;
-            items.Add(new BatchItem
-            {
-                Command = "add",
-                Parent = "/body",
-                Type = "equation",
-                Props = eqProps
-            });
-            return;
-        }
+        if (TryEmitDisplayEquation(pNode, parentPath, autoPresent, items)) return;
 
         // Track source paraId -> target index BEFORE any early-return path
         // (section break, TOC, …). Comments anchored on a section-break or
@@ -1150,14 +1123,220 @@ public static class BatchEmitter
             ctx.ParaIdToTargetIdx[earlyParaId.ToString()!] = targetIndex;
         }
 
+        if (TryEmitInlineSectionBreak(pNode, parentPath, items, ctx)) return;
+        if (TryEmitTocParagraph(pNode, parentPath, items)) return;
+
+        var props = FilterEmittableProps(pNode.Format);
+        // BUG-DUMP26-01: numId/numLevel that came from style inheritance
+        // (ResolveNumPrFromStyle, no direct w:numPr on the paragraph) must
+        // not ride on `add p` — the style already supplies them, and emitting
+        // them would semantically promote inherited→explicit on replay.
+        // Mirrors the round-1 first-run hoist precedent for run-character
+        // props inherited from styles.
+        bool numInherited = pNode.Format.TryGetValue("numInherited", out var niVal)
+            && string.Equals(niVal?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
+        if (numInherited)
+        {
+            props.Remove("numId");
+            props.Remove("numLevel");
+            props.Remove("numFmt");
+            props.Remove("listStyle");
+            props.Remove("start");
+        }
+        // When a paragraph carries numId, the abstractNum/num pair is already
+        // in /numbering (raw-set wholesale by EmitNumberingRaw). Forwarding
+        // numFmt/listStyle/start to AddParagraph triggers ad-hoc
+        // numbering-definition creation in WordHandler.Add — Word allocates
+        // a fresh numId (1→9, 2→16, …) and the paragraph references the
+        // new one, orphaning the original abstract numbering's level rPr
+        // (color, bold, custom marker text). Drop those keys so the
+        // paragraph just attaches by numId+numLevel to the existing def.
+        if (props.ContainsKey("numId"))
+        {
+            props.Remove("numFmt");
+            props.Remove("listStyle");
+            props.Remove("start");
+        }
+        // Collapse non-TOC field chains (fldChar(begin) + instrText(" PAGE ")
+        // + fldChar(separate) + display run(s) + fldChar(end)) into a single
+        // synthetic "field" entry. Without this collapse, the subsequent
+        // `runs` filter sees only the cached display run and emits the field
+        // value as static text — PAGE/REF/SEQ/HYPERLINK/NUMPAGES degrade to
+        // their evaluated string and stop auto-updating (BUG-R2-05 / R2-1).
+        var fieldEntries = CollapseFieldChains(pNode.Children ?? new List<DocumentNode>());
+        // BUG-DUMP5-01/02: include break-typed children in the same ordered
+        // list as runs so document-order is preserved on emit.
+        var runs = fieldEntries
+            .Where(c => c.Type == "run" || c.Type == "r" || c.Type == "picture" || c.Type == "field" || c.Type == "ptab" || c.Type == "break"
+                || c.Type == "equation"
+                || c.Type == "tab"
+                || c.Type == "bookmark")
+            .ToList();
+        var breaks = runs.Where(c => c.Type == "break").ToList();
+        var bookmarks = (pNode.Children ?? new List<DocumentNode>())
+            .Where(c => c.Type == "bookmark")
+            .ToList();
+        var inlineSdts = (pNode.Children ?? new List<DocumentNode>())
+            .Where(c => c.Type == "sdt")
+            .ToList();
+
+        bool collapseSingleRun = ShouldCollapseSingleRun(runs, breaks.Count, bookmarks.Count, inlineSdts.Count);
+        pNode.Format.TryGetValue("tabs", out var pTabs);
+
+        if (collapseSingleRun)
+        {
+            if (runs.Count == 1)
+            {
+                var runProps = FilterEmittableProps(runs[0].Format);
+                foreach (var (k, v) in runProps)
+                {
+                    if (!props.ContainsKey(k)) props[k] = v;
+                }
+                if (!string.IsNullOrEmpty(runs[0].Text))
+                    props["text"] = runs[0].Text!;
+            }
+
+            if (autoPresent)
+            {
+                if (props.Count > 0)
+                {
+                    items.Add(new BatchItem
+                    {
+                        Command = "set",
+                        Path = $"{parentPath}/p[last()]",
+                        Props = props
+                    });
+                }
+            }
+            else
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "add",
+                    Parent = parentPath,
+                    Type = "p",
+                    Props = props.Count > 0 ? props : null
+                });
+            }
+            EmitTabStops($"{parentPath}/p[last()]", pTabs, items);
+            return;
+        }
+
+        // Multi-run paragraph: emit the paragraph empty first, then add each
+        // run as an explicit child. See BUG-DUMP-HOIST in
+        // StripRunCharacterPropsFromParagraph — for multi-run paragraphs the
+        // firstRun hoist would re-apply formatting to every sibling on
+        // replay, so strip run-level keys before emit.
+        StripRunCharacterPropsFromParagraph(props);
+        if (autoPresent)
+        {
+            if (props.Count > 0)
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "set",
+                    Path = $"{parentPath}/p[last()]",
+                    Props = props
+                });
+            }
+        }
+        else
+        {
+            items.Add(new BatchItem
+            {
+                Command = "add",
+                Parent = parentPath,
+                Type = "p",
+                Props = props.Count > 0 ? props : null
+            });
+        }
+
+        var paraTargetPath = $"{parentPath}/p[last()]";
+        EmitTabStops(paraTargetPath, pTabs, items);
+
+        // BUG-DUMP4-06: emit inline SdtRun children before the runs loop.
+        foreach (var sdt in inlineSdts)
+        {
+            var sdtProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var key in new[] { "type", "alias", "tag", "items", "format" })
+            {
+                if (sdt.Format.TryGetValue(key, out var v) && v != null)
+                {
+                    var s = v.ToString() ?? "";
+                    if (s.Length > 0) sdtProps[key] = s;
+                }
+            }
+            if (!string.IsNullOrEmpty(sdt.Text))
+                sdtProps["text"] = sdt.Text!;
+            items.Add(new BatchItem
+            {
+                Command = "add",
+                Parent = paraTargetPath,
+                Type = "sdt",
+                Props = sdtProps
+            });
+        }
+
+        // BUG-DUMP6-05: collapse N runs that share a hyperlink wrapper into
+        // one synthetic hyperlink-typed entry — see CoalesceHyperlinkRuns.
+        runs = CoalesceHyperlinkRuns(runs);
+        foreach (var run in runs)
+        {
+            if (TryEmitBookmarkRun(run, paraTargetPath, items, ctx)) continue;
+            if (TryEmitBreakRun(run, paraTargetPath, items)) continue;
+            if (TryEmitTabRun(run, paraTargetPath, items)) continue;
+            if (TryEmitPtabRun(run, paraTargetPath, items)) continue;
+            if (TryEmitEquationRun(run, paraTargetPath, items)) continue;
+            if (TryEmitFieldRun(run, paraTargetPath, items)) continue;
+            if (TryEmitPictureRun(word, run, paraTargetPath, parentPath, targetIndex, items, ctx)) continue;
+            if (TryEmitNoteRefRun(run, paraTargetPath, items, ctx)) continue;
+            EmitPlainOrHyperlinkRun(run, paraTargetPath, items);
+        }
+    }
+
+    // ── Extracted helpers (behavior unchanged from inline original) ──
+
+    private static bool TryEmitDisplayEquation(DocumentNode pNode, string parentPath, bool autoPresent, List<BatchItem> items)
+    {
+        // Display-mode equations (<m:oMathPara>) surface in EmitBody's
+        // bodyNode.Children as type=paragraph, but a direct Get on the
+        // path returns type=equation with the LaTeX-ish formula in
+        // DocumentNode.Text. EmitParagraph would otherwise emit an empty
+        // `add p` and lose the entire formula. Route to typed
+        // `add /body --type equation` instead.
+        if (pNode.Type != "equation" || parentPath != "/body" || autoPresent) return false;
+        var mode = pNode.Format.TryGetValue("mode", out var m) ? m?.ToString() : "display";
+        var eqProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["mode"] = string.IsNullOrEmpty(mode) ? "display" : mode
+        };
+        if (!string.IsNullOrEmpty(pNode.Text))
+            eqProps["formula"] = pNode.Text!;
+        // BUG-DUMP19-02: forward block-equation alignment.
+        if (pNode.Format.TryGetValue("align", out var eqAlign)
+            && eqAlign != null && !string.IsNullOrEmpty(eqAlign.ToString()))
+            eqProps["align"] = eqAlign.ToString()!;
+        items.Add(new BatchItem
+        {
+            Command = "add",
+            Parent = "/body",
+            Type = "equation",
+            Props = eqProps
+        });
+        return true;
+    }
+
+    private static bool TryEmitInlineSectionBreak(DocumentNode pNode, string parentPath, List<BatchItem> items, BodyEmitContext? ctx)
+    {
         // Inline section break: a paragraph carrying <w:sectPr> is the
         // OOXML representation of a mid-document section boundary.
         // AddSection on /body produces this same shape, so we emit
         // `add /body --type section` (which creates a fresh break paragraph)
         // rather than emitting a regular `add p`. The companion
         // sectionBreak.* keys map back to AddSection's prop vocabulary.
-        if (parentPath == "/body" &&
-            pNode.Format.TryGetValue("sectionBreak", out var breakKind) && breakKind != null)
+        if (parentPath != "/body" ||
+            !pNode.Format.TryGetValue("sectionBreak", out var breakKind) || breakKind == null)
+            return false;
         {
             var sectProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -1180,29 +1359,19 @@ public static class BatchEmitter
             });
             // BUG-DUMP4-04: a section-break paragraph can also carry visible
             // text runs (the carrier paragraph is just a regular paragraph
-            // with sectPr in its pPr). Without this re-emit, the early return
-            // above silently discards every run on the carrier. AddSection
-            // appends a fresh paragraph at /body/p[targetIndex]; emit each
-            // text-bearing run as `add r` against that paragraph.
+            // with sectPr in its pPr). AddSection appends a fresh paragraph
+            // at /body/p[targetIndex]; emit each text-bearing run as
+            // `add r` against that paragraph.
             var carrierRuns = (pNode.Children ?? new List<DocumentNode>())
                 .Where(c =>
                 {
-                    // BUG-DUMP7-11: inline w:sdt children of a section-break
-                    // carrier paragraph were excluded by the run-only filter
-                    // and silently dropped. Route through the same emit
-                    // loop; the typed dispatch below converts them to
-                    // `add sdt` rows just like the body-paragraph branch.
+                    // BUG-DUMP7-11: include inline w:sdt carrier children.
                     if (c.Type == "sdt") return true;
                     if (c.Type != "run" && c.Type != "r") return false;
-                    // BUG-DUMP5-08: footnote/endnote reference runs carry no
-                    // visible Text — they're empty <w:r> elements with
-                    // rStyle=FootnoteReference + <w:footnoteReference w:id=…/>.
-                    // The plain "non-empty Text" filter excluded them and the
-                    // footnote anchor on a section-break carrier paragraph
-                    // was silently dropped on dump. Include rStyle-bearing
-                    // note refs so the typed footnote-emit branch below sees
-                    // them.
                     if (!string.IsNullOrEmpty(c.Text)) return true;
+                    // BUG-DUMP5-08: include empty rStyle-bearing footnote /
+                    // endnote refs (their visible text comes via the typed
+                    // emit branch below, not from c.Text).
                     if (c.Format.TryGetValue("rStyle", out var rsv)
                         && rsv != null
                         && (string.Equals(rsv.ToString(), "FootnoteReference", StringComparison.OrdinalIgnoreCase)
@@ -1216,14 +1385,8 @@ public static class BatchEmitter
                 var carrierPath = $"/body/p[last()]";
                 foreach (var run in carrierRuns)
                 {
-                    // Dispatch footnote/endnote refs through the same typed
-                    // branch the multi-run paragraph path uses, so the
-                    // pre-resolved note body text rides along on a
-                    // `add footnote/endnote` row instead of a `add r`
-                    // (which has no consumer for `rStyle=FootnoteReference`
-                    // by itself and would lose the note entirely).
-                    // BUG-DUMP7-11: inline SDT — emit `add sdt` mirroring the
-                    // body-paragraph inline-SDT branch (same prop whitelist).
+                    // BUG-DUMP7-11: inline SDT carrier — same prop whitelist
+                    // as the body-paragraph inline-SDT branch.
                     if (run.Type == "sdt")
                     {
                         var sdtCarrierProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -1287,767 +1450,487 @@ public static class BatchEmitter
                     });
                 }
             }
-            return;
+            return true;
         }
+    }
 
+    private static bool TryEmitTocParagraph(DocumentNode pNode, string parentPath, List<BatchItem> items)
+    {
         // TOC field-bearing paragraph: a fldChar(begin) + instrText("TOC ...")
         // + fldChar(separate) + placeholder run + fldChar(end) chain. Get
         // exposes only the placeholder text on the parent paragraph, so
         // emitting a regular `add p text=...` would drop the field structure
         // entirely and Word would no longer auto-update the TOC on open.
-        // Detect the chain and emit a typed `add /body --type toc` instead;
-        // AddToc rebuilds the full fldChar wrapper with the same instruction.
-        if (parentPath == "/body" && pNode.Children != null)
+        if (parentPath != "/body" || pNode.Children == null) return false;
+        var instrChild = pNode.Children
+            .FirstOrDefault(c => c.Type == "instrText"
+                && (c.Format.TryGetValue("instruction", out var iv)
+                    && iv?.ToString()?.TrimStart().StartsWith("TOC", StringComparison.OrdinalIgnoreCase) == true));
+        if (instrChild == null) return false;
+        var instr = instrChild.Format["instruction"]!.ToString()!;
+        var tocProps = ParseTocInstruction(instr);
+        items.Add(new BatchItem
         {
-            var instrChild = pNode.Children
-                .FirstOrDefault(c => c.Type == "instrText"
-                    && (c.Format.TryGetValue("instruction", out var iv)
-                        && iv?.ToString()?.TrimStart().StartsWith("TOC", StringComparison.OrdinalIgnoreCase) == true));
-            if (instrChild != null)
-            {
-                var instr = instrChild.Format["instruction"]!.ToString()!;
-                var tocProps = ParseTocInstruction(instr);
-                items.Add(new BatchItem
-                {
-                    Command = "add",
-                    Parent = "/body",
-                    Type = "toc",
-                    Props = tocProps
-                });
-                return;
-            }
-        }
+            Command = "add",
+            Parent = "/body",
+            Type = "toc",
+            Props = tocProps
+        });
+        return true;
+    }
 
-        var props = FilterEmittableProps(pNode.Format);
-        // BUG-DUMP26-01: numId/numLevel that came from style inheritance
-        // (ResolveNumPrFromStyle, no direct w:numPr on the paragraph) must
-        // not ride on `add p` — the style already supplies them, and emitting
-        // them would semantically promote inherited→explicit on replay.
-        // Mirrors the round-1 first-run hoist precedent for run-character
-        // props inherited from styles.
-        bool numInherited = pNode.Format.TryGetValue("numInherited", out var niVal)
-            && string.Equals(niVal?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
-        if (numInherited)
-        {
-            props.Remove("numId");
-            props.Remove("numLevel");
-            props.Remove("numFmt");
-            props.Remove("listStyle");
-            props.Remove("start");
-        }
-        // When a paragraph carries numId, the abstractNum/num pair is already
-        // in /numbering (raw-set wholesale by EmitNumberingRaw). Forwarding
-        // numFmt/listStyle/start to AddParagraph triggers ad-hoc
-        // numbering-definition creation in WordHandler.Add — Word allocates
-        // a fresh numId (1→9, 2→16, …) and the paragraph references the
-        // new one, orphaning the original abstract numbering's level rPr
-        // (color, bold, custom marker text). Drop those keys so the
-        // paragraph just attaches by numId+numLevel to the existing def.
-        if (props.ContainsKey("numId"))
-        {
-            props.Remove("numFmt");
-            props.Remove("listStyle");
-            props.Remove("start");
-        }
-        // Collapse non-TOC field chains (fldChar(begin) + instrText(" PAGE ")
-        // + fldChar(separate) + display run(s) + fldChar(end)) into a single
-        // synthetic "field" entry. Without this collapse, the subsequent
-        // `runs` filter sees only the cached display run and emits the field
-        // value as static text — PAGE/REF/SEQ/HYPERLINK/NUMPAGES degrade to
-        // their evaluated string and stop auto-updating (BUG-R2-05 / R2-1).
-        var fieldEntries = CollapseFieldChains(pNode.Children ?? new List<DocumentNode>());
-        // BUG-DUMP5-01/02: include break-typed children in the same ordered
-        // list as runs so document-order is preserved on emit. Previously
-        // breaks were collected separately and emitted as a contiguous block
-        // BEFORE the runs loop, hoisting every <w:br/> to the front of its
-        // paragraph (e.g. textA + <br> + textB became <br> + textA + textB).
-        var runs = fieldEntries
-            .Where(c => c.Type == "run" || c.Type == "r" || c.Type == "picture" || c.Type == "field" || c.Type == "ptab" || c.Type == "break"
-                // BUG-DUMP7-03: inline <m:oMath> children surface as type=equation.
-                // Without inclusion the inline equation was dropped from the runs
-                // pipeline and `add equation mode=inline` was never emitted.
-                || c.Type == "equation"
-                // BUG-DUMP14-02: <w:r><w:tab/></w:r> surfaces as type="tab"
-                // with empty Text. Without inclusion the tab-only run was
-                // dropped from the runs pipeline and round-trip lost the tab.
-                || c.Type == "tab"
-                // BUG-DUMP25-01: BookmarkStart children carry intra-paragraph
-                // position relative to sibling runs. Including them in the
-                // unified runs list keeps DOM order on emit; the foreach loop
-                // below has a dedicated bookmark branch that mirrors the
-                // round-4 / round-10 standalone emit (with deferral support
-                // for cross-paragraph spans).
-                || c.Type == "bookmark")
-            .ToList();
-        var breaks = runs.Where(c => c.Type == "break").ToList();
-        // CONSISTENCY(bookmark-roundtrip): bookmarks are paragraph-level
-        // children (BookmarkStart) that Navigation surfaces as type="bookmark"
-        // with name/id in Format. Without an emit branch they were silently
-        // stripped, breaking REF/HYPERLINK targets on dump→batch round-trips.
-        var bookmarks = (pNode.Children ?? new List<DocumentNode>())
-            .Where(c => c.Type == "bookmark")
-            .ToList();
-        // BUG-DUMP4-06: inline SdtRun (content control) children. Navigation
-        // surfaces these as type="sdt" with alias/tag/type/items so AddSdt
-        // can rebuild the wrapper on replay.
-        var inlineSdts = (pNode.Children ?? new List<DocumentNode>())
-            .Where(c => c.Type == "sdt")
-            .ToList();
-
+    private static bool ShouldCollapseSingleRun(List<DocumentNode> runs, int breaksCount, int bookmarksCount, int inlineSdtsCount)
+    {
         // Single-run / no-run paragraph: collapse run formatting into the
         // paragraph's prop bag (the schema-reflection layer accepts run-level
         // keys on a paragraph and routes them through ApplyRunFormatting).
-        // Picture runs need their own typed `add picture` row, so the
-        // collapse only applies when the sole run is a regular text run.
-        // Break-only paragraphs (e.g. <w:p><w:r><w:br type=page/></w:r></w:p>)
-        // also fall out of collapse — they need an explicit `add pagebreak`
-        // child after the empty paragraph is created.
-        // A run carrying `url` (or `anchor`) was a <w:hyperlink>-wrapped
-        // run in source; collapsing it into a paragraph-level prop bag
-        // would drop the hyperlink wrapper because `add p` does not
-        // consume url/anchor. Force the multi-run path so the run gets
-        // re-emitted as `add hyperlink` below.
-        bool singleRunIsHyperlink = runs.Count == 1 &&
-            (runs[0].Format.ContainsKey("url") || runs[0].Format.ContainsKey("anchor")
-             // BUG-DUMP10-05: tooltip-only hyperlinks have neither url nor
-             // anchor; the `isHyperlink` sentinel is set by Navigation
-             // whenever the run's parent is a w:hyperlink so the wrapper
-             // survives dump→batch round-trip.
-             || runs[0].Format.ContainsKey("isHyperlink"));
-        // BUG-R4-FUZZ-2: when a paragraph's sole run is a footnote/endnote
-        // reference (rStyle=FootnoteReference / EndnoteReference), collapsing
-        // the run into the paragraph prop bag emits `add p props={rStyle=...}`
-        // and drops the typed `add footnote/endnote` row entirely (Add does
-        // not consume rStyle on a paragraph; the note text is lost). Force
-        // the multi-run path so the dedicated note-emit branch below fires.
-        // BUG-R6-6: w14 text effects (textOutline / textFill / w14shadow /
-        // w14glow / w14reflection) live on a run but AddParagraph's
-        // ApplyRunFormatting fallback has no case for them — collapsing
-        // the single run would route the keys to the paragraph prop bag
-        // and they'd surface as UNSUPPORTED on replay (effect lost).
-        // Force the multi-run path so the effects ride along on `add r`.
-        bool singleRunHasW14 = runs.Count == 1 &&
-            (runs[0].Format.ContainsKey("w14shadow")
-             || runs[0].Format.ContainsKey("textOutline")
-             || runs[0].Format.ContainsKey("textFill")
-             || runs[0].Format.ContainsKey("w14glow")
-             || runs[0].Format.ContainsKey("w14reflection")
-             // BUG-DUMP5-09: ligatures / numForm / numSpacing are run-level
-             // OpenType properties (FillUnknownChildProps surfaces them as
-             // bare keys). AddParagraph's ApplyRunFormatting fallback has
-             // no case for them — collapsing the single run would route
-             // them onto the paragraph prop bag and `add p ligatures=…`
-             // surfaces as UNSUPPORTED on replay. Force the multi-run
-             // path so the keys ride along on `add r`.
-             || runs[0].Format.ContainsKey("ligatures")
-             || runs[0].Format.ContainsKey("numForm")
-             || runs[0].Format.ContainsKey("numSpacing")
-             // BUG-DUMP5-10: trackChange wraps the run in <w:ins>/<w:del>;
-             // AddRun consumes it and rebuilds the wrapper, but
-             // AddParagraph has no equivalent path. Collapsing onto the
-             // paragraph would silently drop the attribution.
-             || runs[0].Format.ContainsKey("trackChange")
-             // BUG-DUMP7-01: w:sym runs carry a `sym=font:hex` key that only
-             // AddRun consumes (rebuilds SymbolChar). Collapsing onto the
-             // paragraph would drop the key (AddParagraph's run fallback has
-             // no case) and replay would emit a plain text run with the
-             // resolved Unicode codepoint in the wrong font (e.g. U+F0E0
-             // outside Wingdings is invisible).
-             || runs[0].Format.ContainsKey("sym"));
-        bool singleRunIsNoteRef = runs.Count == 1 &&
-            runs[0].Format.TryGetValue("rStyle", out var srStyle)
+        if (runs.Count > 1) return false;
+        if (breaksCount > 0 || bookmarksCount > 0 || inlineSdtsCount > 0) return false;
+        if (runs.Count == 0) return true;
+        var r = runs[0];
+        // Picture / ptab runs need their own typed `add` rows.
+        if (r.Type == "picture" || r.Type == "ptab") return false;
+        // BUG-DUMP6-05 / BUG-DUMP10-05: hyperlink-wrapped run (url, anchor,
+        // or tooltip-only via isHyperlink sentinel) must re-emit as
+        // `add hyperlink` — `add p` does not consume url/anchor.
+        if (r.Format.ContainsKey("url") || r.Format.ContainsKey("anchor")
+            || r.Format.ContainsKey("isHyperlink")) return false;
+        // BUG-FUZZ-2: footnote/endnote reference runs need the typed
+        // `add footnote/endnote` branch; AddParagraph doesn't consume rStyle.
+        if (r.Format.TryGetValue("rStyle", out var srStyle)
             && (string.Equals(srStyle?.ToString(), "FootnoteReference", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(srStyle?.ToString(), "EndnoteReference", StringComparison.OrdinalIgnoreCase));
-        // BUG-R7-05: a synthetic field run (from CollapseFieldChains) carries
-        // `instruction=PAGE` + `text="1"` — collapsing those onto the
-        // paragraph emits `set /footer[1]/p[1] instruction=PAGE text=1` which
-        // ApplyParagraphLevelProperty doesn't translate into an actual field
-        // chain (paragraph just becomes static text "1"). Force the multi-run
-        // path so the field run is re-emitted as `add field` and the chain
-        // is rebuilt on replay. Header parts hit this same code path; the
-        // bug surfaces in footers because header documents in earlier rounds
-        // happened to have multiple runs that already forced the multi-run
-        // branch.
-        bool singleRunIsField = runs.Count == 1 && runs[0].Type == "field";
-        // BUG-DUMP7-03: an inline equation child must emit `add equation`
-        // explicitly (collapsing the formula text onto `add p` would lose
-        // the OfficeMath structure entirely).
-        bool singleRunIsEquation = runs.Count == 1 && runs[0].Type == "equation";
-        bool collapseSingleRun = runs.Count <= 1 &&
-            !(runs.Count == 1 && runs[0].Type == "picture") &&
-            !(runs.Count == 1 && runs[0].Type == "ptab") &&
-            !singleRunIsHyperlink &&
-            !singleRunIsNoteRef &&
-            !singleRunHasW14 &&
-            !singleRunIsField &&
-            !singleRunIsEquation &&
-            breaks.Count == 0 &&
-            bookmarks.Count == 0 &&
-            inlineSdts.Count == 0;
-        // Pull paragraph-level tab stops out for per-stop `add tab` emit
-        // (FilterEmittableProps already drops the `tabs` scalar).
-        pNode.Format.TryGetValue("tabs", out var pTabs);
+                || string.Equals(srStyle?.ToString(), "EndnoteReference", StringComparison.OrdinalIgnoreCase)))
+            return false;
+        // BUG-W14-EFFECTS / BUG-DUMP5-09 / 7-01 / 5-10: run-level w14 effects /
+        // OpenType properties / sym / trackChange — AddParagraph's
+        // ApplyRunFormatting fallback has no cases for these; they'd
+        // surface as UNSUPPORTED on replay.
+        if (r.Format.ContainsKey("w14shadow")
+            || r.Format.ContainsKey("textOutline")
+            || r.Format.ContainsKey("textFill")
+            || r.Format.ContainsKey("w14glow")
+            || r.Format.ContainsKey("w14reflection")
+            || r.Format.ContainsKey("ligatures")
+            || r.Format.ContainsKey("numForm")
+            || r.Format.ContainsKey("numSpacing")
+            || r.Format.ContainsKey("trackChange")
+            || r.Format.ContainsKey("sym")) return false;
+        // BUG-FIELD-COLLAPSE: a synthetic field run carries `instruction=…` —
+        // collapse would lose the field chain on replay.
+        if (r.Type == "field") return false;
+        // BUG-DUMP7-03: inline equation must emit `add equation` explicitly.
+        if (r.Type == "equation") return false;
+        return true;
+    }
 
-        if (collapseSingleRun)
+    private static bool TryEmitBookmarkRun(DocumentNode run, string paraTargetPath, List<BatchItem> items, BodyEmitContext? ctx)
+    {
+        // BUG-DUMP25-01: bookmark child emitted in DOM order so a
+        // BookmarkStart between runs survives round-trip at its original
+        // intra-paragraph offset. Deferred bookmarks (endPara=true) are
+        // pushed onto ctx.DeferredBookmarks so the End sibling can land in
+        // a downstream paragraph.
+        if (run.Type != "bookmark") return false;
+        var bmProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (run.Format.TryGetValue("name", out var bmName) && bmName != null)
         {
-            if (runs.Count == 1)
+            var s = bmName.ToString();
+            if (!string.IsNullOrEmpty(s)) bmProps["name"] = s;
+        }
+        if (bmProps.Count == 0) return true; // skip unnamed/anonymous bookmarks
+        bool deferred = false;
+        if (run.Format.TryGetValue("endPara", out var bmEnd) && bmEnd != null)
+        {
+            var s = bmEnd.ToString();
+            if (!string.IsNullOrEmpty(s) && s != "0")
             {
-                var runProps = FilterEmittableProps(runs[0].Format);
-                foreach (var (k, v) in runProps)
-                {
-                    if (!props.ContainsKey(k)) props[k] = v;
-                }
-                if (!string.IsNullOrEmpty(runs[0].Text))
-                    props["text"] = runs[0].Text!;
+                bmProps["endPara"] = s;
+                deferred = true;
             }
+        }
+        var bmItem = new BatchItem
+        {
+            Command = "add",
+            Parent = paraTargetPath,
+            Type = "bookmark",
+            Props = bmProps
+        };
+        if (deferred && ctx != null)
+            ctx.DeferredBookmarks.Add(bmItem);
+        else
+            items.Add(bmItem);
+        return true;
+    }
 
-            if (autoPresent)
+    private static bool TryEmitBreakRun(DocumentNode run, string paraTargetPath, List<BatchItem> items)
+    {
+        // BUG-DUMP5-01/02: a soft <w:br/> with NO type attribute is a line
+        // break, not a page break — fall back to type=line. Emitted inline
+        // from the unified runs loop so each break stays at its source
+        // position instead of being hoisted to the front of the paragraph.
+        if (run.Type != "break") return false;
+        var breakType = run.Format.TryGetValue("breakType", out var bt) ? bt?.ToString() : null;
+        items.Add(new BatchItem
+        {
+            Command = "add",
+            Parent = paraTargetPath,
+            Type = "pagebreak",
+            Props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
-                // Replace the auto-created paragraph in place — only push the
-                // set when there is something to apply, otherwise the empty
-                // skeleton is already correct.
-                if (props.Count > 0)
+                ["type"] = string.IsNullOrEmpty(breakType) ? "line" : breakType!
+            }
+        });
+        return true;
+    }
+
+    private static bool TryEmitTabRun(DocumentNode run, string paraTargetPath, List<BatchItem> items)
+    {
+        // BUG-DUMP14-02: tab-only run (<w:r><w:tab/></w:r>) surfaces as
+        // type="tab" with empty Text. AddText splits "\t" into TabChar, so
+        // emit `add r text="\t"` to round-trip the tab character.
+        if (run.Type != "tab") return false;
+        var tabParent = ResolveHyperlinkParent(run, paraTargetPath, items);
+        items.Add(new BatchItem
+        {
+            Command = "add",
+            Parent = tabParent,
+            Type = "r",
+            Props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["text"] = "\t"
+            }
+        });
+        return true;
+    }
+
+    private static bool TryEmitPtabRun(DocumentNode run, string paraTargetPath, List<BatchItem> items)
+    {
+        // BUG-PTAB: ptab (positional tab) — Navigation surfaces its own run
+        // type with align/relativeTo/leader on Format. Without an explicit
+        // emit branch the runs filter would drop it and round-trip would
+        // silently lose right-align/header-style tabs.
+        if (run.Type != "ptab") return false;
+        var ptabProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (run.Format.TryGetValue("align", out var pAlign) && pAlign != null)
+            ptabProps["alignment"] = pAlign.ToString() ?? "";
+        if (run.Format.TryGetValue("relativeTo", out var pRel) && pRel != null)
+            ptabProps["relativeTo"] = pRel.ToString() ?? "";
+        if (run.Format.TryGetValue("leader", out var pLead) && pLead != null)
+            ptabProps["leader"] = pLead.ToString() ?? "";
+        var ptabParent = ResolveHyperlinkParent(run, paraTargetPath, items);
+        items.Add(new BatchItem
+        {
+            Command = "add",
+            Parent = ptabParent,
+            Type = "ptab",
+            Props = ptabProps.Count > 0 ? ptabProps : null
+        });
+        return true;
+    }
+
+    private static bool TryEmitEquationRun(DocumentNode run, string paraTargetPath, List<BatchItem> items)
+    {
+        // BUG-DUMP7-03: inline <m:oMath> as paragraph child. Get surfaces it
+        // as type="equation" with mode=inline and the LaTeX-ish formula in
+        // Text. AddEquation accepts a paragraph parent for inline mode.
+        // BUG-DUMP15-04: m:oMath inside w:hyperlink surfaces with a
+        // hyperlink-scoped path (.../p[N]/hyperlink[K]/equation[M]). Strip
+        // the trailing /equation[M] segment so the emitted Parent places the
+        // equation INSIDE the hyperlink on replay.
+        if (run.Type != "equation") return false;
+        var eqMode = run.Format.TryGetValue("mode", out var emv) ? emv?.ToString() : "inline";
+        var eqProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["mode"] = string.IsNullOrEmpty(eqMode) ? "inline" : eqMode!
+        };
+        // Always emit `formula` (even when empty); ToLatex may legitimately
+        // return "" for minimal m:oMath.
+        eqProps["formula"] = run.Text ?? "";
+        var eqParent = paraTargetPath;
+        if (!string.IsNullOrEmpty(run.Path))
+        {
+            var idxEq = run.Path.LastIndexOf("/equation[", StringComparison.Ordinal);
+            if (idxEq > 0)
+            {
+                var derived = run.Path.Substring(0, idxEq);
+                if (derived.Contains("/hyperlink["))
+                    eqParent = derived;
+            }
+        }
+        items.Add(new BatchItem
+        {
+            Command = "add",
+            Parent = eqParent,
+            Type = "equation",
+            Props = eqProps
+        });
+        return true;
+    }
+
+    private static bool TryEmitFieldRun(DocumentNode run, string paraTargetPath, List<BatchItem> items)
+    {
+        // Synthetic field entry from CollapseFieldChains. Format carries
+        // `instruction` (raw fldSimple/instrText) and Text holds the cached
+        // display value. AddField parses the instruction and rebuilds the
+        // fldChar chain on replay.
+        // BUG-DUMP18-02: w:fldSimple / fldChar-chain field inside w:hyperlink
+        // should replay INSIDE the hyperlink — but only when a prior
+        // `add hyperlink` row actually landed at the target paragraph
+        // (BUG-DUMP9-03 fldSimple-only hyperlinks never surface a hyperlink
+        // row, and routing the field there would fail path lookup on replay).
+        if (run.Type != "field") return false;
+        var instr = run.Format.TryGetValue("instruction", out var iv)
+            ? iv?.ToString() ?? "" : "";
+        var fieldProps = BuildFieldAddProps(instr, run.Text ?? "");
+        if (fieldProps != null
+            && run.Format.TryGetValue("_noFieldSeparator", out var nfs)
+            && nfs is bool nfsB && nfsB)
+        {
+            fieldProps["noSeparator"] = "true";
+        }
+        var fldParent = paraTargetPath;
+        string? candidateHlParent = null;
+        if (!string.IsNullOrEmpty(run.Path))
+        {
+            var idxFld = run.Path.LastIndexOf("/field[", StringComparison.Ordinal);
+            if (idxFld > 0)
+            {
+                var derived = run.Path.Substring(0, idxFld);
+                if (derived.Contains("/hyperlink["))
+                    candidateHlParent = derived;
+            }
+        }
+        // fldChar-chain fields surface with a flat /…/r[N] path; the
+        // hyperlink hint is in Format._hyperlinkParent.
+        if (candidateHlParent == null
+            && run.Format.TryGetValue("_hyperlinkParent", out var fhlpObj)
+            && fhlpObj != null)
+        {
+            var hint = fhlpObj.ToString();
+            if (!string.IsNullOrEmpty(hint)) candidateHlParent = hint;
+        }
+        if (candidateHlParent != null)
+        {
+            // Re-base the candidate path onto paraTargetPath and verify a
+            // prior `add hyperlink` row landed under that same paragraph.
+            const string hlMarker = "/hyperlink[";
+            var hlIdxStart = candidateHlParent.LastIndexOf(hlMarker, StringComparison.Ordinal);
+            if (hlIdxStart > 0)
+            {
+                var hlEnd = candidateHlParent.IndexOf(']', hlIdxStart);
+                if (hlEnd > hlIdxStart)
                 {
-                    items.Add(new BatchItem
+                    var kStr = candidateHlParent.Substring(hlIdxStart + hlMarker.Length,
+                        hlEnd - hlIdxStart - hlMarker.Length);
+                    if (int.TryParse(kStr, out var kIdx))
                     {
-                        Command = "set",
-                        Path = $"{parentPath}/p[last()]",
-                        Props = props
-                    });
+                        var rebased = paraTargetPath
+                            + candidateHlParent.Substring(hlIdxStart);
+                        int emittedHls = items.Count(it => it.Type == "hyperlink"
+                            && string.Equals(it.Parent, paraTargetPath, StringComparison.Ordinal));
+                        if (emittedHls >= kIdx)
+                            fldParent = rebased;
+                    }
                 }
             }
-            else
+        }
+        if (fieldProps != null)
+        {
+            items.Add(new BatchItem
+            {
+                Command = "add",
+                Parent = fldParent,
+                Type = "field",
+                Props = fieldProps
+            });
+        }
+        else if (!string.IsNullOrEmpty(run.Text))
+        {
+            // Unparseable instruction — fall back to plain text so the
+            // paragraph still renders the cached value rather than going empty.
+            items.Add(new BatchItem
+            {
+                Command = "add",
+                Parent = fldParent,
+                Type = "r",
+                Props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["text"] = run.Text! }
+            });
+        }
+        return true;
+    }
+
+    private static bool TryEmitPictureRun(WordHandler word, DocumentNode run, string paraTargetPath, string parentPath, int targetIndex, List<BatchItem> items, BodyEmitContext? ctx)
+    {
+        // Drawing-bearing runs surface as type="picture" regardless of
+        // whether the Drawing wraps an image (Blip) or a chart (c:chart).
+        // Try the image path first; if no embedded image part the run is a
+        // chart anchor — pull the next pre-resolved ChartSpec and emit a
+        // typed `add chart` row.
+        if (run.Type != "picture") return false;
+        var binary = word.GetImageBinary(run.Path);
+        if (binary.HasValue)
+        {
+            var (bytes, contentType) = binary.Value;
+            var dataUri = $"data:{contentType};base64,{Convert.ToBase64String(bytes)}";
+            var picProps = FilterEmittableProps(run.Format);
+            picProps.Remove("id");
+            picProps.Remove("contentType");
+            picProps.Remove("fileSize");
+            picProps["src"] = dataUri;
+            items.Add(new BatchItem
+            {
+                Command = "add",
+                Parent = paraTargetPath,
+                Type = "picture",
+                Props = picProps
+            });
+            return true;
+        }
+
+        // Only consume a ChartSpec if the run is genuinely a chart. Picture-
+        // typed runs that aren't images can also be background images, OLE
+        // objects, SmartArt, watermark anchors etc — falling through
+        // unconditionally would misalign chart positions.
+        if (ctx != null && word.IsChartRun(run.Path)
+            && ctx.ChartCursor.Index < ctx.ChartSpecs.Count)
+        {
+            var spec = ctx.ChartSpecs[ctx.ChartCursor.Index];
+            ctx.ChartCursor.Index++;
+            var chartProps = BuildChartProps(spec);
+            items.Add(new BatchItem
+            {
+                Command = "add",
+                Parent = paraTargetPath,
+                Type = "chart",
+                Props = chartProps
+            });
+            return true;
+        }
+        // Drawing without image part and not a chart — most likely a wps
+        // shape. No typed Add path exists yet, but the XML is self-contained
+        // (no rId/embed back-references) so round-trip via raw-set append is
+        // safe. Targets the already-created paragraph by xpath positional
+        // index. Caveats: drawings with embedded image references would also
+        // land here and silently lose their image part — acceptable v0.5
+        // lossy mode.
+        var rawXml = word.GetElementXml(run.Path);
+        if (!string.IsNullOrEmpty(rawXml) &&
+            parentPath == "/body" &&
+            !rawXml.Contains("r:embed") && !rawXml.Contains("r:id"))
+        {
+            items.Add(new BatchItem
+            {
+                Command = "raw-set",
+                Part = "/document",
+                Xpath = $"/w:document/w:body/w:p[{targetIndex}]",
+                Action = "append",
+                Xml = rawXml
+            });
+        }
+        return true;
+    }
+
+    private static bool TryEmitNoteRefRun(DocumentNode run, string paraTargetPath, List<BatchItem> items, BodyEmitContext? ctx)
+    {
+        // Footnote/endnote reference runs are empty <w:r> elements with
+        // rStyle = FootnoteReference / EndnoteReference. Emit them as a
+        // typed footnote/endnote add anchored on the host paragraph and
+        // pull the body text from the pre-resolved ordered list — see
+        // BodyEmitContext for the document-order assumption.
+        if (ctx == null) return false;
+        var rStyle = run.Format.TryGetValue("rStyle", out var rs) ? rs?.ToString() : null;
+        if (rStyle == "FootnoteReference")
+        {
+            var noteText = ctx.FootnoteCursor.Index < ctx.FootnoteTexts.Count
+                ? ctx.FootnoteTexts[ctx.FootnoteCursor.Index]
+                : "";
+            ctx.FootnoteCursor.Index++;
+            items.Add(new BatchItem
+            {
+                Command = "add",
+                Parent = paraTargetPath,
+                Type = "footnote",
+                Props = new() { ["text"] = noteText }
+            });
+            return true;
+        }
+        if (rStyle == "EndnoteReference")
+        {
+            var noteText = ctx.EndnoteCursor.Index < ctx.EndnoteTexts.Count
+                ? ctx.EndnoteTexts[ctx.EndnoteCursor.Index]
+                : "";
+            ctx.EndnoteCursor.Index++;
+            items.Add(new BatchItem
+            {
+                Command = "add",
+                Parent = paraTargetPath,
+                Type = "endnote",
+                Props = new() { ["text"] = noteText }
+            });
+            return true;
+        }
+        return false;
+    }
+
+    private static void EmitPlainOrHyperlinkRun(DocumentNode run, string paraTargetPath, List<BatchItem> items)
+    {
+        var rProps = FilterEmittableProps(run.Format);
+        if (!string.IsNullOrEmpty(run.Text))
+            rProps["text"] = run.Text!;
+
+        // Hyperlink-wrapped run: Get flattens a <w:hyperlink>'s child run
+        // into a regular run-typed node but copies the resolved URL onto
+        // Format["url"]. AddRun does not consume `url` — emitting type="r"
+        // would silently drop the hyperlink wrapper. Re-emit as a typed
+        // `add hyperlink` so the <w:hyperlink>+rel-relationship round-trip
+        // rebuilds correctly.
+        // CONSISTENCY(docx-hyperlink-canonical-url): canonical key is `url`
+        // on both Get readback and Add input.
+        if (rProps.ContainsKey("url") || rProps.ContainsKey("anchor")
+            || rProps.ContainsKey("isHyperlink"))
+        {
+            // AddHyperlink writes its own color/underline defaults from theme;
+            // drop the inferred `color: hyperlink` / `underline: single` Get
+            // echoes back so we don't override those defaults.
+            if (rProps.TryGetValue("color", out var hlColor)
+                && string.Equals(hlColor, "hyperlink", StringComparison.OrdinalIgnoreCase))
+                rProps.Remove("color");
+            if (rProps.TryGetValue("underline", out var hlUl)
+                && string.Equals(hlUl, "single", StringComparison.OrdinalIgnoreCase))
+                rProps.Remove("underline");
+            rProps.Remove("isHyperlink");
+            // Bare <w:hyperlink> wrapper with no url/anchor/tooltip/tgtFrame
+            // /history carries no round-trippable property — AddHyperlink
+            // would reject it. Fall through and emit as a plain run.
+            if (!rProps.ContainsKey("url") && !rProps.ContainsKey("anchor")
+                && !rProps.ContainsKey("tooltip") && !rProps.ContainsKey("tgtFrame")
+                && !rProps.ContainsKey("tgtframe") && !rProps.ContainsKey("history"))
             {
                 items.Add(new BatchItem
                 {
                     Command = "add",
-                    Parent = parentPath,
-                    Type = "p",
-                    Props = props.Count > 0 ? props : null
+                    Parent = paraTargetPath,
+                    Type = "r",
+                    Props = rProps.Count > 0 ? rProps : null
                 });
+                return;
             }
-            EmitTabStops($"{parentPath}/p[last()]", pTabs, items);
+            items.Add(new BatchItem
+            {
+                Command = "add",
+                Parent = paraTargetPath,
+                Type = "hyperlink",
+                Props = rProps,
+            });
             return;
         }
-
-        // Multi-run paragraph: emit/set the paragraph empty first, then add
-        // each run as an explicit child.
-        //
-        // BUG-DUMP-HOIST: WordHandler surfaces the first run's RunProperties on
-        // the paragraph node's Format (Navigation.cs ~1352, mirrors PPTX's
-        // shape-level first-run hoist). For *single-run* paragraphs this is
-        // load-bearing — `collapseSingleRun` above relies on it to fold the
-        // run into `add p`. For *multi-run* paragraphs it is wrong: the
-        // firstRun's bold/color/size/font/etc. would ride on `add p`, which
-        // re-applies them to pPr/rPr on replay and causes every plain sibling
-        // run to inherit the first run's formatting. Strip run-level character
-        // keys from the paragraph prop bag here — each run gets its own
-        // `add r` below carrying its real props.
-        StripRunCharacterPropsFromParagraph(props);
-        if (autoPresent)
+        items.Add(new BatchItem
         {
-            if (props.Count > 0)
-            {
-                items.Add(new BatchItem
-                {
-                    Command = "set",
-                    Path = $"{parentPath}/p[last()]",
-                    Props = props
-                });
-            }
-        }
-        else
-        {
-            items.Add(new BatchItem
-            {
-                Command = "add",
-                Parent = parentPath,
-                Type = "p",
-                Props = props.Count > 0 ? props : null
-            });
-        }
-
-        var paraTargetPath = $"{parentPath}/p[last()]";
-        EmitTabStops(paraTargetPath, pTabs, items);
-
-        // BUG-DUMP25-01: bookmarks now emit inline from the runs loop below
-        // so their intra-paragraph DOM position relative to sibling runs is
-        // preserved on round-trip. See the `if (run.Type == "bookmark")`
-        // branch after CoalesceHyperlinkRuns.
-
-        // BUG-DUMP4-06: emit inline SdtRun children. Mirror EmitSdt's whitelist
-        // — AddSdt consumes type/alias/tag/items/format and the visible text.
-        foreach (var sdt in inlineSdts)
-        {
-            var sdtProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var key in new[] { "type", "alias", "tag", "items", "format" })
-            {
-                if (sdt.Format.TryGetValue(key, out var v) && v != null)
-                {
-                    var s = v.ToString() ?? "";
-                    if (s.Length > 0) sdtProps[key] = s;
-                }
-            }
-            if (!string.IsNullOrEmpty(sdt.Text))
-                sdtProps["text"] = sdt.Text!;
-            items.Add(new BatchItem
-            {
-                Command = "add",
-                Parent = paraTargetPath,
-                Type = "sdt",
-                Props = sdtProps
-            });
-        }
-
-        // BUG-DUMP6-05: a single <w:hyperlink> wrapping N runs surfaces as N
-        // sibling DocumentNodes each carrying the same url/anchor on Format
-        // (Navigation flattens the wrapper). Without coalescing, the loop
-        // below emits N separate `add hyperlink` rows — replay rebuilds N
-        // independent <w:hyperlink> elements, structurally splitting one
-        // hyperlink into many. Group consecutive runs sharing the same
-        // url/anchor into a single synthetic hyperlink-typed entry whose
-        // Text is the concatenated run text. AddHyperlink only consumes
-        // a flat `text` prop, so per-run formatting (bold/italic on a
-        // sub-segment) is lost — accepted v0.5 trade-off, structurally
-        // correct round-trip beats sub-run formatting fidelity.
-        runs = CoalesceHyperlinkRuns(runs);
-        foreach (var run in runs)
-        {
-            // Break run (page / column / textWrapping a.k.a. "line") — emitted
-            // inline so document order is preserved relative to surrounding
-            // text runs. BUG-DUMP5-01: a soft <w:br/> with NO type attribute
-            // is a line break, not a page break — fall back to type=line, not
-            // type=page. AddBreak's "type" prop accepts page / column / line
-            // / textwrapping. BUG-DUMP5-02: emitting from the unified runs
-            // loop keeps each break at its source position instead of hoisting
-            // every break to the front of the paragraph.
-            // BUG-DUMP25-01: bookmark child emitted in DOM order so a
-            // BookmarkStart between runs survives round-trip at its
-            // original intra-paragraph offset. Mirrors the round-4 /
-            // round-10 emit logic (props=name[,endPara]; deferred
-            // bookmarks pushed onto ctx.DeferredBookmarks so the End
-            // sibling can land in a downstream paragraph).
-            if (run.Type == "bookmark")
-            {
-                var bmProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                if (run.Format.TryGetValue("name", out var bmName) && bmName != null)
-                {
-                    var s = bmName.ToString();
-                    if (!string.IsNullOrEmpty(s)) bmProps["name"] = s;
-                }
-                if (bmProps.Count == 0) continue; // skip unnamed/anonymous bookmarks
-                bool deferred = false;
-                if (run.Format.TryGetValue("endPara", out var bmEnd) && bmEnd != null)
-                {
-                    var s = bmEnd.ToString();
-                    if (!string.IsNullOrEmpty(s) && s != "0")
-                    {
-                        bmProps["endPara"] = s;
-                        deferred = true;
-                    }
-                }
-                var bmItem = new BatchItem
-                {
-                    Command = "add",
-                    Parent = paraTargetPath,
-                    Type = "bookmark",
-                    Props = bmProps
-                };
-                if (deferred && ctx != null)
-                    ctx.DeferredBookmarks.Add(bmItem);
-                else
-                    items.Add(bmItem);
-                continue;
-            }
-
-            if (run.Type == "break")
-            {
-                var breakType = run.Format.TryGetValue("breakType", out var bt) ? bt?.ToString() : null;
-                items.Add(new BatchItem
-                {
-                    Command = "add",
-                    Parent = paraTargetPath,
-                    Type = "pagebreak",
-                    Props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                    {
-                        ["type"] = string.IsNullOrEmpty(breakType) ? "line" : breakType!
-                    }
-                });
-                continue;
-            }
-
-
-            // BUG-DUMP14-02: tab-only run (<w:r><w:tab/></w:r>) surfaces as
-            // type="tab" with empty Text. AddText splits "\t" into TabChar,
-            // so emit `add r text="\t"` to round-trip the tab character.
-            if (run.Type == "tab")
-            {
-                var tabParent = ResolveHyperlinkParent(run, paraTargetPath, items);
-                items.Add(new BatchItem
-                {
-                    Command = "add",
-                    Parent = tabParent,
-                    Type = "r",
-                    Props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                    {
-                        ["text"] = "\t"
-                    }
-                });
-                continue;
-            }
-
-            // Positional tab — Navigation surfaces ptab as its own run type
-            // with align/relativeTo/leader on Format. Without an explicit
-            // emit branch the runs filter would drop it (BUG-R6-4) and the
-            // round-trip would silently lose right-align/header-style tabs.
-            if (run.Type == "ptab")
-            {
-                var ptabProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                if (run.Format.TryGetValue("align", out var pAlign) && pAlign != null)
-                    ptabProps["alignment"] = pAlign.ToString() ?? "";
-                if (run.Format.TryGetValue("relativeTo", out var pRel) && pRel != null)
-                    ptabProps["relativeTo"] = pRel.ToString() ?? "";
-                if (run.Format.TryGetValue("leader", out var pLead) && pLead != null)
-                    ptabProps["leader"] = pLead.ToString() ?? "";
-                var ptabParent = ResolveHyperlinkParent(run, paraTargetPath, items);
-                items.Add(new BatchItem
-                {
-                    Command = "add",
-                    Parent = ptabParent,
-                    Type = "ptab",
-                    Props = ptabProps.Count > 0 ? ptabProps : null
-                });
-                continue;
-            }
-
-            // BUG-DUMP7-03: inline <m:oMath> as paragraph child. Get surfaces
-            // it as type="equation" with mode=inline and the LaTeX-ish formula
-            // in Text. AddEquation accepts a paragraph parent for inline mode.
-            if (run.Type == "equation")
-            {
-                var eqMode = run.Format.TryGetValue("mode", out var emv) ? emv?.ToString() : "inline";
-                var eqProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["mode"] = string.IsNullOrEmpty(eqMode) ? "inline" : eqMode!
-                };
-                // Always emit `formula` (even when empty) so replay's
-                // AddEquation has the required key. ToLatex may legitimately
-                // return "" for minimal m:oMath; Navigation falls back to
-                // element.InnerText, which can also be empty.
-                eqProps["formula"] = run.Text ?? "";
-                // BUG-DUMP15-04: m:oMath inside w:hyperlink surfaces from
-                // Navigation with a hyperlink-scoped path (.../p[N]/hyperlink[K]/equation[M]).
-                // Strip the trailing /equation[M] segment so the emitted
-                // BatchItem.Parent places the equation INSIDE the hyperlink
-                // on replay, rather than next to it under the paragraph.
-                var eqParent = paraTargetPath;
-                if (!string.IsNullOrEmpty(run.Path))
-                {
-                    var idxEq = run.Path.LastIndexOf("/equation[", StringComparison.Ordinal);
-                    if (idxEq > 0)
-                    {
-                        var derived = run.Path.Substring(0, idxEq);
-                        if (derived.Contains("/hyperlink["))
-                            eqParent = derived;
-                    }
-                }
-                items.Add(new BatchItem
-                {
-                    Command = "add",
-                    Parent = eqParent,
-                    Type = "equation",
-                    Props = eqProps
-                });
-                continue;
-            }
-
-            // Synthetic field entry from CollapseFieldChains. Format carries
-            // `instruction` (the raw fldSimple/instrText string) and Text holds
-            // the cached display value. AddField parses the instruction code
-            // and rebuilds the fldChar chain on replay.
-            if (run.Type == "field")
-            {
-                var instr = run.Format.TryGetValue("instruction", out var iv)
-                    ? iv?.ToString() ?? "" : "";
-                var fieldProps = BuildFieldAddProps(instr, run.Text ?? "");
-                // Pass through the no-separator marker so AddField writes the
-                // begin+instr+end shape instead of stamping a default cached
-                // placeholder. CollapseFieldChains set this when source had
-                // no <w:fldChar w:fldCharType="separate"/>.
-                if (fieldProps != null
-                    && run.Format.TryGetValue("_noFieldSeparator", out var nfs)
-                    && nfs is bool nfsB && nfsB)
-                {
-                    fieldProps["noSeparator"] = "true";
-                }
-                // BUG-DUMP18-02: w:fldSimple / fldChar-chain field inside
-                // w:hyperlink should replay INSIDE the hyperlink. Mirrors the
-                // equation-emit logic above (BUG-DUMP15-04) but gated on the
-                // hyperlink actually having been emitted as a prior `add
-                // hyperlink` batch row — hyperlinks with no emittable runs
-                // (BUG-DUMP9-03 fldSimple-only hyperlinks) never surface a
-                // hyperlink row, and routing the field there would fail the
-                // replay path lookup. Fall back to paraTargetPath in that
-                // case (the field still renders, just lifted out of the
-                // hyperlink wrapper — same trade-off as round-9 baseline).
-                var fldParent = paraTargetPath;
-                string? candidateHlParent = null;
-                if (!string.IsNullOrEmpty(run.Path))
-                {
-                    var idxFld = run.Path.LastIndexOf("/field[", StringComparison.Ordinal);
-                    if (idxFld > 0)
-                    {
-                        var derived = run.Path.Substring(0, idxFld);
-                        if (derived.Contains("/hyperlink["))
-                            candidateHlParent = derived;
-                    }
-                }
-                // fldChar-chain fields surface with a flat /…/r[N] path; the
-                // hyperlink hint is in Format._hyperlinkParent.
-                if (candidateHlParent == null
-                    && run.Format.TryGetValue("_hyperlinkParent", out var fhlpObj)
-                    && fhlpObj != null)
-                {
-                    var hint = fhlpObj.ToString();
-                    if (!string.IsNullOrEmpty(hint)) candidateHlParent = hint;
-                }
-                if (candidateHlParent != null)
-                {
-                    // Re-base the candidate path onto paraTargetPath (which
-                    // may use either /p[N] or /p[@paraId=...] form depending
-                    // on whether this is a body paragraph or via stable id —
-                    // Navigation surfaces /p[@paraId=...] but BatchEmitter
-                    // emits children under the numeric /p[N] parent). Then
-                    // verify a prior `add hyperlink` row landed under that
-                    // same paragraph; without it, the hyperlink-scoped path
-                    // wouldn't resolve on replay (BUG-DUMP9-03 fldSimple-
-                    // only hyperlinks never surface a hyperlink row).
-                    const string hlMarker = "/hyperlink[";
-                    var hlIdxStart = candidateHlParent.LastIndexOf(hlMarker, StringComparison.Ordinal);
-                    if (hlIdxStart > 0)
-                    {
-                        var hlEnd = candidateHlParent.IndexOf(']', hlIdxStart);
-                        if (hlEnd > hlIdxStart)
-                        {
-                            var kStr = candidateHlParent.Substring(hlIdxStart + hlMarker.Length,
-                                hlEnd - hlIdxStart - hlMarker.Length);
-                            if (int.TryParse(kStr, out var kIdx))
-                            {
-                                var rebased = paraTargetPath
-                                    + candidateHlParent.Substring(hlIdxStart);
-                                int emittedHls = items.Count(it => it.Type == "hyperlink"
-                                    && string.Equals(it.Parent, paraTargetPath, StringComparison.Ordinal));
-                                if (emittedHls >= kIdx)
-                                    fldParent = rebased;
-                            }
-                        }
-                    }
-                }
-                if (fieldProps != null)
-                {
-                    items.Add(new BatchItem
-                    {
-                        Command = "add",
-                        Parent = fldParent,
-                        Type = "field",
-                        Props = fieldProps
-                    });
-                }
-                else if (!string.IsNullOrEmpty(run.Text))
-                {
-                    // Unparseable instruction — fall back to plain text so the
-                    // paragraph still renders the cached value rather than going
-                    // empty.
-                    items.Add(new BatchItem
-                    {
-                        Command = "add",
-                        Parent = fldParent,
-                        Type = "r",
-                        Props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["text"] = run.Text! }
-                    });
-                }
-                continue;
-            }
-
-            // Drawing-bearing runs surface as type=="picture" regardless of
-            // whether the Drawing wraps an image (Blip) or a chart
-            // (c:chart). Try the image path first; if there's no embedded
-            // image part the run is a chart anchor — pull the next
-            // pre-resolved ChartSpec and emit a typed `add chart` row.
-            if (run.Type == "picture")
-            {
-                var binary = word.GetImageBinary(run.Path);
-                if (binary.HasValue)
-                {
-                    var (bytes, contentType) = binary.Value;
-                    var dataUri = $"data:{contentType};base64,{Convert.ToBase64String(bytes)}";
-                    var picProps = FilterEmittableProps(run.Format);
-                    picProps.Remove("id");
-                    picProps.Remove("contentType");
-                    picProps.Remove("fileSize");
-                    picProps["src"] = dataUri;
-                    items.Add(new BatchItem
-                    {
-                        Command = "add",
-                        Parent = paraTargetPath,
-                        Type = "picture",
-                        Props = picProps
-                    });
-                    continue;
-                }
-
-                // Only consume a ChartSpec if the run is genuinely a chart.
-                // Picture-typed runs that aren't images can also be background
-                // images, OLE objects, SmartArt, watermark anchors, etc. —
-                // falling through unconditionally to chart consumption would
-                // misalign chart positions for every subsequent chart in the
-                // document (e.g. a Background anchor at p[1] would steal the
-                // chart spec belonging to a real chart further down).
-                if (ctx != null && word.IsChartRun(run.Path)
-                    && ctx.ChartCursor.Index < ctx.ChartSpecs.Count)
-                {
-                    var spec = ctx.ChartSpecs[ctx.ChartCursor.Index];
-                    ctx.ChartCursor.Index++;
-                    var chartProps = BuildChartProps(spec);
-                    items.Add(new BatchItem
-                    {
-                        Command = "add",
-                        Parent = paraTargetPath,
-                        Type = "chart",
-                        Props = chartProps
-                    });
-                    continue;
-                }
-                // Drawing without image part and not a chart — most likely a
-                // wps shape (background rectangle, watermark anchor) drawn
-                // with prstGeom + solidFill. No typed Add path exists yet,
-                // but the XML is self-contained (no rId/embed back-references)
-                // so round-trip via raw-set append is safe. Targets the
-                // already-created paragraph by xpath positional index.
-                // Caveats: drawings with embedded image references (a:blipFill
-                // with r:embed) would also land here and silently lose their
-                // image part — for those we'd need rId remapping. Acceptable
-                // v0.5 lossy mode: log nothing, round-trip survives for the
-                // common decorative-shape case.
-                var rawXml = word.GetElementXml(run.Path);
-                if (!string.IsNullOrEmpty(rawXml) &&
-                    parentPath == "/body" &&
-                    !rawXml.Contains("r:embed") && !rawXml.Contains("r:id"))
-                {
-                    items.Add(new BatchItem
-                    {
-                        Command = "raw-set",
-                        Part = "/document",
-                        Xpath = $"/w:document/w:body/w:p[{targetIndex}]",
-                        Action = "append",
-                        Xml = rawXml
-                    });
-                }
-                continue;
-            }
-
-            // Detect footnote/endnote reference runs. The OOXML model marks
-            // them with a w:rStyle = FootnoteReference / EndnoteReference;
-            // the run itself carries no visible text. Emit them as a
-            // typed footnote/endnote add anchored on the host paragraph and
-            // pull the body text from the pre-resolved ordered list — see
-            // BodyEmitContext for the document-order assumption.
-            var rStyle = run.Format.TryGetValue("rStyle", out var rs) ? rs?.ToString() : null;
-            if (ctx != null && rStyle == "FootnoteReference")
-            {
-                var noteText = ctx.FootnoteCursor.Index < ctx.FootnoteTexts.Count
-                    ? ctx.FootnoteTexts[ctx.FootnoteCursor.Index]
-                    : "";
-                ctx.FootnoteCursor.Index++;
-                items.Add(new BatchItem
-                {
-                    Command = "add",
-                    Parent = paraTargetPath,
-                    Type = "footnote",
-                    Props = new() { ["text"] = noteText }
-                });
-                continue;
-            }
-            if (ctx != null && rStyle == "EndnoteReference")
-            {
-                var noteText = ctx.EndnoteCursor.Index < ctx.EndnoteTexts.Count
-                    ? ctx.EndnoteTexts[ctx.EndnoteCursor.Index]
-                    : "";
-                ctx.EndnoteCursor.Index++;
-                items.Add(new BatchItem
-                {
-                    Command = "add",
-                    Parent = paraTargetPath,
-                    Type = "endnote",
-                    Props = new() { ["text"] = noteText }
-                });
-                continue;
-            }
-
-            var rProps = FilterEmittableProps(run.Format);
-            if (!string.IsNullOrEmpty(run.Text))
-                rProps["text"] = run.Text!;
-
-            // Hyperlink-wrapped run: Get flattens a <w:hyperlink>'s child run
-            // into a regular run-typed node, but copies the hyperlink's
-            // r:id-resolved URL onto the run via Format["url"]. AddRun does
-            // not consume `url` — emitting type="r" would silently drop the
-            // hyperlink wrapper. Re-emit as a typed `add hyperlink` so the
-            // <w:hyperlink>+rel-relationship round-trip rebuilds correctly.
-            // CONSISTENCY(docx-hyperlink-canonical-url): canonical key is
-            // `url` on both Get readback and Add input.
-            if (rProps.ContainsKey("url") || rProps.ContainsKey("anchor")
-                || rProps.ContainsKey("isHyperlink"))
-            {
-                // AddHyperlink writes its own color/underline defaults from
-                // theme; drop the inferred `color: hyperlink` /
-                // `underline: single` Get echoes back so we don't override
-                // those defaults with stringly-typed values that the
-                // AddHyperlink color path doesn't recognize.
-                if (rProps.TryGetValue("color", out var hlColor)
-                    && string.Equals(hlColor, "hyperlink", StringComparison.OrdinalIgnoreCase))
-                    rProps.Remove("color");
-                if (rProps.TryGetValue("underline", out var hlUl)
-                    && string.Equals(hlUl, "single", StringComparison.OrdinalIgnoreCase))
-                    rProps.Remove("underline");
-                // The sentinel itself is not a real Add prop; drop it before
-                // emission so AddHyperlink doesn't see an unsupported key.
-                rProps.Remove("isHyperlink");
-                // Bare <w:hyperlink> wrapper with neither r:id nor anchor (and
-                // no tooltip/tgtFrame/history) carries no semantically
-                // meaningful round-trip property — AddHyperlink would reject
-                // it ("'url' or 'anchor' property is required"). Fall through
-                // and emit as a plain run so the visible text survives.
-                if (!rProps.ContainsKey("url") && !rProps.ContainsKey("anchor")
-                    && !rProps.ContainsKey("tooltip") && !rProps.ContainsKey("tgtFrame")
-                    && !rProps.ContainsKey("tgtframe") && !rProps.ContainsKey("history"))
-                {
-                    items.Add(new BatchItem
-                    {
-                        Command = "add",
-                        Parent = paraTargetPath,
-                        Type = "r",
-                        Props = rProps.Count > 0 ? rProps : null
-                    });
-                    continue;
-                }
-                items.Add(new BatchItem
-                {
-                    Command = "add",
-                    Parent = paraTargetPath,
-                    Type = "hyperlink",
-                    Props = rProps,
-                });
-                continue;
-            }
-            items.Add(new BatchItem
-            {
-                Command = "add",
-                Parent = paraTargetPath,
-                Type = "r",
-                Props = rProps.Count > 0 ? rProps : null
-            });
-        }
+            Command = "add",
+            Parent = paraTargetPath,
+            Type = "r",
+            Props = rProps.Count > 0 ? rProps : null
+        });
     }
 
     private static void EmitTable(WordHandler word, string sourcePath, int targetIndex,
