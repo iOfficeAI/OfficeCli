@@ -1,9 +1,9 @@
 // Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
-using OfficeCli.Handlers;
+using OfficeCli.Core;
 
-namespace OfficeCli.Core;
+namespace OfficeCli.Handlers;
 
 /// <summary>
 /// Walks an opened handler's document tree and emits a sequence of BatchItem
@@ -27,7 +27,7 @@ namespace OfficeCli.Core;
 /// passes will add them.
 /// </para>
 /// </summary>
-public static class BatchEmitter
+public static class WordBatchEmitter
 {
     /// <summary>
     /// Emit a batch sequence for a subtree of a Word document.

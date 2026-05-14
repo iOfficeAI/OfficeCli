@@ -895,7 +895,7 @@ public partial class WordHandler
             // CONSISTENCY(style-shading-pPr): paragraph/table styles can carry
             // <w:shd> on either pPr (split into val/fill/color sub-keys by
             // Navigation, folded back into "VAL;FILL[;COLOR]" compound form
-            // by BatchEmitter) or rPr (Query.cs:683 emits compact `shading=<fill>`
+            // by WordBatchEmitter) or rPr (Query.cs:683 emits compact `shading=<fill>`
             // only). Use the compound form as the signal — values that contain
             // `;` came from pPr in the source and must round-trip to pPr.
             // Compact values stay with the ApplyRunFormatting (rPr) probe below.

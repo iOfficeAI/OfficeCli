@@ -660,7 +660,7 @@ public partial class WordHandler
             "styleref" => $" STYLEREF \"{styleRefName}\" ",
             "docproperty" => $" DOCPROPERTY \"{docPropertyName}\" ",
             "if" => BuildIfFieldInstruction(properties),
-            // CONSISTENCY(field-add-symmetry): BatchEmitter.BuildFieldAddProps
+            // CONSISTENCY(field-add-symmetry): WordBatchEmitter.BuildFieldAddProps
             // emits legacy form fields with fieldType=FORMTEXT / FORMCHECKBOX
             // / FORMDROPDOWN. Without these arms the default arm threw
             // `Unknown field type 'formtext'`, breaking dump→batch round-trips
@@ -670,7 +670,7 @@ public partial class WordHandler
             "formtext" => "__FORMFIELD_DELEGATE__",
             "formcheckbox" => "__FORMFIELD_DELEGATE__",
             "formdropdown" => "__FORMFIELD_DELEGATE__",
-            // CONSISTENCY(field-add-symmetry): BatchEmitter.BuildFieldAddProps
+            // CONSISTENCY(field-add-symmetry): WordBatchEmitter.BuildFieldAddProps
             // emits HYPERLINK fields as fieldType=HYPERLINK + url/anchor (+ text),
             // never as a raw `instr`. Without a hyperlink case the default arm
             // throws `Unknown field type 'hyperlink'` and (under the new
@@ -1459,7 +1459,7 @@ public partial class WordHandler
     // BUG-DUMP9-09: MERGEFIELD field names with whitespace must be quoted in
     // the instruction so Word parses them as one token. Already-quoted input
     // is left as-is so the instruction is idempotent under dump round-trip.
-    // Append the trailing-switches blob produced by BatchEmitter for SEQ /
+    // Append the trailing-switches blob produced by WordBatchEmitter for SEQ /
     // MERGEFIELD round-trips (e.g. `\* ARABIC \r 1`, `\* MERGEFORMAT`).
     // Returns either an empty string or a single space + verbatim switches,
     // so the caller can splice it directly between the identifier and the

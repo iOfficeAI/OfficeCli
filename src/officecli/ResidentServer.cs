@@ -1259,7 +1259,7 @@ public class ResidentServer : IDisposable
             throw new CliException("dump currently supports .docx only")
                 { Code = "unsupported_format" };
 
-        var items = BatchEmitter.EmitWord(word, path);
+        var items = WordBatchEmitter.EmitWord(word, path);
         var output = System.Text.Json.JsonSerializer.Serialize(items, BatchJsonContext.Default.ListBatchItem);
 
         if (outPath == "-") outPath = null;

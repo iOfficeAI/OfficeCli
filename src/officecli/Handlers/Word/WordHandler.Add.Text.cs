@@ -1282,7 +1282,7 @@ public partial class WordHandler
         // BUG-DUMP33-01: support <w:hyperlink> as a run parent so dump→batch
         // can round-trip tab-only / formatted runs that live inside a
         // hyperlink wrapper (Navigation surfaces them with hyperlink-scoped
-        // _hyperlinkParent and BatchEmitter rebases the parent path).
+        // _hyperlinkParent and WordBatchEmitter rebases the parent path).
         Hyperlink? targetHyperlink = null;
         Paragraph? targetPara = parent as Paragraph;
         if (targetPara == null && parent is Hyperlink hlParent && hlParent.Parent is Paragraph hlEnclosingPara)
@@ -1294,7 +1294,7 @@ public partial class WordHandler
             throw new ArgumentException("Runs can only be added to paragraphs");
 
         // BUG-DUMP5-10: track-change attribution from dump round-trip.
-        // BatchEmitter (round-4 fix) emits trackChange / trackChange.author /
+        // WordBatchEmitter emits trackChange / trackChange.author /
         // trackChange.date on the run when the source run sat inside a
         // <w:ins>/<w:del> wrapper. Without consuming these here, the dotted
         // fallback below dispatches them through TypedAttributeFallback.TrySet

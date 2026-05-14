@@ -553,7 +553,7 @@ public partial class WordHandler
         uint size;
         bool sizeProvided = parts.Length > 1 && !string.IsNullOrEmpty(parts[1].Trim());
         // CONSISTENCY(border-empty-segment): mirror the empty-color tolerance
-        // below — BatchEmitter's border fold emits "STYLE;;COLOR" whenever a
+        // below — WordBatchEmitter's border fold emits "STYLE;;COLOR" whenever a
         // side has color but no explicit sz attribute (very common in real
         // .docx files where w:sz is inherited via the style chain). Treat an
         // empty SIZE segment as "use default" instead of throwing.

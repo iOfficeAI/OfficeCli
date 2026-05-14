@@ -310,7 +310,7 @@ public partial class WordHandler
                     cm.TableCellRightMargin = new TableCellRightMargin { Width = (short)Math.Min(paddingVal, short.MaxValue), Type = TableWidthValues.Dxa };
                     break;
                 }
-                // BUG-DUMP13-04: per-side default cell margins. BatchEmitter
+                // BUG-DUMP13-04: per-side default cell margins. WordBatchEmitter
                 // passes asymmetric padding.* keys through unfolded when sides
                 // differ; without these cases AddTable warned UNSUPPORTED and
                 // the values became zero on round-trip. Mirrors the per-cell

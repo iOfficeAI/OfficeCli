@@ -569,7 +569,7 @@ public partial class WordHandler
     /// number of runs before the range marker plus 1. Returns 0 when the
     /// range marker is not found, or sits before any Run (anchor at paragraph
     /// start).
-    /// BUG-DUMP4-03: callers (BatchEmitter) need this so dump can preserve
+    /// BUG-DUMP4-03: callers (WordBatchEmitter) need this so dump can preserve
     /// intra-paragraph anchor position; without it replay widens every
     /// comment to the whole paragraph.
     /// </summary>
@@ -637,7 +637,7 @@ public partial class WordHandler
                     sb.Append('\n'); break;
                 // BUG-DUMP7-01: <w:sym w:font="Wingdings" w:char="F0E0"/> is a
                 // glyph substitution — the run carries no <w:t>. Without a case
-                // here, GetRunText returned empty and BatchEmitter's run-emit
+                // here, GetRunText returned empty and WordBatchEmitter's run-emit
                 // dropped the whole run, silently losing the symbol on dump
                 // round-trip. Surface the resolved Unicode code point as Text
                 // so the run looks non-empty; the canonical `sym` Format key

@@ -64,7 +64,7 @@ static partial class CommandBuilder
             }, json) is {} rc) return rc;
 
             using var word = new WordHandler(file.FullName, editable: false);
-            var items = BatchEmitter.EmitWord(word, path);
+            var items = WordBatchEmitter.EmitWord(word, path);
 
             // Compact JSON (single line) is the canonical batch wire form:
             // `batch run` consumes it directly and AI tooling pipes it through
