@@ -347,9 +347,15 @@ public partial class WordHandler
             : (properties.TryGetValue("alt", out var altOverride) && !string.IsNullOrEmpty(altOverride)
                 ? altOverride
                 : DefaultPictureName());
+        // altText: explicit `alt=` wins. When absent, leave the Description
+        // attribute blank — auto-stamping `altText = pictureName` meant Get
+        // surfaced a phantom `alt=<name>` key on dump round-trip for sources
+        // whose docPr had no Description (07_example_online_convert.docx).
+        // Empty string keeps the OOXML attr off entirely (DocProperties
+        // serialises Description="" as no attr).
         var altText = properties.TryGetValue("alt", out var altOverride2) && !string.IsNullOrEmpty(altOverride2)
             ? altOverride2
-            : pictureName;
+            : "";
 
         var imgDocPropId = NextDocPropId();
         Run imgRun;
