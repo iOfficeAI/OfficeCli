@@ -1623,7 +1623,19 @@ public partial class WordHandler
             // replay can target ParagraphMarkRunProperties without conflating
             // with run-level formatting.
             var pmrpForDump = para.ParagraphProperties?.ParagraphMarkRunProperties;
-            if (pmrpForDump != null)
+            // Suppress markRPr.* dotted keys when the paragraph has no
+            // text-bearing runs — the bare keys below (size, font.latin, …)
+            // already cover markRPr via the firstRun-fallback path. Emitting
+            // both forms on an empty paragraph means dump→batch→dump
+            // surfaces phantom markRPr.* keys even after AddParagraph
+            // routed the formatting correctly (BUG-DUMP-MARKRPR-DOUBLE).
+            // The dotted form's purpose is to distinguish the ¶ glyph's
+            // formatting from the visible text — only meaningful when text
+            // runs exist.
+            var hasTextRun = para.Elements<Run>()
+                .Any(r => r.GetFirstChild<Text>() != null
+                          && !string.IsNullOrEmpty(r.GetFirstChild<Text>()?.Text));
+            if (pmrpForDump != null && hasTextRun)
             {
                 var b = pmrpForDump.GetFirstChild<Bold>();
                 if (b != null) node.Format["markRPr.bold"] = IsToggleOn(b);
