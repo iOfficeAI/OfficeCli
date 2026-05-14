@@ -1012,7 +1012,43 @@ public partial class WordHandler
                     var sub = key.Substring("markRPr.".Length);
                     var markOnlyRPr = pProps.ParagraphMarkRunProperties
                         ?? pProps.AppendChild(new ParagraphMarkRunProperties());
-                    ApplyRunFormatting(markOnlyRPr, sub, value);
+                    // CONSISTENCY(markRPr-explicit-false): the dotted markRPr.*
+                    // form is dump-specific (Navigation emits markRPr.bold=false
+                    // only when source <w:rPr><w:b w:val="false"/></w:rPr> sits
+                    // on the paragraph mark — explicit style override). Preserve
+                    // val=false here so round-trip survives. The bare-key path
+                    // keeps ApplyRunFormatting's "remove on falsy" contract
+                    // intact for interactive `set bold=false`.
+                    var subLower = sub.ToLowerInvariant();
+                    if (IsExplicitFalseAddOverride(value))
+                    {
+                        switch (subLower)
+                        {
+                            case "bold" or "font.bold":
+                                markOnlyRPr.RemoveAllChildren<Bold>();
+                                InsertRunPropInSchemaOrder(markOnlyRPr, new Bold { Val = DocumentFormat.OpenXml.OnOffValue.FromBoolean(false) });
+                                break;
+                            case "italic" or "font.italic":
+                                markOnlyRPr.RemoveAllChildren<Italic>();
+                                InsertRunPropInSchemaOrder(markOnlyRPr, new Italic { Val = DocumentFormat.OpenXml.OnOffValue.FromBoolean(false) });
+                                break;
+                            case "bold.cs" or "font.bold.cs" or "boldcs":
+                                markOnlyRPr.RemoveAllChildren<BoldComplexScript>();
+                                InsertRunPropInSchemaOrder(markOnlyRPr, new BoldComplexScript { Val = DocumentFormat.OpenXml.OnOffValue.FromBoolean(false) });
+                                break;
+                            case "italic.cs" or "font.italic.cs" or "italiccs":
+                                markOnlyRPr.RemoveAllChildren<ItalicComplexScript>();
+                                InsertRunPropInSchemaOrder(markOnlyRPr, new ItalicComplexScript { Val = DocumentFormat.OpenXml.OnOffValue.FromBoolean(false) });
+                                break;
+                            default:
+                                ApplyRunFormatting(markOnlyRPr, sub, value);
+                                break;
+                        }
+                    }
+                    else
+                    {
+                        ApplyRunFormatting(markOnlyRPr, sub, value);
+                    }
                     break;
                 }
                 case "size" or "font" or "bold" or "italic" or "color" or "highlight" or "underline" or "strike"
