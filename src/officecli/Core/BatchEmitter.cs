@@ -516,7 +516,7 @@ public static class BatchEmitter
         // Source may have headerRef-first WITHOUT titlePg — preserve that
         // shape by passing noTitlePg=true so AddHeader skips the auto-stamp.
         // Otherwise the next dump would emit a phantom `titlePage=true` key.
-        if (kind == "header"
+        if ((kind == "header" || kind == "footer")
             && string.Equals(subType, "first", StringComparison.OrdinalIgnoreCase)
             && sectionParent != null)
         {
@@ -529,6 +529,26 @@ public static class BatchEmitter
                     addHeaderProps["noTitlePg"] = "true";
             }
             catch { /* section path unresolved — fall through with auto-stamp */ }
+        }
+        // CONSISTENCY(headerfooter-noEvenAndOdd-opt-out): even-{header,footer}
+        // auto-stamps <w:evenAndOddHeaders/> in /settings. Source whose settings
+        // lacks the toggle (rare but real — Word renders inconsistently across
+        // versions) gets a phantom toggle injected on replay. Suppress by
+        // surfacing `noEvenAndOddHeaders=true` so AddHeader/AddFooter skip the
+        // stamp. The settings raw-set already replaced /settings with the
+        // source xml before this add executes.
+        if ((kind == "header" || kind == "footer")
+            && string.Equals(subType, "even", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var settingsNode = word.Get("/settings");
+                bool sourceHadToggle = settingsNode.Format.TryGetValue("evenAndOddHeaders", out var ev)
+                                     && ev is bool eb && eb;
+                if (!sourceHadToggle)
+                    addHeaderProps["noEvenAndOddHeaders"] = "true";
+            }
+            catch { /* settings unreadable — fall through */ }
         }
         items.Add(new BatchItem
         {

@@ -1752,12 +1752,21 @@ public partial class WordHandler
         // Word silently ignores the even header reference at render time.
         if (headerType == HeaderFooterValues.Even)
         {
-            var hSettingsPart = mainPartH.DocumentSettingsPart
-                ?? mainPartH.AddNewPart<DocumentSettingsPart>();
-            hSettingsPart.Settings ??= new Settings();
-            if (hSettingsPart.Settings.GetFirstChild<EvenAndOddHeaders>() == null)
-                hSettingsPart.Settings.AddChild(new EvenAndOddHeaders(), throwOnError: false);
-            hSettingsPart.Settings.Save();
+            // CONSISTENCY(headerfooter-noEvenAndOdd-opt-out): dump→batch emits
+            // `noEvenAndOddHeaders=true` when the source's settings.xml lacks
+            // <w:evenAndOddHeaders/> so the auto-stamp doesn't phantom-write a
+            // toggle the source never had.
+            bool skipHEvenAndOdd = properties.TryGetValue("noevenandoddheaders", out var hNeo)
+                                || properties.TryGetValue("noEvenAndOddHeaders", out hNeo);
+            if (!(skipHEvenAndOdd && IsTruthy(hNeo)))
+            {
+                var hSettingsPart = mainPartH.DocumentSettingsPart
+                    ?? mainPartH.AddNewPart<DocumentSettingsPart>();
+                hSettingsPart.Settings ??= new Settings();
+                if (hSettingsPart.Settings.GetFirstChild<EvenAndOddHeaders>() == null)
+                    hSettingsPart.Settings.AddChild(new EvenAndOddHeaders(), throwOnError: false);
+                hSettingsPart.Settings.Save();
+            }
         }
 
         var hIdx = mainPartH.HeaderParts.ToList().IndexOf(headerPart);
@@ -1905,19 +1914,30 @@ public partial class WordHandler
 
         if (footerType == HeaderFooterValues.First)
         {
-            if (fSectPr.GetFirstChild<TitlePage>() == null)
+            // CONSISTENCY(headerfooter-noTitlePg-opt-out): mirror AddHeader.
+            // Round-trip emit passes `noTitlePg=true` when the source's sectPr
+            // had no <w:titlePg/>, so the footer add does not phantom-stamp it.
+            bool skipFooterTitlePg = properties.TryGetValue("notitlepg", out var fNtp)
+                                  || properties.TryGetValue("noTitlePg", out fNtp);
+            if (!(skipFooterTitlePg && IsTruthy(fNtp))
+                && fSectPr.GetFirstChild<TitlePage>() == null)
                 fSectPr.AddChild(new TitlePage(), throwOnError: false);
         }
         // CONSISTENCY(headerfooter-effective-toggle): even-footer also needs
         // settings.xml/w:evenAndOddHeaders to render.
         if (footerType == HeaderFooterValues.Even)
         {
-            var fSettingsPart = mainPartF.DocumentSettingsPart
-                ?? mainPartF.AddNewPart<DocumentSettingsPart>();
-            fSettingsPart.Settings ??= new Settings();
-            if (fSettingsPart.Settings.GetFirstChild<EvenAndOddHeaders>() == null)
-                fSettingsPart.Settings.AddChild(new EvenAndOddHeaders(), throwOnError: false);
-            fSettingsPart.Settings.Save();
+            bool skipFEvenAndOdd = properties.TryGetValue("noevenandoddheaders", out var fNeo)
+                                || properties.TryGetValue("noEvenAndOddHeaders", out fNeo);
+            if (!(skipFEvenAndOdd && IsTruthy(fNeo)))
+            {
+                var fSettingsPart = mainPartF.DocumentSettingsPart
+                    ?? mainPartF.AddNewPart<DocumentSettingsPart>();
+                fSettingsPart.Settings ??= new Settings();
+                if (fSettingsPart.Settings.GetFirstChild<EvenAndOddHeaders>() == null)
+                    fSettingsPart.Settings.AddChild(new EvenAndOddHeaders(), throwOnError: false);
+                fSettingsPart.Settings.Save();
+            }
         }
 
         var fIdx = mainPartF.FooterParts.ToList().IndexOf(footerPart);
