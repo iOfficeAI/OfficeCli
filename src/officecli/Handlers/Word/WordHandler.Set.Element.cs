@@ -1012,12 +1012,46 @@ public partial class WordHandler
                   or "font.cs" or "font.complexscript" or "font.complex"
                   or "bold.cs" or "italic.cs" or "size.cs"
                   or "font.bold.cs" or "font.italic.cs" or "font.size.cs":
-                    // Apply run-level formatting to all runs in the paragraph
+                    // Apply run-level formatting to all runs in the paragraph.
                     var allParaRuns = para.Descendants<Run>().ToList();
-                    // Also update paragraph mark run properties (rPr inside pPr)
-                    // so new runs inherit the formatting
-                    var markRPr = pProps.ParagraphMarkRunProperties ?? pProps.AppendChild(new ParagraphMarkRunProperties());
-                    ApplyRunFormatting(markRPr, key, value);
+                    // Paragraph-mark run properties (<w:rPr> inside <w:pPr>)
+                    // governs the ¶ glyph and is what cursor-at-end inherits
+                    // when the user types more text. Four cases:
+                    //   * Already has runs: apply to those runs. Skip markRPr
+                    //     unless it already exists (avoid fabricating a
+                    //     <w:pPr><w:rPr> the source never had — BUG-DUMP-
+                    //     MARKRPR-LEAK leaked 4-5 phantom `markRPr.*` keys
+                    //     per paragraph on every dump round-trip).
+                    //   * Empty paragraph but this Set has `text`/`formula`:
+                    //     the run hasn't been created yet (case order may put
+                    //     formatting keys before text). Seed an empty Run
+                    //     with an rPr and apply formatting there; the later
+                    //     `text` case sees a non-empty run list and takes
+                    //     its preserve-rPr branch, so the visible text picks
+                    //     up the formatting WITHOUT poisoning markRPr.
+                    //   * Truly empty paragraph (no runs now, no text/formula
+                    //     in this Set): write to markRPr so the formatting is
+                    //     visible on the lone ¶ glyph.
+                    //   * Already had markRPr: keep mirroring (preserves
+                    //     existing-document semantics; we never strip what
+                    //     was there).
+                    var pmrpExisting = pProps.ParagraphMarkRunProperties;
+                    bool willCreateRun = properties.ContainsKey("text")
+                                      || properties.ContainsKey("formula");
+                    if (allParaRuns.Count == 0 && willCreateRun)
+                    {
+                        // Seed a placeholder run if not already seeded by an
+                        // earlier iteration of this loop on the same Set call.
+                        var seedRun = new Run(new RunProperties());
+                        para.AppendChild(seedRun);
+                        allParaRuns.Add(seedRun);
+                    }
+                    if (allParaRuns.Count == 0 || pmrpExisting != null)
+                    {
+                        var markRPr = pmrpExisting
+                            ?? pProps.AppendChild(new ParagraphMarkRunProperties());
+                        ApplyRunFormatting(markRPr, key, value);
+                    }
                     foreach (var pRun in allParaRuns)
                     {
                         var pRunProps = EnsureRunProperties(pRun);

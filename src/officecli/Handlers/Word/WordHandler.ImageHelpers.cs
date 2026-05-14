@@ -32,12 +32,13 @@ public partial class WordHandler
         return maxId + 1;
     }
 
-    private static Run CreateImageRun(string relationshipId, long cx, long cy, string altText, uint docPropId)
+    private static Run CreateImageRun(string relationshipId, long cx, long cy, string altText, uint docPropId, string? pictureName = null)
     {
+        var docPrName = pictureName ?? altText;
         var inline = new DW.Inline(
             new DW.Extent { Cx = cx, Cy = cy },
             new DW.EffectExtent { LeftEdge = 0, TopEdge = 0, RightEdge = 0, BottomEdge = 0 },
-            new DW.DocProperties { Id = docPropId, Name = altText, Description = altText },
+            new DW.DocProperties { Id = docPropId, Name = docPrName, Description = altText },
             new DW.NonVisualGraphicFrameDrawingProperties(
                 new A.GraphicFrameLocks { NoChangeAspect = true }
             ),
@@ -45,7 +46,7 @@ public partial class WordHandler
                 new A.GraphicData(
                     new PIC.Picture(
                         new PIC.NonVisualPictureProperties(
-                            new PIC.NonVisualDrawingProperties { Id = docPropId, Name = altText },
+                            new PIC.NonVisualDrawingProperties { Id = docPropId, Name = docPrName },
                             new PIC.NonVisualPictureDrawingProperties()
                         ),
                         new PIC.BlipFill(
@@ -76,7 +77,7 @@ public partial class WordHandler
     private static Run CreateAnchorImageRun(string relationshipId, long cx, long cy, string altText,
         string wrap, long hPos, long vPos,
         DW.HorizontalRelativePositionValues hRel, DW.VerticalRelativePositionValues vRel,
-        bool behindText, uint docPropId)
+        bool behindText, uint docPropId, string? pictureName = null)
     {
         OpenXmlElement wrapElement = wrap.ToLowerInvariant() switch
         {
@@ -101,6 +102,7 @@ public partial class WordHandler
         };
 
         var anchorDocPropId = docPropId;
+        var docPrName = pictureName ?? altText;
         var anchor = new DW.Anchor(
             new DW.SimplePosition { X = 0, Y = 0 },
             new DW.HorizontalPosition(new DW.PositionOffset(hPos.ToString()))
@@ -110,14 +112,14 @@ public partial class WordHandler
             new DW.Extent { Cx = cx, Cy = cy },
             new DW.EffectExtent { LeftEdge = 0, TopEdge = 0, RightEdge = 0, BottomEdge = 0 },
             wrapElement,
-            new DW.DocProperties { Id = anchorDocPropId, Name = altText, Description = altText },
+            new DW.DocProperties { Id = anchorDocPropId, Name = docPrName, Description = altText },
             new DW.NonVisualGraphicFrameDrawingProperties(
                 new A.GraphicFrameLocks { NoChangeAspect = true }),
             new A.Graphic(
                 new A.GraphicData(
                     new PIC.Picture(
                         new PIC.NonVisualPictureProperties(
-                            new PIC.NonVisualDrawingProperties { Id = anchorDocPropId, Name = altText },
+                            new PIC.NonVisualDrawingProperties { Id = anchorDocPropId, Name = docPrName },
                             new PIC.NonVisualPictureDrawingProperties()),
                         new PIC.BlipFill(
                             new A.Blip { Embed = relationshipId, CompressionState = A.BlipCompressionValues.Print },

@@ -53,6 +53,27 @@ internal static class RawXmlHelper
             }
         }
         rootElement.InnerXml = string.Concat(xDoc.Root.Nodes().Select(n => n.ToString()));
+        // The InnerXml setter restores inner content but does NOT touch root
+        // attributes — so non-xmlns attrs like `mc:Ignorable` carried by the
+        // replacement root would be silently lost on round-trip. Copy them
+        // through. Skip xmlns declarations (SDK manages those via its typed
+        // prefix table). Need the prefix for namespaced attrs so SDK renders
+        // them as `<prefix>:<localname>` rather than re-prefixing under the
+        // SDK's auto-generated alias.
+        foreach (var attr in xDoc.Root.Attributes())
+        {
+            if (attr.IsNamespaceDeclaration) continue;
+            var ns = attr.Name.NamespaceName;
+            // Resolve the prefix as the source XML had it (walk parent's
+            // in-scope namespace declarations). XLinq's XAttribute.Name has
+            // no Prefix property, only the parent element does.
+            var prefix = string.IsNullOrEmpty(ns)
+                ? string.Empty
+                : (xDoc.Root.GetPrefixOfNamespace(ns) ?? string.Empty);
+            var openXmlAttr = new DocumentFormat.OpenXml.OpenXmlAttribute(
+                prefix, attr.Name.LocalName, ns, attr.Value);
+            rootElement.SetAttribute(openXmlAttr);
+        }
         return affected;
     }
 

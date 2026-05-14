@@ -89,8 +89,12 @@ static partial class CommandBuilder
             }
 
             if (json)
+                // Unified envelope contract: single-path get returns the same
+                // {matches, results: [...]} shape as `get selected` and `query`,
+                // so agents and scripts can use one jq path everywhere. Text
+                // mode keeps the rich single-node rendering.
                 Console.WriteLine(OutputFormatter.WrapEnvelope(
-                    OutputFormatter.FormatNode(node, OutputFormat.Json)));
+                    OutputFormatter.FormatNodes(new List<DocumentNode> { node }, OutputFormat.Json)));
             else
                 Console.WriteLine(OutputFormatter.FormatNode(node, OutputFormat.Text));
             return 0;

@@ -372,12 +372,26 @@ public partial class WordHandler
             var ind = pProps.Indentation ?? (pProps.Indentation = new Indentation());
             ind.HangingChars = ParseHelpers.SafeParseInt(addHC, "hangingChars");
         }
-        if ((properties.TryGetValue("keepnext", out var addKN) || properties.TryGetValue("keepNext", out addKN)) && IsTruthy(addKN))
-            pProps.KeepNext = new KeepNext();
-        if ((properties.TryGetValue("keeplines", out var addKL) || properties.TryGetValue("keeptogether", out addKL) || properties.TryGetValue("keepLines", out addKL) || properties.TryGetValue("keepTogether", out addKL)) && IsTruthy(addKL))
-            pProps.KeepLines = new KeepLines();
-        if ((properties.TryGetValue("pagebreakbefore", out var addPBB) || properties.TryGetValue("pageBreakBefore", out addPBB)) && IsTruthy(addPBB))
-            pProps.PageBreakBefore = new PageBreakBefore();
+        // keepNext / keepLines / pageBreakBefore are <w:onOff>-typed: the
+        // bare element means "true", and an explicit <w:keepNext w:val="0"/>
+        // means "false" (and OVERRIDES a true inherited from a paragraph
+        // style — common pattern in heading-style paragraphs that want to
+        // disable the style's default keep-with-next). Write both forms.
+        if (properties.TryGetValue("keepnext", out var addKN) || properties.TryGetValue("keepNext", out addKN))
+            pProps.KeepNext = IsTruthy(addKN)
+                ? new KeepNext()
+                : new KeepNext { Val = OnOffValue.FromBoolean(false) };
+        if (properties.TryGetValue("keeplines", out var addKL)
+            || properties.TryGetValue("keeptogether", out addKL)
+            || properties.TryGetValue("keepLines", out addKL)
+            || properties.TryGetValue("keepTogether", out addKL))
+            pProps.KeepLines = IsTruthy(addKL)
+                ? new KeepLines()
+                : new KeepLines { Val = OnOffValue.FromBoolean(false) };
+        if (properties.TryGetValue("pagebreakbefore", out var addPBB) || properties.TryGetValue("pageBreakBefore", out addPBB))
+            pProps.PageBreakBefore = IsTruthy(addPBB)
+                ? new PageBreakBefore()
+                : new PageBreakBefore { Val = OnOffValue.FromBoolean(false) };
         // fuzz-2: paragraph-context `break=newPage` alias → pageBreakBefore=true.
         // Mirrors Set-side handling in WordHandler.Set.cs (case "break").
         if (properties.TryGetValue("break", out var addBrk))
@@ -777,15 +791,16 @@ public partial class WordHandler
             "caps", "smallcaps",
             "boldcs", "italiccs", "sizecs",
             "field", "formula", "ref", "id",
-            // BUG-R7-06: kern (kerning) is a run-level OOXML key — handled
-            // via ApplyRunFormatting on the bare-key fallback path below.
-            // Listing it here just prevents double-routing through
-            // TypedAttributeFallback.
             // BUG-DUMP23-01: bdr was previously listed here, which made the
             // fallback `continue` at line 765 skip it entirely (no curated
             // handler exists in the rProps block above either). Removed so
             // bdr falls through to ApplyRunFormatting like kern does.
-            "kern",
+            // kern was historically here too, "to prevent double-routing
+            // through TypedAttributeFallback" — but the continue at the bare-
+            // key fallback gate also skipped ApplyRunFormatting itself, so
+            // kern was silently dropped on `add p kern=36` even though it
+            // round-trips fine on `set r[N] kern=36`. Removed so kern reaches
+            // ApplyRunFormatting on the bare-key fallback path below.
         };
         foreach (var (key, value) in properties)
         {

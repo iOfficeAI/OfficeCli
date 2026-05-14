@@ -179,7 +179,13 @@ public partial class WordHandler
         // Skip the auto-tblW path when gridCols=0 was explicitly requested
         // (empty tblGrid → no widths to sum → emitting `<w:tblW w:w="0"/>` would
         // poison the dump round-trip with a width key the source never had).
-        if (!properties.ContainsKey("width") && !(gridColsExplicit && gridCols == 0))
+        // Also skip when caller passed `skipTblW=true` (dump-replay path for
+        // sources whose <w:tbl> has no <w:tblW> element — leaves Word to
+        // auto-fit from gridCol widths, matching the source's behaviour).
+        bool skipTblW = properties.TryGetValue("skiptblw", out var stbw)
+                     || properties.TryGetValue("skipTblW", out stbw);
+        bool skipTblWRequested = skipTblW && IsTruthy(stbw);
+        if (!properties.ContainsKey("width") && !(gridColsExplicit && gridCols == 0) && !skipTblWRequested)
         {
             long totalTwips = 0;
             for (int gc = 0; gc < gridCols; gc++)
@@ -232,7 +238,7 @@ public partial class WordHandler
                         $"firstRow, lastRow, firstCol, lastCol, bandRow, bandCol, " +
                         $"noHBand, noVBand. Or use the bare hex form tblLook=04A0.");
             }
-            if (tkl is "rows" or "cols" or "colwidths" or "gridcols" || tkl.StartsWith("border")) continue;
+            if (tkl is "rows" or "cols" or "colwidths" or "gridcols" or "skiptblw" || tkl.StartsWith("border")) continue;
             // ACCOUNTING(handler-as-truth): see AddStyle. ContainsKey only
             // when the switch will consume this key — otherwise typos would
             // leak past UnusedKeys detection.

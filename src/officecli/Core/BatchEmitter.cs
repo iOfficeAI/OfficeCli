@@ -167,6 +167,130 @@ public static class BatchEmitter
         return items;
     }
 
+    // RawXmlHelper.Execute propagates the root's xmlns declarations onto every
+    // direct child so the SDK's InnerXml setter can resolve prefixes (SDK does
+    // not inherit root xmlns scope when parsing inner content). After replay,
+    // the part's XML carries redundant xmlns attrs on each child, which the
+    // next dump reads back verbatim — phantom bloat that breaks idempotency.
+    //
+    // Canonicalize on emit: parse the part's XML, drop child-element xmlns
+    // declarations that match the root's declarations, re-serialize. The
+    // first-pass emit (source's clean XML) and second-pass emit (target's
+    // bloated XML) both collapse to the same canonical shape.
+    // Schema order for <w:ind>'s attributes. SDK serialises in this order
+    // on write, so source-side OuterXml (which mirrors the on-disk order
+    // from the original producer) and replay-target OuterXml (SDK's
+    // canonical) can disagree on attribute order alone. Re-sort to a fixed
+    // canonical order so both passes emit identical bytes.
+    private static readonly string[] s_indAttrOrder =
+    [
+        "start", "end", "left", "right",
+        "hanging", "firstLine",
+        "startChars", "endChars", "leftChars", "rightChars",
+        "hangingChars", "firstLineChars",
+    ];
+
+    private static void SortIndAttrs(System.Xml.Linq.XElement ind)
+    {
+        var attrs = ind.Attributes().ToList();
+        // Keep xmlns declarations first (in original order), then sort
+        // typed attrs by the schema-order table, then unknown attrs by name.
+        var nsDecls = attrs.Where(a => a.IsNamespaceDeclaration).ToList();
+        var typed = attrs.Where(a => !a.IsNamespaceDeclaration).ToList();
+        int OrderKey(System.Xml.Linq.XAttribute a)
+        {
+            var idx = Array.IndexOf(s_indAttrOrder, a.Name.LocalName);
+            return idx < 0 ? 99 : idx;
+        }
+        var sorted = typed.OrderBy(OrderKey).ThenBy(a => a.Name.LocalName, StringComparer.Ordinal).ToList();
+        ind.RemoveAttributes();
+        foreach (var a in nsDecls) ind.Add(a);
+        foreach (var a in sorted) ind.Add(a);
+    }
+
+    private static void RenameAttr(System.Xml.Linq.XElement el, string fromLocal, string toLocal, string ns)
+    {
+        var fromName = System.Xml.Linq.XName.Get(fromLocal, ns);
+        var toName = System.Xml.Linq.XName.Get(toLocal, ns);
+        var src = el.Attribute(fromName);
+        if (src == null) return;
+        if (el.Attribute(toName) != null) { src.Remove(); return; }
+        // Preserve attribute order: re-build the attribute list with the
+        // rename applied in-place. SetAttributeValue(newName) by itself would
+        // append the new attr at the tail and shift byte order.
+        var rebuilt = el.Attributes()
+            .Select(a => a.Name == fromName
+                ? new System.Xml.Linq.XAttribute(toName, a.Value)
+                : new System.Xml.Linq.XAttribute(a.Name, a.Value))
+            .ToList();
+        el.RemoveAttributes();
+        foreach (var a in rebuilt) el.Add(a);
+    }
+
+    private static string CanonicalizeRawXml(string xml)
+    {
+        if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<")) return xml;
+        try
+        {
+            var doc = System.Xml.Linq.XDocument.Parse(xml);
+            if (doc.Root == null) return xml;
+            var rootNsAttrs = doc.Root.Attributes()
+                .Where(a => a.IsNamespaceDeclaration)
+                .ToDictionary(a => a.Name, a => a.Value);
+            foreach (var desc in doc.Root.Descendants())
+            {
+                var toRemove = desc.Attributes()
+                    .Where(a => a.IsNamespaceDeclaration
+                                && rootNsAttrs.TryGetValue(a.Name, out var v)
+                                && v == a.Value)
+                    .ToList();
+                foreach (var a in toRemove) a.Remove();
+            }
+            // SDK normalises bidi-aware <w:ind w:start="…"> ↔ <w:ind w:left="…">
+            // (and end ↔ right) on serialisation depending on the document's
+            // bidi state. The two forms are byte-different but semantically
+            // equivalent in non-bidi documents. Canonicalise to the bidi-
+            // aware names AND fix the attribute order so the dump pair emits
+            // identical bytes regardless of SDK's choice.
+            var wNs = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+            foreach (var ind in doc.Descendants(System.Xml.Linq.XName.Get("ind", wNs)))
+            {
+                RenameAttr(ind, "left", "start", wNs);
+                RenameAttr(ind, "right", "end", wNs);
+                // BIDI-aware character-count variants also drift through SDK
+                // normalisation. proof_fixed family: <w:ind … w:leftChars="0" …>
+                // → SDK rewrites as <w:ind … w:startChars="0" …>.
+                RenameAttr(ind, "leftChars", "startChars", wNs);
+                RenameAttr(ind, "rightChars", "endChars", wNs);
+                SortIndAttrs(ind);
+            }
+            // Stabilise root attribute order: SDK serialises xmlns attrs in
+            // an internal order that can shift when mc:Ignorable / other
+            // typed attrs change, so byte-equal round-trip needs a canonical
+            // ordering. Emit xmlns attrs first (sorted by prefix; default
+            // xmlns first if any), then non-xmlns attrs (sorted by name).
+            var root = doc.Root;
+            var allAttrs = root.Attributes().ToList();
+            foreach (var a in allAttrs) a.Remove();
+            var nsAttrs = allAttrs.Where(a => a.IsNamespaceDeclaration)
+                .OrderBy(a => a.Name == System.Xml.Linq.XNamespace.Xmlns + "xmlns" ? "" : a.Name.LocalName,
+                         StringComparer.Ordinal)
+                .ToList();
+            var otherAttrs = allAttrs.Where(a => !a.IsNamespaceDeclaration)
+                .OrderBy(a => a.Name.NamespaceName, StringComparer.Ordinal)
+                .ThenBy(a => a.Name.LocalName, StringComparer.Ordinal)
+                .ToList();
+            foreach (var a in nsAttrs) root.Add(a);
+            foreach (var a in otherAttrs) root.Add(a);
+            return root.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+        }
+        catch
+        {
+            // Malformed XML — leave as-is rather than corrupting.
+            return xml;
+        }
+    }
+
     private static void EmitThemeRaw(WordHandler word, List<BatchItem> items)
     {
         // Theme carries clrScheme + fontScheme + fmtScheme — pure structured
@@ -187,6 +311,7 @@ public static class BatchEmitter
         string xml;
         try { xml = word.Raw("/theme"); }
         catch { xml = ""; }
+        xml = CanonicalizeRawXml(xml);
         if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<"))
             // name="Office Theme" matches what Open XML SDK's Theme class
             // auto-stamps on save. Without it, dump-2's read-back picks up
@@ -224,6 +349,7 @@ public static class BatchEmitter
         string xml;
         try { xml = word.Raw("/settings"); }
         catch { xml = ""; }
+        xml = CanonicalizeRawXml(xml);
         if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<"))
             xml = "<w:settings xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" />";
 
@@ -248,6 +374,7 @@ public static class BatchEmitter
         string xml;
         try { xml = word.Raw("/numbering"); }
         catch { return; }
+        xml = CanonicalizeRawXml(xml);
         if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<")) return;
         // Skip when numbering is empty (just `<w:numbering/>` with no children).
         if (!xml.Contains("<w:abstractNum") && !xml.Contains("<w:num "))
@@ -383,6 +510,26 @@ public static class BatchEmitter
         // `add field` row instead of being baked into static "1" text on the
         // seed paragraph (BUG-R4-T3). Run-level formatting on multi-run
         // first paragraphs is preserved by the per-run emit path below.
+        var addHeaderProps = new Dictionary<string, string> { ["type"] = subType };
+        // First-page header auto-stamps <w:titlePg/> on its section (UX:
+        // without titlePg, Word silently ignores type="first" headerRef).
+        // Source may have headerRef-first WITHOUT titlePg — preserve that
+        // shape by passing noTitlePg=true so AddHeader skips the auto-stamp.
+        // Otherwise the next dump would emit a phantom `titlePage=true` key.
+        if (kind == "header"
+            && string.Equals(subType, "first", StringComparison.OrdinalIgnoreCase)
+            && sectionParent != null)
+        {
+            try
+            {
+                var sectionNode = word.Get(sectionParent);
+                bool sourceHadTitlePg = sectionNode.Format.TryGetValue("titlePage", out var tpv)
+                                     && tpv is bool b && b;
+                if (!sourceHadTitlePg)
+                    addHeaderProps["noTitlePg"] = "true";
+            }
+            catch { /* section path unresolved — fall through with auto-stamp */ }
+        }
         items.Add(new BatchItem
         {
             Command = "add",
@@ -394,7 +541,7 @@ public static class BatchEmitter
             // already filters orphans before reaching here).
             Parent = sectionParent ?? "/",
             Type = kind,
-            Props = new Dictionary<string, string> { ["type"] = subType }
+            Props = addHeaderProps
         });
 
         var partTargetPath = $"/{kind}[{targetIndex}]";
@@ -1589,6 +1736,16 @@ public static class BatchEmitter
                 var instr = run.Format.TryGetValue("instruction", out var iv)
                     ? iv?.ToString() ?? "" : "";
                 var fieldProps = BuildFieldAddProps(instr, run.Text ?? "");
+                // Pass through the no-separator marker so AddField writes the
+                // begin+instr+end shape instead of stamping a default cached
+                // placeholder. CollapseFieldChains set this when source had
+                // no <w:fldChar w:fldCharType="separate"/>.
+                if (fieldProps != null
+                    && run.Format.TryGetValue("_noFieldSeparator", out var nfs)
+                    && nfs is bool nfsB && nfsB)
+                {
+                    fieldProps["noSeparator"] = "true";
+                }
                 // BUG-DUMP18-02: w:fldSimple / fldChar-chain field inside
                 // w:hyperlink should replay INSIDE the hyperlink. Mirrors the
                 // equation-emit logic above (BUG-DUMP15-04) but gated on the
@@ -1931,9 +2088,19 @@ public static class BatchEmitter
         // had (test.docx tbl[1]). Signal AddTable to leave tblGrid empty.
         if (actualGridCols == 0)
             tableProps["gridCols"] = "0";
-        // Drop the internal-only marker from emitted props (BatchItem.Props
-        // never carries it; only Navigation→EmitTable consumes it).
+        // Source had no <w:tblW> — surface a `skipTblW=true` user-facing
+        // flag (mirrors `gridCols=0`). AddTable's default-tblW stamp
+        // path defers to this when set, so replay won't grow a phantom
+        // <w:tblW>. Skip when source had any explicit width (auto / dxa /
+        // pct) — those round-trip through the existing `width=` key.
+        bool sourceHadNoTblW = tableNode.Format.TryGetValue("_noTblW", out var noTblW)
+            && noTblW is bool b && b;
+        if (sourceHadNoTblW && !tableProps.ContainsKey("width"))
+            tableProps["skipTblW"] = "true";
+        // Drop the internal-only markers from emitted props (BatchItem.Props
+        // never carries them; only Navigation→EmitTable consumes them).
         tableProps.Remove("_gridCols");
+        tableProps.Remove("_noTblW");
         // BUG-R2-P1-5: AddTable seeds all 6 default borders and overlays user
         // props on top, so a partial border spec (e.g. only border.top +
         // border.bottom for a banner-line table) replays as 6 single-borders.
@@ -2072,6 +2239,25 @@ public static class BatchEmitter
                     }
                 }
             }
+            // Trim trailing cells when source row is underfilled (sum of
+            // source spans < gridCols). AddTable seeds `cols` cells per row;
+            // `set tc[i] colspan=N` removes excess cells DOWN TO gridCols but
+            // also PADS UP TO gridCols when the post-set total is short — so
+            // a source row like [colspan=3] in a 4-col grid lands at 2 cells
+            // post-replay (1 spanning + 1 pad). Source-shape preservation
+            // demands removing (gridCols - sum_of_source_spans) trailing
+            // cells AFTER all per-cell sets. The remove path is non-padding,
+            // so the final cell count matches source. CONSISTENCY(table-row-
+            // cell-count).
+            int excessTrail = cols - rowEffectiveWidths[r];
+            for (int e = 0; e < excessTrail; e++)
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "remove",
+                    Path = $"{tablePath}/tr[{r + 1}]/tc[last()]",
+                });
+            }
         }
     }
 
@@ -2193,6 +2379,7 @@ public static class BatchEmitter
             // Walk forward to find instruction text and end marker.
             string instruction = "";
             string display = "";
+            bool sawSeparate = false;
             int end = -1;
             for (int j = i + 1; j < children.Count; j++)
             {
@@ -2205,11 +2392,16 @@ public static class BatchEmitter
                         instruction += k.Text;
                 }
                 else if (k.Type == "fieldChar"
-                    && k.Format.TryGetValue("fieldCharType", out var ft)
-                    && string.Equals(ft?.ToString(), "end", StringComparison.OrdinalIgnoreCase))
+                    && k.Format.TryGetValue("fieldCharType", out var ft))
                 {
-                    end = j;
-                    break;
+                    var ftStr = ft?.ToString();
+                    if (string.Equals(ftStr, "separate", StringComparison.OrdinalIgnoreCase))
+                        sawSeparate = true;
+                    else if (string.Equals(ftStr, "end", StringComparison.OrdinalIgnoreCase))
+                    {
+                        end = j;
+                        break;
+                    }
                 }
                 else if (k.Type == "run" || k.Type == "r")
                 {
@@ -2235,6 +2427,15 @@ public static class BatchEmitter
                     ["instruction"] = instruction.Trim()
                 }
             };
+            // Source field has no <w:fldChar w:fldCharType="separate"/> — it's
+            // the begin+instr+end shape (Word recomputes the result on open).
+            // Flag this so EmitField on the field branch can pass `text=""`
+            // explicitly to AddField, which short-circuits AddField's default
+            // placeholder ("1" for PAGE etc.) and emits the same separator-
+            // less shape. Without this flag, the second dump surfaces a
+            // phantom `text="1"` key that the source never had.
+            if (!sawSeparate)
+                synth.Format["_noFieldSeparator"] = true;
             // BUG-DUMP18-02: propagate hyperlink-scope hint from the begin
             // run so the field-emit branch can target the hyperlink parent
             // on replay.
@@ -2553,6 +2754,12 @@ public static class BatchEmitter
         // numId/numLevel/numFmt/listStyle/start before they ride on `add p`.
         // Drop the flag itself from any emitted prop bag.
         "numInherited",
+        // Document-internal relationship id (rId4 / R5c0e4d…). Assigned fresh
+        // by every Add* path when it creates a new part-relationship, so the
+        // value is unstable across replays even when the document is byte-
+        // identical otherwise. Pictures, charts, OLE, hyperlinks all emit
+        // relId on Get for diagnostics but it must not ride on `add`/`set`.
+        "relId",
         // BUG-019: lineSpacing alone cannot distinguish AtLeast from Exact —
         // SpacingConverter.FormatWordLineSpacing serializes both as "Npt".
         // Set/AddParagraph now accept `lineRule` explicitly so it must flow

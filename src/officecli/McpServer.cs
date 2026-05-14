@@ -422,7 +422,9 @@ public static class McpServer
                 var depth = ArgInt("depth", 1);
                 using var handler = DocumentHandlerFactory.Open(file);
                 var node = handler.Get(path, depth);
-                return OutputFormatter.FormatNode(node, OutputFormat.Json);
+                // Unified envelope: single-path get returns the same
+                // {matches, results: [...]} shape as query / get selected.
+                return OutputFormatter.FormatNodes(new List<DocumentNode> { node }, OutputFormat.Json);
             }
             case "query":
             {

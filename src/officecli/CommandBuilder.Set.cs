@@ -13,7 +13,7 @@ static partial class CommandBuilder
     {
         var forceOption = new Option<bool>("--force") { Description = "Force write even if document is protected" };
         var setFileArg = new Argument<FileInfo>("file") { Description = "Office document path (required even with open/close mode)" };
-        var setPathArg = new Argument<string>("path") { Description = "DOM path to the element" };
+        var setPathArg = new Argument<string>("path") { Description = "DOM path to the element. The 'selected' pseudo-path is deprecated for mutations: use `get selected` to capture path(s) first, then `set <path>` (or a `batch` file for multi-select) so the target lives in the command line, not in transient watch-server state." };
         var propsOpt = new Option<string[]>("--prop") { Description = "Property to set (key=value)", AllowMultipleArgumentsPerToken = true };
 
         var setCommand = new Command("set", "Modify a document node's properties") { TreatUnmatchedTokensAsErrors = false };
@@ -35,6 +35,19 @@ static partial class CommandBuilder
             // re-invoke set for any additional paths after the main set
             // completes. CONSISTENCY(selected-pseudo): grep for the same
             // pseudo-path handling in CommandBuilder.Mark.cs / GetQuery.cs.
+            //
+            // Discouraged for mutations, single- or multi-select alike.
+            // `set selected` resolves the selection at *execution* time, so
+            // if the user clicks a different element between deciding-to-set
+            // and the command running, this branch silently retargets the
+            // new element — no error, just the wrong object mutated. The
+            // canonical pattern is two-step: `get selected` to freeze the
+            // path(s) as strings, then issue explicit `set <path>` per path
+            // (or a `batch` file for multi-select). Every mutation command
+            // then carries its target in the command line itself — auditable,
+            // diffable, replayable from shell history. Out-of-band watch-server
+            // state must not influence what mutation commands target. Do not
+            // extend this pseudo-path to more mutation commands.
             List<string>? extraSelectedPaths = null;
             if (string.Equals(path, "selected", StringComparison.Ordinal))
             {

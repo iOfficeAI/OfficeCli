@@ -1,9 +1,9 @@
 // Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 //
-// CONSISTENCY(watch-isolation): 本文件不引用 OfficeCli.Handlers,不打开文件,不写盘。
-// 见 CLAUDE.md "Watch Server Rules"。要放宽这条红线,
-// grep "CONSISTENCY(watch-isolation)" 找全 watch 子系统所有文件项目级一起评审。
+// CONSISTENCY(watch-isolation): this file does not reference OfficeCli.Handlers, does not open files,
+// does not write to disk. See CLAUDE.md "Watch Server Rules". To relax this red line,
+// grep "CONSISTENCY(watch-isolation)" and review every file in the watch subsystem project-wide.
 
 using System.Net;
 using System.Net.Sockets;
@@ -49,9 +49,10 @@ internal class WatchServer : IDisposable
     // Single shared list (last-write-wins): all browsers viewing the same file see
     // the same selection. CLI reads this via the named pipe "get-selection" command.
     //
-    // CONSISTENCY(path-stability): selection 和 mark 共享同一套裸位置寻址契约,
-    // 没有指纹/漂移检测。要升级到稳定 ID,grep "CONSISTENCY(path-stability)"
-    // 找全所有 deferred 站点项目级一起改。见 CLAUDE.md "Design Principles"。
+    // CONSISTENCY(path-stability): selection and mark share the same naive positional addressing
+    // contract — no fingerprinting, no drift detection. To upgrade to stable IDs,
+    // grep "CONSISTENCY(path-stability)" and update every deferred site project-wide in one pass.
+    // See CLAUDE.md "Design Principles".
     private List<string> _currentSelection = new();
     private readonly object _selectionLock = new();
 
@@ -59,11 +60,12 @@ internal class WatchServer : IDisposable
     // memory only. Server never opens the document and never inspects DOM —
     // marks are pure metadata; the browser computes match positions client-side.
     //
-    // CONSISTENCY(path-stability): 元素删除/位置漂移的处理刻意和 selection 一致 ——
-    // 裸位置寻址,无指纹,无漂移检测。stale 仅在 path 解析失败或 find 不命中时由
-    // 客户端报告设置。见 CLAUDE.md "Design Principles" + "Watch Server Rules"。
-    // 要修复成稳定 ID 路径,grep "CONSISTENCY(path-stability)" 找全所有 deferred 站点
-    // (selection / mark / 未来其它 path 消费者)项目级一起改,不要在 mark 单点改。
+    // CONSISTENCY(path-stability): element-deletion / position-drift handling deliberately matches
+    // selection — naive positional addressing, no fingerprint, no drift detection. `stale` is only
+    // set when the client reports a path-resolution failure or a `find` miss.
+    // See CLAUDE.md "Design Principles" + "Watch Server Rules".
+    // To migrate to stable-ID paths, grep "CONSISTENCY(path-stability)" and update every deferred
+    // site (selection / mark / any future path consumer) project-wide — never patch mark alone.
     private readonly List<WatchMark> _currentMarks = new();
     private readonly object _marksLock = new();
     private int _marksVersion = 0;

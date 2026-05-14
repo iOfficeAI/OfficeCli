@@ -698,11 +698,25 @@ public partial class WordHandler
                 _ => "1"
             };
 
-        // Build complex field: fldChar(begin) + instrText + fldChar(separate) + result + fldChar(end)
+        // Build complex field. Canonical shape:
+        //   fldChar(begin) + instrText + fldChar(separate) + result + fldChar(end)
+        // When the caller passes `noSeparator=true` (typically dump→batch
+        // replay of a source whose original field had no separator+result
+        // runs), drop fldChar(separate) and the result run — Word treats
+        // separator-less fields as "field will be recomputed on open" and
+        // renders identically while preserving the source's structural
+        // shape on round-trip.
+        bool fieldNoSeparator = (properties.TryGetValue("noseparator", out var nsv)
+                              || properties.TryGetValue("noSeparator", out nsv))
+                              && IsTruthy(nsv);
         var fieldRunBegin = new Run(new FieldChar { FieldCharType = FieldCharValues.Begin });
         var fieldRunInstr = new Run(new FieldCode(fieldInstr) { Space = SpaceProcessingModeValues.Preserve });
-        var fieldRunSep = new Run(new FieldChar { FieldCharType = FieldCharValues.Separate });
-        var fieldRunResult = new Run(new Text(fieldPlaceholder) { Space = SpaceProcessingModeValues.Preserve });
+        var fieldRunSep = fieldNoSeparator
+            ? null
+            : new Run(new FieldChar { FieldCharType = FieldCharValues.Separate });
+        var fieldRunResult = fieldNoSeparator
+            ? null
+            : new Run(new Text(fieldPlaceholder) { Space = SpaceProcessingModeValues.Preserve });
         var fieldRunEnd = new Run(new FieldChar { FieldCharType = FieldCharValues.End });
 
         // Apply optional run formatting to all runs
@@ -722,13 +736,23 @@ public partial class WordHandler
                 fieldRProps.AppendChild(new FontSize { Val = ((int)Math.Round(ParseFontSize(fs) * 2, MidpointRounding.AwayFromZero)).ToString() });
         }
 
+        // Final emitted-run ordering: begin → instr → [separate → result] → end
+        // (the bracketed pair is skipped when noSeparator=true). Collect in
+        // a list so the insertion-site code below doesn't have to repeat the
+        // separator-aware conditional.
+        var fieldRuns = new List<Run> { fieldRunBegin, fieldRunInstr };
+        if (fieldRunSep != null) fieldRuns.Add(fieldRunSep);
+        if (fieldRunResult != null) fieldRuns.Add(fieldRunResult);
+        fieldRuns.Add(fieldRunEnd);
+        // pathRun is what `resultPath` will index to. With separator: the
+        // result run (carrying the cached text). Without: end run (no result
+        // node exists; pointing at end is the closest stable anchor).
+        var pathRun = fieldRunResult ?? fieldRunEnd;
+
         if (fieldRProps != null)
         {
-            fieldRunBegin.PrependChild(fieldRProps.CloneNode(true));
-            fieldRunInstr.PrependChild(fieldRProps.CloneNode(true));
-            fieldRunSep.PrependChild(fieldRProps.CloneNode(true));
-            fieldRunResult.PrependChild(fieldRProps.CloneNode(true));
-            fieldRunEnd.PrependChild(fieldRProps.CloneNode(true));
+            foreach (var fr in fieldRuns)
+                fr.PrependChild(fieldRProps.CloneNode(true));
         }
 
         string resultPath;
@@ -750,25 +774,16 @@ public partial class WordHandler
             {
                 InsertIntoParagraph(
                     fieldPara,
-                    new OpenXmlElement[] { fieldRunBegin, fieldRunInstr, fieldRunSep, fieldRunResult, fieldRunEnd },
+                    fieldRuns.Cast<OpenXmlElement>().ToArray(),
                     index);
-                var runIdxAfterInsert = GetAllRuns(fieldPara).IndexOf(fieldRunResult);
+                var runIdxAfterInsert = GetAllRuns(fieldPara).IndexOf(pathRun);
                 resultPath = $"{fieldParaPath}/r[{runIdxAfterInsert + 1}]";
             }
             else
             {
-                fieldPara.AppendChild(fieldRunBegin);
-                fieldPara.AppendChild(fieldRunInstr);
-                fieldPara.AppendChild(fieldRunSep);
-                fieldPara.AppendChild(fieldRunResult);
-                fieldPara.AppendChild(fieldRunEnd);
-                // tester-1: the 5 field runs are appended in order
-                // [Begin, Instr, Sep, Result, End]; to point at the Result run
-                // (1-based path index) we want Count - 1, not Count - 4 which
-                // returned the Begin run. Mirrors the indexed-insert branch
-                // above, which correctly resolves to Result.
+                foreach (var fr in fieldRuns) fieldPara.AppendChild(fr);
                 var runs = GetAllRuns(fieldPara);
-                var runIdx = runs.IndexOf(fieldRunResult) + 1;
+                var runIdx = runs.IndexOf(pathRun) + 1;
                 resultPath = $"{fieldParaPath}/r[{runIdx}]";
             }
         }
@@ -782,55 +797,40 @@ public partial class WordHandler
             if (index.HasValue)
             {
                 var children = fieldHl.ChildElements.ToList();
-                OpenXmlElement[] runs = { fieldRunBegin, fieldRunInstr, fieldRunSep, fieldRunResult, fieldRunEnd };
                 if (index.Value < children.Count)
                 {
                     var anchor = children[index.Value];
-                    foreach (var r in runs)
-                    {
-                        anchor.InsertBeforeSelf(r);
-                    }
+                    foreach (var r in fieldRuns) anchor.InsertBeforeSelf(r);
                 }
                 else
                 {
-                    foreach (var r in runs) fieldHl.AppendChild(r);
+                    foreach (var r in fieldRuns) fieldHl.AppendChild(r);
                 }
             }
             else
             {
-                fieldHl.AppendChild(fieldRunBegin);
-                fieldHl.AppendChild(fieldRunInstr);
-                fieldHl.AppendChild(fieldRunSep);
-                fieldHl.AppendChild(fieldRunResult);
-                fieldHl.AppendChild(fieldRunEnd);
+                foreach (var r in fieldRuns) fieldHl.AppendChild(r);
             }
             var fieldHlParaPath = ReplaceTrailingParaSegment(parentPath, fieldHlPara);
-            // Strip trailing /hyperlink[K] segment to get paragraph path
             var slashIdxHl = fieldHlParaPath.LastIndexOf("/hyperlink[", StringComparison.Ordinal);
             var paraPathOnly = slashIdxHl > 0 ? fieldHlParaPath.Substring(0, slashIdxHl) : fieldHlParaPath;
             var hlIdxF = fieldHlPara.Elements<Hyperlink>().TakeWhile(h => !ReferenceEquals(h, fieldHl)).Count() + 1;
-            var runIdxAfter = GetAllRuns(fieldHlPara).IndexOf(fieldRunResult);
+            var runIdxAfter = GetAllRuns(fieldHlPara).IndexOf(pathRun);
             resultPath = $"{paraPathOnly}/hyperlink[{hlIdxF}]/r[{runIdxAfter + 1}]";
         }
         else if (parent is Run hostRun && hostRun.Parent is Paragraph hostRunPara)
         {
-            // Adding a field "to" an existing run: insert the 5 field runs as
-            // siblings of the host run inside its paragraph. NEVER nest a
-            // <w:p> inside a <w:r> — that violates schema and produces an
-            // unreadable document. Default position: after the host run.
             hostRunPara.TextId = GenerateParaId();
-            var anchor = (OpenXmlElement)hostRun;
-            anchor.InsertAfterSelf(fieldRunBegin);
-            fieldRunBegin.InsertAfterSelf(fieldRunInstr);
-            fieldRunInstr.InsertAfterSelf(fieldRunSep);
-            fieldRunSep.InsertAfterSelf(fieldRunResult);
-            fieldRunResult.InsertAfterSelf(fieldRunEnd);
+            OpenXmlElement cursor = hostRun;
+            foreach (var fr in fieldRuns)
+            {
+                cursor.InsertAfterSelf(fr);
+                cursor = fr;
+            }
             var hostParaPath = ReplaceTrailingParaSegment(parentPath, hostRunPara);
-            // parentPath is .../r[K]; canonicalize to .../p[@paraId=...] form.
-            // Strip the trailing /r[K] segment to get the paragraph path.
             var slashIdx = hostParaPath.LastIndexOf("/r[", StringComparison.Ordinal);
             if (slashIdx > 0) hostParaPath = hostParaPath.Substring(0, slashIdx);
-            var runIdxAfter = GetAllRuns(hostRunPara).IndexOf(fieldRunResult);
+            var runIdxAfter = GetAllRuns(hostRunPara).IndexOf(pathRun);
             resultPath = $"{hostParaPath}/r[{runIdxAfter + 1}]";
         }
         else
@@ -841,11 +841,7 @@ public partial class WordHandler
             if (properties.TryGetValue("align", out var fAlign) || properties.TryGetValue("alignment", out fAlign))
                 fPProps.Justification = new Justification { Val = ParseJustification(fAlign) };
             fNewPara.AppendChild(fPProps);
-            fNewPara.AppendChild(fieldRunBegin);
-            fNewPara.AppendChild(fieldRunInstr);
-            fNewPara.AppendChild(fieldRunSep);
-            fNewPara.AppendChild(fieldRunResult);
-            fNewPara.AppendChild(fieldRunEnd);
+            foreach (var fr in fieldRuns) fNewPara.AppendChild(fr);
             // CONSISTENCY(paraid-global-uniqueness): newly-created paragraphs
             // get a paraId from the global counter so they remain addressable
             // by paraId regardless of which container they land in.

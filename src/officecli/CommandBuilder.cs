@@ -448,6 +448,11 @@ static partial class CommandBuilder
                 // ExecuteBatchItem treats it as success, and stop-on-error never fires.
                 if (node.Type == "error")
                     throw new ArgumentException(node.Text ?? $"Path not found: {path}");
+                // Unified envelope: batch get items emit the same
+                // {matches, results: [...]} shape as query items, so callers
+                // can consume batch step output with a single parser.
+                if (format == OutputFormat.Json)
+                    return OfficeCli.Core.OutputFormatter.FormatNodes(new List<DocumentNode> { node }, format);
                 return OfficeCli.Core.OutputFormatter.FormatNode(node, format);
             }
             case "query":

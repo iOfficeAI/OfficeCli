@@ -1623,7 +1623,19 @@ public partial class WordHandler
             // replay can target ParagraphMarkRunProperties without conflating
             // with run-level formatting.
             var pmrpForDump = para.ParagraphProperties?.ParagraphMarkRunProperties;
-            if (pmrpForDump != null)
+            // Suppress markRPr.* dotted keys when the paragraph has no
+            // text-bearing runs — the bare keys below (size, font.latin, …)
+            // already cover markRPr via the firstRun-fallback path. Emitting
+            // both forms on an empty paragraph means dump→batch→dump
+            // surfaces phantom markRPr.* keys even after AddParagraph
+            // routed the formatting correctly (BUG-DUMP-MARKRPR-DOUBLE).
+            // The dotted form's purpose is to distinguish the ¶ glyph's
+            // formatting from the visible text — only meaningful when text
+            // runs exist.
+            var hasTextRun = para.Elements<Run>()
+                .Any(r => r.GetFirstChild<Text>() != null
+                          && !string.IsNullOrEmpty(r.GetFirstChild<Text>()?.Text));
+            if (pmrpForDump != null && hasTextRun)
             {
                 var b = pmrpForDump.GetFirstChild<Bold>();
                 if (b != null) node.Format["markRPr.bold"] = IsToggleOn(b);
@@ -2438,8 +2450,20 @@ public partial class WordHandler
                 if (breakEl != null)
                 {
                     node.Type = "break";
+                    // Normalize "textWrapping" → "line" on emit. OOXML treats
+                    // a typeless <w:br/> as textWrapping (the default), but
+                    // AddBreak's user-facing vocab uses "line"; without
+                    // normalisation, dump round-trip emits `type=line` from
+                    // typeless source and `type=textWrapping` from the
+                    // explicitly-stamped replay target — semantically
+                    // identical, byte-different.
                     if (breakEl.Type?.HasValue == true)
-                        node.Format["breakType"] = breakEl.Type.InnerText;
+                    {
+                        var bt = breakEl.Type.InnerText;
+                        node.Format["breakType"] = string.Equals(bt, "textWrapping", StringComparison.OrdinalIgnoreCase)
+                            ? "line"
+                            : bt;
+                    }
                 }
             }
 
@@ -2603,16 +2627,33 @@ public partial class WordHandler
                 // with empty string) must NOT surface as a "style" key.
                 if (!string.IsNullOrEmpty(tp.TableStyle?.Val?.Value))
                     node.Format["style"] = tp.TableStyle.Val.Value!;
-                // Table borders
+                // Table borders. `LeftBorder`/`RightBorder` only catch
+                // <w:left>/<w:right>; bidi-aware sources use <w:start>/<w:end>
+                // which the SDK does NOT alias onto Left/Right (the typed
+                // properties stay null). Walk all border children by local
+                // name and map both forms onto the same canonical key — the
+                // alternative is dropping borders for any doc whose tblBorders
+                // uses the start/end naming (three-line-table2.docx).
                 var tblBorders = tp.TableBorders;
                 if (tblBorders != null)
                 {
                     ReadBorder(tblBorders.TopBorder, "border.top", node);
                     ReadBorder(tblBorders.BottomBorder, "border.bottom", node);
-                    ReadBorder(tblBorders.LeftBorder, "border.left", node);
-                    ReadBorder(tblBorders.RightBorder, "border.right", node);
                     ReadBorder(tblBorders.InsideHorizontalBorder, "border.insideH", node);
                     ReadBorder(tblBorders.InsideVerticalBorder, "border.insideV", node);
+                    foreach (var bChild in tblBorders.ChildElements)
+                    {
+                        if (bChild is BorderType bt)
+                        {
+                            var ln = bChild.LocalName;
+                            if (ln.Equals("left", StringComparison.OrdinalIgnoreCase)
+                                || ln.Equals("start", StringComparison.OrdinalIgnoreCase))
+                                ReadBorder(bt, "border.left", node);
+                            else if (ln.Equals("right", StringComparison.OrdinalIgnoreCase)
+                                     || ln.Equals("end", StringComparison.OrdinalIgnoreCase))
+                                ReadBorder(bt, "border.right", node);
+                        }
+                    }
                 }
                 // Table width
                 if (tp.TableWidth?.Width?.Value != null)
@@ -2630,6 +2671,16 @@ public partial class WordHandler
                 {
                     // Some producers emit <w:tblW w:type="auto"/> without w:w.
                     node.Format["width"] = "auto";
+                }
+                else
+                {
+                    // Internal-only marker: source had no <w:tblW> element at
+                    // all. EmitTable reads this to tell AddTable to skip the
+                    // default-tblW stamp; without it, replay grows
+                    // a <w:tblW w:w="<sum-of-gridCol>" w:type="dxa"/> that
+                    // the source never had, and the next dump surfaces a
+                    // phantom `width=…` key.
+                    node.Format["_noTblW"] = true;
                 }
                 // Alignment
                 if (tp.TableJustification?.Val?.Value != null)

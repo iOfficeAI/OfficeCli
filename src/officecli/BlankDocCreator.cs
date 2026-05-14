@@ -252,7 +252,7 @@ public static class BlankDocCreator
             // Why 1.08 × not 1.15 ×: empirical (stress-C measurement) — when
             // a list line has a 14 pt marker over 11 pt body, Word renders
             // the line at 14 × 1.08 × calibri-ratio = 18.45pt; cli with
-            // 1.15 × renders at 14 × 1.15 × ratio = 19.65pt (1.3pt/段 drift
+            // 1.15 × renders at 14 × 1.15 × ratio = 19.65pt (1.3pt/paragraph drift
             // accumulating across the doc). Office 2013+ Normal IS 1.08 ×;
             // matching that here matches what Word actually does.
             var normalStyle = new Style(

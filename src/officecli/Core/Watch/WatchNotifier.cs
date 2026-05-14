@@ -1,9 +1,9 @@
 // Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 //
-// CONSISTENCY(watch-isolation): 本文件不引用 OfficeCli.Handlers,不打开文件,不写盘。
-// 见 CLAUDE.md "Watch Server Rules"。要放宽这条红线,
-// grep "CONSISTENCY(watch-isolation)" 找全 watch 子系统所有文件项目级一起评审。
+// CONSISTENCY(watch-isolation): this file does not reference OfficeCli.Handlers, does not open files,
+// does not write to disk. See CLAUDE.md "Watch Server Rules". To relax this red line,
+// grep "CONSISTENCY(watch-isolation)" and review every file in the watch subsystem project-wide.
 
 using System.IO.Pipes;
 using System.Text;

@@ -334,11 +334,28 @@ public partial class WordHandler
             try { return Path.GetFileName(imgPath); }
             catch { return "image"; }
         }
-        var altText = properties.TryGetValue("alt", out var altOverride) && !string.IsNullOrEmpty(altOverride)
-            ? altOverride
-            : (properties.TryGetValue("name", out var nameOverride) && !string.IsNullOrEmpty(nameOverride)
-                ? nameOverride
+        // `name` is the picture's docPr Name (Word's Object Browser label;
+        // typically "Picture 1", "Picture 2", …). `alt` is the docPr
+        // Description (Word's Alt Text field, used by screen readers).
+        // Source documents almost always set these to DIFFERENT values, so
+        // collapsing both onto `altText` poisons dump round-trip — d2 would
+        // emit the long alt text as the name. Take them separately; fall
+        // back through name → alt → DefaultPictureName so callers passing
+        // only one still get a sensible result.
+        var pictureName = properties.TryGetValue("name", out var nameOverride) && !string.IsNullOrEmpty(nameOverride)
+            ? nameOverride
+            : (properties.TryGetValue("alt", out var altOverride) && !string.IsNullOrEmpty(altOverride)
+                ? altOverride
                 : DefaultPictureName());
+        // altText: explicit `alt=` wins. When absent, leave the Description
+        // attribute blank — auto-stamping `altText = pictureName` meant Get
+        // surfaced a phantom `alt=<name>` key on dump round-trip for sources
+        // whose docPr had no Description (07_example_online_convert.docx).
+        // Empty string keeps the OOXML attr off entirely (DocProperties
+        // serialises Description="" as no attr).
+        var altText = properties.TryGetValue("alt", out var altOverride2) && !string.IsNullOrEmpty(altOverride2)
+            ? altOverride2
+            : "";
 
         var imgDocPropId = NextDocPropId();
         Run imgRun;
@@ -374,11 +391,11 @@ public partial class WordHandler
                 ? ParseVerticalRelative(vRelStr)
                 : DW.VerticalRelativePositionValues.Margin;
             var behind = properties.TryGetValue("behindtext", out var behindStr) && IsTruthy(behindStr);
-            imgRun = CreateAnchorImageRun(relId, cxEmu, cyEmu, altText, wrapType, hPos, vPos, hRel, vRel, behind, imgDocPropId);
+            imgRun = CreateAnchorImageRun(relId, cxEmu, cyEmu, altText, wrapType, hPos, vPos, hRel, vRel, behind, imgDocPropId, pictureName);
         }
         else
         {
-            imgRun = CreateImageRun(relId, cxEmu, cyEmu, altText, imgDocPropId);
+            imgRun = CreateImageRun(relId, cxEmu, cyEmu, altText, imgDocPropId, pictureName);
         }
 
         // Wire the asvg:svgBlip extension after the run is built. Walking
@@ -474,6 +491,29 @@ public partial class WordHandler
                 var imgPIdx = parent.Elements<Paragraph>().Count();
                 resultPath = $"{parentPath}/{BuildParaPathSegment(imgPara, imgPIdx)}";
             }
+        }
+
+        // Apply run-level properties carried on the picture's Format (lang.*,
+        // noproof, bold, color, …). Sources often stamp <w:lang> / <w:noProof>
+        // on the picture's run — without this pass they were silently dropped
+        // on replay, surfacing as phantom keys-missing on the second dump.
+        // Iterate AddPicture's full property bag and apply anything the run-
+        // formatting helper recognises; AddPicture-specific keys (width,
+        // height, alt, name, wrap, anchor, …) are not in the helper's
+        // vocabulary so they pass through untouched.
+        OpenXmlCompositeElement? imgRunRPr = null;
+        foreach (var (key, value) in properties)
+        {
+            var lk = key.ToLowerInvariant();
+            if (lk is "width" or "height" or "alt" or "name" or "src"
+                or "wrap" or "anchor" or "hposition" or "vposition"
+                or "hrelative" or "vrelative" or "behindtext"
+                or "tooltip" or "tgtframe" or "tgtframe" or "history" or "url"
+                or "relid" or "id" or "contenttype" or "filesize"
+                or "src.svg")
+                continue;
+            imgRunRPr ??= imgRun.GetFirstChild<RunProperties>() ?? imgRun.PrependChild(new RunProperties());
+            ApplyRunFormatting(imgRunRPr, key, value);
         }
 
         // BUG-DUMP11-06: a hyperlink-wrapped picture's `anchor` attr (the

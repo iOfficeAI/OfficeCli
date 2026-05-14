@@ -21,7 +21,7 @@ static partial class CommandBuilder
     private static Command BuildMarkCommand(Option<bool> jsonOption)
     {
         var fileArg = new Argument<FileInfo>("file") { Description = "Office document path (.pptx, .xlsx, .docx)" };
-        var pathArg = new Argument<string>("path") { Description = "DOM path to the element to mark" };
+        var pathArg = new Argument<string>("path") { Description = "DOM path to the element to mark. The 'selected' pseudo-path still works but is discouraged: prefer `get selected` first, then `mark <path>` per path, so the target lives in the command line." };
         var propsOpt = new Option<string[]>("--prop")
         {
             Description = "Mark property: find=..., color=..., note=..., tofix=..., regex=true",
@@ -95,10 +95,10 @@ static partial class CommandBuilder
                 }
             }
 
-            // CONSISTENCY(find-regex): 复用 WordHandler.Set.cs:60-61 的 regex→raw-string 转换,
-            // 保持 mark 和 set 在 find/regex 词汇上完全一致(literal | r"..." | regex=true flag)。
-            // 要修改 find 解析协议,grep "CONSISTENCY(find-regex)" 找全所有调用点项目级一起改,
-            // 不要在 mark 单点改。见 CLAUDE.md Design Principles。
+            // CONSISTENCY(find-regex): reuse WordHandler.Set.cs:60-61's regex→raw-string conversion
+            // so mark and set share the exact same find/regex vocabulary (literal | r"..." | regex=true flag).
+            // To change the find parsing protocol, grep "CONSISTENCY(find-regex)" and update every call site
+            // project-wide in one pass — never patch mark alone. See CLAUDE.md Design Principles.
             props.TryGetValue("find", out var findText);
             findText ??= "";
             if (props.TryGetValue("regex", out var regexFlag) && ParseHelpers.IsTruthySafe(regexFlag)
@@ -120,6 +120,11 @@ static partial class CommandBuilder
             // elements is conceptually N independent marks (one per element); a
             // single mark with N paths would need new wire-format plumbing and
             // make find/stale semantics ambiguous.
+            //
+            // mark is advisory (no OOXML write), so the silent-retarget hazard
+            // that makes `set selected` discouraged-by-default is milder here.
+            // See CommandBuilder.Set.cs `selected` branch for the full rationale
+            // before extending this pseudo-path to additional mutation commands.
             List<string> targetPaths;
             if (string.Equals(path, "selected", StringComparison.Ordinal))
             {

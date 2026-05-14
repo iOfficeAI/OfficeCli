@@ -22,8 +22,9 @@ public partial class WordHandler
             {
                 var cols = EnsureColumns();
                 cols.ColumnCount = (short)ParseHelpers.SafeParseInt(value, "columns.count");
-                if (cols.EqualWidth == null)
-                    cols.EqualWidth = true;
+                // No auto-stamp — see `columns` case above. equalWidth is
+                // implicitly true per OOXML when no <w:col> children carry
+                // explicit widths.
                 return true;
             }
             // CONSISTENCY(canonical-key): 'columnSpace' is the canonical key
@@ -233,7 +234,13 @@ public partial class WordHandler
                 if (!short.TryParse(colParts[0], out var colCount))
                     throw new ArgumentException($"Invalid 'columns' value: '{value}'. Expected an integer or integer,space (e.g. '3' or '3,720').");
                 eqCols.ColumnCount = (DocumentFormat.OpenXml.Int16Value)colCount;
-                eqCols.EqualWidth = true;
+                // Don't auto-stamp equalWidth. Per OOXML spec, equalWidth is
+                // implicitly true when no <w:col> children carry explicit
+                // widths — so the auto-stamp was always redundant. Leaving
+                // it off lets the round-trip preserve source's no-equalWidth
+                // shape (complex-textbox-test.docx, 03_filesamples_sample3).
+                // Callers that want unequal columns must populate <w:col>
+                // children separately or pass `columns.equalWidth=false`.
                 if (colParts.Length > 1)
                     eqCols.Space = colParts[1];
                 else
