@@ -1493,6 +1493,21 @@ public partial class WordHandler
                     && uint.TryParse(value, out var kernVal))
                     InsertRunPropInSchemaOrder(props, new Kern { Val = kernVal });
                 return true;
+            case "position":
+                // <w:position w:val="N"/> — vertical raise/lower in
+                // half-points (ST_SignedHpsMeasure). Positive = raise,
+                // negative = lower, 0 = baseline. Distinct from
+                // vertAlign=super|sub which is the typographic toggle
+                // (renders at ~58% size); position keeps full size and
+                // shifts by exact half-points. Doc/x .doc carries this
+                // as sprmCHpsPos (0x4845). Get exposes "position" already
+                // (see WordHandler.Navigation.cs); Add/Set previously
+                // routed to tab-stop SetElementTabStop only.
+                props.RemoveAllChildren<Position>();
+                if (!string.IsNullOrEmpty(value)
+                    && int.TryParse(value, out var posVal))
+                    InsertRunPropInSchemaOrder(props, new Position { Val = posVal.ToString(System.Globalization.CultureInfo.InvariantCulture) });
+                return true;
             case "lang" or "lang.latin" or "lang.val":
             case "lang.ea" or "lang.eastasia" or "lang.eastasian":
             case "lang.cs" or "lang.complexscript" or "lang.bidi":
