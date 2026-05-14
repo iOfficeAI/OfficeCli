@@ -1056,7 +1056,16 @@ public partial class WordHandler
                         para.AppendChild(seedRun);
                         allParaRuns.Add(seedRun);
                     }
-                    if (allParaRuns.Count == 0 || pmrpExisting != null)
+                    // CONSISTENCY(markRPr-bare-vs-dotted): when the same Set
+                    // carries an explicit markRPr.<key>, the dotted form is
+                    // the authoritative mark-only value — the bare key must
+                    // propagate to visible runs but NOT overwrite markRPr.
+                    // Without this, source's `markRPr.size=12pt + size=15pt`
+                    // (¶ glyph at 12pt, runs at 15pt) collapses to 15pt on
+                    // both after replay because iteration order isn't stable.
+                    bool explicitMarkOverride = properties.ContainsKey($"markRPr.{key}")
+                                             || properties.ContainsKey($"markrpr.{key}");
+                    if ((allParaRuns.Count == 0 || pmrpExisting != null) && !explicitMarkOverride)
                     {
                         var markRPr = pmrpExisting
                             ?? pProps.AppendChild(new ParagraphMarkRunProperties());
