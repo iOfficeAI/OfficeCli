@@ -627,6 +627,14 @@ public partial class WordHandler
             {
                 case Text t: sb.Append(t.Text); break;
                 case TabChar: sb.Append('\t'); break;
+                // CONSISTENCY(text-breaks): mirror AppendTextWithBreaks — \n
+                // round-trips through <w:br/> (textWrapping, the OOXML default
+                // when w:type is absent). Without this case, Set/Add(text=...)
+                // with embedded \n loses the break on dump readback. Skip
+                // page/column breaks — they have no \n source representation
+                // and a paragraph-level `break` property already captures them.
+                case Break br when br.Type == null || br.Type.Value == BreakValues.TextWrapping:
+                    sb.Append('\n'); break;
                 // BUG-DUMP7-01: <w:sym w:font="Wingdings" w:char="F0E0"/> is a
                 // glyph substitution — the run carries no <w:t>. Without a case
                 // here, GetRunText returned empty and BatchEmitter's run-emit
