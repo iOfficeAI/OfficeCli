@@ -89,8 +89,6 @@ internal sealed class FormatHandlerProxy : IDocumentHandler
         var props = PropsToJson(properties);
         var result = _session.Send("command", "set", args, props);
         // Protocol §5.3 (set): result is `{"unsupported_properties":["k1",...]}`.
-        // Accept the older bare-string-array shape too so a plugin upgrading
-        // at its own pace does not break.
         return ParseUnsupportedProperties(result);
     }
 
@@ -105,7 +103,6 @@ internal sealed class FormatHandlerProxy : IDocumentHandler
         var props = PropsToJson(properties);
         var result = _session.Send("command", "add", args, props);
         // Protocol §5.3 (add): result is `{"path":"...","unsupported_properties":[...]}`.
-        // Accept the older bare-string shape too.
         return ParseAddPath(result);
     }
 
@@ -332,40 +329,40 @@ internal sealed class FormatHandlerProxy : IDocumentHandler
 
     /// <summary>
     /// Extract the <c>unsupported_properties</c> list from a <c>set</c> reply.
-    /// Spec-conformant plugins return <c>{"unsupported_properties":[...]}</c>;
-    /// older plugins returned a bare string array. Both shapes are accepted so
-    /// host stays compatible during the protocol-v1 rollout.
+    /// Strict to the protocol §5.3 shape: <c>{"unsupported_properties":[...]}</c>.
+    /// Bare-array replies are a plugin bug and fail loudly with
+    /// <c>protocol_mismatch</c>, so plugin authors discover the drift
+    /// immediately instead of having it silently absorbed by the host.
     /// </summary>
     private static List<string> ParseUnsupportedProperties(JsonNode? result)
     {
         if (result is null) return new List<string>();
-        if (result is JsonArray array)
-        {
-            return array
-                .Where(n => n is not null)
-                .Select(n => n!.GetValue<string>())
-                .ToList();
-        }
-        if (result is JsonObject obj && obj["unsupported_properties"] is JsonArray ups)
-        {
-            return ups
-                .Where(n => n is not null)
-                .Select(n => n!.GetValue<string>())
-                .ToList();
-        }
-        return new List<string>();
+        if (result is not JsonObject obj)
+            throw new CliException(
+                "Format-handler `set` reply must be a JSON object with `unsupported_properties` array (§5.3). " +
+                $"Got: {result.GetType().Name}.")
+            { Code = "protocol_mismatch" };
+        if (obj["unsupported_properties"] is not JsonArray ups)
+            return new List<string>();
+        return ups
+            .Where(n => n is not null)
+            .Select(n => n!.GetValue<string>())
+            .ToList();
     }
 
     /// <summary>
-    /// Extract the new element's path from an <c>add</c> reply.
-    /// Spec-conformant plugins return <c>{"path":"...","unsupported_properties":[...]}</c>;
-    /// older plugins returned a bare string. Both shapes are accepted.
+    /// Extract the new element's path from an <c>add</c> reply. Strict to the
+    /// protocol §5.3 shape: <c>{"path":"...","unsupported_properties":[...]}</c>.
+    /// Bare-string replies fail loudly with <c>protocol_mismatch</c>.
     /// </summary>
     private static string ParseAddPath(JsonNode? result)
     {
         if (result is null) return "";
-        if (result is JsonValue v && v.TryGetValue<string>(out var s)) return s;
-        if (result is JsonObject obj) return obj["path"]?.GetValue<string>() ?? "";
-        return "";
+        if (result is not JsonObject obj)
+            throw new CliException(
+                "Format-handler `add` reply must be a JSON object with `path` field (§5.3). " +
+                $"Got: {result.GetType().Name}.")
+            { Code = "protocol_mismatch" };
+        return obj["path"]?.GetValue<string>() ?? "";
     }
 }
