@@ -1173,7 +1173,14 @@ public class ResidentServer : IDisposable
                 node.Format["savedContentType"] = contentType!;
         }
 
-        Console.WriteLine(OutputFormatter.FormatNode(node, format));
+        // Unified envelope contract: mirror direct-mode CommandBuilder.GetQuery.cs
+        // — single-path get JSON returns {matches, results: [node]}, so agents
+        // and scripts use one jq path across get / get selected / query. Text
+        // mode keeps the rich single-node rendering via FormatNode.
+        if (format == OutputFormat.Json)
+            Console.WriteLine(OutputFormatter.FormatNodes(new List<DocumentNode> { node }, format));
+        else
+            Console.WriteLine(OutputFormatter.FormatNode(node, format));
     }
 
     // BUG-DUMP-R6-01: dump used to bypass the resident and open its own
