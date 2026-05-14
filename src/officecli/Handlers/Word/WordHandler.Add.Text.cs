@@ -61,11 +61,13 @@ public partial class WordHandler
                 // inserted into the tree (see post-insert HasInheritedBidi
                 // pass below). Mirrors paragraph Set/ApplyDirectionCascade.
                 pProps.RemoveAllChildren<BiDi>();
-                var addStyleId = pProps.ParagraphStyleId?.Val?.Value;
-                if (addStyleId != null && StyleChainHasBidi(addStyleId))
-                {
-                    pProps.BiDi = new BiDi { Val = new DocumentFormat.OpenXml.OnOffValue(false) };
-                }
+                // CONSISTENCY(bidi-explicit-false-roundtrip): Navigation emits
+                // `direction=ltr` ONLY when source pPr had an explicit
+                // <w:bidi w:val="0"/>. Always stamp the explicit override on
+                // replay so dump→batch preserves the source's literal pPr
+                // shape — not just the subset where style-chain inheritance
+                // would otherwise re-enable RTL.
+                pProps.BiDi = new BiDi { Val = new DocumentFormat.OpenXml.OnOffValue(false) };
                 var markRPr = pProps.ParagraphMarkRunProperties;
                 markRPr?.RemoveAllChildren<RightToLeftText>();
             }
