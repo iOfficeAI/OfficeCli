@@ -522,19 +522,16 @@ public partial class WordHandler
                            ?? styleSpacing?.LineRule?.InnerText;
                 if (rule == "auto" || rule == null)
                 {
-                    if (int.TryParse(lv, out var lvNum))
+                    if (int.TryParse(lv, out var lvNum) && lvNum > 0)
                     {
-                        // OOXML §17.3.1.33 "auto" rule: line-height is the
-                        // larger of the font's natural single-line height
-                        // and the per-paragraph multiplier `lvNum/240 ×
-                        // font_size`. The multiplier is anchored to
-                        // font_size, not to the natural-line-height — so
-                        // `lvNum/240 × ratio` double-counts the ratio.
-                        // In CSS unitless line-height (browser multiplies
-                        // by font-size): line-height = max(ratio, lvNum/240).
+                        // OOXML §17.3.1.33 "auto" rule: line value is in
+                        // 240ths of a line. Final line-height multiplies
+                        // the font's natural single-line ratio by the
+                        // per-paragraph (lvNum/240) factor.
+                        // CSS unitless: line-height = (lvNum/240) × natural_ratio
                         var paraFont = ResolveParaFontForLineHeight(para);
                         var ratio = FontMetricsReader.GetRatio(paraFont);
-                        var lh = Math.Max(ratio, lvNum / 240.0);
+                        var lh = ratio * (lvNum / 240.0);
                         parts.Add($"line-height:{lh:0.####}");
                     }
                 }
@@ -1135,15 +1132,13 @@ public partial class WordHandler
                     if (spacing.Line?.Value is string lv && !parts.Any(p => p.StartsWith("line-height")))
                     {
                         var rule = spacing.LineRule?.InnerText;
-                        if ((rule == "auto" || rule == null) && int.TryParse(lv, out var val))
+                        if ((rule == "auto" || rule == null) && int.TryParse(lv, out var val) && val > 0)
                         {
-                            // OOXML §17.3.1.33 "auto" rule: max of natural
-                            // line-height (font_size × ratio) and the
-                            // multiplier (val/240 × font_size). In CSS
-                            // unitless line-height: max(ratio, val/240).
+                            // OOXML §17.3.1.33 "auto" rule: see paragraph
+                            // path above. line-height = (val/240) × natural_ratio.
                             var paraFont = ResolveParaFontForLineHeight(para);
                             var ratio = FontMetricsReader.GetRatio(paraFont);
-                            parts.Add($"line-height:{Math.Max(ratio, val / 240.0):0.####}");
+                            parts.Add($"line-height:{ratio * (val / 240.0):0.####}");
                         }
                         else if (rule == "exact" || rule == "atLeast")
                             parts.Add($"line-height:{Units.TwipsToPt(lv):0.##}pt");
@@ -1203,13 +1198,13 @@ public partial class WordHandler
                 if (spacing.Line?.Value is string lv && !parts.Any(p => p.StartsWith("line-height")))
                 {
                     var rule = spacing.LineRule?.InnerText;
-                    if ((rule == "auto" || rule == null) && int.TryParse(lv, out var val))
+                    if ((rule == "auto" || rule == null) && int.TryParse(lv, out var val) && val > 0)
                     {
-                        // OOXML §17.3.1.33 "auto" rule (see ResolveSpacing
-                        // path above for derivation).
+                        // OOXML §17.3.1.33 "auto" rule (see paragraph path
+                        // above). line-height = (val/240) × natural_ratio.
                         var paraFont = ResolveParaFontForLineHeight(para);
                         var ratio = FontMetricsReader.GetRatio(paraFont);
-                        parts.Add($"line-height:{Math.Max(ratio, val / 240.0):0.####}");
+                        parts.Add($"line-height:{ratio * (val / 240.0):0.####}");
                     }
                     else if (rule == "exact" || rule == "atLeast")
                         parts.Add($"line-height:{Units.TwipsToPt(lv):0.##}pt");
@@ -1232,7 +1227,82 @@ public partial class WordHandler
         return string.Join(";", parts);
     }
 
-    private string GetRunInlineCss(RunProperties? rProps)
+    /// <summary>Read the paragraph's principal font size (in pt), the same
+    /// value GetParagraphInlineCss emits on the &lt;p&gt; element.</summary>
+    private double? ResolveParaPrincipalSizePt(Paragraph para)
+    {
+        Run? probeRun = para.Elements<Run>().FirstOrDefault(r =>
+            r.ChildElements.Any(c => c is Text t && !string.IsNullOrEmpty(t.Text)));
+        if (probeRun == null)
+        {
+            var markProps = para.ParagraphProperties?.ParagraphMarkRunProperties;
+            if (markProps != null)
+            {
+                var synthRPr = new RunProperties();
+                foreach (var child in markProps.ChildElements)
+                    synthRPr.AppendChild(child.CloneNode(true));
+                probeRun = new Run(synthRPr);
+            }
+        }
+        if (probeRun == null) return null;
+        var rProps = ResolveEffectiveRunProperties(probeRun, para);
+        var sz = rProps.FontSize?.Val?.Value;
+        if (sz != null && int.TryParse(sz, out var hp))
+            return hp / 2.0;
+        return null;
+    }
+
+    /// <summary>Compute a line-height CSS value for a single run-level span.
+    /// CSS 2.1 §10.8.1: line-box height = max over each inline of its own
+    /// line-height. When the run's font-size matches the paragraph's
+    /// principal size, the run emits the unitless multiplier 1 so the
+    /// paragraph's own line-height dominates the line-box; this also caps
+    /// the inline box at the run's font-size, preventing a font variant
+    /// whose intrinsic inline metrics exceed the paragraph's line-height
+    /// from extending the line-box. When the run's size differs from the
+    /// paragraph's principal size, the run mirrors the paragraph's
+    /// line-height rule using its own font's natural ratio so mixed-size
+    /// paragraphs render at the correct max-line-height per OOXML
+    /// §17.3.1.33.</summary>
+    private string ResolveRunLineHeightCss(string? runFontName, double? runSizePt, Paragraph para)
+    {
+        var paraSizePt = ResolveParaPrincipalSizePt(para);
+        bool sizeMatches = runSizePt == null
+            || (paraSizePt != null && Math.Abs(runSizePt.Value - paraSizePt.Value) < 0.01);
+        if (sizeMatches) return "line-height:1";
+
+        var pProps = para.ParagraphProperties;
+        var styleId = pProps?.ParagraphStyleId?.Val?.Value;
+        var styleSpacing = ResolveSpacingFromStyle(styleId);
+        var hasSpacing = pProps?.SpacingBetweenLines != null || styleSpacing != null;
+        var lineVal = pProps?.SpacingBetweenLines?.Line?.Value ?? styleSpacing?.Line?.Value;
+        var rule = pProps?.SpacingBetweenLines?.LineRule?.InnerText ?? styleSpacing?.LineRule?.InnerText;
+
+        var font = runFontName ?? ResolveParaFontForLineHeight(para);
+        var ratio = FontMetricsReader.GetRatio(font);
+
+        if (hasSpacing)
+        {
+            if (lineVal != null)
+            {
+                if ((rule == "auto" || rule == null)
+                    && int.TryParse(lineVal, out var lvNum) && lvNum > 0)
+                    return $"line-height:{ratio * (lvNum / 240.0):0.####}";
+                if (rule == "exact" || rule == "atLeast")
+                    return $"line-height:{Units.TwipsToPt(lineVal):0.##}pt";
+            }
+            return $"line-height:{ratio:0.####}";
+        }
+
+        var builtIn = ResolveBuiltInStyleDefaults(styleId);
+        if (builtIn == null && DocCarriesNormalDefaults())
+            builtIn = BuiltInStyleDefaults["Normal"];
+        if (builtIn != null)
+            return $"line-height:{Math.Max(builtIn.Line, ratio):0.####}";
+        return $"line-height:{ratio:0.####}";
+    }
+
+    private string GetRunInlineCss(RunProperties? rProps, Paragraph? para = null)
     {
         if (rProps == null) return "";
         var parts = new List<string>();
@@ -1448,6 +1518,20 @@ public partial class WordHandler
 
         // w14 text effects (textFill, textOutline, glow, shadow, reflection)
         AppendW14CssEffects(rProps, parts);
+
+        // CSS 2.1 §10.8.1 — line-box height = max over each inline of
+        // its own line-height. ResolveRunLineHeightCss picks "1" when the
+        // run's font-size matches the paragraph's principal size (the
+        // paragraph's own line-height dominates the line-box, and the
+        // run's inline box is capped to its font-size so a heavier font
+        // variant can't extend it); when the run's size differs, the
+        // run's line-height mirrors the paragraph's rule using its own
+        // font's natural ratio so the bigger inline box drives the
+        // line-box to max-of-fonts × max-size × multi.
+        double? runSizePt = (size != null && int.TryParse(size, out var hp))
+            ? hp / 2.0 : (double?)null;
+        if (parts.Count > 0 && para != null)
+            parts.Add(ResolveRunLineHeightCss(font, runSizePt, para));
 
         return string.Join(";", parts);
     }
@@ -2293,8 +2377,8 @@ public partial class WordHandler
             padding-bottom: 0.3em; }}
         .doc-footer {{ position: absolute; bottom: {pg.FooterDistancePt:0.#}pt; left: {mL}; right: {mR};
             padding-top: 0.3em; }}
-        h1, h2, h3, h4, h5, h6 {{ line-height: {Math.Max(FontMetricsReader.GetRatio(dd.Font), dd.LineHeight):0.####}; }}
-        p {{ margin: 0; margin-bottom: {(dd.SpaceAfterPt > 0 ? $"{dd.SpaceAfterPt:0.##}pt" : "0")}; line-height: {Math.Max(FontMetricsReader.GetRatio(dd.Font), dd.LineHeight):0.####}; text-align: {dd.DefaultAlign};{(dd.DefaultAlign == "justify" ? " text-justify: inter-character;" : "")} text-autospace: ideograph-alpha ideograph-numeric; }}
+        h1, h2, h3, h4, h5, h6 {{ line-height: {FontMetricsReader.GetRatio(dd.Font) * dd.LineHeight:0.####}; }}
+        p {{ margin: 0; margin-bottom: {(dd.SpaceAfterPt > 0 ? $"{dd.SpaceAfterPt:0.##}pt" : "0")}; line-height: {FontMetricsReader.GetRatio(dd.Font) * dd.LineHeight:0.####}; text-align: {dd.DefaultAlign};{(dd.DefaultAlign == "justify" ? " text-justify: inter-character;" : "")} text-autospace: ideograph-alpha ideograph-numeric; }}
         a {{ color: #2B579A; }} a:hover {{ color: #1a3c6e; }}
         .toc {{ display: flex; text-indent: 0 !important; }}
         .toc a {{ color: inherit; text-decoration: none; display: flex; flex: 1; }}

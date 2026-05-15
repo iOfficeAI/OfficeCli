@@ -302,7 +302,7 @@ public partial class WordHandler
             return;
         if (rProps.SpecVanish != null && (rProps.SpecVanish.Val == null || rProps.SpecVanish.Val.Value))
             return;
-        var style = GetRunInlineCss(rProps);
+        var style = GetRunInlineCss(rProps, para);
         var needsSpan = !string.IsNullOrEmpty(style);
 
         // When line-break tracking is active, text is buffered and flushed later
