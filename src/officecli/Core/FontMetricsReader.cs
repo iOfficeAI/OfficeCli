@@ -489,7 +489,7 @@ internal static class FontMetricsReader
         var result = new CmapSubtable { offset = -1, format = 0 };
         r.BaseStream.Position = cmapOffset + 2;
         var numTables = ReadUInt16BE(r);
-        long bestF4 = -1, bestF12 = -1;
+        long bestF4 = -1, bestF12 = -1, fallbackF4 = -1;
         for (int i = 0; i < numTables; i++)
         {
             r.BaseStream.Position = cmapOffset + 4 + i * 8;
@@ -506,9 +506,17 @@ internal static class FontMetricsReader
                 bestF4 = cmapOffset + subOff;
             else if (format == 4 && bestF4 < 0 && platformId == 0)
                 bestF4 = cmapOffset + subOff;
+            // Symbol-encoded fonts (Symbol/Wingdings family) ship only a
+            // platform=3, encoding=0 cmap whose segments live in the PUA range
+            // U+F000-U+F0FF. OpenType cmap spec admits this as a legitimate
+            // subtable; without it, lvlText codepoints declared in numbering
+            // rPr can't be resolved against the font's own coverage.
+            else if (format == 4 && platformId == 3 && encodingId == 0)
+                fallbackF4 = cmapOffset + subOff;
         }
         if (bestF12 >= 0) { result.offset = bestF12; result.format = 12; }
         else if (bestF4 >= 0) { result.offset = bestF4; result.format = 4; }
+        else if (fallbackF4 >= 0) { result.offset = fallbackF4; result.format = 4; }
         return result;
     }
 
