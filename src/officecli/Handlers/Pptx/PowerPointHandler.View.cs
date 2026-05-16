@@ -529,6 +529,43 @@ public partial class PowerPointHandler
                 }
             }
 
+            // Table row/grid width mismatch. OOXML requires each <a:tr> to have
+            // <a:tc> count equal to its parent <a:tblGrid>'s <a:gridCol> count
+            // (gridSpan creates wide cells via hMerge placeholders, not by
+            // dropping cells). A short row produces undefined render — real
+            // PowerPoint stretches it with empty stubs, other viewers may
+            // skip it; either way it's malformed. Common cause: an earlier
+            // `add row --prop cols=N` with N < grid count, now rejected at
+            // write time but old files may still carry the bug.
+            int tableIdx = 0;
+            foreach (var graphicFrame in shapeTree.Descendants<GraphicFrame>())
+            {
+                var table = graphicFrame.Descendants<Drawing.Table>().FirstOrDefault();
+                if (table == null) continue;
+                tableIdx++;
+                var gridColCount = table.TableGrid?.Elements<Drawing.GridColumn>().Count() ?? 0;
+                if (gridColCount == 0) continue;
+                int rowIdx = 0;
+                foreach (var tr in table.Elements<Drawing.TableRow>())
+                {
+                    rowIdx++;
+                    var tcCount = tr.Elements<Drawing.TableCell>().Count();
+                    if (tcCount != gridColCount)
+                    {
+                        issues.Add(new DocumentIssue
+                        {
+                            Id = $"S{++issueNum}",
+                            Type = IssueType.Structure,
+                            Severity = IssueSeverity.Warning,
+                            Path = $"/slide[{slideNum}]/table[{tableIdx}]/tr[{rowIdx}]",
+                            Message = $"Row has {tcCount} cell(s) but table grid has {gridColCount} column(s). " +
+                                      "Real PowerPoint silently pads/clips; other viewers may render incorrectly. " +
+                                      "Add empty cells or use gridSpan to merge."
+                        });
+                    }
+                }
+            }
+
             // CONSISTENCY(pptx-group-flatten): alt-text accessibility check
             // applies to every picture on the slide, including those nested in
             // groups.
