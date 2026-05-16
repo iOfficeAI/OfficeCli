@@ -6,6 +6,7 @@ using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Presentation;
 using OfficeCli.Core;
+using OfficeCli.Core.TableStyles;
 using Drawing = DocumentFormat.OpenXml.Drawing;
 
 namespace OfficeCli.Handlers;
@@ -1047,12 +1048,18 @@ public partial class PowerPointHandler
         double tw = EmuToPx(extents.Cx?.Value ?? 0);
         double th = EmuToPx(extents.Cy?.Value ?? 0);
 
-        // Table style
+        // Table style. Banding flags and grid dimensions feed the per-cell
+        // Core/TableStyles resolver below — mirrors HtmlPreview.Tables.cs.
         var tblPr = table.GetFirstChild<Drawing.TableProperties>();
         var tableStyleId = tblPr?.GetFirstChild<Drawing.TableStyleId>()?.InnerText;
-        var tableStyleName = tableStyleId != null && _tableStyleGuidToName.TryGetValue(tableStyleId, out var sn) ? sn : null;
         bool hasFirstRow = tblPr?.FirstRow?.Value == true;
         bool hasBandRow = tblPr?.BandRow?.Value == true;
+        bool hasLastRow = tblPr?.LastRow?.Value == true;
+        bool hasFirstCol = tblPr?.FirstColumn?.Value == true;
+        bool hasLastCol = tblPr?.LastColumn?.Value == true;
+        bool hasBandCol = tblPr?.BandColumn?.Value == true;
+        var allRowsSvg = table.Elements<Drawing.TableRow>().ToList();
+        int totalRowsSvg = allRowsSvg.Count;
 
         // Column widths
         var gridCols = table.TableGrid?.Elements<Drawing.GridColumn>().ToList();
@@ -1091,11 +1098,25 @@ public partial class PowerPointHandler
                 {
                     ParseSvgColor(cellFill, out cellFillColor, out cellFillOpacity);
                 }
-                else if (tableStyleName != null)
+                else
                 {
-                    var (bg, fg) = GetTableStyleColors(tableStyleName, isHeaderRow, isBandedOdd, themeColors);
-                    if (bg != null) ParseSvgColor(bg, out cellFillColor, out cellFillOpacity);
-                    if (fg != null) textColorOverride = fg;
+                    // Core/TableStyles resolver — same call shape used in
+                    // HtmlPreview.Tables.cs. Returns null for unknown style
+                    // ids; an unstyled (or unrecognised) table simply gets
+                    // no fill, matching previous behaviour for that case.
+                    var resolved = TableStyleResolver.Resolve(
+                        tableStyleId,
+                        new CellPosition(
+                            RowIndex: rowIndex, ColIndex: colIndex,
+                            RowCount: totalRowsSvg, ColCount: colWidths.Count,
+                            HasFirstRow: hasFirstRow, HasLastRow: hasLastRow,
+                            HasFirstCol: hasFirstCol, HasLastCol: hasLastCol,
+                            HasBandedRows: hasBandRow, HasBandedCols: hasBandCol),
+                        themeColors);
+                    if (resolved?.Fill != null)
+                        ParseSvgColor(resolved.Fill, out cellFillColor, out cellFillOpacity);
+                    if (resolved?.TextColor != null)
+                        textColorOverride = resolved.TextColor;
                 }
 
                 // Cell background
