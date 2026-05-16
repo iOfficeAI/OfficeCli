@@ -334,6 +334,34 @@
       "readback": "length in pt (e.g. \"1pt\")",
       "enforcement": "report"
     },
+    "lineDash": {
+      "type": "enum",
+      "description": "outline dash pattern (drawingML prstDash). Also reachable as the third segment of the compound line='color:width:style' form.",
+      "aliases": [
+        "linedash",
+        "line.dash"
+      ],
+      "values": [
+        "solid",
+        "dot",
+        "dash",
+        "dashdot",
+        "longdash",
+        "longdashdot",
+        "lgdash",
+        "lgdashdot"
+      ],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop lineDash=dash",
+        "--prop lineDash=dashdot",
+        "--prop line=FF0000:1.5:dash"
+      ],
+      "readback": "preset dash token (solid | dot | dash | dashdot | longdash | longdashdot)",
+      "enforcement": "report"
+    },
     "list": {
       "type": "string",
       "description": "list style for shape paragraphs (bullet|ordered|none).",
