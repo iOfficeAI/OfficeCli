@@ -352,15 +352,28 @@ public partial class PowerPointHandler
 
                 var rowSlidePart = rowLogical.Value.slidePart;
 
-                // Determine column count from existing grid
+                // Row width is fixed by the parent <a:tblGrid>. OOXML requires
+                // every <a:tr> to have <a:tc> count (gridSpan-summed) equal to
+                // <a:tblGrid> column count — there is no "narrower row" concept.
+                // We always emit `existingColCount` cells; user-supplied c1..cN
+                // populate text and unspecified positions stay empty (legal).
+                // An explicit `cols=` is only accepted when it matches the grid
+                // (no-op) — any other value is a misuse caused by treating a
+                // row as a width container, which OOXML doesn't model.
                 var existingColCount = rowTable.Elements<Drawing.TableGrid>().FirstOrDefault()
                     ?.Elements<Drawing.GridColumn>().Count() ?? 1;
-                int newColCount = existingColCount;
                 if (properties.TryGetValue("cols", out var rcVal))
                 {
-                    if (!int.TryParse(rcVal, out newColCount))
+                    if (!int.TryParse(rcVal, out var requested))
                         throw new ArgumentException($"Invalid 'cols' value: '{rcVal}'. Expected a positive integer.");
+                    if (requested != existingColCount)
+                        throw new ArgumentException(
+                            $"cols={requested} does not match the table's grid ({existingColCount} columns). " +
+                            "A row's cell count is fixed by <a:tblGrid> and cannot be narrower or wider. " +
+                            "Omit --prop cols and leave unused c1..cN empty, or use --prop gridSpan=N on c1 " +
+                            "(via set tr[i]/tc[1]) to merge cells into a wider span.");
                 }
+                int newColCount = existingColCount;
 
                 // Row height: default from first existing row, or 370840 EMU (~1cm)
                 long newRowHeight = properties.TryGetValue("height", out var rhVal)
@@ -492,6 +505,25 @@ public partial class PowerPointHandler
                     throw new ArgumentException("Cells can only be added to a table row: /slide[N]/table[M]/tr[R]");
 
                 var cellSlidePart = cellLogical.Value.slidePart;
+
+                // Reject cell-append that would make the row wider than the
+                // table's <a:tblGrid>. Real PowerPoint silently DROPS cells
+                // beyond the gridCol count on render, so the user's content
+                // would be lost. The user almost certainly meant "add column"
+                // (which atomically grows tblGrid AND pads every sibling row);
+                // surface that explicitly rather than silently corrupting.
+                var parentTable = cellRow.Ancestors<Drawing.Table>().FirstOrDefault();
+                var gridColCount = parentTable?.GetFirstChild<Drawing.TableGrid>()
+                    ?.Elements<Drawing.GridColumn>().Count() ?? 0;
+                var currentCellCount = cellRow.Elements<Drawing.TableCell>().Count();
+                if (gridColCount > 0 && currentCellCount >= gridColCount)
+                {
+                    throw new ArgumentException(
+                        $"Row already has {currentCellCount} cell(s); table grid has {gridColCount} column(s). " +
+                        "Appending another cell would make the row wider than the grid and real PowerPoint " +
+                        "would silently drop the orphan on render. Use `add /slide[N]/table[M] --type column` " +
+                        "to grow the table rectangularly instead.");
+                }
 
                 var newCell = new Drawing.TableCell();
                 var cBodyProps = new Drawing.BodyProperties();
