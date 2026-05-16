@@ -492,47 +492,112 @@
     },
     "bevel": {
       "type": "string",
-      "add": false,
-      "set": false,
+      "add": true,
+      "set": true,
       "get": true,
-      "description": "3-D top bevel descriptor (preset[:width:height], e.g. `circle:6:6`). Surfaces when sp3d.bevelT is present.",
-      "readback": "`preset:width:height` token",
+      "description": "3-D top bevel descriptor (sp3d.bevelT). Form: 'preset[-width[-height]]' with width/height in points; height defaults to width. Preset values: angle, artDeco, circle, convex, coolSlant, cross, divot, hardEdge, relaxedInset, riblet, slope, softRound. Example: 'circle-6-6'.",
+      "examples": [
+        "--prop bevel=circle",
+        "--prop bevel=circle-6",
+        "--prop bevel=angle-8-4"
+      ],
+      "readback": "'preset' alone, or 'preset-widthPt-heightPt' when non-default sizing was written. Surfaces when sp3d.bevelT is present.",
       "enforcement": "report"
     },
     "bevelBottom": {
       "type": "string",
-      "add": false,
-      "set": false,
+      "add": true,
+      "set": true,
       "get": true,
-      "description": "3-D bottom bevel descriptor (sp3d.bevelB).",
-      "readback": "`preset:width:height` token",
+      "description": "3-D bottom bevel descriptor (sp3d.bevelB). Same grammar as 'bevel'.",
+      "examples": [
+        "--prop bevelBottom=circle-4-4"
+      ],
+      "readback": "'preset' alone, or 'preset-widthPt-heightPt'.",
       "enforcement": "report"
     },
     "depth": {
       "type": "length",
-      "add": false,
-      "set": false,
+      "add": true,
+      "set": true,
       "get": true,
-      "description": "3-D extrusion height (sp3d @extrusionH) in points.",
-      "readback": "unit-qualified pt length",
+      "description": "3-D extrusion height (sp3d @extrusionH). Accepts the canonical length input forms — bare number is points, also accepts pt/cm/in/px/emu suffix. 'none' or '0' clears.",
+      "examples": [
+        "--prop depth=10",
+        "--prop depth=10pt",
+        "--prop depth=0.5cm",
+        "--prop depth=none"
+      ],
+      "readback": "bare numeric points (e.g. '10', '14.17').",
       "enforcement": "report"
     },
     "lighting": {
       "type": "string",
-      "add": false,
-      "set": false,
+      "add": true,
+      "set": true,
       "get": true,
-      "description": "3-D scene lighting rig name (e.g. threePt, balanced, soft).",
-      "readback": "OOXML preset light rig token",
+      "description": "3-D scene lighting rig name (scene3d.lightRig @rig). OOXML preset rig values: threePt, balanced, soft, harsh, flood, contrasting, morning, sunrise, sunset, chilly, freezing, flat, twoPt, glow, brightRoom.",
+      "examples": [
+        "--prop lighting=threePt",
+        "--prop lighting=balanced"
+      ],
+      "readback": "OOXML preset light rig token.",
       "enforcement": "report"
     },
     "material": {
       "type": "string",
-      "add": false,
-      "set": false,
+      "add": true,
+      "set": true,
       "get": true,
-      "description": "3-D preset material (e.g. metal, plastic, matte).",
-      "readback": "OOXML preset material token",
+      "description": "3-D preset material (sp3d.prstMaterial). OOXML values: clear, dkEdge, flat, legacyMatte, legacyMetal, legacyPlastic, legacyWireframe, matte, metal, plastic, powder, softEdge, softmetal, translucentPowder, warmMatte.",
+      "examples": [
+        "--prop material=metal",
+        "--prop material=plastic"
+      ],
+      "readback": "OOXML preset material token.",
+      "enforcement": "report"
+    },
+    "reflection": {
+      "type": "string",
+      "description": "reflection effect. Accepts 'true' / 'tight' / 'half' / 'full' to enable a reflection of varying length, or 'none' to clear.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop reflection=true",
+        "--prop reflection=half",
+        "--prop reflection=full"
+      ],
+      "readback": "tight | half | full (mapped from a:reflection @endPos: <70000=tight, <95000=half, else=full).",
+      "enforcement": "report"
+    },
+    "shadow": {
+      "type": "string",
+      "description": "outer shadow. Pass a color (e.g. '000000') or 'true' (defaults to black). Routed to text-level rPr for text-only shapes.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop shadow=#808080",
+        "--prop shadow=none",
+        "--prop shadow=000000",
+        "--prop shadow=true"
+      ],
+      "readback": "compound 'color-blurPt-angleDeg-distPt-opacityPct' (e.g. '000000-4-45-3-40'). Color is raw hex (no leading #); blur, distance in pt; angle in degrees; opacity in percent (0-100).",
+      "enforcement": "report"
+    },
+    "glow": {
+      "type": "string",
+      "description": "glow effect. Pass a color (e.g. '4472C4') or 'true' (defaults to accent blue).",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop glow=#4472C4",
+        "--prop glow=4472C4",
+        "--prop glow=true"
+      ],
+      "readback": "compound 'color-radiusPt-opacityPct' (e.g. '00FF00-8-75'). Color is raw hex (no leading #); radius in pt; opacity in percent.",
       "enforcement": "report"
     },
     "lineOpacity": {
