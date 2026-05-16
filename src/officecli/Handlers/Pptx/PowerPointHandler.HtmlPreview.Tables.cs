@@ -65,7 +65,12 @@ public partial class PowerPointHandler
         int rowIndex = 0;
         foreach (var row in table.Elements<Drawing.TableRow>())
         {
-            sb.AppendLine("        <tr>");
+            // Honor explicit per-row height from <a:tr h="EMU">. Without this,
+            // every row collapses to equal height (HTML table default), losing
+            // the per-row sizing users set via `set tr[N] --prop height=`.
+            var rowH = row.Height?.Value ?? 0;
+            var rowStyle = rowH > 0 ? $" style=\"height:{Units.EmuToPt(rowH):0.##}pt\"" : "";
+            sb.AppendLine($"        <tr{rowStyle}>");
             int skipCols = 0;
             bool isHeaderRow = hasFirstRow && rowIndex == 0;
             bool isBandedOdd = hasBandRow && (!hasFirstRow ? rowIndex % 2 == 0 : rowIndex > 0 && (rowIndex - 1) % 2 == 0);
