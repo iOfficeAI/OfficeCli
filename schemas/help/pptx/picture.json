@@ -96,6 +96,32 @@
       ],
       "readback": "decimal degrees (e.g. 45 or 22.5)",
       "enforcement": "report"
+    },
+    "link": {
+      "type": "string",
+      "description": "click-hyperlink target attached to the picture's cNvPr (so the whole image is clickable). Accepts absolute URI (https://, mailto:), slide[N] for in-deck jumps, or named actions (firstslide, lastslide, nextslide, previousslide). Pass 'none' or empty to clear.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop link=https://example.com",
+        "--prop link=slide[3]",
+        "--prop link=nextslide"
+      ],
+      "readback": "URL, slide[N], or named action",
+      "enforcement": "report"
+    },
+    "tooltip": {
+      "type": "string",
+      "description": "hover tooltip text for the click-hyperlink. Applied together with `link` in a single set/add call; standalone tooltip change without link is not supported.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop link=https://example.com --prop tooltip=\"Open homepage\""
+      ],
+      "readback": "string",
+      "enforcement": "report"
     }
   }
 }

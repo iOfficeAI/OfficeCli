@@ -145,6 +145,30 @@ public partial class PowerPointHandler
     }
 
     /// <summary>
+    /// Apply a click-hyperlink to a picture. Pictures have no runs (BlipFill
+    /// is image data, not text), so the link lives only on the picture's
+    /// NonVisualDrawingProperties (nvPicPr/cNvPr) — mirroring how PowerPoint
+    /// writes click-targets on inserted images. Pass "none" or "" to remove.
+    /// </summary>
+    private static void ApplyPictureHyperlink(SlidePart slidePart, Picture picture, string url, string? tooltip = null)
+    {
+        var nvDp = picture.NonVisualPictureProperties?.NonVisualDrawingProperties;
+        if (nvDp == null) return;
+
+        if (string.IsNullOrEmpty(url) || url.Equals("none", StringComparison.OrdinalIgnoreCase))
+        {
+            nvDp.RemoveAllChildren<Drawing.HyperlinkOnClick>();
+            return;
+        }
+
+        var target = ResolveHyperlinkTarget(slidePart, url);
+        if (target == null) return;
+
+        nvDp.RemoveAllChildren<Drawing.HyperlinkOnClick>();
+        nvDp.AppendChild(BuildHyperlinkElement(target.Value, tooltip));
+    }
+
+    /// <summary>
     /// Apply a hyperlink to a single run. Pass "none" or "" to remove.
     /// </summary>
     private static void ApplyRunHyperlink(SlidePart slidePart, Drawing.Run run, string url, string? tooltip = null)
@@ -172,6 +196,17 @@ public partial class PowerPointHandler
     private static string? ReadRunHyperlinkUrl(Drawing.Run run, OpenXmlPart part)
     {
         var hlClick = run.RunProperties?.GetFirstChild<Drawing.HyperlinkOnClick>();
+        return ReadHyperlinkOnClickUrl(hlClick, part);
+    }
+
+    /// <summary>
+    /// Read the friendly URL form of a HyperlinkOnClick element (action-name,
+    /// slide[N], or absolute URI). Returns null if absent or unresolvable.
+    /// Shared by run-level (text) and shape-level (cNvPr) hyperlinks —
+    /// including picture-level, which uses the same nvDp/cNvPr slot.
+    /// </summary>
+    private static string? ReadHyperlinkOnClickUrl(Drawing.HyperlinkOnClick? hlClick, OpenXmlPart part)
+    {
         if (hlClick == null) return null;
         var id = hlClick.Id?.Value;
         var action = hlClick.Action?.Value;

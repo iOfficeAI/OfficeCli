@@ -273,9 +273,20 @@ public partial class PowerPointHandler
                     blipBC.AppendChild(new Drawing.LuminanceOffset { Val = curLumOffPct });
                     break;
                 }
+                case "link":
+                {
+                    // CONSISTENCY(shape-picture-parity): mirror shape's link/tooltip
+                    // pairing — tooltip is applied alongside link in one call.
+                    var picTip = properties.GetValueOrDefault("tooltip");
+                    ApplyPictureHyperlink(slidePart, pic, value, picTip);
+                    break;
+                }
+                case "tooltip":
+                    // handled in tandem with "link"; standalone tooltip change is not supported here
+                    break;
                 default:
                     if (unsupported.Count == 0)
-                        unsupported.Add($"{key} (valid picture props: path, src, x, y, width, height, rotation, opacity, name, crop, cropleft, croptop, cropright, cropbottom, shadow, glow, brightness, contrast)");
+                        unsupported.Add($"{key} (valid picture props: path, src, x, y, width, height, rotation, opacity, name, crop, cropleft, croptop, cropright, cropbottom, shadow, glow, brightness, contrast, link, tooltip)");
                     else
                         unsupported.Add(key);
                     break;

@@ -344,6 +344,15 @@ public partial class PowerPointHandler
                         (int)(ParseHelpers.SafeParseDouble(picRotStr, "rotation") * 60000);
                 }
 
+                // CONSISTENCY(shape-picture-parity): pictures are routinely
+                // click-targets — wire link= the same way shape does.
+                // Tooltip is the same secondary key as on shape.
+                if (properties.TryGetValue("link", out var picLink))
+                {
+                    var picTip = properties.GetValueOrDefault("tooltip");
+                    ApplyPictureHyperlink(imgSlidePart, picture, picLink, picTip);
+                }
+
                 InsertAtPosition(imgShapeTree, picture, index);
                 GetSlide(imgSlidePart).Save();
 

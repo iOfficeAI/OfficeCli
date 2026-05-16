@@ -1243,6 +1243,19 @@ public partial class PowerPointHandler
         if (alphaModFix?.Amount?.HasValue == true)
             node.Format["opacity"] = $"{alphaModFix.Amount.Value / 100000.0:0.##}";
 
+        // Click-hyperlink on the picture (nvPicPr/cNvPr/a:hlinkClick).
+        // CONSISTENCY(shape-picture-parity): pictures share the cNvPr
+        // hyperlink slot with shapes; reuse the same reader.
+        if (slidePart != null)
+        {
+            var picHl = pic.NonVisualPictureProperties?.NonVisualDrawingProperties?
+                .GetFirstChild<Drawing.HyperlinkOnClick>();
+            var picLinkUrl = ReadHyperlinkOnClickUrl(picHl, slidePart);
+            if (picLinkUrl != null) node.Format["link"] = picLinkUrl;
+            var picTip = picHl?.Tooltip?.Value;
+            if (!string.IsNullOrEmpty(picTip)) node.Format["tooltip"] = picTip!;
+        }
+
         // Crop
         var srcRect = pic.BlipFill?.GetFirstChild<Drawing.SourceRectangle>();
         if (srcRect != null)
