@@ -452,23 +452,13 @@ public partial class PowerPointHandler
                 };
             }
 
-            // Counter-flip text so it remains readable when shape is flipped
-            var isFlipH = xfrm?.HorizontalFlip?.Value == true;
-            var isFlipV = xfrm?.VerticalFlip?.Value == true;
-            if (isFlipH || isFlipV)
-            {
-                var sx = isFlipH ? -1 : 1;
-                var sy = isFlipV ? -1 : 1;
-                var tx = isFlipH ? w : 0;
-                var ty = isFlipV ? h : 0;
-                sb.Append($"<g transform=\"translate({tx:0.##},{ty:0.##}) scale({sx},{sy})\">");
-            }
-
+            // PowerPoint mirrors text along with the shape on flipH/flipV. The
+            // shape-level flip transform (lines ~267-271) already applies to the
+            // inner text, so do not counter-flip here. An earlier implementation
+            // counter-flipped to keep text upright; that diverged from real
+            // PowerPoint output (e.g. flipH renders "AI" as "IA").
             RenderTextBodyFO(sb, shape.TextBody, themeColors, w, h,
                 lIns, tIns, rIns, bIns, valign, shape, part);
-
-            if (isFlipH || isFlipV)
-                sb.Append("</g>");
         }
 
         sb.AppendLine("</g>");

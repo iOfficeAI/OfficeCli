@@ -347,16 +347,12 @@ public partial class PowerPointHandler
         // chrome (fill/outline/geometry) so themed placeholder backgrounds survive.
         if (shape.TextBody != null && !suppressText)
         {
-            // Counter-flip text so it remains readable when shape is flipped
+            // PowerPoint mirrors text along with the shape on flipH/flipV (e.g. flipH
+            // renders "AI" as "IA"; flipV renders text upside-down). We deliberately
+            // do NOT counter-flip — the parent shape transform applies to the inner
+            // text, matching PowerPoint's rendering. An earlier implementation
+            // counter-flipped here, but that diverged from real PowerPoint output.
             var flipStyle = "";
-            var isFlipH = xfrm?.HorizontalFlip?.Value == true;
-            var isFlipV = xfrm?.VerticalFlip?.Value == true;
-            if (isFlipH && isFlipV)
-                flipStyle = "transform:scale(-1,-1);";
-            else if (isFlipH)
-                flipStyle = "transform:scaleX(-1);";
-            else if (isFlipV)
-                flipStyle = "transform:scaleY(-1);";
 
             // Shape-level RTL column flow: <a:bodyPr rtlCol="1"/> reverses
             // the column flow for the whole text body. Mirror with CSS so
