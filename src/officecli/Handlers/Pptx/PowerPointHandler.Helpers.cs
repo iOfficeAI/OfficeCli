@@ -74,7 +74,17 @@ public partial class PowerPointHandler
             throw new ArgumentException($"Invalid path '{path}': leading '//' is not allowed.");
         if (path.Contains("//"))
             throw new ArgumentException($"Invalid path '{path}': empty path segment ('//') is not allowed.");
-        return Regex.Replace(path, @"cell\[(\d+),\s*(\d+)\]", m => $"tr[{m.Groups[1].Value}]/tc[{m.Groups[2].Value}]");
+        // CONSISTENCY(table-path-long-form): pptx CLAUDE.md documents long form
+        // /slide[N]/table[K]/row[R]/cell[C] as canonical. Query/Add already alias
+        // row→tr and cell→tc at their dispatch layer; mirror that here so Get/Set
+        // /Remove parse paths also accept long form. Short OOXML form (tr/tc)
+        // continues to work unchanged.
+        path = Regex.Replace(path, @"cell\[(\d+),\s*(\d+)\]", m => $"tr[{m.Groups[1].Value}]/tc[{m.Groups[2].Value}]");
+        // Alias only inside /table[K]/... — never globally, to avoid colliding
+        // with hypothetical future top-level "row"/"cell" segments.
+        path = Regex.Replace(path, @"(/table\[\d+\](?:/[^/]+)*?)/row\[(\d+)\]", m => $"{m.Groups[1].Value}/tr[{m.Groups[2].Value}]");
+        path = Regex.Replace(path, @"(/tr\[\d+\])/cell\[(\d+)\]", m => $"{m.Groups[1].Value}/tc[{m.Groups[2].Value}]");
+        return path;
     }
 
     /// <summary>
