@@ -424,9 +424,56 @@ public partial class PowerPointHandler
         var phId = GenerateUniqueShapeId(phShapeTree);
         var phName = properties.GetValueOrDefault("name", $"{phTypeStr} Placeholder {phId}");
 
+        // ECMA-376 §19.3.1.36: every non-title placeholder needs an @idx so the
+        // slide-layout slot can be located by PowerPoint / LibreOffice. Without
+        // idx, the placeholder defaults to idx=0 which collides with title and
+        // strips geometry/font inheritance. Strategy:
+        //   1. If user passed phIndex explicitly, honor it.
+        //   2. Else if the layout has a matching phType slot with idx, copy it.
+        //   3. Else allocate the smallest non-zero idx not already used on slide.
+        // Title (and centeredTitle) keep no idx — per spec the default 0 binds
+        // to the layout title slot.
+        uint? phIdx = null;
+        bool isTitleType = phTypeVal == PlaceholderValues.Title
+            || phTypeVal == PlaceholderValues.CenteredTitle;
+        if (!isTitleType)
+        {
+            if ((properties.TryGetValue("phIndex", out var phIdxStr)
+                    || properties.TryGetValue("phindex", out phIdxStr)
+                    || properties.TryGetValue("idx", out phIdxStr))
+                && uint.TryParse(phIdxStr, out var parsedIdx))
+            {
+                phIdx = parsedIdx;
+            }
+            else
+            {
+                var layoutPart = phSlidePart.SlideLayoutPart;
+                var layoutMatch = layoutPart?.SlideLayout?.CommonSlideData?.ShapeTree
+                    ?.Elements<Shape>()
+                    .Select(s => s.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
+                        ?.GetFirstChild<PlaceholderShape>())
+                    .FirstOrDefault(p => p?.Type?.Value == phTypeVal && p.Index?.HasValue == true);
+                if (layoutMatch != null) phIdx = layoutMatch.Index!.Value;
+                else
+                {
+                    var usedIdx = phShapeTree.Elements<Shape>()
+                        .Select(s => s.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
+                            ?.GetFirstChild<PlaceholderShape>()?.Index?.Value)
+                        .Where(v => v.HasValue)
+                        .Select(v => v!.Value)
+                        .ToHashSet();
+                    uint next = 1;
+                    while (usedIdx.Contains(next)) next++;
+                    phIdx = next;
+                }
+            }
+        }
+
         var shape = new Shape();
         var appNvPr = new ApplicationNonVisualDrawingProperties();
-        appNvPr.AppendChild(new PlaceholderShape { Type = phTypeVal });
+        var phElem = new PlaceholderShape { Type = phTypeVal };
+        if (phIdx.HasValue) phElem.Index = phIdx.Value;
+        appNvPr.AppendChild(phElem);
         shape.NonVisualShapeProperties = new NonVisualShapeProperties(
             new NonVisualDrawingProperties { Id = phId, Name = phName },
             new NonVisualShapeDrawingProperties(),
@@ -437,24 +484,42 @@ public partial class PowerPointHandler
 
         // Optional text prepopulation. Build a minimal TextBody so PowerPoint
         // still renders layout placeholder typography.
+        // CONSISTENCY(text-newline-split): mirror Set --prop text=... behavior —
+        // a literal "\n" (backslash-n) or actual LF in the value spawns one
+        // paragraph per line. Without this, Add stored "A\nB" as a single run
+        // while Set on the same shape produced two paragraphs (asymmetric).
         var textBody = new TextBody(
             new Drawing.BodyProperties(),
             new Drawing.ListStyle()
         );
-        var para = new Drawing.Paragraph();
         if (properties.TryGetValue("text", out var phText) && phText.Length > 0)
         {
-            para.AppendChild(new Drawing.Run(
-                new Drawing.RunProperties { Language = "en-US" },
-                new Drawing.Text(phText)
-            ));
+            // Accept both literal backslash-n (typical shell escape) and real LF.
+            var lines = phText.Replace("\\n", "\n").Split('\n');
+            foreach (var line in lines)
+            {
+                var p = new Drawing.Paragraph();
+                if (line.Length > 0)
+                {
+                    p.AppendChild(new Drawing.Run(
+                        new Drawing.RunProperties { Language = "en-US" },
+                        new Drawing.Text(line)
+                    ));
+                }
+                else
+                {
+                    p.AppendChild(new Drawing.EndParagraphRunProperties { Language = "en-US" });
+                }
+                textBody.AppendChild(p);
+            }
         }
         else
         {
             // Empty paragraph is valid — PowerPoint shows the layout prompt text.
-            para.AppendChild(new Drawing.EndParagraphRunProperties { Language = "en-US" });
+            var p = new Drawing.Paragraph();
+            p.AppendChild(new Drawing.EndParagraphRunProperties { Language = "en-US" });
+            textBody.AppendChild(p);
         }
-        textBody.AppendChild(para);
         shape.TextBody = textBody;
 
         InsertAtPosition(phShapeTree, shape, index);
