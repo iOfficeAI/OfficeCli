@@ -82,6 +82,20 @@
       ],
       "readback": "length string",
       "enforcement": "report"
+    },
+    "rotation": {
+      "type": "number",
+      "description": "clockwise rotation in degrees. Mirrors shape/connector/group rotation — stored on the same a:xfrm rot attribute (degrees * 60000). Alias: rotate.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "aliases": ["rotate"],
+      "examples": [
+        "--prop rotation=45",
+        "--prop rotation=-90"
+      ],
+      "readback": "decimal degrees (e.g. 45 or 22.5)",
+      "enforcement": "report"
     }
   }
 }

@@ -332,6 +332,18 @@ public partial class PowerPointHandler
                     new Drawing.PresetGeometry(new Drawing.AdjustValueList()) { Preset = ParsePresetShape(picGeomName) }
                 );
 
+                // CONSISTENCY(shape-picture-parity): rotation lives on the
+                // same Transform2D as shape/connector/group; PowerPoint
+                // applies it identically to pictures. Set.Media already
+                // accepts rotation on picture; Add must mirror so Add and
+                // Set agree on the property surface.
+                if (properties.TryGetValue("rotation", out var picRotStr)
+                    || properties.TryGetValue("rotate", out picRotStr))
+                {
+                    picture.ShapeProperties.Transform2D!.Rotation =
+                        (int)(ParseHelpers.SafeParseDouble(picRotStr, "rotation") * 60000);
+                }
+
                 InsertAtPosition(imgShapeTree, picture, index);
                 GetSlide(imgSlidePart).Save();
 
