@@ -32,11 +32,100 @@ public partial class PowerPointHandler
                 var cxnId = GenerateUniqueShapeId(cxnShapeTree);
                 var cxnName = properties.GetValueOrDefault("name", $"Connector {cxnShapeTree.Elements<ConnectionShape>().Count() + 1}");
 
-                // Position: x1,y1 → x2,y2 or x,y,width,height
+                // Position: explicit x/y/width/height OR derived from connected shapes.
+                // When from=/to= reference existing shapes and x/y/width/height are
+                // omitted, compute the connector's bounding box from the two shapes'
+                // centers so the rendered line actually spans the gap between them.
+                // PowerPoint does NOT recompute connector geometry from stCxn/endCxn
+                // at render time — it trusts our offset/extent — so a missing default
+                // here paints the connector at a hard-coded stub near the slide center.
+                var hasX = properties.ContainsKey("x") || properties.ContainsKey("left");
+                var hasY = properties.ContainsKey("y") || properties.ContainsKey("top");
+                var hasW = properties.ContainsKey("width");
+                var hasH = properties.ContainsKey("height");
+                // Look up a frame's (x,y,width,height) by OOXML shape ID across
+                // every connectable container element (Shape, Picture, GraphicFrame,
+                // ConnectionShape, GroupShape) — same set ResolveShapeId+AddGroup
+                // accepts so connector from=/to= works against the full frame list.
+                static (long x, long y, long cx, long cy)? GetFrameBoundsById(ShapeTree tree, uint id)
+                {
+                    foreach (var el in tree.ChildElements)
+                    {
+                        Drawing.Transform2D? xf = null;
+                        uint? frameId = null;
+                        switch (el)
+                        {
+                            case Shape s:
+                                frameId = s.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value;
+                                xf = s.ShapeProperties?.Transform2D;
+                                break;
+                            case Picture p:
+                                frameId = p.NonVisualPictureProperties?.NonVisualDrawingProperties?.Id?.Value;
+                                xf = p.ShapeProperties?.Transform2D;
+                                break;
+                            case ConnectionShape c:
+                                frameId = c.NonVisualConnectionShapeProperties?.NonVisualDrawingProperties?.Id?.Value;
+                                xf = c.ShapeProperties?.Transform2D;
+                                break;
+                            case GraphicFrame gf:
+                                frameId = gf.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties?.Id?.Value;
+                                if (frameId == id && gf.Transform != null)
+                                    return (gf.Transform.Offset?.X?.Value ?? 0, gf.Transform.Offset?.Y?.Value ?? 0,
+                                            gf.Transform.Extents?.Cx?.Value ?? 0, gf.Transform.Extents?.Cy?.Value ?? 0);
+                                break;
+                            case GroupShape g:
+                                frameId = g.NonVisualGroupShapeProperties?.NonVisualDrawingProperties?.Id?.Value;
+                                var gxf = g.GroupShapeProperties?.TransformGroup;
+                                if (frameId == id && gxf != null)
+                                    return (gxf.Offset?.X?.Value ?? 0, gxf.Offset?.Y?.Value ?? 0,
+                                            gxf.Extents?.Cx?.Value ?? 0, gxf.Extents?.Cy?.Value ?? 0);
+                                break;
+                        }
+                        if (frameId == id && xf != null)
+                            return (xf.Offset?.X?.Value ?? 0, xf.Offset?.Y?.Value ?? 0,
+                                    xf.Extents?.Cx?.Value ?? 0, xf.Extents?.Cy?.Value ?? 0);
+                    }
+                    return null;
+                }
+
+                var hasFrom = properties.ContainsKey("from") || properties.ContainsKey("startshape") || properties.ContainsKey("startShape");
+                var hasTo = properties.ContainsKey("to") || properties.ContainsKey("endshape") || properties.ContainsKey("endShape");
+
                 long cxnX = (properties.TryGetValue("x", out var cx1) || properties.TryGetValue("left", out cx1)) ? ParseEmu(cx1) : 2000000;
                 long cxnY = (properties.TryGetValue("y", out var cy1) || properties.TryGetValue("top", out cy1)) ? ParseEmu(cy1) : 3000000;
                 long cxnCx = properties.TryGetValue("width", out var cw) ? ParseEmu(cw) : 4000000;
                 long cxnCy = properties.TryGetValue("height", out var ch) ? ParseEmu(ch) : 0;
+                var cxnFlipH = false;
+                var cxnFlipV = false;
+                if ((hasFrom || hasTo) && !(hasX && hasY && hasW && hasH))
+                {
+                    var startRef = properties.GetValueOrDefault("from")
+                        ?? properties.GetValueOrDefault("startShape")
+                        ?? properties.GetValueOrDefault("startshape");
+                    var endRef = properties.GetValueOrDefault("to")
+                        ?? properties.GetValueOrDefault("endShape")
+                        ?? properties.GetValueOrDefault("endshape");
+                    var startBox = startRef != null ? GetFrameBoundsById(cxnShapeTree, ResolveShapeId(startRef, cxnShapeTree)) : null;
+                    var endBox = endRef != null ? GetFrameBoundsById(cxnShapeTree, ResolveShapeId(endRef, cxnShapeTree)) : null;
+                    var pStart = startBox ?? endBox;
+                    var pEnd = endBox ?? startBox;
+                    if (pStart.HasValue && pEnd.HasValue)
+                    {
+                        var (sx, sy, scx, scy) = pStart.Value;
+                        var (ex, ey, ecx, ecy) = pEnd.Value;
+                        var p1x = sx + scx / 2;
+                        var p1y = sy + scy / 2;
+                        var p2x = ex + ecx / 2;
+                        var p2y = ey + ecy / 2;
+                        if (!hasX) cxnX = Math.Min(p1x, p2x);
+                        if (!hasY) cxnY = Math.Min(p1y, p2y);
+                        if (!hasW) cxnCx = Math.Abs(p2x - p1x);
+                        if (!hasH) cxnCy = Math.Abs(p2y - p1y);
+                        // Encode start/end ordering via flipH/flipV (mirrors PowerPoint).
+                        cxnFlipH = p2x < p1x;
+                        cxnFlipV = p2y < p1y;
+                    }
+                }
                 // CONSISTENCY(positive-size): mirror Add.Shape negative-size guard so picture
                 // / chart / connector / media all reject inverted dimensions instead of silently
                 // emitting negative cx/cy that PowerPoint draws as flipped or 0-sized boxes.
@@ -66,11 +155,14 @@ public partial class PowerPointHandler
                 }
 
                 connector.NonVisualConnectionShapeProperties = cxnNvProps;
+                var cxnTransform = new Drawing.Transform2D(
+                    new Drawing.Offset { X = cxnX, Y = cxnY },
+                    new Drawing.Extents { Cx = cxnCx, Cy = cxnCy }
+                );
+                if (cxnFlipH) cxnTransform.HorizontalFlip = true;
+                if (cxnFlipV) cxnTransform.VerticalFlip = true;
                 connector.ShapeProperties = new ShapeProperties(
-                    new Drawing.Transform2D(
-                        new Drawing.Offset { X = cxnX, Y = cxnY },
-                        new Drawing.Extents { Cx = cxnCx, Cy = cxnCy }
-                    ),
+                    cxnTransform,
                     new Drawing.PresetGeometry(new Drawing.AdjustValueList())
                     {
                         // CONSISTENCY(canonical-key): canonical 'shape'; 'preset' legacy alias.
