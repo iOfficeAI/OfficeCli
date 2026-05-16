@@ -331,9 +331,21 @@ public partial class PowerPointHandler
         }
 
         var sp3dEl = EnsureShape3D(spPr);
-        if (!double.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, out var depthPt) || double.IsNaN(depthPt) || double.IsInfinity(depthPt))
-            throw new ArgumentException($"Invalid '3ddepth' value '{value}'. Expected a finite numeric depth in points.");
-        sp3dEl.ExtrusionHeight = (long)(depthPt * 12700);
+        // Canonical length input contract (CLAUDE.md): bare number = points,
+        // and pt/cm/in/px/emu suffixes are all accepted. Mirror lineWidth's
+        // bare-int-as-points behaviour via EmuConverter.ParseLineWidth, which
+        // returns EMU.
+        long depthEmu;
+        try
+        {
+            depthEmu = OfficeCli.Core.EmuConverter.ParseLineWidth(value);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new ArgumentException(
+                $"Invalid 'depth' value '{value}'. Expected a finite numeric depth in points (e.g. '10', '10pt', '0.5cm'). {ex.Message}");
+        }
+        sp3dEl.ExtrusionHeight = depthEmu;
     }
 
     /// <summary>
