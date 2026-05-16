@@ -285,11 +285,28 @@ public partial class PowerPointHandler
             };
         }
 
-        // Add has-fill class to clip overflow when shape has a visible background
+        // bodyPr/@wrap="none": text does not wrap inside the shape. Combined
+        // with noAutofit (or by itself, since spAutoFit only adjusts the
+        // shape's own bounds and normAutofit only scales), real PowerPoint
+        // lets the rendered line extend beyond the shape's right edge.
+        // Detect explicitly so we can suppress wrap and unclip overflow.
+        var wrapNone = bodyPr?.Wrap?.Value == Drawing.TextWrappingValues.None;
+        // noAutofit / spAutoFit (and absence of any autofit child = default
+        // is shape-dependent, but textbox defaults to noAutofit) mean we must
+        // not clip vertical overflow either.
+        var noAutofit = bodyPr?.GetFirstChild<Drawing.NoAutoFit>() != null
+            || (bodyPr != null
+                && bodyPr.GetFirstChild<Drawing.NormalAutoFit>() == null
+                && bodyPr.GetFirstChild<Drawing.ShapeAutoFit>() == null);
+
+        // Add has-fill class to clip overflow when shape has a visible background.
+        // wrap=none takes priority: overflow must stay visible so text can extend
+        // past the shape's right edge as real PowerPoint renders it.
         var hasFillBg = shape.ShapeProperties?.GetFirstChild<Drawing.SolidFill>() != null
             || shape.ShapeProperties?.GetFirstChild<Drawing.GradientFill>() != null
             || shape.ShapeProperties?.GetFirstChild<Drawing.BlipFill>() != null;
-        var shapeClass = hasFillBg ? "shape has-fill" : "shape";
+        var shapeClass = hasFillBg && !wrapNone ? "shape has-fill" : "shape";
+        if (wrapNone) styles.Add("overflow:visible");
 
         // Open <a> wrapper for shape-level hyperlink (before the shape <div>)
         if (!string.IsNullOrEmpty(shapeHrefUrl))
@@ -371,8 +388,12 @@ public partial class PowerPointHandler
                 }
             }
 
-            var textStyle = !string.IsNullOrEmpty(flipStyle) || !string.IsNullOrEmpty(clipPathCss) || !string.IsNullOrEmpty(rtlColStyle)
-                ? $" style=\"{flipStyle}{rtlColStyle}{(string.IsNullOrEmpty(clipPathCss) ? "" : "position:relative;")}\""
+            // wrap=none: suppress the .shape inherited `white-space:pre-wrap`
+            // on the inner text container so the line extends horizontally
+            // rather than wrapping inside the shape's width box.
+            var wrapNoneStyle = wrapNone ? "white-space:nowrap;overflow:visible;" : "";
+            var textStyle = !string.IsNullOrEmpty(flipStyle) || !string.IsNullOrEmpty(clipPathCss) || !string.IsNullOrEmpty(rtlColStyle) || !string.IsNullOrEmpty(wrapNoneStyle)
+                ? $" style=\"{flipStyle}{rtlColStyle}{wrapNoneStyle}{(string.IsNullOrEmpty(clipPathCss) ? "" : "position:relative;")}\""
                 : "";
             sb.Append($"<div class=\"shape-text valign-{valign}\"{textStyle}>");
 
