@@ -61,11 +61,13 @@ public partial class WordHandler
                 // inserted into the tree (see post-insert HasInheritedBidi
                 // pass below). Mirrors paragraph Set/ApplyDirectionCascade.
                 pProps.RemoveAllChildren<BiDi>();
-                var addStyleId = pProps.ParagraphStyleId?.Val?.Value;
-                if (addStyleId != null && StyleChainHasBidi(addStyleId))
-                {
-                    pProps.BiDi = new BiDi { Val = new DocumentFormat.OpenXml.OnOffValue(false) };
-                }
+                // CONSISTENCY(bidi-explicit-false-roundtrip): Navigation emits
+                // `direction=ltr` ONLY when source pPr had an explicit
+                // <w:bidi w:val="0"/>. Always stamp the explicit override on
+                // replay so dump→batch preserves the source's literal pPr
+                // shape — not just the subset where style-chain inheritance
+                // would otherwise re-enable RTL.
+                pProps.BiDi = new BiDi { Val = new DocumentFormat.OpenXml.OnOffValue(false) };
                 var markRPr = pProps.ParagraphMarkRunProperties;
                 markRPr?.RemoveAllChildren<RightToLeftText>();
             }
@@ -1280,7 +1282,7 @@ public partial class WordHandler
         // BUG-DUMP33-01: support <w:hyperlink> as a run parent so dump→batch
         // can round-trip tab-only / formatted runs that live inside a
         // hyperlink wrapper (Navigation surfaces them with hyperlink-scoped
-        // _hyperlinkParent and BatchEmitter rebases the parent path).
+        // _hyperlinkParent and WordBatchEmitter rebases the parent path).
         Hyperlink? targetHyperlink = null;
         Paragraph? targetPara = parent as Paragraph;
         if (targetPara == null && parent is Hyperlink hlParent && hlParent.Parent is Paragraph hlEnclosingPara)
@@ -1292,7 +1294,7 @@ public partial class WordHandler
             throw new ArgumentException("Runs can only be added to paragraphs");
 
         // BUG-DUMP5-10: track-change attribution from dump round-trip.
-        // BatchEmitter (round-4 fix) emits trackChange / trackChange.author /
+        // WordBatchEmitter emits trackChange / trackChange.author /
         // trackChange.date on the run when the source run sat inside a
         // <w:ins>/<w:del> wrapper. Without consuming these here, the dotted
         // fallback below dispatches them through TypedAttributeFallback.TrySet
@@ -1572,9 +1574,16 @@ public partial class WordHandler
         // Detach rPr from temp run for re-attachment to actual run
         newRProps.Remove();
 
-        // Inherit default formatting from paragraph mark run properties
+        // Inherit default formatting from paragraph mark run properties.
+        // CONSISTENCY(markRPr-inherit-opt-out): dump→batch sets the exact
+        // run props it observed (no font.ea, no rFonts at all → no
+        // inheritance wanted). Caller passes noMarkRPrInherit=true to
+        // suppress the markRPr→rPr type-fill so the round-trip preserves
+        // the source's "run has no rFonts even though para mark does" shape.
+        bool noMarkInherit = properties.TryGetValue("nomarkrprinherit", out var nMri)
+                          || properties.TryGetValue("noMarkRPrInherit", out nMri);
         var markRProps = targetPara.ParagraphProperties?.ParagraphMarkRunProperties;
-        if (markRProps != null)
+        if (markRProps != null && !(noMarkInherit && IsTruthy(nMri)))
         {
             foreach (var child in markRProps.ChildElements)
             {

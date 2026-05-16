@@ -56,7 +56,12 @@ public partial class WordHandler
             new Paragraph(new Run(new Text(commentText) { Space = SpaceProcessingModeValues.Preserve })))
         {
             Id = commentId, Author = author, Initials = initials,
-            Date = properties.TryGetValue("date", out var ds) ? DateTime.Parse(ds) : DateTime.UtcNow
+            // CONSISTENCY(date-roundtrip): RoundtripKind keeps DateTimeKind.Utc
+            // (input ending in Z stays UTC and serializes back with Z) and
+            // DateTimeKind.Local with explicit offset (input "...+08:00" keeps
+            // the +08:00 form). Default Parse converts everything to Local,
+            // poisoning round-trip on docs whose comment dates are UTC.
+            Date = properties.TryGetValue("date", out var ds) ? DateTime.Parse(ds, null, System.Globalization.DateTimeStyles.RoundtripKind) : DateTime.UtcNow
         };
         commentsPart.Comments.AppendChild(commentEl);
         // Apply paragraph-level / run-level format keys (direction, font, size, etc.)
@@ -87,9 +92,32 @@ public partial class WordHandler
             }
             else
             {
-                var after = commentPara.ParagraphProperties as OpenXmlElement;
-                if (after != null) after.InsertAfterSelf(rangeStart);
-                else commentPara.InsertAt(rangeStart, 0);
+                // CONSISTENCY(comment-runStart): when caller passes runStart=N (N>=1),
+                // place rangeStart immediately AFTER the Nth run in the paragraph
+                // so dump round-trip restores the anchor position. N=0 keeps the
+                // legacy paragraph-start placement.
+                int runStartIdx = 0;
+                if ((properties.TryGetValue("runstart", out var rsRaw)
+                     || properties.TryGetValue("runStart", out rsRaw))
+                    && int.TryParse(rsRaw, out var rsN))
+                    runStartIdx = rsN;
+                OpenXmlElement? anchorRun = null;
+                if (runStartIdx >= 1)
+                {
+                    var runs = commentPara.Elements<Run>().ToList();
+                    if (runStartIdx <= runs.Count)
+                        anchorRun = runs[runStartIdx - 1];
+                }
+                if (anchorRun != null)
+                {
+                    anchorRun.InsertAfterSelf(rangeStart);
+                }
+                else
+                {
+                    var after = commentPara.ParagraphProperties as OpenXmlElement;
+                    if (after != null) after.InsertAfterSelf(rangeStart);
+                    else commentPara.InsertAt(rangeStart, 0);
+                }
                 commentPara.AppendChild(rangeEnd);
                 commentPara.AppendChild(refRun);
             }
@@ -632,7 +660,7 @@ public partial class WordHandler
             "styleref" => $" STYLEREF \"{styleRefName}\" ",
             "docproperty" => $" DOCPROPERTY \"{docPropertyName}\" ",
             "if" => BuildIfFieldInstruction(properties),
-            // CONSISTENCY(field-add-symmetry): BatchEmitter.BuildFieldAddProps
+            // CONSISTENCY(field-add-symmetry): WordBatchEmitter.BuildFieldAddProps
             // emits legacy form fields with fieldType=FORMTEXT / FORMCHECKBOX
             // / FORMDROPDOWN. Without these arms the default arm threw
             // `Unknown field type 'formtext'`, breaking dump→batch round-trips
@@ -642,7 +670,7 @@ public partial class WordHandler
             "formtext" => "__FORMFIELD_DELEGATE__",
             "formcheckbox" => "__FORMFIELD_DELEGATE__",
             "formdropdown" => "__FORMFIELD_DELEGATE__",
-            // CONSISTENCY(field-add-symmetry): BatchEmitter.BuildFieldAddProps
+            // CONSISTENCY(field-add-symmetry): WordBatchEmitter.BuildFieldAddProps
             // emits HYPERLINK fields as fieldType=HYPERLINK + url/anchor (+ text),
             // never as a raw `instr`. Without a hyperlink case the default arm
             // throws `Unknown field type 'hyperlink'` and (under the new
@@ -1431,7 +1459,7 @@ public partial class WordHandler
     // BUG-DUMP9-09: MERGEFIELD field names with whitespace must be quoted in
     // the instruction so Word parses them as one token. Already-quoted input
     // is left as-is so the instruction is idempotent under dump round-trip.
-    // Append the trailing-switches blob produced by BatchEmitter for SEQ /
+    // Append the trailing-switches blob produced by WordBatchEmitter for SEQ /
     // MERGEFIELD round-trips (e.g. `\* ARABIC \r 1`, `\* MERGEFORMAT`).
     // Returns either an empty string or a single space + verbatim switches,
     // so the caller can splice it directly between the identifier and the

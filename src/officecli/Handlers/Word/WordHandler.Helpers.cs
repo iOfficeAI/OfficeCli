@@ -569,7 +569,7 @@ public partial class WordHandler
     /// number of runs before the range marker plus 1. Returns 0 when the
     /// range marker is not found, or sits before any Run (anchor at paragraph
     /// start).
-    /// BUG-DUMP4-03: callers (BatchEmitter) need this so dump can preserve
+    /// BUG-DUMP4-03: callers (WordBatchEmitter) need this so dump can preserve
     /// intra-paragraph anchor position; without it replay widens every
     /// comment to the whole paragraph.
     /// </summary>
@@ -627,9 +627,17 @@ public partial class WordHandler
             {
                 case Text t: sb.Append(t.Text); break;
                 case TabChar: sb.Append('\t'); break;
+                // CONSISTENCY(text-breaks): mirror AppendTextWithBreaks — \n
+                // round-trips through <w:br/> (textWrapping, the OOXML default
+                // when w:type is absent). Without this case, Set/Add(text=...)
+                // with embedded \n loses the break on dump readback. Skip
+                // page/column breaks — they have no \n source representation
+                // and a paragraph-level `break` property already captures them.
+                case Break br when br.Type == null || br.Type.Value == BreakValues.TextWrapping:
+                    sb.Append('\n'); break;
                 // BUG-DUMP7-01: <w:sym w:font="Wingdings" w:char="F0E0"/> is a
                 // glyph substitution — the run carries no <w:t>. Without a case
-                // here, GetRunText returned empty and BatchEmitter's run-emit
+                // here, GetRunText returned empty and WordBatchEmitter's run-emit
                 // dropped the whole run, silently losing the symbol on dump
                 // round-trip. Surface the resolved Unicode code point as Text
                 // so the run looks non-empty; the canonical `sym` Format key
@@ -1268,6 +1276,36 @@ public partial class WordHandler
                     else InsertRunPropInSchemaOrder(props, new RunFonts { Ascii = fv, HighAnsi = fv });
                 }
                 return true;
+            // CONSISTENCY(font-slot-asymmetric): Navigation surfaces ascii and
+            // hAnsi separately when their values disagree (font.ascii vs
+            // font.hAnsi); the bare `font.latin` shorthand only handles the
+            // symmetric case. Without these, sources with asymmetric Latin
+            // fonts (e.g. ascii=黑体 hAnsi=宋体, common in CJK docs to fork
+            // ASCII vs extended-Latin glyphs) round-trip with the keys lost.
+            case "font.ascii":
+                {
+                    var fv = SanitizeFontTokenInput(value);
+                    var rfA = props.GetFirstChild<RunFonts>();
+                    if (string.IsNullOrEmpty(fv))
+                    {
+                        if (rfA != null) { rfA.Ascii = null; if (RunFontsIsEmpty(rfA)) rfA.Remove(); }
+                    }
+                    else if (rfA != null) rfA.Ascii = fv;
+                    else InsertRunPropInSchemaOrder(props, new RunFonts { Ascii = fv });
+                }
+                return true;
+            case "font.hansi" or "font.hAnsi":
+                {
+                    var fv = SanitizeFontTokenInput(value);
+                    var rfHA = props.GetFirstChild<RunFonts>();
+                    if (string.IsNullOrEmpty(fv))
+                    {
+                        if (rfHA != null) { rfHA.HighAnsi = null; if (RunFontsIsEmpty(rfHA)) rfHA.Remove(); }
+                    }
+                    else if (rfHA != null) rfHA.HighAnsi = fv;
+                    else InsertRunPropInSchemaOrder(props, new RunFonts { HighAnsi = fv });
+                }
+                return true;
             case "font.ea" or "font.eastasia" or "font.eastasian":
                 {
                     var fv = SanitizeFontTokenInput(value);
@@ -1282,6 +1320,71 @@ public partial class WordHandler
                     }
                     else if (rfEa != null) { rfEa.EastAsia = fv; }
                     else InsertRunPropInSchemaOrder(props, new RunFonts { EastAsia = fv });
+                }
+                return true;
+            // CONSISTENCY(font-theme-slot): theme-font slots bind to a theme
+            // major/minor face instead of a literal typeface. Mirrors the
+            // text-run additions in AddRun/AddParagraph but routed through
+            // ApplyRunFormatting so Set paragraph (and any other call site
+            // that funnels through this helper) honours them too.
+            case "font.asciitheme" or "font.asciiTheme":
+                {
+                    var rfAT = props.GetFirstChild<RunFonts>();
+                    if (string.IsNullOrEmpty(value))
+                    {
+                        if (rfAT != null) { rfAT.AsciiTheme = null; if (RunFontsIsEmpty(rfAT)) rfAT.Remove(); }
+                    }
+                    else
+                    {
+                        var enumAT = new EnumValue<ThemeFontValues>(new ThemeFontValues(value));
+                        if (rfAT != null) rfAT.AsciiTheme = enumAT;
+                        else InsertRunPropInSchemaOrder(props, new RunFonts { AsciiTheme = enumAT });
+                    }
+                }
+                return true;
+            case "font.hansitheme" or "font.hAnsiTheme":
+                {
+                    var rfHAT = props.GetFirstChild<RunFonts>();
+                    if (string.IsNullOrEmpty(value))
+                    {
+                        if (rfHAT != null) { rfHAT.HighAnsiTheme = null; if (RunFontsIsEmpty(rfHAT)) rfHAT.Remove(); }
+                    }
+                    else
+                    {
+                        var enumHAT = new EnumValue<ThemeFontValues>(new ThemeFontValues(value));
+                        if (rfHAT != null) rfHAT.HighAnsiTheme = enumHAT;
+                        else InsertRunPropInSchemaOrder(props, new RunFonts { HighAnsiTheme = enumHAT });
+                    }
+                }
+                return true;
+            case "font.eatheme" or "font.eaTheme" or "font.eastasiatheme":
+                {
+                    var rfEAT = props.GetFirstChild<RunFonts>();
+                    if (string.IsNullOrEmpty(value))
+                    {
+                        if (rfEAT != null) { rfEAT.EastAsiaTheme = null; if (RunFontsIsEmpty(rfEAT)) rfEAT.Remove(); }
+                    }
+                    else
+                    {
+                        var enumEAT = new EnumValue<ThemeFontValues>(new ThemeFontValues(value));
+                        if (rfEAT != null) rfEAT.EastAsiaTheme = enumEAT;
+                        else InsertRunPropInSchemaOrder(props, new RunFonts { EastAsiaTheme = enumEAT });
+                    }
+                }
+                return true;
+            case "font.cstheme" or "font.csTheme":
+                {
+                    var rfCST = props.GetFirstChild<RunFonts>();
+                    if (string.IsNullOrEmpty(value))
+                    {
+                        if (rfCST != null) { rfCST.ComplexScriptTheme = null; if (RunFontsIsEmpty(rfCST)) rfCST.Remove(); }
+                    }
+                    else
+                    {
+                        var enumCST = new EnumValue<ThemeFontValues>(new ThemeFontValues(value));
+                        if (rfCST != null) rfCST.ComplexScriptTheme = enumCST;
+                        else InsertRunPropInSchemaOrder(props, new RunFonts { ComplexScriptTheme = enumCST });
+                    }
                 }
                 return true;
             case "font.cs" or "font.complexscript" or "font.complex":
@@ -1309,9 +1412,6 @@ public partial class WordHandler
                 if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Bold());
                 return true;
             case "bold.cs" or "font.bold.cs" or "boldcs":
-                // Complex-script bold (<w:bCs/>). Word renders Arabic / Hebrew
-                // bold via this flag, NOT <w:b/>. Required for Arabic bold to
-                // actually render as bold.
                 props.RemoveAllChildren<BoldComplexScript>();
                 if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new BoldComplexScript());
                 return true;
@@ -1321,8 +1421,6 @@ public partial class WordHandler
                 if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Italic());
                 return true;
             case "italic.cs" or "font.italic.cs" or "italiccs":
-                // Complex-script italic (<w:iCs/>). Same rationale as bold.cs —
-                // Arabic / Hebrew italic ignores <w:i/>.
                 props.RemoveAllChildren<ItalicComplexScript>();
                 if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new ItalicComplexScript());
                 return true;

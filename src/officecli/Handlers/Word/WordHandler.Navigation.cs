@@ -1527,7 +1527,7 @@ public partial class WordHandler
                         var (inhId, inhLvl) = inherited.Value;
                         node.Format["numId"] = inhId.ToString();
                         node.Format["numLevel"] = inhLvl.ToString();
-                        // BUG-DUMP26-01: flag style-inherited values so BatchEmitter
+                        // BUG-DUMP26-01: flag style-inherited values so WordBatchEmitter
                         // can suppress them on `add p` — they're already covered by
                         // the paragraph's style and emitting them would semantically
                         // promote inherited→explicit on round-trip. Mirrors the
@@ -1891,7 +1891,7 @@ public partial class WordHandler
                         // BUG-DUMP18-02: surface a hyperlink-scoped subpath on
                         // runs that are direct children of <w:hyperlink>. The
                         // canonical Path stays flat (/…/r[N]) for back-compat
-                        // with every existing caller; BatchEmitter's
+                        // with every existing caller; WordBatchEmitter's
                         // CollapseFieldChains carries this hint to the synth
                         // field-add row so a fldChar-chain field inside a
                         // hyperlink replays INSIDE the hyperlink instead of
@@ -2050,7 +2050,7 @@ public partial class WordHandler
                 // (which appended every bookmark at the tail of
                 // node.Children) is intentionally left empty.
                 // BUG-DUMP4-06: surface inline SdtRun (content control) children
-                // so BatchEmitter can re-emit a typed `add sdt` row carrying
+                // so WordBatchEmitter can re-emit a typed `add sdt` row carrying
                 // alias/tag/type metadata. Without this, GetAllRuns unwrapped
                 // the SdtRun's inner Run as a plain `add r` and the metadata
                 // was silently dropped on dump round-trip.
@@ -2084,7 +2084,7 @@ public partial class WordHandler
                     }
                 }
                 // BUG-DUMP6-01: surface <w:fldSimple> children as typed `field`
-                // nodes so BatchEmitter can re-emit `add field` with the
+                // nodes so WordBatchEmitter can re-emit `add field` with the
                 // instruction preserved. Without this, GetAllRuns descended
                 // into SimpleField and surfaced the inner display run as a
                 // plain run, silently dropping the w:instr attribute.
@@ -2363,7 +2363,7 @@ public partial class WordHandler
             // BUG-R5-T3: previously this branch wrote only id/name/alt/width/
             // height/relId — wrap/hPosition/vPosition/hRelative/vRelative/
             // behindText for floating pictures were silently dropped, which
-            // also broke dump→batch round-trip (BatchEmitter relies on Get).
+            // also broke dump→batch round-trip (WordBatchEmitter relies on Get).
             // Reuse CreateImageNode (the canonical picture-node builder) and
             // merge its Format bag into the run node.
             var runDrawing = run.GetFirstChild<Drawing>();
@@ -2529,7 +2529,7 @@ public partial class WordHandler
                 // BUG-DUMP10-05: a hyperlink wrapper with neither r:id nor
                 // anchor (tooltip-only / history-only) used to fall through
                 // both branches below, leaving the run with no Format keys
-                // that would trigger the BatchEmitter hyperlink-emit guard.
+                // that would trigger the WordBatchEmitter hyperlink-emit guard.
                 // Surface a sentinel so the wrapper survives even when there
                 // is no destination — required for w:hyperlink[@w:tooltip]
                 // bookmarks-style hover popups.
@@ -2549,7 +2549,7 @@ public partial class WordHandler
                 // CONSISTENCY(internal-anchor-hyperlink): runs inside an
                 // internal anchor hyperlink (w:hyperlink[@w:anchor]) had no
                 // r:id, so `anchor` was never surfaced on the run. The
-                // BatchEmitter hyperlink branch keys off Format["anchor"]/
+                // WordBatchEmitter hyperlink branch keys off Format["anchor"]/
                 // ["url"] to emit `add hyperlink`; without anchor the run
                 // was demoted to a plain `add r` and the link was lost on
                 // dump→batch round-trip.
@@ -2768,7 +2768,7 @@ public partial class WordHandler
                     node.Format["padding.right"] = dcm.TableCellRightMargin.Width.Value;
                 // Table-level shading (w:tblPr/w:shd). Mirror paragraph shading
                 // pattern: split into shading.val/.fill/.color sub-keys.
-                // BatchEmitter's shading-fold collapses these into a single
+                // WordBatchEmitter's shading-fold collapses these into a single
                 // semicolon-encoded `shading=VAL;FILL[;COLOR]` value, which
                 // AddTable consumes via the existing "shading" case.
                 // BUG-DUMP22-09: floating-table position (<w:tblpPr/>) and

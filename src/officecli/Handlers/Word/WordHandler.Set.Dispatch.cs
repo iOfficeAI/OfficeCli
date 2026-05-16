@@ -1656,7 +1656,7 @@ public partial class WordHandler
                 }
                 // CONSISTENCY(style-indent): list-family styles (List, List Paragraph,
                 // List 2/3, List Continue 1/2/3, Intense Quote) carry their indent on
-                // the style definition. Without these cases the BatchEmitter dump emits
+                // the style definition. Without these cases the WordBatchEmitter dump emits
                 // leftIndent / hangingIndent / firstLineIndent / rightIndent on /styles
                 // and Set rejects them as UNSUPPORTED — list styles round-trip with
                 // their indent erased (BUG BT-5). StyleUnsupportedHints' "set indent at

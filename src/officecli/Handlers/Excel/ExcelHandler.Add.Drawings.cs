@@ -625,9 +625,7 @@ public partial class ExcelHandler
                 spPr.AppendChild(new Drawing.NoFill());
             else
             {
-                var (rgb, alpha) = ParseHelpers.SanitizeColorForOoxml(shpFill);
-                var solidFill = new Drawing.SolidFill(new Drawing.RgbColorModelHex { Val = rgb });
-                spPr.AppendChild(solidFill);
+                spPr.AppendChild(DrawingColorBuilder.BuildSolidFill(shpFill));
             }
         }
 
@@ -638,8 +636,7 @@ public partial class ExcelHandler
                 spPr.AppendChild(new Drawing.Outline(new Drawing.NoFill()));
             else
             {
-                var (lRgb, _) = ParseHelpers.SanitizeColorForOoxml(shpLine);
-                spPr.AppendChild(new Drawing.Outline(new Drawing.SolidFill(new Drawing.RgbColorModelHex { Val = lRgb })));
+                spPr.AppendChild(new Drawing.Outline(DrawingColorBuilder.BuildSolidFill(shpLine)));
             }
         }
 
@@ -750,8 +747,7 @@ public partial class ExcelHandler
                 ?? properties.GetValueOrDefault("font.color");
             if (rawColor != null)
             {
-                var (cRgb, _) = ParseHelpers.SanitizeColorForOoxml(rawColor);
-                rPr.AppendChild(new Drawing.SolidFill(new Drawing.RgbColorModelHex { Val = cRgb }));
+                rPr.AppendChild(DrawingColorBuilder.BuildSolidFill(rawColor));
             }
 
             // Text-level effects for fill=none shapes

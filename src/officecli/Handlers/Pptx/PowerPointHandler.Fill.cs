@@ -29,59 +29,16 @@ public partial class PowerPointHandler
 
     // ==================== Color Helpers ====================
 
-    /// <summary>
-    /// Parse a color string and return the appropriate OpenXML color element.
-    /// Supports: hex RGB ("FF0000"), theme colors ("accent1", "dk1", "lt1", etc.)
-    /// </summary>
+    // Color/fill builders moved to Core/DrawingColorBuilder so ExcelHandler's
+    // drawing-layer shapes can reuse the same scheme-color resolution.
     private static OpenXmlElement BuildColorElement(string value)
-    {
-        var schemeColor = TryParseSchemeColor(value);
-        if (schemeColor.HasValue)
-            return new Drawing.SchemeColor { Val = schemeColor.Value };
+        => DrawingColorBuilder.BuildColorElement(value);
 
-        var (rgb, alpha) = OfficeCli.Core.ParseHelpers.SanitizeColorForOoxml(value);
-        var colorEl = new Drawing.RgbColorModelHex { Val = rgb };
-        if (alpha.HasValue)
-            colorEl.AppendChild(new Drawing.Alpha { Val = alpha.Value });
-        return colorEl;
-    }
-
-    /// <summary>
-    /// Build a SolidFill element with the appropriate color type.
-    /// </summary>
     private static Drawing.SolidFill BuildSolidFill(string colorValue)
-    {
-        var solidFill = new Drawing.SolidFill();
-        solidFill.Append(BuildColorElement(colorValue));
-        return solidFill;
-    }
+        => DrawingColorBuilder.BuildSolidFill(colorValue);
 
-    /// <summary>
-    /// Try to parse a theme/scheme color name. Returns null if it's a hex RGB value.
-    /// </summary>
     private static Drawing.SchemeColorValues? TryParseSchemeColor(string value)
-    {
-        return value.ToLowerInvariant().TrimStart('#') switch
-        {
-            "accent1" => Drawing.SchemeColorValues.Accent1,
-            "accent2" => Drawing.SchemeColorValues.Accent2,
-            "accent3" => Drawing.SchemeColorValues.Accent3,
-            "accent4" => Drawing.SchemeColorValues.Accent4,
-            "accent5" => Drawing.SchemeColorValues.Accent5,
-            "accent6" => Drawing.SchemeColorValues.Accent6,
-            "dk1" or "dark1" => Drawing.SchemeColorValues.Dark1,
-            "dk2" or "dark2" => Drawing.SchemeColorValues.Dark2,
-            "lt1" or "light1" => Drawing.SchemeColorValues.Light1,
-            "lt2" or "light2" => Drawing.SchemeColorValues.Light2,
-            "tx1" or "text1" => Drawing.SchemeColorValues.Text1,
-            "tx2" or "text2" => Drawing.SchemeColorValues.Text2,
-            "bg1" or "background1" => Drawing.SchemeColorValues.Background1,
-            "bg2" or "background2" => Drawing.SchemeColorValues.Background2,
-            "hlink" or "hyperlink" => Drawing.SchemeColorValues.Hyperlink,
-            "folhlink" or "followedhyperlink" => Drawing.SchemeColorValues.FollowedHyperlink,
-            _ => null
-        };
-    }
+        => DrawingColorBuilder.TryParseSchemeColor(value);
 
     /// <summary>
     /// Read a color value from a SolidFill element, returning either hex RGB or scheme color name.

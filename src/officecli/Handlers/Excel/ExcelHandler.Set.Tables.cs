@@ -638,7 +638,7 @@ public partial class ExcelHandler
                     var x14Db = rule != null ? ResolveX14DataBar(ws, rule) : null;
                     if (x14Db != null)
                     {
-                        var dirNorm = value.ToLowerInvariant().Replace("-", "").Replace("_", "");
+                        var dirNorm = SchemaKeyNormalizer.Normalize(value);
                         x14Db.Direction = dirNorm switch
                         {
                             "lefttoright" or "ltr" => X14.DataBarDirectionValues.LeftToRight,

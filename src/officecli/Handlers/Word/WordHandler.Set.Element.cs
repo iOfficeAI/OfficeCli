@@ -939,6 +939,14 @@ public partial class WordHandler
     {
         var unsupported = new List<string>();
         var pProps = para.ParagraphProperties ?? para.PrependChild(new ParagraphProperties());
+        // CONSISTENCY(markRPr-pre-existed-snapshot): captured ONCE before
+        // the property iteration starts. The per-iteration pmrpExisting
+        // check inside the bare-key case below otherwise flipped to non-
+        // null as soon as the *same* Set call processed an explicit
+        // `markRPr.<key>=…` — making every subsequent bare-key iteration
+        // mirror to markRPr too, fabricating mark keys the source never
+        // had (BUG-DUMP-MARKRPR-LEAK regression form).
+        bool markRPrPreExisted = pProps.ParagraphMarkRunProperties != null;
         foreach (var (key, value) in properties)
         {
             var k = key.ToLowerInvariant();
@@ -1004,14 +1012,60 @@ public partial class WordHandler
                     var sub = key.Substring("markRPr.".Length);
                     var markOnlyRPr = pProps.ParagraphMarkRunProperties
                         ?? pProps.AppendChild(new ParagraphMarkRunProperties());
-                    ApplyRunFormatting(markOnlyRPr, sub, value);
+                    // CONSISTENCY(markRPr-explicit-false): the dotted markRPr.*
+                    // form is dump-specific (Navigation emits markRPr.bold=false
+                    // only when source <w:rPr><w:b w:val="false"/></w:rPr> sits
+                    // on the paragraph mark — explicit style override). Preserve
+                    // val=false here so round-trip survives. The bare-key path
+                    // keeps ApplyRunFormatting's "remove on falsy" contract
+                    // intact for interactive `set bold=false`.
+                    var subLower = sub.ToLowerInvariant();
+                    if (IsExplicitFalseAddOverride(value))
+                    {
+                        switch (subLower)
+                        {
+                            case "bold" or "font.bold":
+                                markOnlyRPr.RemoveAllChildren<Bold>();
+                                InsertRunPropInSchemaOrder(markOnlyRPr, new Bold { Val = DocumentFormat.OpenXml.OnOffValue.FromBoolean(false) });
+                                break;
+                            case "italic" or "font.italic":
+                                markOnlyRPr.RemoveAllChildren<Italic>();
+                                InsertRunPropInSchemaOrder(markOnlyRPr, new Italic { Val = DocumentFormat.OpenXml.OnOffValue.FromBoolean(false) });
+                                break;
+                            case "bold.cs" or "font.bold.cs" or "boldcs":
+                                markOnlyRPr.RemoveAllChildren<BoldComplexScript>();
+                                InsertRunPropInSchemaOrder(markOnlyRPr, new BoldComplexScript { Val = DocumentFormat.OpenXml.OnOffValue.FromBoolean(false) });
+                                break;
+                            case "italic.cs" or "font.italic.cs" or "italiccs":
+                                markOnlyRPr.RemoveAllChildren<ItalicComplexScript>();
+                                InsertRunPropInSchemaOrder(markOnlyRPr, new ItalicComplexScript { Val = DocumentFormat.OpenXml.OnOffValue.FromBoolean(false) });
+                                break;
+                            default:
+                                ApplyRunFormatting(markOnlyRPr, sub, value);
+                                break;
+                        }
+                    }
+                    else
+                    {
+                        ApplyRunFormatting(markOnlyRPr, sub, value);
+                    }
                     break;
                 }
                 case "size" or "font" or "bold" or "italic" or "color" or "highlight" or "underline" or "strike"
-                  or "font.latin" or "font.ea" or "font.eastasia" or "font.eastasian"
+                  or "font.latin" or "font.ascii" or "font.hansi" or "font.hAnsi"
+                  or "font.ea" or "font.eastasia" or "font.eastasian"
                   or "font.cs" or "font.complexscript" or "font.complex"
                   or "bold.cs" or "italic.cs" or "size.cs"
-                  or "font.bold.cs" or "font.italic.cs" or "font.size.cs":
+                  or "font.bold.cs" or "font.italic.cs" or "font.size.cs"
+                  or "font.asciitheme" or "font.asciiTheme"
+                  or "font.hansitheme" or "font.hAnsiTheme"
+                  or "font.eatheme" or "font.eaTheme" or "font.eastasiatheme"
+                  or "font.cstheme" or "font.csTheme"
+                  // CONSISTENCY(set-para-run-keys): rPr-bound keys that also
+                  // belong on the paragraph mark when no runs exist yet.
+                  // ApplyRunFormatting handles each individually.
+                  or "kern" or "bdr" or "lang" or "lang.latin" or "lang.val"
+                  or "lang.ea" or "lang.eastasia" or "lang.cs" or "lang.bidi":
                     // Apply run-level formatting to all runs in the paragraph.
                     var allParaRuns = para.Descendants<Run>().ToList();
                     // Paragraph-mark run properties (<w:rPr> inside <w:pPr>)
@@ -1046,9 +1100,22 @@ public partial class WordHandler
                         para.AppendChild(seedRun);
                         allParaRuns.Add(seedRun);
                     }
-                    if (allParaRuns.Count == 0 || pmrpExisting != null)
+                    // CONSISTENCY(markRPr-bare-vs-dotted): when the same Set
+                    // carries an explicit markRPr.<key>, the dotted form is
+                    // the authoritative mark-only value — the bare key must
+                    // propagate to visible runs but NOT overwrite markRPr.
+                    // Without this, source's `markRPr.size=12pt + size=15pt`
+                    // (¶ glyph at 12pt, runs at 15pt) collapses to 15pt on
+                    // both after replay because iteration order isn't stable.
+                    bool explicitMarkOverride = properties.ContainsKey($"markRPr.{key}")
+                                             || properties.ContainsKey($"markrpr.{key}");
+                    // Use the pre-iteration snapshot: only mirror to markRPr
+                    // when the source's markRPr existed before this Set started.
+                    // A markRPr created mid-loop by an earlier explicit
+                    // markRPr.* setter does NOT enable bare-key mirroring.
+                    if ((allParaRuns.Count == 0 || markRPrPreExisted) && !explicitMarkOverride)
                     {
-                        var markRPr = pmrpExisting
+                        var markRPr = pProps.ParagraphMarkRunProperties
                             ?? pProps.AppendChild(new ParagraphMarkRunProperties());
                         ApplyRunFormatting(markRPr, key, value);
                     }
@@ -1374,7 +1441,16 @@ public partial class WordHandler
                         // gridCol slot it occupies and Word's column-boundary
                         // inference breaks across all other rows. Mirrors the
                         // startCol calculation used by the gridspan branch.
-                        if (cell.Parent is TableRow widthRow
+                        // CONSISTENCY(tblgrid-preserve): dump→batch can disable
+                        // the tblGrid sync via skipGridSync=true on the tc set
+                        // because AddTable wrote authoritative colWidths and
+                        // sources are allowed to carry per-cell tcW values that
+                        // disagree with the gridCol widths (Word renders cells
+                        // by their own tcW; tblGrid is just a layout hint).
+                        bool skipGridSync = properties.TryGetValue("skipgridsync", out var sgs)
+                                         || properties.TryGetValue("skipGridSync", out sgs);
+                        if (!(skipGridSync && IsTruthy(sgs))
+                            && cell.Parent is TableRow widthRow
                             && widthRow.Parent is Table widthTbl)
                         {
                             var widthGrid = widthTbl.GetFirstChild<TableGrid>();
@@ -1399,12 +1475,30 @@ public partial class WordHandler
                                     }
                                     else
                                     {
-                                        int per = (int)(widthVal / (uint)thisSpan);
-                                        int remainder = (int)(widthVal - (uint)(per * thisSpan));
+                                        // CONSISTENCY(tblgrid-preserve): when the
+                                        // spanned gridCols already sum to widthVal
+                                        // (the common dump-replay case — AddTable
+                                        // wrote authoritative colWidths and a later
+                                        // tc/width=Σ on a span>1 cell is just a
+                                        // restatement) leave them alone. Only
+                                        // redistribute evenly when the sum disagrees.
+                                        long existingSum = 0;
+                                        bool allParsed = true;
                                         for (int gi = 0; gi < thisSpan && startCol + gi < widthGridCols.Count; gi++)
                                         {
-                                            var slice = per + (gi == thisSpan - 1 ? remainder : 0);
-                                            widthGridCols[startCol + gi].Width = slice.ToString();
+                                            if (long.TryParse(widthGridCols[startCol + gi].Width?.Value, out var gw))
+                                                existingSum += gw;
+                                            else { allParsed = false; break; }
+                                        }
+                                        if (!(allParsed && existingSum == widthVal))
+                                        {
+                                            int per = (int)(widthVal / (uint)thisSpan);
+                                            int remainder = (int)(widthVal - (uint)(per * thisSpan));
+                                            for (int gi = 0; gi < thisSpan && startCol + gi < widthGridCols.Count; gi++)
+                                            {
+                                                var slice = per + (gi == thisSpan - 1 ? remainder : 0);
+                                                widthGridCols[startCol + gi].Width = slice.ToString();
+                                            }
                                         }
                                     }
                                 }

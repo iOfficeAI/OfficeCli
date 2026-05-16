@@ -106,7 +106,12 @@ public partial class WordHandler
         {
             var parts = colsVal.Split(',');
             var count = (short)int.Parse(parts[0].Trim());
-            var cols = new Columns { ColumnCount = count, EqualWidth = true };
+            // CONSISTENCY(columns-no-equalWidth-default): Set.SectionLayout
+            // dropped the EqualWidth auto-stamp (round-trip preservation —
+            // sources whose <w:cols> omits w:equalWidth must replay without
+            // it). Mirror that on Add so `add section --prop columns=N`
+            // doesn't phantom-stamp columns.equalWidth=true.
+            var cols = new Columns { ColumnCount = count };
             if (parts.Length > 1)
                 cols.Space = ParseTwips(parts[1].Trim()).ToString();
             InsertSectPrChildInOrder(sectPr, cols);
@@ -650,6 +655,18 @@ public partial class WordHandler
             sp.After = SpacingConverter.ParseWordSpacing(sSAfter).ToString();
             hasPPr = true;
         }
+        if (properties.TryGetValue("spacebeforelines", out var sSBL) || properties.TryGetValue("spaceBeforeLines", out sSBL))
+        {
+            var sp = stylePPr.SpacingBetweenLines ?? (stylePPr.SpacingBetweenLines = new SpacingBetweenLines());
+            sp.BeforeLines = ParseHelpers.SafeParseInt(sSBL, "spaceBeforeLines");
+            hasPPr = true;
+        }
+        if (properties.TryGetValue("spaceafterlines", out var sSAL) || properties.TryGetValue("spaceAfterLines", out sSAL))
+        {
+            var sp = stylePPr.SpacingBetweenLines ?? (stylePPr.SpacingBetweenLines = new SpacingBetweenLines());
+            sp.AfterLines = ParseHelpers.SafeParseInt(sSAL, "spaceAfterLines");
+            hasPPr = true;
+        }
         // CONSISTENCY(add-set-symmetry): mirror SetStylePath's lineSpacing case
         // (WordHandler.Set.Dispatch.cs:1403). Without this, `add /styles … --prop
         // lineSpacing=1.5x` was silent-dropped while `set /styles/X --prop
@@ -852,6 +869,7 @@ public partial class WordHandler
             "autoRedefine", "autoredefine", "hidden",
             "align", "alignment", "spacebefore", "spaceBefore",
             "spaceafter", "spaceAfter", "linespacing", "lineSpacing",
+            "spacebeforelines", "spaceBeforeLines", "spaceafterlines", "spaceAfterLines",
             "lineRule", "linerule",
             "font", "size", "bold", "italic", "color",
             "direction", "dir", "bidi",
@@ -874,6 +892,22 @@ public partial class WordHandler
             // below, which the CLI layer reports independently of Tracking.
             properties.ContainsKey(key);
 
+            // CONSISTENCY(style-shading-pPr): paragraph/table styles can carry
+            // <w:shd> on either pPr (split into val/fill/color sub-keys by
+            // Navigation, folded back into "VAL;FILL[;COLOR]" compound form
+            // by WordBatchEmitter) or rPr (Query.cs:683 emits compact `shading=<fill>`
+            // only). Use the compound form as the signal — values that contain
+            // `;` came from pPr in the source and must round-trip to pPr.
+            // Compact values stay with the ApplyRunFormatting (rPr) probe below.
+            if ((string.Equals(key, "shading", StringComparison.OrdinalIgnoreCase)
+                 || string.Equals(key, "shd", StringComparison.OrdinalIgnoreCase))
+                && value.Contains(';')
+                && (styleType == StyleValues.Paragraph || styleType == StyleValues.Table))
+            {
+                var pPrShd = newStyle.StyleParagraphProperties ?? EnsureStyleParagraphProperties(newStyle);
+                pPrShd.Shading = ParseShadingValue(value);
+                continue;
+            }
             // 1) Run-formatting helper (covers underline/strike/highlight/caps/
             //    smallCaps/dstrike/vanish/shadow/emboss/imprint/noProof/rtl/
             //    superscript/subscript/charSpacing/shading/...).
@@ -961,6 +995,34 @@ public partial class WordHandler
                     var pPrHi = newStyle.StyleParagraphProperties ?? EnsureStyleParagraphProperties(newStyle);
                     var indHi = pPrHi.Indentation ?? (pPrHi.Indentation = new Indentation());
                     indHi.Hanging = SpacingConverter.ParseWordSpacing(value).ToString();
+                    continue;
+                }
+                case "firstlinechars":
+                {
+                    var pPrFlc = newStyle.StyleParagraphProperties ?? EnsureStyleParagraphProperties(newStyle);
+                    var indFlc = pPrFlc.Indentation ?? (pPrFlc.Indentation = new Indentation());
+                    indFlc.FirstLineChars = ParseHelpers.SafeParseInt(value, "firstLineChars");
+                    continue;
+                }
+                case "leftchars" or "startchars":
+                {
+                    var pPrLc = newStyle.StyleParagraphProperties ?? EnsureStyleParagraphProperties(newStyle);
+                    var indLc = pPrLc.Indentation ?? (pPrLc.Indentation = new Indentation());
+                    indLc.LeftChars = ParseHelpers.SafeParseInt(value, "leftChars");
+                    continue;
+                }
+                case "rightchars" or "endchars":
+                {
+                    var pPrRc = newStyle.StyleParagraphProperties ?? EnsureStyleParagraphProperties(newStyle);
+                    var indRc = pPrRc.Indentation ?? (pPrRc.Indentation = new Indentation());
+                    indRc.RightChars = ParseHelpers.SafeParseInt(value, "rightChars");
+                    continue;
+                }
+                case "hangingchars":
+                {
+                    var pPrHc = newStyle.StyleParagraphProperties ?? EnsureStyleParagraphProperties(newStyle);
+                    var indHc = pPrHc.Indentation ?? (pPrHc.Indentation = new Indentation());
+                    indHc.HangingChars = ParseHelpers.SafeParseInt(value, "hangingChars");
                     continue;
                 }
                 case "pbdr.top" or "pbdr.bottom" or "pbdr.left" or "pbdr.right" or "pbdr.between" or "pbdr.bar" or "pbdr.all" or "pbdr":
@@ -1724,12 +1786,21 @@ public partial class WordHandler
         // Word silently ignores the even header reference at render time.
         if (headerType == HeaderFooterValues.Even)
         {
-            var hSettingsPart = mainPartH.DocumentSettingsPart
-                ?? mainPartH.AddNewPart<DocumentSettingsPart>();
-            hSettingsPart.Settings ??= new Settings();
-            if (hSettingsPart.Settings.GetFirstChild<EvenAndOddHeaders>() == null)
-                hSettingsPart.Settings.AddChild(new EvenAndOddHeaders(), throwOnError: false);
-            hSettingsPart.Settings.Save();
+            // CONSISTENCY(headerfooter-noEvenAndOdd-opt-out): dump→batch emits
+            // `noEvenAndOddHeaders=true` when the source's settings.xml lacks
+            // <w:evenAndOddHeaders/> so the auto-stamp doesn't phantom-write a
+            // toggle the source never had.
+            bool skipHEvenAndOdd = properties.TryGetValue("noevenandoddheaders", out var hNeo)
+                                || properties.TryGetValue("noEvenAndOddHeaders", out hNeo);
+            if (!(skipHEvenAndOdd && IsTruthy(hNeo)))
+            {
+                var hSettingsPart = mainPartH.DocumentSettingsPart
+                    ?? mainPartH.AddNewPart<DocumentSettingsPart>();
+                hSettingsPart.Settings ??= new Settings();
+                if (hSettingsPart.Settings.GetFirstChild<EvenAndOddHeaders>() == null)
+                    hSettingsPart.Settings.AddChild(new EvenAndOddHeaders(), throwOnError: false);
+                hSettingsPart.Settings.Save();
+            }
         }
 
         var hIdx = mainPartH.HeaderParts.ToList().IndexOf(headerPart);
@@ -1877,19 +1948,30 @@ public partial class WordHandler
 
         if (footerType == HeaderFooterValues.First)
         {
-            if (fSectPr.GetFirstChild<TitlePage>() == null)
+            // CONSISTENCY(headerfooter-noTitlePg-opt-out): mirror AddHeader.
+            // Round-trip emit passes `noTitlePg=true` when the source's sectPr
+            // had no <w:titlePg/>, so the footer add does not phantom-stamp it.
+            bool skipFooterTitlePg = properties.TryGetValue("notitlepg", out var fNtp)
+                                  || properties.TryGetValue("noTitlePg", out fNtp);
+            if (!(skipFooterTitlePg && IsTruthy(fNtp))
+                && fSectPr.GetFirstChild<TitlePage>() == null)
                 fSectPr.AddChild(new TitlePage(), throwOnError: false);
         }
         // CONSISTENCY(headerfooter-effective-toggle): even-footer also needs
         // settings.xml/w:evenAndOddHeaders to render.
         if (footerType == HeaderFooterValues.Even)
         {
-            var fSettingsPart = mainPartF.DocumentSettingsPart
-                ?? mainPartF.AddNewPart<DocumentSettingsPart>();
-            fSettingsPart.Settings ??= new Settings();
-            if (fSettingsPart.Settings.GetFirstChild<EvenAndOddHeaders>() == null)
-                fSettingsPart.Settings.AddChild(new EvenAndOddHeaders(), throwOnError: false);
-            fSettingsPart.Settings.Save();
+            bool skipFEvenAndOdd = properties.TryGetValue("noevenandoddheaders", out var fNeo)
+                                || properties.TryGetValue("noEvenAndOddHeaders", out fNeo);
+            if (!(skipFEvenAndOdd && IsTruthy(fNeo)))
+            {
+                var fSettingsPart = mainPartF.DocumentSettingsPart
+                    ?? mainPartF.AddNewPart<DocumentSettingsPart>();
+                fSettingsPart.Settings ??= new Settings();
+                if (fSettingsPart.Settings.GetFirstChild<EvenAndOddHeaders>() == null)
+                    fSettingsPart.Settings.AddChild(new EvenAndOddHeaders(), throwOnError: false);
+                fSettingsPart.Settings.Save();
+            }
         }
 
         var fIdx = mainPartF.FooterParts.ToList().IndexOf(footerPart);

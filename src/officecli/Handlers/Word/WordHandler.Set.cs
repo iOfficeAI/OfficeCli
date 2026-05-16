@@ -537,11 +537,23 @@ public partial class WordHandler
     // a `STYLE;SZ;;0` artifact in batch dump).
     private static (BorderValues style, uint size, string? color, uint? space) ParseBorderValue(string value)
     {
+        var (style, size, color, space, _) = ParseBorderValueDetailed(value);
+        return (style, size, color, space);
+    }
+
+    // CONSISTENCY(border-size-roundtrip): expose whether the caller provided
+    // a SIZE segment so MakeBorder can suppress w:sz on nil borders that
+    // never had it in the source. Mirrors the w:space "only when given"
+    // pattern. Internal helper — callers that don't care about the flag
+    // use the legacy 4-tuple wrapper above.
+    private static (BorderValues style, uint size, string? color, uint? space, bool sizeProvided) ParseBorderValueDetailed(string value)
+    {
         var parts = value.Split(';');
         var style = ParseBorderStyle(parts[0]);
         uint size;
+        bool sizeProvided = parts.Length > 1 && !string.IsNullOrEmpty(parts[1].Trim());
         // CONSISTENCY(border-empty-segment): mirror the empty-color tolerance
-        // below — BatchEmitter's border fold emits "STYLE;;COLOR" whenever a
+        // below — WordBatchEmitter's border fold emits "STYLE;;COLOR" whenever a
         // side has color but no explicit sz attribute (very common in real
         // .docx files where w:sz is inherited via the style chain). Treat an
         // empty SIZE segment as "use default" instead of throwing.
@@ -586,7 +598,7 @@ public partial class WordHandler
                 throw new ArgumentException($"Invalid border space '{parts[3]}', expected integer. Format: STYLE[;SIZE[;COLOR[;SPACE]]]");
             space = spaceVal;
         }
-        return (style, size, color, space);
+        return (style, size, color, space, sizeProvided);
     }
 
     private static T MakeBorder<T>(BorderValues style, uint size, string? color, uint? space) where T : BorderType, new()
@@ -596,7 +608,14 @@ public partial class WordHandler
         // spurious `border.X.space: 0` readback and a `STYLE;SZ;;0` batch
         // artifact, even though 0 is the OOXML default and the user never
         // asked for it.
-        var b = new T { Val = style, Size = size };
+        // CONSISTENCY(border-size-roundtrip): a bare `nil` value (no sz
+        // segment) round-trips with size=0 default — but emitting w:sz="0"
+        // surfaces a `nil;0` readback on the next dump. Callers that have
+        // sizeProvided info route through MakeBorderTyped below; the legacy
+        // overload stays size-always-stamped for non-nil borders that
+        // genuinely default to size 4.
+        var b = new T { Val = style };
+        if (!(style == BorderValues.Nil && size == 0)) b.Size = size;
         if (space.HasValue) b.Space = space.Value;
         if (color != null) b.Color = color;
         return b;
@@ -660,6 +679,35 @@ public partial class WordHandler
                 indentH.Hanging = SpacingConverter.ParseWordSpacing(value).ToString();
                 indentH.FirstLine = null;
                 return true;
+            // CONSISTENCY(ind-char-units): CJK-convention character-unit
+            // indents (recomputed by Word when font size changes). Mirror
+            // AddStyle's char-unit handlers so dump→batch on Set paragraph
+            // preserves the source's firstLineChars / leftChars / rightChars
+            // / hangingChars attrs.
+            case "firstlinechars":
+            {
+                var indFlc = pProps.Indentation ?? (pProps.Indentation = new Indentation());
+                indFlc.FirstLineChars = ParseHelpers.SafeParseInt(value, "firstLineChars");
+                return true;
+            }
+            case "leftchars" or "startchars":
+            {
+                var indLc = pProps.Indentation ?? (pProps.Indentation = new Indentation());
+                indLc.LeftChars = ParseHelpers.SafeParseInt(value, "leftChars");
+                return true;
+            }
+            case "rightchars" or "endchars":
+            {
+                var indRc = pProps.Indentation ?? (pProps.Indentation = new Indentation());
+                indRc.RightChars = ParseHelpers.SafeParseInt(value, "rightChars");
+                return true;
+            }
+            case "hangingchars":
+            {
+                var indHc = pProps.Indentation ?? (pProps.Indentation = new Indentation());
+                indHc.HangingChars = ParseHelpers.SafeParseInt(value, "hangingChars");
+                return true;
+            }
             // Toggle props: always replace the element (don't `??=`) so an
             // existing `<w:foo w:val="false"/>` written by a previous Set or
             // by external tooling is correctly overridden when the new value

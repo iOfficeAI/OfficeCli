@@ -215,7 +215,7 @@ public partial class ExcelHandler
         };
         if (properties.TryGetValue("direction", out var dbDir))
         {
-            var dirNorm = dbDir.ToLowerInvariant().Replace("-", "").Replace("_", "");
+            var dirNorm = SchemaKeyNormalizer.Normalize(dbDir);
             x14DataBar.Direction = dirNorm switch
             {
                 "lefttoright" or "ltr" => X14.DataBarDirectionValues.LeftToRight,

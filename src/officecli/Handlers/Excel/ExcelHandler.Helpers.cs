@@ -2945,9 +2945,8 @@ public partial class ExcelHandler
                 case "color":
                 {
                     rPr.RemoveAllChildren<Drawing.SolidFill>();
-                    var (cRgb, _) = ParseHelpers.SanitizeColorForOoxml(value);
                     OfficeCli.Core.DrawingEffectsHelper.InsertFillInRunProperties(rPr,
-                        new Drawing.SolidFill(new Drawing.RgbColorModelHex { Val = cRgb }));
+                        DrawingColorBuilder.BuildSolidFill(value));
                     break;
                 }
                 case "underline":
