@@ -398,7 +398,9 @@ public partial class PowerPointHandler
             "star16" => Drawing.ShapeTypeValues.Star16,
             "star24" => Drawing.ShapeTypeValues.Star24,
             "star32" => Drawing.ShapeTypeValues.Star32,
-            "rightarrow" or "rarrow" => Drawing.ShapeTypeValues.RightArrow,
+            // "arrow" alias mirrors PowerPoint's "Arrow: Right" UI label —
+            // the unqualified short form users naturally reach for.
+            "rightarrow" or "rarrow" or "arrow" => Drawing.ShapeTypeValues.RightArrow,
             "leftarrow" or "larrow" => Drawing.ShapeTypeValues.LeftArrow,
             "uparrow" => Drawing.ShapeTypeValues.UpArrow,
             "downarrow" => Drawing.ShapeTypeValues.DownArrow,
