@@ -88,10 +88,21 @@ public partial class PowerPointHandler
 
     private static void ApplyShapeFill(ShapeProperties spPr, string value)
     {
-        // Build new fill element BEFORE removing old one (atomic: no data loss on validation failure)
-        OpenXmlElement newFill = value.Equals("none", StringComparison.OrdinalIgnoreCase)
-            ? new Drawing.NoFill()
-            : BuildSolidFill(value);
+        // CONSISTENCY(fill-gradient-shorthand): accept gradient shorthand
+        // ("C1-C2[-angle]", "radial:C1-C2", "path:C1-C2", and "LINEAR;C1;C2;angle")
+        // directly on fill= — table cells and slide backgrounds already auto-detect
+        // the same shorthand, so shape fill matches that input contract instead of
+        // forcing callers to switch to the parallel gradient= key.
+        var normalized = NormalizeGradientValue(value);
+        OpenXmlElement newFill;
+        if (value.Equals("none", StringComparison.OrdinalIgnoreCase))
+            newFill = new Drawing.NoFill();
+        else if (normalized.StartsWith("radial:", StringComparison.OrdinalIgnoreCase)
+              || normalized.StartsWith("path:", StringComparison.OrdinalIgnoreCase)
+              || IsGradientColorString(normalized))
+            newFill = BuildGradientFill(normalized);
+        else
+            newFill = BuildSolidFill(value);
 
         spPr.RemoveAllChildren<Drawing.SolidFill>();
         spPr.RemoveAllChildren<Drawing.NoFill>();
