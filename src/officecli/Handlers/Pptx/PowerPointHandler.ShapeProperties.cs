@@ -1383,49 +1383,25 @@ public partial class PowerPointHandler
                 case "fill":
                 case "background":
                 {
+                    // CONSISTENCY(fill-gradient-shorthand): accept linear
+                    // ("C1-C2[-angle]"), radial ("radial:C1-C2[-focus]"),
+                    // path ("path:C1-C2[-focus]"), and "LINEAR;C1;C2;angle"
+                    // shorthand directly on fill= — matches the shape and
+                    // slide-background contract via the shared
+                    // NormalizeGradientValue / IsGradientColorString /
+                    // BuildGradientFill helpers in Fill.cs.
                     // Build new fill element BEFORE removing old one (atomic: no data loss on invalid color)
+                    var normalizedCellFill = NormalizeGradientValue(value);
                     OpenXmlElement newCellFill;
                     if (value.Equals("none", StringComparison.OrdinalIgnoreCase))
                     {
                         newCellFill = new Drawing.NoFill();
                     }
-                    else if (value.Contains('-'))
+                    else if (normalizedCellFill.StartsWith("radial:", StringComparison.OrdinalIgnoreCase)
+                          || normalizedCellFill.StartsWith("path:", StringComparison.OrdinalIgnoreCase)
+                          || IsGradientColorString(normalizedCellFill))
                     {
-                        // Gradient fill: "FF0000-0000FF" or "FF0000-0000FF-90"
-                        var gradParts = value.Split('-');
-                        var colors = gradParts.ToList();
-                        double degree = 0;
-                        if (colors.Count >= 2 && double.TryParse(colors.Last(),
-                            System.Globalization.NumberStyles.Any,
-                            System.Globalization.CultureInfo.InvariantCulture, out var angleDeg)
-                            && colors.Last().Length <= 3)
-                        {
-                            degree = angleDeg;
-                            colors.RemoveAt(colors.Count - 1);
-                        }
-                        if (colors.Count < 2) colors.Add(colors[0]);
-
-                        // Validate that all segments look like hex colors
-                        foreach (var c in colors)
-                        {
-                            var hex = c.TrimStart('#');
-                            if (hex.Length < 3 || !hex.All(ch => char.IsAsciiHexDigit(ch)))
-                                Console.Error.WriteLine($"Warning: '{c}' does not look like a hex color. Gradient format: COLOR1-COLOR2[-ANGLE] e.g. FF0000-0000FF-90");
-                        }
-
-                        var gradFill = new Drawing.GradientFill();
-                        var gsList = new Drawing.GradientStopList();
-                        for (int gi = 0; gi < colors.Count; gi++)
-                        {
-                            var pos = colors.Count == 1 ? 0 : gi * 100000 / (colors.Count - 1);
-                            var (cRgb, cAlpha) = OfficeCli.Core.ParseHelpers.SanitizeColorForOoxml(colors[gi]);
-                            var cEl = new Drawing.RgbColorModelHex { Val = cRgb };
-                            if (cAlpha.HasValue) cEl.AppendChild(new Drawing.Alpha { Val = cAlpha.Value });
-                            gsList.Append(new Drawing.GradientStop(cEl) { Position = pos });
-                        }
-                        gradFill.Append(gsList);
-                        gradFill.Append(new Drawing.LinearGradientFill { Angle = (int)(degree * 60000), Scaled = true });
-                        newCellFill = gradFill;
+                        newCellFill = BuildGradientFill(normalizedCellFill);
                     }
                     else
                     {
