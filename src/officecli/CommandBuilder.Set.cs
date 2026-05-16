@@ -4,6 +4,7 @@
 using System.CommandLine;
 using OfficeCli.Core;
 using OfficeCli.Handlers;
+using OfficeCli.Handlers.Hwp;
 
 namespace OfficeCli;
 
@@ -12,16 +13,38 @@ static partial class CommandBuilder
     private static Command BuildSetCommand(Option<bool> jsonOption)
     {
         var forceOption = new Option<bool>("--force") { Description = "Force write even if document is protected" };
+        var inPlaceOption = new Option<bool>("--in-place") { Description = "HWP safe-save in-place mutation (experimental; requires --backup --verify)" };
+        var backupOption = new Option<bool>("--backup") { Description = "Create a backup before HWP in-place mutation" };
+        var verifyOption = new Option<bool>("--verify") { Description = "Run HWP safe-save verification checks before publishing output" };
         var setFileArg = new Argument<FileInfo>("file") { Description = "Office document path (required even with open/close mode)" };
         var setPathArg = new Argument<string>("path") { Description = "DOM path to the element. The 'selected' pseudo-path is deprecated for mutations: use `get selected` to capture path(s) first, then `set <path>` (or a `batch` file for multi-select) so the target lives in the command line, not in transient watch-server state." };
         var propsOpt = new Option<string[]>("--prop") { Description = "Property to set (key=value)", AllowMultipleArgumentsPerToken = true };
 
-        var setCommand = new Command("set", "Modify a document node's properties") { TreatUnmatchedTokensAsErrors = false };
+        var setCommand = new Command("set", """
+            Modify a document node's properties.
+
+            Agent examples:
+              officecli set report.docx "/body/p[1]" --prop text="New text" --json
+              officecli set sheet.xlsx "/Sheet1/A1" --prop value="42" --json
+              officecli set form.hwp /field --prop name=회사명 --prop value=리지 --prop output=out.hwp --json
+              officecli set form.hwp /field --prop id=1584999796 --prop value=리지 --prop output=out.hwp --json
+              officecli set form.hwp /text --prop find=마케팅 --prop value=브릿지 --prop output=out.hwp --json
+              officecli set form.hwp /text --prop find=마케팅 --prop value=브릿지 --in-place --backup --verify --json
+              officecli set table.hwp /table/cell --prop section=0 --prop parent-para=3 --prop control=0 --prop cell=0 --prop value=오피스셀 --prop output=out.hwp --json
+              officecli set readonly.hwp /convert-to-editable --prop output=editable.hwp --json
+              officecli set form.hwp /native-op --prop op=split-paragraph --prop paragraph=0 --prop offset=5 --prop output=out.hwp --json
+              officecli set form.hwpx /save-as-hwp --prop output=out.hwp --json
+
+            HWP uses packaged rhwp sidecars when present, or OFFICECLI_HWP_ENGINE=rhwp-experimental plus bridge paths; run `officecli help hwp`.
+            """) { TreatUnmatchedTokensAsErrors = false };
         setCommand.Add(setFileArg);
         setCommand.Add(setPathArg);
         setCommand.Add(propsOpt);
         setCommand.Add(jsonOption);
         setCommand.Add(forceOption);
+        setCommand.Add(inPlaceOption);
+        setCommand.Add(backupOption);
+        setCommand.Add(verifyOption);
 
         setCommand.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
         {
@@ -29,6 +52,9 @@ static partial class CommandBuilder
             var path = result.GetValue(setPathArg)!;
             var props = result.GetValue(propsOpt);
             var force = result.GetValue(forceOption);
+            var inPlace = result.GetValue(inPlaceOption);
+            var backup = result.GetValue(backupOption);
+            var verify = result.GetValue(verifyOption);
 
             // BUG-BT-R5-01: support the `selected` pseudo-path (mark and get
             // already do). Expand to the first selected path and recursively
@@ -124,18 +150,66 @@ static partial class CommandBuilder
                 return 1;
             }
 
-            if (TryResident(file.FullName, req =>
-            {
-                req.Command = "set";
-                req.Args["path"] = path;
-                req.Props = ParsePropsArray(props);
-            }, json) is {} rc) return rc;
-
             // CONSISTENCY(prop-key-case): --prop keys are case-insensitive
             // so "SRC=x" and "src=x" both resolve to the same handler key.
             // Reuse ParsePropsArray so the inline and resident-server paths
             // stay in sync.
             var properties = ParsePropsArray(props);
+
+            var extension = Path.GetExtension(file.FullName);
+            if (string.Equals(extension, ".hwp", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(path, "/field", StringComparison.OrdinalIgnoreCase))
+                return HandleHwpFieldSet(file.FullName, HwpFormat.Hwp, properties, json);
+            if (string.Equals(extension, ".hwp", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(path, "/text", StringComparison.OrdinalIgnoreCase))
+                return HandleHwpTextReplace(file.FullName, HwpFormat.Hwp, properties, json, inPlace, backup, verify);
+            if (string.Equals(extension, ".hwp", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(path, "/table/cell", StringComparison.OrdinalIgnoreCase))
+                return HandleHwpTableCellSet(file.FullName, HwpFormat.Hwp, properties, json);
+            if (string.Equals(extension, ".hwp", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(path, "/convert-to-editable", StringComparison.OrdinalIgnoreCase))
+                return HandleHwpConvertToEditable(file.FullName, HwpFormat.Hwp, properties, json);
+            if (string.Equals(extension, ".hwp", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(path, "/native-op", StringComparison.OrdinalIgnoreCase))
+                return HandleHwpNativeMutation(file.FullName, HwpFormat.Hwp, properties, json);
+            if (string.Equals(extension, ".hwp", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(path, "/save-as-hwp", StringComparison.OrdinalIgnoreCase))
+                return HandleHwpSaveAsHwp(file.FullName, HwpFormat.Hwp, properties, json);
+
+            if (string.Equals(extension, ".hwpx", StringComparison.OrdinalIgnoreCase)
+                && (HwpEngineSelector.IsExperimentalBridgeEnabled()
+                    || HwpEngineSelector.CanUseInstalledRuntime(
+                        HwpCapabilityConstants.FormatHwpx,
+                        HwpCapabilityConstants.OperationFillField))
+                && string.Equals(path, "/field", StringComparison.OrdinalIgnoreCase))
+                return HandleHwpFieldSet(file.FullName, HwpFormat.Hwpx, properties, json);
+            if (string.Equals(extension, ".hwpx", StringComparison.OrdinalIgnoreCase)
+                && (HwpEngineSelector.IsExperimentalBridgeEnabled()
+                    || HwpEngineSelector.CanUseInstalledRuntime(
+                        HwpCapabilityConstants.FormatHwpx,
+                        HwpCapabilityConstants.OperationReplaceText))
+                && string.Equals(path, "/text", StringComparison.OrdinalIgnoreCase))
+                return HandleHwpTextReplace(file.FullName, HwpFormat.Hwpx, properties, json, inPlace, backup, verify);
+            if (string.Equals(extension, ".hwpx", StringComparison.OrdinalIgnoreCase)
+                && (HwpEngineSelector.IsExperimentalBridgeEnabled()
+                    || HwpEngineSelector.CanUseInstalledRuntime(
+                        HwpCapabilityConstants.FormatHwpx,
+                        HwpCapabilityConstants.OperationSetTableCell))
+                && string.Equals(path, "/table/cell", StringComparison.OrdinalIgnoreCase))
+                return HandleHwpTableCellSet(file.FullName, HwpFormat.Hwpx, properties, json);
+            if (string.Equals(extension, ".hwpx", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(path, "/save-as-hwp", StringComparison.OrdinalIgnoreCase))
+                return HandleHwpSaveAsHwp(file.FullName, HwpFormat.Hwpx, properties, json);
+            if (string.Equals(extension, ".hwpx", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(path, "/native-op", StringComparison.OrdinalIgnoreCase))
+                return HandleHwpNativeMutation(file.FullName, HwpFormat.Hwpx, properties, json);
+
+            if (TryResident(file.FullName, req =>
+            {
+                req.Command = "set";
+                req.Args["path"] = path;
+                req.Props = properties;
+            }, json) is {} rc) return rc;
 
             using var handler = DocumentHandlerFactory.Open(file.FullName, editable: true);
 
@@ -319,5 +393,13 @@ static partial class CommandBuilder
         }, json); });
 
         return setCommand;
+    }
+
+    private static string? FirstValue(Dictionary<string, string> properties, params string[] keys)
+    {
+        foreach (var key in keys)
+            if (properties.TryGetValue(key, out var value))
+                return value;
+        return null;
     }
 }

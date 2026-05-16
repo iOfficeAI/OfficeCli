@@ -3,6 +3,7 @@ set -e
 
 PROJECT="src/officecli/officecli.csproj"
 ALL_TARGETS="osx-arm64:officecli-mac-arm64 osx-x64:officecli-mac-x64 linux-x64:officecli-linux-x64 linux-arm64:officecli-linux-arm64 linux-musl-x64:officecli-linux-alpine-x64 linux-musl-arm64:officecli-linux-alpine-arm64 win-x64:officecli-win-x64.exe win-arm64:officecli-win-arm64.exe"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Detect current platform RID
 detect_local_rid() {
@@ -79,6 +80,9 @@ build_config() {
         mv -f "$OUTPUT/$NAME.new" "$OUTPUT/$NAME"
         cp "$TMPDIR/officecli.pdb" "$OUTPUT/${NAME%.*}.pdb"
 
+        "$SCRIPT_DIR/scripts/build-rhwp-sidecars.sh" "$OUTPUT" "$RID" "$CONFIG"
+        copy_platform_sidecar_assets "$OUTPUT" "$NAME"
+
         rm -rf "$TMPDIR"
     done
 
@@ -87,6 +91,27 @@ build_config() {
     echo ""
     echo "$CONFIG build complete:"
     ls -lh "$OUTPUT"
+}
+
+copy_platform_sidecar_assets() {
+    local OUTPUT="$1"
+    local NAME="$2"
+    local ASSET_BASE="${NAME%.exe}"
+
+    if [ -f "$OUTPUT/rhwp-field-bridge" ]; then
+        cp "$OUTPUT/rhwp-field-bridge" "$OUTPUT/${ASSET_BASE}-rhwp-field-bridge"
+        chmod +x "$OUTPUT/${ASSET_BASE}-rhwp-field-bridge" 2>/dev/null || true
+    fi
+    if [ -f "$OUTPUT/rhwp-officecli-bridge" ]; then
+        cp "$OUTPUT/rhwp-officecli-bridge" "$OUTPUT/${ASSET_BASE}-rhwp-officecli-bridge"
+        chmod +x "$OUTPUT/${ASSET_BASE}-rhwp-officecli-bridge" 2>/dev/null || true
+    fi
+    if [ -f "$OUTPUT/rhwp-field-bridge.exe" ]; then
+        cp "$OUTPUT/rhwp-field-bridge.exe" "$OUTPUT/${ASSET_BASE}-rhwp-field-bridge.exe"
+    fi
+    if [ -f "$OUTPUT/rhwp-officecli-bridge.exe" ]; then
+        cp "$OUTPUT/rhwp-officecli-bridge.exe" "$OUTPUT/${ASSET_BASE}-rhwp-officecli-bridge.exe"
+    fi
 }
 
 CONFIG="${1:-release}"

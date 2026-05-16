@@ -558,7 +558,6 @@ public partial class WordHandler
 
         if (properties.TryGetValue("text", out var text))
         {
-            var run = new Run();
             var rProps = new RunProperties();
             // Per-script font slots (font.latin / font.ea / font.cs) write
             // to ascii+hAnsi / eastAsia / cs respectively. Bare 'font'
@@ -800,9 +799,8 @@ public partial class WordHandler
             // duplicate that round-trips out as a separate run-level shading
             // command on dump replay.
 
-            run.AppendChild(rProps);
-            AppendTextWithBreaks(run, text);
-            para.AppendChild(run);
+            foreach (var segmentedRun in BuildSegmentedRuns(text, rProps))
+                para.AppendChild(segmentedRun);
         }
 
         // Dotted-key fallback: any "element.attr=value" prop the hand-rolled
