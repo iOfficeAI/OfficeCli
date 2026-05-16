@@ -723,30 +723,27 @@ public partial class WordHandler
             var dropCap = framePr.GetAttributes().FirstOrDefault(a => a.LocalName == "dropCap").Value;
             if (dropCap == "drop" || dropCap == "margin")
             {
-                var lines = framePr.GetAttributes().FirstOrDefault(a => a.LocalName == "lines").Value;
-                var lineCount = lines != null && int.TryParse(lines, out var lc) ? lc : 3;
-                // Don't override font-size — let the run's actual size (e.g. 58.5pt) apply
-                // Set line-height to match lineCount lines of body text
-                // Estimate body line height from document defaults
-                var defSz = para.Ancestors<Body>().FirstOrDefault()
-                    ?.GetFirstChild<SectionProperties>() != null ? 11.0 : 11.0; // fallback
-                var rPr = _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles?.DocDefaults
-                    ?.RunPropertiesDefault?.RunPropertiesBaseStyle;
-                if (rPr?.FontSize?.Val?.Value is string dsz && double.TryParse(dsz, out var dhp))
-                    defSz = dhp / 2.0;
-                var defSpacing = _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles?.DocDefaults
-                    ?.ParagraphPropertiesDefault?.ParagraphPropertiesBaseStyle?.SpacingBetweenLines;
-                var lineHMult = 1.15;
-                if (defSpacing?.Line?.Value is string dlv && double.TryParse(dlv, out var dlvi)
-                    && defSpacing.LineRule?.InnerText is "auto" or null)
-                    lineHMult = dlvi / 240.0;
-                var bodyLineH = defSz * lineHMult;
-                var dropCapHeight = lineCount * bodyLineH;
-                // Read hSpace from framePr (OOXML spec default: 0)
+                // OOXML §17.3.1.36 framePr/dropCap: the cap glyph renders at the
+                // run's effective font size from the rPr cascade (run → style →
+                // docDefaults). The framed paragraph hosts a float whose box
+                // bounds the cap glyph's visible vertical extent so wrap text
+                // flows alongside. Container height = font_size × full-ascent
+                // ratio (top of the inline strut; reaches above cap-height for
+                // accented capitals) so the ink isn't clipped and no trailing
+                // whitespace runs past the visible glyph.
+                var dropCapSizePt = ResolveParaPrincipalSizePt(para) ?? 11.0;
+                var dropCapFont = ResolveParaFontForLineHeight(para);
+                var (dropCapAscPct, _) = Core.FontMetricsReader.GetSplitAscDscOverride(dropCapFont);
+                var ascRatio = dropCapAscPct > 0 ? dropCapAscPct / 100.0 : 0.95;
+                var dropCapHeight = dropCapSizePt * ascRatio;
                 var hSpaceAttr = framePr.GetAttributes().FirstOrDefault(a => a.LocalName == "hSpace").Value;
                 var hSpacePt = hSpaceAttr != null && int.TryParse(hSpaceAttr, out var hsTwips) ? hsTwips / 20.0 : 0;
                 parts.Add("float:left");
                 parts.Add($"line-height:{dropCapHeight:0.#}pt");
+                // Clip the float so the cap glyph's natural strut can't push
+                // the box taller than the visible cap.
+                parts.Add($"height:{dropCapHeight:0.#}pt");
+                parts.Add("overflow:hidden");
                 parts.Add($"padding-right:{hSpacePt:0.#}pt");
                 parts.Add($"margin:0");
             }
@@ -1254,6 +1251,27 @@ public partial class WordHandler
         var ratio = FontMetricsReader.GetRatio(paraFont);
         var paraSizePt = ResolveParaPrincipalSizePt(para) ?? 11.0;
         return Math.Max(floorPt, ratio * paraSizePt);
+    }
+
+    /// <summary>Effective spacing-after for a paragraph in pt, cascading
+    /// through direct pPr → pStyle chain → docDefaults pPrDefault. Returns
+    /// 0 when nothing in the cascade sets it.</summary>
+    private double ResolveParaAfterSpacingPt(Paragraph para)
+    {
+        var pProps = para.ParagraphProperties;
+        var styleId = pProps?.ParagraphStyleId?.Val?.Value;
+        var styleSpacing = ResolveSpacingFromStyle(styleId);
+        var afterTwips = pProps?.SpacingBetweenLines?.After?.Value
+                         ?? styleSpacing?.After?.Value;
+        if (afterTwips == null)
+        {
+            afterTwips = _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles?.DocDefaults
+                ?.ParagraphPropertiesDefault?.ParagraphPropertiesBaseStyle
+                ?.SpacingBetweenLines?.After?.Value;
+        }
+        if (afterTwips != null && int.TryParse(afterTwips, out var tw))
+            return tw / 20.0;
+        return 0;
     }
 
     /// <summary>Read the paragraph's principal font size (in pt), the same
@@ -2454,6 +2472,11 @@ public partial class WordHandler
         ul, ol {{ padding-left: 2em; margin: 0; }}
         ul {{ list-style-type: disc; }}
         li {{ margin: 0; }}
+        /* OOXML §17.3.1.36 dropCap: the framed <p> hosts a float clipped
+           to the visible cap-glyph height; the inner run <span>'s own
+           line-height must defer so its natural strut doesn't expand
+           the float past that clip. */
+        .dropcap-wrap > p:first-child > span {{ line-height: inherit !important; }}
         .equation {{ text-align: center; padding: 0.5em 0; overflow-x: auto; }}
         img {{ max-width: 100%; height: auto; }}
         .img-error {{ color: #999; font-style: italic; }}

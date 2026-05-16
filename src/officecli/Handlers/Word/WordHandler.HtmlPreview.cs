@@ -1726,7 +1726,12 @@ public partial class WordHandler
                         is "drop" or "margin";
                 if (paraIsDropCap && dropCapWrapRemaining == 0)
                 {
-                    sb.Append("<div class=\"dropcap-wrap\" style=\"display:block;overflow:hidden\">");
+                    // Reserve the drop cap paragraph's own spacing-after below
+                    // the floated frame so consecutive drop cap structures
+                    // stack with the same gap as ordinary paragraphs.
+                    var dcAfterPt = ResolveParaAfterSpacingPt(para);
+                    var marginCss = dcAfterPt > 0 ? $";margin-bottom:{dcAfterPt:0.##}pt" : "";
+                    sb.Append($"<div class=\"dropcap-wrap\" style=\"display:block;overflow:hidden{marginCss}\">");
                     dropCapWrapRemaining = 2;
                 }
 
