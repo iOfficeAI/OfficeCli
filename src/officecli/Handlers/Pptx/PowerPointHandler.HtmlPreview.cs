@@ -92,49 +92,21 @@ public partial class PowerPointHandler
         sb.AppendLine("<!DOCTYPE html>");
         // i18n: emit lang from the first run's <a:rPr lang=...> when present
         // (PPT carries no presentation-level language tag analogous to Word's
-        // themeFontLang; per-run lang is the closest signal). Emit dir="rtl"
-        // when any shape carries <a:bodyPr rtlCol="1"/> or any paragraph
-        // <a:pPr rtl="1"/>, so browsers activate BiDi layout document-wide.
+        // themeFontLang; per-run lang is the closest signal). RTL containers are
+        // emitted PER-SHAPE / PER-PARAGRAPH (direction:rtl on shape-text and
+        // unicode-bidi:embed on the para); document-wide dir="rtl" is NOT set
+        // because it forces every LTR shape's default text-align to right.
         string presLang = "en";
-        bool presHasRtl = false;
         foreach (var sp in slideParts)
         {
             var slide = sp.Slide;
             if (slide == null) continue;
-            if (presLang == "en")
-            {
-                var firstRunLang = slide.Descendants<DocumentFormat.OpenXml.Drawing.RunProperties>()
-                    .Select(rp => rp.Language?.Value)
-                    .FirstOrDefault(l => !string.IsNullOrEmpty(l));
-                if (!string.IsNullOrEmpty(firstRunLang)) presLang = firstRunLang!;
-            }
-            if (!presHasRtl)
-            {
-                if (slide.Descendants<DocumentFormat.OpenXml.Drawing.Paragraph>()
-                        .Any(p => p.ParagraphProperties?.RightToLeft?.Value == true))
-                {
-                    presHasRtl = true;
-                }
-                else
-                {
-                    foreach (var bp in slide.Descendants<DocumentFormat.OpenXml.Drawing.BodyProperties>())
-                    {
-                        foreach (var attr in bp.GetAttributes())
-                        {
-                            if (attr.LocalName == "rtlCol"
-                                && (attr.Value == "1" || string.Equals(attr.Value, "true", StringComparison.OrdinalIgnoreCase)))
-                            {
-                                presHasRtl = true; break;
-                            }
-                        }
-                        if (presHasRtl) break;
-                    }
-                }
-            }
-            if (presLang != "en" && presHasRtl) break;
+            var firstRunLang = slide.Descendants<DocumentFormat.OpenXml.Drawing.RunProperties>()
+                .Select(rp => rp.Language?.Value)
+                .FirstOrDefault(l => !string.IsNullOrEmpty(l));
+            if (!string.IsNullOrEmpty(firstRunLang)) { presLang = firstRunLang!; break; }
         }
-        var presDirAttr = presHasRtl ? " dir=\"rtl\"" : "";
-        sb.AppendLine($"<html lang=\"{HtmlEncode(presLang)}\"{presDirAttr}>");
+        sb.AppendLine($"<html lang=\"{HtmlEncode(presLang)}\">");
         sb.AppendLine("<head>");
         sb.AppendLine("<meta charset=\"UTF-8\">");
         sb.AppendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">");
