@@ -127,8 +127,13 @@
       "enforcement": "report"
     },
     "strike": {
-      "type": "bool",
-      "description": "strikethrough on shape text.",
+      "type": "enum",
+      "description": "strikethrough on shape text. Single and double are distinct OOXML tokens (sngStrike / dblStrike); Word splits these into `strike` + `dstrike`, PowerPoint folds both into one attribute.",
+      "values": [
+        "none",
+        "single",
+        "double"
+      ],
       "aliases": [
         "strikethrough",
         "font.strike",
@@ -138,9 +143,11 @@
       "set": true,
       "get": true,
       "examples": [
+        "--prop strike=single",
+        "--prop strike=double",
         "--prop strike=true"
       ],
-      "readback": "true | false",
+      "readback": "single | double | none. Boolean `true` on add/set is accepted as an alias for `single`.",
       "enforcement": "report"
     },
     "cap": {
