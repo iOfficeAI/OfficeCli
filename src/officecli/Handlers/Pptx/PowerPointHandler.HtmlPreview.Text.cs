@@ -59,11 +59,20 @@ public partial class PowerPointHandler
             var lsPts = pProps?.GetFirstChild<Drawing.LineSpacing>()?.GetFirstChild<Drawing.SpacingPoints>()?.Val?.Value;
             if (lsPts.HasValue) paraStyles.Add($"line-height:{lsPts.Value / 100.0:0.##}pt");
 
-            // Indent
-            if (pProps?.Indent?.HasValue == true)
+            // Indent / left margin. OOXML hanging-indent idiom (bullet outside, text inside)
+            // is marL>=0 paired with indent<0 (|indent|==marL). We translate marL to CSS
+            // padding-left (text starts at marL inside the shape content). The negative
+            // indent is realised on the bullet span itself (margin-left:-|indent|), NOT
+            // via text-indent on the para — text-indent would shift the line into the
+            // shape's outer padding box and route bulletless paragraphs (line-spacing only)
+            // right-flush via overflow interactions with width:100%.
+            // CONSISTENCY(pptx-hanging-indent): bullet pulled left via its own margin.
+            bool hasBullet0 = pProps?.GetFirstChild<Drawing.CharacterBullet>() != null
+                              || pProps?.GetFirstChild<Drawing.AutoNumberedBullet>() != null;
+            if (pProps?.Indent?.HasValue == true && !hasBullet0)
                 paraStyles.Add($"text-indent:{Units.EmuToPt(pProps.Indent.Value)}pt");
             if (pProps?.LeftMargin?.HasValue == true)
-                paraStyles.Add($"margin-left:{Units.EmuToPt(pProps.LeftMargin.Value)}pt");
+                paraStyles.Add($"padding-left:{Units.EmuToPt(pProps.LeftMargin.Value)}pt");
 
             // RTL paragraph (Arabic / Hebrew). <a:pPr rtl="1"/> reverses
             // character order; emit CSS so the browser does the same. Without
@@ -142,13 +151,19 @@ public partial class PowerPointHandler
                 // indent so text starts at marL regardless of bullet glyph width.
                 // OOXML marL (e.g. 457200 EMU = 0.5in = 36pt) paired with indent
                 // = -marL creates the hanging layout; we mirror it in CSS by
-                // making the bullet an inline-block of width |indent|.
+                // sizing the bullet to |indent| AND pulling it left with margin-left
+                // by the same amount, so the bullet sits at the para outer edge
+                // (shape content-left + 0) while text continues at marL inside.
+                // We do NOT use text-indent here — text-indent on the para offsets
+                // the line into the shape's outer padding box, putting the bullet
+                // physically outside the shape's content area.
                 long indentEmu = pProps?.Indent?.Value ?? 0;
                 if (indentEmu < 0)
                 {
                     var gapPt = Units.EmuToPt(-indentEmu);
                     buStyles.Add($"display:inline-block");
                     buStyles.Add($"width:{gapPt}pt");
+                    buStyles.Add($"margin-left:-{gapPt}pt");
                 }
                 var buStyle = buStyles.Count > 0 ? $" style=\"{string.Join(";", buStyles)}\"" : "";
                 sb.Append($"<span class=\"bullet\"{buStyle}>{HtmlEncode(bullet)}</span>");
@@ -339,6 +354,16 @@ public partial class PowerPointHandler
                 {
                     styles.Add("text-decoration:line-through");
                 }
+            }
+
+            // Caps (rPr/@cap). all → text-transform:uppercase; small → font-variant-caps:small-caps
+            // (browsers fall back to synthetic small-caps when the font lacks the SC variant).
+            if (rp.Capital?.HasValue == true && rp.Capital.Value != Drawing.TextCapsValues.None)
+            {
+                if (rp.Capital.Value == Drawing.TextCapsValues.All)
+                    styles.Add("text-transform:uppercase");
+                else if (rp.Capital.Value == Drawing.TextCapsValues.Small)
+                    styles.Add("font-variant-caps:all-small-caps");
             }
 
             // Color
