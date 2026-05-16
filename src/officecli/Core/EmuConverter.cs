@@ -8,13 +8,13 @@ namespace OfficeCli.Core;
 /// <summary>
 /// Shared EMU (English Metric Unit) parsing and formatting.
 /// 1 inch = 914400 EMU, 1 cm = 360000 EMU, 1 pt = 12700 EMU, 1 px = 9525 EMU.
-/// Accepts: raw EMU integer, or suffixed with cm/in/pt/px.
+/// Accepts: raw EMU integer, or suffixed with cm/in/pt/px/emu.
 /// </summary>
 internal static class EmuConverter
 {
     /// <summary>
     /// Parse a dimension/position string into EMU (long).
-    /// Supported formats: "914400" (raw EMU), "2.54cm", "1in", "72pt", "96px".
+    /// Supported formats: "914400" (raw EMU), "914400emu", "2.54cm", "1in", "72pt", "96px".
     /// Negative values are allowed (for positions like x, y).
     /// Throws ArgumentException on invalid input.
     /// </summary>
@@ -43,15 +43,24 @@ internal static class EmuConverter
         {
             result = ParseWithUnit(value, 2, 9525.0, "px");
         }
+        else if (value.EndsWith("emu", StringComparison.OrdinalIgnoreCase))
+        {
+            // Explicit emu suffix — symmetric with FormatEmu's tiny-value fallback.
+            var numberPart = value[..^3];
+            if (string.IsNullOrWhiteSpace(numberPart))
+                throw new ArgumentException($"Missing numeric value before 'emu' unit in '{value}'.");
+            if (!long.TryParse(numberPart, NumberStyles.Integer, CultureInfo.InvariantCulture, out result))
+                throw new ArgumentException($"Invalid integer value '{numberPart}' before 'emu' unit in '{value}'.");
+        }
         else if (HasKnownUnitSuffix(value, out var unit))
         {
-            throw new ArgumentException($"Unsupported unit '{unit}' in dimension value '{value}'. Supported units: cm, in, pt, px (or raw EMU integer).");
+            throw new ArgumentException($"Unsupported unit '{unit}' in dimension value '{value}'. Supported units: cm, in, pt, px, emu (or raw EMU integer).");
         }
         else
         {
             // Raw EMU integer
             if (!long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out result))
-                throw new ArgumentException($"Invalid EMU value '{value}'. Expected a number with optional unit suffix (cm, in, pt, px).");
+                throw new ArgumentException($"Invalid EMU value '{value}'. Expected a number with optional unit suffix (cm, in, pt, px, emu).");
         }
 
         return result;
@@ -101,10 +110,12 @@ internal static class EmuConverter
         // The "0.##" cm format loses precision below ~1800 EMU per side
         // (rounded to two decimal places of cm). For values that round
         // either to "0"/"-0" or to a string that does not faithfully
-        // represent the original EMU, fall back to the raw EMU integer
-        // so Get readback is non-lossy. ParseEmu accepts raw integers.
+        // represent the original EMU, fall back to a `<n>emu` form so
+        // Get readback is both non-lossy AND unit-qualified — round-trips
+        // through ParseEmu and satisfies the documented length-string
+        // readback contract.
         if (cmStr == "0" || cmStr == "-0")
-            return emu.ToString(CultureInfo.InvariantCulture);
+            return emu.ToString(CultureInfo.InvariantCulture) + "emu";
         return $"{cmStr}cm";
     }
 
