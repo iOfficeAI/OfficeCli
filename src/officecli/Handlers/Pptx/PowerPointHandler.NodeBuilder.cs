@@ -310,8 +310,9 @@ public partial class PowerPointHandler
                             var cellLatin = rp.GetFirstChild<Drawing.LatinFont>()?.Typeface?.Value;
                             var cellEa = rp.GetFirstChild<Drawing.EastAsianFont>()?.Typeface?.Value;
                             var cellCs = rp.GetFirstChild<Drawing.ComplexScriptFont>()?.Typeface?.Value;
-                            var cellFont = cellLatin ?? cellEa;
-                            if (cellFont != null) cellNode.Format["font"] = cellFont;
+                            // Bare `font` is the Latin slot alias only — see
+                            // CONSISTENCY(font-bare-latin-only).
+                            if (cellLatin != null) cellNode.Format["font"] = cellLatin;
                             // CONSISTENCY(canonical-keys): always emit per-script
                             // slots when present (schema declares get:true).
                             if (cellLatin != null) cellNode.Format["font.latin"] = cellLatin;
@@ -645,8 +646,13 @@ public partial class PowerPointHandler
             var fontLatinTf = firstRun.RunProperties.GetFirstChild<Drawing.LatinFont>()?.Typeface?.Value;
             var fontEaTf = firstRun.RunProperties.GetFirstChild<Drawing.EastAsianFont>()?.Typeface?.Value;
             var fontCsTf = firstRun.RunProperties.GetFirstChild<Drawing.ComplexScriptFont>()?.Typeface?.Value;
-            var font = fontLatinTf ?? fontEaTf;
-            if (font != null) node.Format["font"] = font;
+            // Bare `font` is the Latin slot alias only. Do NOT fall back to
+            // <a:ea>/<a:cs> — those have their own canonical keys
+            // (`font.ea`, `font.cs`) and bare `font` implying EA misrepresents
+            // the OOXML. Suppressing bare `font` for ea/cs-only also keeps
+            // `effective.font` (theme Latin) visible — symmetric with the
+            // `font.cs`-only case.
+            if (fontLatinTf != null) node.Format["font"] = fontLatinTf;
             // Per-script slots — emit canonical `font.latin` / `font.ea`
             // whenever the slot is present so schema-declared `get:true`
             // round-trips (CONSISTENCY(canonical-keys)). The redundant
@@ -1062,8 +1068,9 @@ public partial class PowerPointHandler
             var fLatin = run.RunProperties.GetFirstChild<Drawing.LatinFont>()?.Typeface?.Value;
             var fEa = run.RunProperties.GetFirstChild<Drawing.EastAsianFont>()?.Typeface?.Value;
             var fCs = run.RunProperties.GetFirstChild<Drawing.ComplexScriptFont>()?.Typeface?.Value;
-            var f = fLatin ?? fEa;
-            if (f != null) node.Format["font"] = f;
+            // Bare `font` is the Latin slot alias only — see shape-level
+            // CONSISTENCY(font-bare-latin-only) note above.
+            if (fLatin != null) node.Format["font"] = fLatin;
             // Emit canonical `font.latin` / `font.ea` whenever the slot is
             // present so schema-declared `get:true` round-trips
             // (CONSISTENCY(canonical-keys)). `font` kept as backward-compat alias.
