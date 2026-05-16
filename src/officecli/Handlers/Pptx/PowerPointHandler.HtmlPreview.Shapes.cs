@@ -985,7 +985,14 @@ public partial class PowerPointHandler
         var strokeAttrs = $"stroke=\"{safeColor}\" stroke-width=\"{lineWidth:0.##}pt\" fill=\"none\"{dashAttr}{markerStartAttr}{markerEndAttr}";
 
         var dataPathAttr = string.IsNullOrEmpty(dataPath) ? "" : $" data-path=\"{HtmlEncode(dataPath)}\"";
-        sb.AppendLine($"    <div class=\"connector\"{dataPathAttr} style=\"left:{Units.EmuToPt(renderX)}pt;top:{Units.EmuToPt(renderY)}pt;width:{widthPt}pt;height:{heightPt}pt\">");
+        // CONSISTENCY(shape-rotation): connectors use the same Transform2D.Rotation
+        // slot as shapes/pictures/groups; apply the same CSS transform so the rendered
+        // line matches PowerPoint. Default transform-origin (50% 50%) matches OOXML
+        // rotation pivot (bounding-box center).
+        var cxnRotTransform = "";
+        if (xfrm?.Rotation != null && xfrm.Rotation.Value != 0)
+            cxnRotTransform = $";transform:rotate({xfrm.Rotation.Value / 60000.0:0.##}deg)";
+        sb.AppendLine($"    <div class=\"connector\"{dataPathAttr} style=\"left:{Units.EmuToPt(renderX)}pt;top:{Units.EmuToPt(renderY)}pt;width:{widthPt}pt;height:{heightPt}pt{cxnRotTransform}\">");
 
         if (preset.StartsWith("bentConnector", StringComparison.Ordinal))
         {

@@ -128,10 +128,16 @@ public partial class PowerPointHandler
                     cxnOutline.AppendChild(new Drawing.TailEnd { Type = ParseLineEndType(tailVal) });
                 }
 
-                if (properties.TryGetValue("rotation", out var cxnRot))
+                // CONSISTENCY(shape-picture-parity): rotation lives on Transform2D
+                // for shape/picture/connector/group; all four must parse the same
+                // way. Shape (Add.Shape.cs) and Picture (Add.Media.cs) accept
+                // fractional degrees (e.g. 22.5); connector previously used
+                // int.TryParse and silently dropped non-integer values.
+                if (properties.TryGetValue("rotation", out var cxnRot)
+                    || properties.TryGetValue("rotate", out cxnRot))
                 {
-                    if (int.TryParse(cxnRot, out var rotDeg))
-                        connector.ShapeProperties.Transform2D!.Rotation = rotDeg * 60000;
+                    connector.ShapeProperties.Transform2D!.Rotation =
+                        (int)(ParseHelpers.SafeParseDouble(cxnRot, "rotation") * 60000);
                 }
                 connector.ShapeProperties.AppendChild(cxnOutline);
 
