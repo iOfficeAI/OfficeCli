@@ -124,7 +124,7 @@ static partial class CommandBuilder
         var createTypeOpt = new Option<string>("--type") { Description = "Document type (docx, xlsx, pptx) — optional, inferred from file extension" };
         var createForceOpt = new Option<bool>("--force") { Description = "Overwrite an existing file." };
         var createLocaleOpt = new Option<string>("--locale") { Description = "Locale tag (e.g. zh-CN, ja, ko, ar, he) — sets per-script default fonts in docDefaults. Without it, host application's UI-locale fallback applies. Currently only honored for .docx." };
-        var createMinimalOpt = new Option<bool>("--minimal") { Description = "(.docx only) Skip Word's Normal.dotm-style baseline (Calibri 11pt + Normal style + theme1.xml) and emit a raw OOXML-spec docx instead. Use for testing edge cases or producing maximally compact output. Without this flag, the doc carries Word-aligned defaults so it renders identically in Word, LibreOffice, and the cli preview." };
+        var createMinimalOpt = new Option<bool>("--minimal") { Description = "(.docx only) Skip Word's Normal.dotm-style baseline (Calibri 11pt + Normal style + theme1.xml) and emit a raw OOXML-spec docx instead. Use for testing edge cases or producing maximally compact output. Without this flag, the doc carries Word-aligned defaults so it renders identically in Word, other producers, and the cli preview." };
         var createCommand = new Command("create", "Create a blank Office document");
         createCommand.Aliases.Add("new");
         createCommand.Add(createFileArg);

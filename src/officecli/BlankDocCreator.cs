@@ -120,7 +120,7 @@ public static class BlankDocCreator
             )
         );
         // i18n: stamp themeFontLang from --locale so HTML preview, screen
-        // readers, and Word / LibreOffice's per-script font fallback know
+        // readers, and Word's per-script font fallback know
         // the document's primary language. Routes the locale to EastAsia
         // (CJK), Bidi (Arabic / Hebrew / Persian / Urdu / Thai / Hindi),
         // or the bare Val attribute otherwise.
@@ -189,19 +189,19 @@ public static class BlankDocCreator
         // as Ignorable — w14/wp14/w15 carry attributes like paraId/anchorId
         // directly. wps/wpg/wpi/wpc only appear inside mc:Choice and are
         // already gated by mc:Fallback, so they don't need (and shouldn't get)
-        // Ignorable. Mirrors LibreOffice's docxexport MainXmlNamespaces.
+        // Ignorable. Mirrors the docxexport MainXmlNamespaces.
         foreach (var p in new[] { "w14", "w15", "wp14" })
             ignorableTokens.Add(p);
         document.MCAttributes.Ignorable = string.Join(" ", ignorableTokens);
         mainPart.Document = document;
 
         // Two paths: full (default) emits Word-aligned baseline (Calibri 11pt
-        // + Normal style + theme1.xml — matches LibreOffice's behavior, which
+        // + Normal style + theme1.xml — matches the de-facto baseline, which
         // is what Word actually writes); minimal emits raw OOXML (TNR, no sz,
         // no Normal, no theme — matches POI's `new XWPFDocument()`). The
         // minimal path is the prior officecli behavior; the full path was
         // added so docs created by officecli render identically in Word /
-        // LibreOffice / cli preview without relying on each renderer's
+        // / cli preview without relying on each renderer's
         // Normal.dotm fallback heuristics.
         //
         // Resolve locale-specific defaults from LocaleFontRegistry (POI/LO

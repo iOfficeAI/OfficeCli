@@ -214,7 +214,7 @@ internal partial class FormulaEvaluator
     /// (formula_not_evaluated), and `get` (Format["evaluated"]). Routes all
     /// three signals through one decision so they cannot drift apart as the
     /// evaluator's coverage grows. Inspired by POI BaseFormulaEvaluator and
-    /// LibreOffice ScFormulaCell.MaybeInterpret single-entry pattern.
+    /// ScFormulaCell.MaybeInterpret single-entry pattern.
     /// </summary>
     internal EvalReport EvaluateForReport(string formula)
     {

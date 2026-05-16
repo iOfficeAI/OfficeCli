@@ -24,7 +24,7 @@ public partial class WordHandler
     // normalization to one of these enum strings) to the resolved typeface
     // declared in theme1.xml's <a:fontScheme>. asciiTheme and hAnsiTheme
     // both point at the latin face — Word treats them as one slot.
-    // Modeled after LibreOffice ThemeHandler::resolveMajorMinorTypeFace.
+    // Modeled after ThemeHandler::resolveMajorMinorTypeFace.
     private Dictionary<string, string> GetThemeFonts()
     {
         if (_themeFonts != null) return _themeFonts;
@@ -416,7 +416,7 @@ public partial class WordHandler
             // Before/after spacing: w:before is in twips; w:beforeLines is in
             // hundredths of a line. Per ECMA-376 §17.3.1.33 beforeLines
             // OVERRIDES before when both are present. The "1 line" base unit
-            // is implementation-defined; LibreOffice (and Word) anchor it to
+            // is implementation-defined; (and Word) anchor it to
             // 240 twips = 12pt FIXED, not the paragraph's font line.
             const double LineUnitPt = 12.0;
 
@@ -1116,7 +1116,7 @@ public partial class WordHandler
                 {
                     // beforeLines/afterLines override before/after per
                     // ECMA-376 §17.3.1.33; "1 line" = 240 twips = 12pt fixed
-                    // (matches Word and LibreOffice's nSingleLineSpacing).
+                    // (matches Word's single-line spacing).
                     const double LineUnitPt = 12.0;
                     if (!parts.Any(p => p.StartsWith("margin-top")))
                     {
@@ -2285,7 +2285,7 @@ public partial class WordHandler
            zeroed when it becomes :first-child of a new page-body. The
            ORIGINAL page-body (which holds the document's first paragraph)
            is intentionally not matched here, so its first-paragraph
-           spaceBefore renders the way Word/LibreOffice/POI emit it. */
+           spaceBefore renders the way Word / POI emit it. */
         .page-body-cont > :first-child {{ margin-top: 0 !important; }}
         .page-body > img + h1, .page-body > img + img + h1 {{ margin-top: 0 !important; }}
         .doc-header, .doc-footer {{ font-size: {dd.SizePt:0.##}pt; }}

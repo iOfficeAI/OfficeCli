@@ -141,7 +141,7 @@ public static partial class WordBatchEmitter
         // "(no theme)" when the part is missing.
         //
         // ALWAYS emit, even for source docs that have no theme part. The
-        // blank target auto-stamps theme1.xml (for Word/LibreOffice render
+        // blank target auto-stamps theme1.xml (for Word render
         // parity), so silently skipping the emit caused dump∘replay∘dump
         // to drift by +1 item every pass: dump-1 saw no theme and
         // emitted nothing; replay left blank's theme in place; dump-2
@@ -611,7 +611,7 @@ public static partial class WordBatchEmitter
         // index). Query produces id-based paths and excludes docDefaults.
         var styles = word.Query("style");
         // Blank-baseline cleanup: BlankDocCreator always stamps a Normal
-        // style (for Word/LibreOffice render parity — Calibri 11pt, 1.08x
+        // style (for Word render parity — Calibri 11pt, 1.08x
         // line). When the source has no entry for styleId="Normal",
         // skipping the emit leaks the blank's stamped Normal into the
         // replay target — dump-2's dump then emits it as a phantom

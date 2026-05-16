@@ -112,7 +112,7 @@ public partial class PowerPointHandler
                 var bulletColor = ResolveFillColor(buClrFill, themeColors);
                 if (bulletColor == null)
                 {
-                    // Follow first run text color (same as LibreOffice/POI behavior)
+                    // Follow first run text color (same as the POI baseline)
                     var firstRun = para.Elements<Drawing.Run>().FirstOrDefault();
                     var firstRunFill = firstRun?.RunProperties?.GetFirstChild<Drawing.SolidFill>();
                     bulletColor = ResolveFillColor(firstRunFill, themeColors);

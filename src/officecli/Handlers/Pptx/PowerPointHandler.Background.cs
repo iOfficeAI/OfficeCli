@@ -397,7 +397,7 @@ public partial class PowerPointHandler
                 Alignment = Drawing.RectangleAlignmentValues.TopLeft,
                 Flip = Drawing.TileFlipValues.None,
             },
-            // Center = tile anchored at center with no scaling. Matches LibreOffice's
+            // Center = tile anchored at center with no scaling. Matches the
             // FillBitmapMode_NO_REPEAT → oox export pattern (WriteXGraphicTile algn=ctr).
             "center" => new Drawing.Tile
             {
@@ -528,7 +528,7 @@ public partial class PowerPointHandler
             var tile = blipFill.GetFirstChild<Drawing.Tile>();
             if (tile != null)
             {
-                // LibreOffice convention: algn=ctr + sx=sy=100000 → "center",
+                // convention: algn=ctr + sx=sy=100000 → "center",
                 // anything else with tile → "tile".
                 var algn = tile.Alignment?.Value;
                 var sx = tile.HorizontalRatio?.Value ?? 100000;
