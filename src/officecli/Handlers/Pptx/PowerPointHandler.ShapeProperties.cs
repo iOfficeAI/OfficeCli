@@ -19,6 +19,27 @@ public partial class PowerPointHandler
             ?? new List<Drawing.Run>();
     }
 
+    // Split documented compound 'line=color[:width[:style]]' form (e.g.
+    // "FF0000:1.5:dash") into its parts. The split-key form (line=,
+    // lineWidth=, lineDash=) is the underlying canonical; this helper just
+    // unpacks the compound surface listed in schemas/help/_shared/shape.json
+    // so the documented example works on Add and Set.
+    //
+    // Inputs without ':' return (value, null, null) unchanged — including
+    // "none", named colors, hex (#RRGGBB), scheme tokens (accent1), rgb(...)
+    // (commas, not colons). The compound form is unambiguous because no
+    // accepted color literal contains ':'.
+    private static (string color, string? width, string? dash) SplitCompoundLineValue(string value)
+    {
+        if (string.IsNullOrEmpty(value) || value.IndexOf(':') < 0)
+            return (value, null, null);
+        var parts = value.Split(':');
+        var color = parts[0];
+        var width = parts.Length >= 2 ? parts[1] : null;
+        var dash = parts.Length >= 3 ? parts[2] : null;
+        return (color, width, dash);
+    }
+
     // drawingML CT_TextCharacterProperties attribute set (rPr attrs).
     // Long-tail run-context Set in SetRunOrShapeProperties uses this to
     // distinguish attribute-pattern keys (set as XML attributes on rPr) from
@@ -572,10 +593,15 @@ public partial class PowerPointHandler
 
                 case "line" or "linecolor" or "line.color":
                 {
+                    // Schema documents compound form 'color[:width[:style]]'
+                    // (schemas/help/_shared/shape.json) — split here and
+                    // fall through the existing single-part code paths so
+                    // there's one place doing the OOXML mutation.
+                    var (lineColor, lineWidthPart, lineDashPart) = SplitCompoundLineValue(value);
                     // Build fill before removing old one (atomic)
-                    OpenXmlElement newLineFill = value.Equals("none", StringComparison.OrdinalIgnoreCase)
+                    OpenXmlElement newLineFill = lineColor.Equals("none", StringComparison.OrdinalIgnoreCase)
                         ? new Drawing.NoFill()
-                        : BuildSolidFill(value);
+                        : BuildSolidFill(lineColor);
                     var spPr = shape.ShapeProperties;
                     if (spPr == null) { unsupported.Add(key); break; }
                     var outline = EnsureOutline(spPr);
@@ -587,6 +613,22 @@ public partial class PowerPointHandler
                         outline.InsertBefore(newLineFill, prstDash);
                     else
                         outline.AppendChild(newLineFill);
+                    if (lineWidthPart != null)
+                        outline.Width = Core.EmuConverter.ParseLineWidth(lineWidthPart);
+                    if (lineDashPart != null)
+                    {
+                        outline.RemoveAllChildren<Drawing.PresetDash>();
+                        outline.AppendChild(new Drawing.PresetDash { Val = lineDashPart.ToLowerInvariant() switch
+                        {
+                            "solid" => Drawing.PresetLineDashValues.Solid,
+                            "dot" => Drawing.PresetLineDashValues.Dot,
+                            "dash" => Drawing.PresetLineDashValues.Dash,
+                            "dashdot" or "dash_dot" => Drawing.PresetLineDashValues.DashDot,
+                            "longdash" or "lgdash" or "lg_dash" => Drawing.PresetLineDashValues.LargeDash,
+                            "longdashdot" or "lgdashdot" or "lg_dash_dot" => Drawing.PresetLineDashValues.LargeDashDot,
+                            _ => throw new ArgumentException($"Invalid 'lineDash' value: '{lineDashPart}'. Valid values: solid, dot, dash, dashdot, longdash, longdashdot.")
+                        }});
+                    }
                     break;
                 }
 

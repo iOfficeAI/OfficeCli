@@ -439,8 +439,14 @@ public partial class PowerPointHandler
                 }
 
                 // Line/border (after fill per schema: xfrm → prstGeom → fill → ln)
+                // Schema documents compound form 'color[:width[:style]]'
+                // (schemas/help/_shared/shape.json) — split here so the
+                // single-part code paths handle each component uniformly.
+                string? compoundLineWidth = null;
+                string? compoundLineDash = null;
                 if (properties.TryGetValue("line", out var lineColor) || properties.TryGetValue("linecolor", out lineColor) || properties.TryGetValue("lineColor", out lineColor) || properties.TryGetValue("line.color", out lineColor) || properties.TryGetValue("border", out lineColor) || properties.TryGetValue("border.color", out lineColor))
                 {
+                    (lineColor, compoundLineWidth, compoundLineDash) = SplitCompoundLineValue(lineColor);
                     var outline = EnsureOutline(newShape.ShapeProperties!);
                     if (lineColor.Equals("none", StringComparison.OrdinalIgnoreCase))
                         outline.AppendChild(new Drawing.NoFill());
@@ -451,6 +457,21 @@ public partial class PowerPointHandler
                 {
                     var outline = EnsureOutline(newShape.ShapeProperties!);
                     outline.Width = Core.EmuConverter.ParseLineWidth(lwStr);
+                }
+                else if (compoundLineWidth != null)
+                {
+                    var outline = EnsureOutline(newShape.ShapeProperties!);
+                    outline.Width = Core.EmuConverter.ParseLineWidth(compoundLineWidth);
+                }
+                // Stash the compound dash so the lineDash branch in
+                // SetRunOrShapeProperties below picks it up via the
+                // shared effectProps dispatch.
+                if (compoundLineDash != null
+                    && !properties.ContainsKey("linedash")
+                    && !properties.ContainsKey("lineDash")
+                    && !properties.ContainsKey("line.dash"))
+                {
+                    properties["lineDash"] = compoundLineDash;
                 }
 
                 // List style (bullet/numbered)

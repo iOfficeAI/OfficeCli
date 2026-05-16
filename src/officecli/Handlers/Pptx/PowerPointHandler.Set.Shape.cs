@@ -321,10 +321,30 @@ public partial class PowerPointHandler
                 }
                 case "linecolor" or "line.color" or "line" or "color":
                 {
+                    // Schema documents compound 'color[:width[:style]]'
+                    // for shape line=; mirror the same surface on connector
+                    // so the documented form works uniformly.
+                    var (lineColorPart, lineWidthPart, lineDashPart) = SplitCompoundLineValue(value);
                     var spPr = cxn.ShapeProperties ?? (cxn.ShapeProperties = new ShapeProperties());
                     var outline = EnsureOutline(spPr);
-                    var (rgb, _) = ParseHelpers.SanitizeColorForOoxml(value);
+                    var (rgb, _) = ParseHelpers.SanitizeColorForOoxml(lineColorPart);
                     outline.RemoveAllChildren<Drawing.SolidFill>();
+                    if (lineWidthPart != null)
+                        outline.Width = Core.EmuConverter.ParseLineWidth(lineWidthPart);
+                    if (lineDashPart != null)
+                    {
+                        outline.RemoveAllChildren<Drawing.PresetDash>();
+                        outline.AppendChild(new Drawing.PresetDash { Val = lineDashPart.ToLowerInvariant() switch
+                        {
+                            "solid" => Drawing.PresetLineDashValues.Solid,
+                            "dot" => Drawing.PresetLineDashValues.Dot,
+                            "dash" => Drawing.PresetLineDashValues.Dash,
+                            "dashdot" or "dash_dot" => Drawing.PresetLineDashValues.DashDot,
+                            "longdash" or "lgdash" or "lg_dash" => Drawing.PresetLineDashValues.LargeDash,
+                            "longdashdot" or "lgdashdot" or "lg_dash_dot" => Drawing.PresetLineDashValues.LargeDashDot,
+                            _ => throw new ArgumentException($"Invalid 'lineDash' value: '{lineDashPart}'. Valid values: solid, dot, dash, dashdot, longdash, longdashdot.")
+                        }});
+                    }
                     var newFill = new Drawing.SolidFill(
                         new Drawing.RgbColorModelHex { Val = rgb });
                     // CT_LineProperties schema: fill → prstDash → ... → headEnd → tailEnd
