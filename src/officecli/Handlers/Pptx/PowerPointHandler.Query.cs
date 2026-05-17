@@ -992,6 +992,14 @@ public partial class PowerPointHandler
             if (grpFillColor != null) grpNode.Format["fill"] = grpFillColor;
             else if (grp.GroupShapeProperties?.GetFirstChild<Drawing.NoFill>() != null) grpNode.Format["fill"] = "none";
             else if (grp.GroupShapeProperties?.GetFirstChild<Drawing.GradientFill>() != null) grpNode.Format["fill"] = "gradient";
+            // Hyperlink (nvGrpSpPr/cNvPr/a:hlinkClick) — mirrors the NodeBuilder
+            // emit so round-trip Set link → reopen → Get returns the URL.
+            var grpHl = grp.NonVisualGroupShapeProperties?.NonVisualDrawingProperties?
+                .GetFirstChild<Drawing.HyperlinkOnClick>();
+            var grpLinkUrl = ReadHyperlinkOnClickUrl(grpHl, targetSlidePart);
+            if (grpLinkUrl != null) grpNode.Format["link"] = grpLinkUrl;
+            var grpTip = grpHl?.Tooltip?.Value;
+            if (!string.IsNullOrEmpty(grpTip)) grpNode.Format["tooltip"] = grpTip!;
             // CONSISTENCY(pptx-group-flatten): delegate to the shared walker so
             // group children include nested groups / tables / charts /
             // connectors — not just shapes and pictures.

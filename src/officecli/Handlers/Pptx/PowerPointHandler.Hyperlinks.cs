@@ -145,6 +145,30 @@ public partial class PowerPointHandler
     }
 
     /// <summary>
+    /// Apply a click-hyperlink to a group. Groups have no runs of their own,
+    /// so the link lives on the group's NonVisualDrawingProperties
+    /// (nvGrpSpPr/cNvPr) — mirroring how PowerPoint writes click-targets on
+    /// grouped shapes. Pass "none" or "" to remove.
+    /// </summary>
+    private static void ApplyGroupHyperlink(SlidePart slidePart, GroupShape grp, string url, string? tooltip = null)
+    {
+        var nvDp = grp.NonVisualGroupShapeProperties?.NonVisualDrawingProperties;
+        if (nvDp == null) return;
+
+        if (string.IsNullOrEmpty(url) || url.Equals("none", StringComparison.OrdinalIgnoreCase))
+        {
+            nvDp.RemoveAllChildren<Drawing.HyperlinkOnClick>();
+            return;
+        }
+
+        var target = ResolveHyperlinkTarget(slidePart, url);
+        if (target == null) return;
+
+        nvDp.RemoveAllChildren<Drawing.HyperlinkOnClick>();
+        nvDp.AppendChild(BuildHyperlinkElement(target.Value, tooltip));
+    }
+
+    /// <summary>
     /// Apply a click-hyperlink to a picture. Pictures have no runs (BlipFill
     /// is image data, not text), so the link lives only on the picture's
     /// NonVisualDrawingProperties (nvPicPr/cNvPr) — mirroring how PowerPoint

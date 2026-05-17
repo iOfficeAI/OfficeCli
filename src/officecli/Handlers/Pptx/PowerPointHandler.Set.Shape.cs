@@ -209,6 +209,11 @@ public partial class PowerPointHandler
             throw new ArgumentException($"Group {grpIdx} not found (total: {groups.Count})");
 
         var grp = groups[grpIdx - 1];
+        // Pull link/tooltip up front so the tooltip is applied alongside link
+        // even when only one of them is also in properties — same pairing as
+        // ApplyShapeHyperlink at shape level.
+        var grpLinkValue = properties.GetValueOrDefault("link");
+        var grpTooltipValue = properties.GetValueOrDefault("tooltip");
         var unsupported = new List<string>();
         foreach (var (key, value) in properties)
         {
@@ -217,6 +222,20 @@ public partial class PowerPointHandler
                 case "name":
                     var nvGrpPr = grp.NonVisualGroupShapeProperties?.NonVisualDrawingProperties;
                     if (nvGrpPr != null) nvGrpPr.Name = value;
+                    break;
+                case "link":
+                    ApplyGroupHyperlink(slidePart, grp, value, grpTooltipValue);
+                    break;
+                case "tooltip":
+                    // Paired with "link" above. When the user sets tooltip
+                    // without link on a group that already has a hyperlink,
+                    // update only the tooltip attribute in place.
+                    if (grpLinkValue == null)
+                    {
+                        var existing = grp.NonVisualGroupShapeProperties?.NonVisualDrawingProperties
+                            ?.GetFirstChild<Drawing.HyperlinkOnClick>();
+                        if (existing != null) existing.Tooltip = value;
+                    }
                     break;
                 case "x" or "y" or "width" or "height":
                 {
@@ -266,7 +285,7 @@ public partial class PowerPointHandler
                     if (!GenericXmlQuery.SetGenericAttribute(grp, key, value))
                     {
                         if (unsupported.Count == 0)
-                            unsupported.Add($"{key} (valid group props: x, y, width, height, rotation, name, fill)");
+                            unsupported.Add($"{key} (valid group props: x, y, width, height, rotation, name, fill, link, tooltip)");
                         else
                             unsupported.Add(key);
                     }

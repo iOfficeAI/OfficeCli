@@ -98,6 +98,13 @@ public partial class PowerPointHandler
             else if (grp.GroupShapeProperties?.GetFirstChild<Drawing.GradientFill>() != null) grpNode.Format["fill"] = "gradient";
             var grpZIdx = contentElements.IndexOf(grp);
             if (grpZIdx >= 0) grpNode.Format["zorder"] = grpZIdx + 1;
+            // Hyperlink (nvGrpSpPr/cNvPr/a:hlinkClick) — same slot as shape/picture.
+            var grpHl = grp.NonVisualGroupShapeProperties?.NonVisualDrawingProperties?
+                .GetFirstChild<Drawing.HyperlinkOnClick>();
+            var grpLinkUrl = ReadHyperlinkOnClickUrl(grpHl, slidePart);
+            if (grpLinkUrl != null) grpNode.Format["link"] = grpLinkUrl;
+            var grpTip = grpHl?.Tooltip?.Value;
+            if (!string.IsNullOrEmpty(grpTip)) grpNode.Format["tooltip"] = grpTip!;
 
             // Recurse into the group's contents when depth allows, so callers
             // see the same iceberg-free view through Get that Query already

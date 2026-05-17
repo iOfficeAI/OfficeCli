@@ -480,6 +480,16 @@ public partial class PowerPointHandler
                 }
 
                 InsertAtPosition(grpShapeTree, groupShape, index);
+
+                // Optional click hyperlink on the group's cNvPr — same
+                // contract as shape/picture so Add and Set agree on the
+                // 'link' / 'tooltip' input keys at creation time.
+                if (properties.TryGetValue("link", out var grpLinkVal) && !string.IsNullOrEmpty(grpLinkVal))
+                {
+                    var grpTipVal = properties.GetValueOrDefault("tooltip");
+                    ApplyGroupHyperlink(grpSlidePart, groupShape, grpLinkVal, grpTipVal);
+                }
+
                 GetSlide(grpSlidePart).Save();
 
                 var grpCount = grpShapeTree.Elements<GroupShape>().Count();
