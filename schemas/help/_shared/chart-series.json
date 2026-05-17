@@ -58,20 +58,20 @@
     "errBars": {
       "type": "string",
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
-      "description": "error bar value type token (e.g. cust, fixedVal, stdDev).",
+      "description": "error bar value type (cust, fixedVal, stdDev, stdErr, percentage); pass 'none' to clear. Silently ignored on series types that don't support error bars.",
       "readback": "OOXML errValType token",
-      "enforcement": "report"
+      "enforcement": "lenient"
     },
     "invertIfNeg": {
       "type": "bool",
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
-      "description": "invert color for negative values (per-series readback).",
+      "description": "invert color for negative values. Bar/column/area/pie series only; line/scatter silently ignore.",
       "readback": "true | false",
-      "enforcement": "report"
+      "enforcement": "lenient"
     },
     "lineDash": {
       "type": "enum",
