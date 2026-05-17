@@ -184,7 +184,10 @@ public partial class PowerPointHandler
                 case "cap":
                 {
                     // Apply rPr/cap to every run in the shape (or to runs when in run context).
-                    if (!DrawingCapsEnum.Contains(value))
+                    // ST_TextCapsType enum is lowercase; normalize so mixed-case
+                    // input ("SMALL", "ALL") does not produce schema-invalid OOXML.
+                    var capValue = value.ToLowerInvariant();
+                    if (!DrawingCapsEnum.Contains(capValue))
                     {
                         unsupported.Add($"cap (value '{value}' must be one of: none, small, all)");
                         break;
@@ -193,7 +196,7 @@ public partial class PowerPointHandler
                     foreach (var run in targetRuns)
                     {
                         var rPr = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
-                        rPr.SetAttribute(new OpenXmlAttribute("", "cap", "", value));
+                        rPr.SetAttribute(new OpenXmlAttribute("", "cap", "", capValue));
                     }
                     break;
                 }

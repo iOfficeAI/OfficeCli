@@ -308,6 +308,13 @@ public partial class PowerPointHandler
 
                     if (capValue != null)
                     {
+                        // ST_TextCapsType enum is lowercase {none, small, all}.
+                        // Mixed-case input ("SMALL", "ALL") written verbatim
+                        // produces schema-invalid OOXML — PowerPoint then
+                        // refuses to open the file. Normalize on write.
+                        capValue = capValue.ToLowerInvariant();
+                        if (capValue is not ("none" or "small" or "all"))
+                            throw new ArgumentException($"Invalid cap value: '{capValue}'. Valid values: none, small, all.");
                         foreach (var run in newShape.Descendants<Drawing.Run>())
                         {
                             var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
