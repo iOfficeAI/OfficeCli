@@ -84,6 +84,11 @@ public partial class PowerPointHandler
         // with hypothetical future top-level "row"/"cell" segments.
         path = Regex.Replace(path, @"(/table\[\d+\](?:/[^/]+)*?)/row\[(\d+)\]", m => $"{m.Groups[1].Value}/tr[{m.Groups[2].Value}]");
         path = Regex.Replace(path, @"(/tr\[\d+\])/cell\[(\d+)\]", m => $"{m.Groups[1].Value}/tc[{m.Groups[2].Value}]");
+        // CONSISTENCY(table-path-long-form): same parity for the column axis.
+        // schemas/help/pptx/table-column.json declares element=column with
+        // alias col, and Add accepts --type column. Get/Set/Remove must also
+        // accept the long form so all five ops share one path vocabulary.
+        path = Regex.Replace(path, @"(/table\[\d+\])/column\[(\d+)\]", m => $"{m.Groups[1].Value}/col[{m.Groups[2].Value}]");
         return path;
     }
 
