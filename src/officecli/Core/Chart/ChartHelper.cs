@@ -20,6 +20,20 @@ internal static partial class ChartHelper
         var is3D = ct.EndsWith("3d") || ct.Contains("3d");
         ct = ct.Replace("3d", "");
 
+        // OOXML has no Scatter3D or Radar3D variant — CT_ScatterChart and
+        // CT_RadarChart are 2D-only. Previously `scatter3d`/`radar3d` silently
+        // had the `3d` stripped and became plain scatter/radar, losing caller
+        // intent (round-trip returned `scatter`/`radar`, real PowerPoint
+        // rendered flat). Reject these forms explicitly with a helpful error
+        // pointing at the supported alternatives.
+        if (is3D && (ct == "scatter" || ct == "xy" || ct == "radar" || ct == "spider"))
+        {
+            throw new ArgumentException(
+                $"Chart type '{chartType}' is not supported. " +
+                "OOXML has no Scatter3D or Radar3D variant — both CT_ScatterChart and CT_RadarChart " +
+                "are 2D-only. Use 'scatter' / 'radar' (optionally with radarStyle=filled|marker|standard).");
+        }
+
         var stacked = ct.Contains("stacked") && !ct.Contains("percent");
         var percentStacked = ct.Contains("percentstacked") || ct.Contains("pstacked");
         ct = ct.Replace("percentstacked", "").Replace("pstacked", "").Replace("stacked", "");
