@@ -173,8 +173,23 @@ public partial class PowerPointHandler : IDocumentHandler
             var idx = int.Parse(layoutMatch.Groups[1].Value);
             var layouts = presentationPart.SlideMasterParts
                 .SelectMany(m => m.SlideLayoutParts).ToList();
-            if (idx < 1 || idx > layouts.Count)
+            if (idx < 1)
                 throw new ArgumentException($"SlideLayout {idx} not found (total: {layouts.Count})");
+            if (idx > layouts.Count)
+            {
+                // BUG-J: Replay scenario — source deck has N layouts (e.g. 11) but
+                // the blank target only stamped K (5). EmitMasterRaw already
+                // replaced the master's sldLayoutIdLst to reference all N rIds,
+                // but the SlideLayoutPart objects for K+1..N don't exist yet, so
+                // raw-set fails with "SlideLayout {idx} not found". Auto-grow the
+                // missing layout parts under the appropriate master based on the
+                // post-master-replace sldLayoutIdLst, then re-resolve.
+                GrowSlideLayoutParts(idx);
+                layouts = presentationPart.SlideMasterParts
+                    .SelectMany(m => m.SlideLayoutParts).ToList();
+                if (idx > layouts.Count)
+                    throw new ArgumentException($"SlideLayout {idx} not found (total: {layouts.Count})");
+            }
             rootElement = layouts[idx - 1].SlideLayout
                 ?? throw new InvalidOperationException("Corrupt file: slide layout data missing");
         }
@@ -209,6 +224,74 @@ public partial class PowerPointHandler : IDocumentHandler
         InitShapeIdCounter();
         // BUG-R5-01: silent — CLI wrappers print their own structured message.
         _ = affected;
+    }
+
+    // BUG-J: Auto-grow SlideLayoutPart objects so raw-set replay can target
+    // /slideLayout[targetGlobalIdx] even when the blank deck only stamped a
+    // subset. The master's sldLayoutIdLst (already replaced by EmitMasterRaw)
+    // is the source of truth: each entry holds the rId that the new
+    // SlideLayoutPart must register with so the master-layout relationship
+    // matches. We walk masters in declaration order, compute each master's
+    // declared layout count from sldLayoutIdLst, and create missing parts
+    // under whichever master's range contains targetGlobalIdx. Newly created
+    // parts get a stub root (the imminent replace overwrites it).
+    private void GrowSlideLayoutParts(int targetGlobalIdx)
+    {
+        var presentationPart = _doc.PresentationPart
+            ?? throw new InvalidOperationException("No presentation part");
+        var masters = presentationPart.SlideMasterParts.ToList();
+        int seen = 0;
+        foreach (var mp in masters)
+        {
+            var declared = mp.SlideMaster?.SlideLayoutIdList?.Elements<SlideLayoutId>().ToList()
+                ?? new List<SlideLayoutId>();
+            int declaredCount = declared.Count;
+            int existingCount = mp.SlideLayoutParts.Count();
+            // This master "owns" global indices (seen+1)..(seen+declaredCount).
+            int rangeStart = seen + 1;
+            int rangeEnd = seen + declaredCount;
+            if (targetGlobalIdx >= rangeStart && targetGlobalIdx <= rangeEnd)
+            {
+                // Create missing parts for slots existingCount+1 .. declaredCount.
+                for (int slot = existingCount; slot < declaredCount; slot++)
+                {
+                    var declaredId = declared[slot];
+                    var rId = declaredId.RelationshipId?.Value;
+                    SlideLayoutPart newPart;
+                    if (!string.IsNullOrEmpty(rId) && !mp.Parts.Any(p => p.RelationshipId == rId))
+                    {
+                        newPart = mp.AddNewPart<SlideLayoutPart>(rId);
+                    }
+                    else
+                    {
+                        // Either rId missing in sldLayoutIdLst or already taken
+                        // (corruption guard) — let OpenXml allocate a new one
+                        // and patch the sldLayoutIdLst entry to match.
+                        newPart = mp.AddNewPart<SlideLayoutPart>();
+                        var newRid = mp.GetIdOfPart(newPart);
+                        declaredId.RelationshipId = newRid;
+                    }
+                    // Stub root — the raw-set replace immediately rewrites it.
+                    newPart.SlideLayout = new SlideLayout(
+                        new CommonSlideData(
+                            new ShapeTree(
+                                new NonVisualGroupShapeProperties(
+                                    new NonVisualDrawingProperties { Id = 1, Name = "" },
+                                    new NonVisualGroupShapeDrawingProperties(),
+                                    new ApplicationNonVisualDrawingProperties()),
+                                new GroupShapeProperties()))
+                    ) { Type = SlideLayoutValues.Blank };
+                    newPart.SlideLayout.Save();
+                    // Layouts must point back to their master.
+                    newPart.AddPart(mp);
+                }
+                if (mp.SlideMaster != null) mp.SlideMaster.Save();
+                return;
+            }
+            seen += declaredCount;
+        }
+        // targetGlobalIdx is beyond every master's declared range; caller will
+        // raise the canonical "not found" error after we return.
     }
 
     public (string RelId, string PartPath) AddPart(string parentPartPath, string partType, Dictionary<string, string>? properties = null)
