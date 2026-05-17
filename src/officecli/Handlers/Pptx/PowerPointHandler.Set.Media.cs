@@ -557,6 +557,30 @@ public partial class PowerPointHandler
                     }
                     break;
                 }
+                case "rotation":
+                {
+                    // Combined "ax,ay,az" form — mirrors Get readback so a Get/Set
+                    // round-trip with the same string works. Missing axes default to 0.
+                    var parts = value.Split(',', StringSplitOptions.TrimEntries);
+                    string axS = parts.Length > 0 ? parts[0] : "0";
+                    string ayS = parts.Length > 1 ? parts[1] : "0";
+                    string azS = parts.Length > 2 ? parts[2] : "0";
+                    var model3dEl = acElement.Descendants().FirstOrDefault(d => d.LocalName == "model3d");
+                    var trans = model3dEl?.ChildElements.FirstOrDefault(e => e.LocalName == "trans");
+                    if (trans != null)
+                    {
+                        var rot = trans.ChildElements.FirstOrDefault(e => e.LocalName == "rot");
+                        if (rot == null)
+                        {
+                            rot = new OpenXmlUnknownElement("am3d", "rot", Am3dNs);
+                            trans.AppendChild(rot);
+                        }
+                        rot.SetAttribute(new OpenXmlAttribute("", "ax", null!, ParseAngle60k(axS).ToString()));
+                        rot.SetAttribute(new OpenXmlAttribute("", "ay", null!, ParseAngle60k(ayS).ToString()));
+                        rot.SetAttribute(new OpenXmlAttribute("", "az", null!, ParseAngle60k(azS).ToString()));
+                    }
+                    break;
+                }
                 default:
                     unsupported.Add(key);
                     break;

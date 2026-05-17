@@ -342,6 +342,14 @@ public partial class PowerPointHandler
         // rot
         var rot = new OpenXmlUnknownElement("am3d", "rot", Am3dNs);
         var rotXVal = "0"; var rotYVal = "0"; var rotZVal = "0";
+        // Combined "ax,ay,az" form mirrors Get readback; per-axis aliases override.
+        if (properties.TryGetValue("rotation", out var rxyz))
+        {
+            var parts = rxyz.Split(',', StringSplitOptions.TrimEntries);
+            if (parts.Length > 0 && !string.IsNullOrEmpty(parts[0])) rotXVal = ParseAngle60k(parts[0]).ToString();
+            if (parts.Length > 1 && !string.IsNullOrEmpty(parts[1])) rotYVal = ParseAngle60k(parts[1]).ToString();
+            if (parts.Length > 2 && !string.IsNullOrEmpty(parts[2])) rotZVal = ParseAngle60k(parts[2]).ToString();
+        }
         if (properties.TryGetValue("rotx", out var rx)) rotXVal = ParseAngle60k(rx).ToString();
         if (properties.TryGetValue("roty", out var ry)) rotYVal = ParseAngle60k(ry).ToString();
         if (properties.TryGetValue("rotz", out var rz)) rotZVal = ParseAngle60k(rz).ToString();
