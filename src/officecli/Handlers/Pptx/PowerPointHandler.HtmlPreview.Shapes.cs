@@ -1469,4 +1469,40 @@ public partial class PowerPointHandler
             sb.AppendLine($"      <img src=\"{imgSrc}\" style=\"width:100%;height:100%;object-fit:contain;\" />");
         sb.AppendLine("    </div>");
     }
+
+    /// <summary>
+    /// Render an OLE GraphicFrame as a bordered placeholder carrying the
+    /// ProgID label. Mirrors the model3d / zoom fallback pattern. Real
+    /// rendering of the embedded payload is intentionally not attempted —
+    /// PowerPoint itself stamps a pre-baked thumbnail (the inner p:pic blip)
+    /// at author time; for the HTML preview we surface the OLE's presence so
+    /// the slide canvas is not silently empty and selection has a data-path
+    /// to bind to.
+    /// </summary>
+    private static void RenderOlePlaceholder(StringBuilder sb, GraphicFrame gf, string? dataPath = null)
+    {
+        var xfrm = gf.Transform;
+        var x = xfrm?.Offset?.X?.Value ?? 0;
+        var y = xfrm?.Offset?.Y?.Value ?? 0;
+        var cx = xfrm?.Extents?.Cx?.Value ?? 0;
+        var cy = xfrm?.Extents?.Cy?.Value ?? 0;
+        var leftPt = Units.EmuToPt(x);
+        var topPt = Units.EmuToPt(y);
+        var widthPt = Units.EmuToPt(cx);
+        var heightPt = Units.EmuToPt(cy);
+
+        var oleEl = gf.Descendants<DocumentFormat.OpenXml.Presentation.OleObject>().First();
+        var progId = oleEl.ProgId?.Value ?? "Embedded Object";
+        var label = HtmlEncode($"OLE: {progId}");
+        var dpAttr = string.IsNullOrEmpty(dataPath) ? "" : $" data-path=\"{HtmlEncode(dataPath)}\"";
+
+        sb.AppendLine($"    <div class=\"ole-placeholder\"{dpAttr} style=\"position:absolute;" +
+            $"left:{leftPt:0.##}pt;top:{topPt:0.##}pt;" +
+            $"width:{widthPt:0.##}pt;height:{heightPt:0.##}pt;" +
+            $"border:2px dashed rgba(108,117,125,0.6);border-radius:4px;" +
+            $"display:flex;align-items:center;justify-content:center;" +
+            $"font:11pt sans-serif;color:#495057;background:rgba(248,249,250,0.7);" +
+            $"overflow:hidden;text-align:center;padding:4px;box-sizing:border-box;\">" +
+            $"{label}</div>");
+    }
 }
