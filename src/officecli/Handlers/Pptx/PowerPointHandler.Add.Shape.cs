@@ -476,6 +476,28 @@ public partial class PowerPointHandler
                     properties["lineDash"] = compoundLineDash;
                 }
 
+                // Default visibility outline: when caller specifies no fill AND no line,
+                // PowerPoint's "Insert Shape" UI gives a thin dark outline so the geometry
+                // is visible. Without it, presets like ellipse/rect render as invisible
+                // (no stroke + no fill) — confirmed in real PowerPoint and HTML/SVG previews.
+                // Apply only when nothing else has touched the outline / fill, and never to
+                // text-box / connector flavors which legitimately have no border by default.
+                if (newShape.ShapeProperties != null
+                    && newShape.ShapeProperties.GetFirstChild<Drawing.Outline>() == null
+                    && newShape.ShapeProperties.GetFirstChild<Drawing.SolidFill>() == null
+                    && newShape.ShapeProperties.GetFirstChild<Drawing.GradientFill>() == null
+                    && newShape.ShapeProperties.GetFirstChild<Drawing.PatternFill>() == null
+                    && newShape.ShapeProperties.GetFirstChild<Drawing.BlipFill>() == null
+                    && newShape.ShapeProperties.GetFirstChild<Drawing.NoFill>() == null
+                    && newShape.ShapeProperties.GetFirstChild<Drawing.PresetGeometry>() != null)
+                {
+                    // 0.75pt = 9525 EMU (1pt = 12700 EMU). #595959 matches PowerPoint UI default.
+                    var defaultOutline = new Drawing.Outline { Width = 9525 };
+                    defaultOutline.AppendChild(new Drawing.SolidFill(
+                        new Drawing.RgbColorModelHex { Val = "595959" }));
+                    newShape.ShapeProperties.AppendChild(defaultOutline);
+                }
+
                 // List style (bullet/numbered)
                 if (properties.TryGetValue("list", out var listVal) || properties.TryGetValue("liststyle", out listVal))
                 {
