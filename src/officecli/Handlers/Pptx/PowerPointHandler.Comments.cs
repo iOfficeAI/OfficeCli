@@ -106,8 +106,13 @@ public partial class PowerPointHandler
         // Default to top-left if omitted.
         var x = properties.TryGetValue("x", out var xv) ? EmuConverter.ParseEmu(xv) : 0L;
         var y = properties.TryGetValue("y", out var yv) ? EmuConverter.ParseEmu(yv) : 0L;
+        // CONSISTENCY(comment-date-utc): pin OOXML p:cm/@dt to UTC `Z` form so
+        // round-trip readback is timezone-agnostic. DateTime.TryParse with a
+        // local-TZ or `Z` input produces Kind=Local/Utc; OpenXml then serializes
+        // local-kind values with the host offset (e.g. +08:00), and re-read
+        // gives a different readback string on differently-tz'd machines.
         var dt = properties.TryGetValue("date", out var dv) && DateTime.TryParse(dv, out var parsedDt)
-            ? parsedDt
+            ? NormalizeToUtc(parsedDt)
             : DateTime.UtcNow;
 
         var commentsPart = GetOrCreateSlideCommentsPart(slidePart);
@@ -148,6 +153,19 @@ public partial class PowerPointHandler
         var addedIdx = commentsPart.CommentList.Elements<Comment>().ToList().IndexOf(comment) + 1;
         return $"/slide[{slideIdx}]/comment[{addedIdx}]";
     }
+
+    // CONSISTENCY(comment-date-utc): normalize any DateTime to Kind=Utc so
+    // OOXML serialization writes the `Z` form (not the host-local offset) and
+    // readback is identical on every machine. Unspecified-kind values are
+    // treated as already-UTC rather than local — the caller's input is almost
+    // always an ISO string and a missing offset is more often "no info" than
+    // "machine local".
+    private static DateTime NormalizeToUtc(DateTime dt) => dt.Kind switch
+    {
+        DateTimeKind.Utc => dt,
+        DateTimeKind.Local => dt.ToUniversalTime(),
+        _ => DateTime.SpecifyKind(dt, DateTimeKind.Utc),
+    };
 
     private static string DeriveInitials(string name)
     {
@@ -199,8 +217,11 @@ public partial class PowerPointHandler
             }
         }
         node.Format["index"] = (int)(comment.Index?.Value ?? 0);
+        // CONSISTENCY(comment-date-utc): always emit UTC `Z` regardless of the
+        // on-disk @dt's stored offset, so Get and query give identical readback
+        // across machines with different local time zones.
         if (comment.DateTime?.Value != null)
-            node.Format["date"] = comment.DateTime.Value.ToString("o");
+            node.Format["date"] = NormalizeToUtc(comment.DateTime.Value).ToString("o");
         var pos = comment.GetFirstChild<Position>();
         if (pos != null)
         {
@@ -272,7 +293,7 @@ public partial class PowerPointHandler
                 case "date":
                 {
                     if (DateTime.TryParse(value, out var dt))
-                        comment.DateTime = dt;
+                        comment.DateTime = NormalizeToUtc(dt);
                     else
                         throw new ArgumentException($"Invalid date '{value}' (expected ISO 8601).");
                     break;
