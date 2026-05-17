@@ -806,6 +806,56 @@ internal static partial class ChartHelper
         if (categories != null)
             xValues = categories.Select(c => double.TryParse(c, out var v) ? v : 0).ToArray();
 
+        // Bubble-specific data shape: data="X:..;Y:..;Size:.." describes ONE
+        // bubble series with X/Y/Size triples — not three parallel categorical
+        // series (the old behaviour stacked all bubbles at the last X value
+        // because each "series" emitted a y-line at the same x indices).
+        // Detect the X/Y/Size sentinel (case-insensitive) and collapse to a
+        // single C.BubbleChartSeries. Falls back to the per-series path
+        // (legacy: each row is its own bubble series) when the names don't
+        // match the triple.
+        if (seriesData.Count >= 2)
+        {
+            var byName = seriesData.ToDictionary(
+                s => s.name.Trim().ToLowerInvariant(),
+                s => s.values);
+            if (byName.ContainsKey("x") && byName.ContainsKey("y"))
+            {
+                var xs = byName["x"];
+                var ys = byName["y"];
+                var sizes = byName.TryGetValue("size", out var sz) ? sz
+                          : byName.TryGetValue("r", out var rsz) ? rsz
+                          : ys;
+                var color = colors != null && colors.Length > 0 ? colors[0] : DefaultSeriesColors[0];
+                var series = new C.BubbleChartSeries(
+                    new C.Index { Val = 0 },
+                    new C.Order { Val = 0 },
+                    new C.SeriesText(new C.NumericValue("Bubble"))
+                );
+                ApplySeriesColor(series, color);
+
+                var xLit = new C.NumberLiteral(new C.PointCount { Val = (uint)xs.Length });
+                for (int j = 0; j < xs.Length; j++)
+                    xLit.AppendChild(new C.NumericPoint(new C.NumericValue(xs[j].ToString("G"))) { Index = (uint)j });
+                series.AppendChild(new C.XValues(xLit));
+
+                var yLit = new C.NumberLiteral(new C.PointCount { Val = (uint)ys.Length });
+                for (int j = 0; j < ys.Length; j++)
+                    yLit.AppendChild(new C.NumericPoint(new C.NumericValue(ys[j].ToString("G"))) { Index = (uint)j });
+                series.AppendChild(new C.YValues(yLit));
+
+                var sizeLit = new C.NumberLiteral(new C.PointCount { Val = (uint)sizes.Length });
+                for (int j = 0; j < sizes.Length; j++)
+                    sizeLit.AppendChild(new C.NumericPoint(new C.NumericValue(sizes[j].ToString("G"))) { Index = (uint)j });
+                series.AppendChild(new C.BubbleSize(sizeLit));
+
+                bubbleChart.AppendChild(series);
+                bubbleChart.AppendChild(new C.AxisId { Val = catAxisId });
+                bubbleChart.AppendChild(new C.AxisId { Val = valAxisId });
+                return bubbleChart;
+            }
+        }
+
         for (int i = 0; i < seriesData.Count; i++)
         {
             var color = colors != null && i < colors.Length ? colors[i] : DefaultSeriesColors[i % DefaultSeriesColors.Length];
