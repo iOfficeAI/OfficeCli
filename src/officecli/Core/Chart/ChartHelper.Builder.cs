@@ -36,9 +36,16 @@ internal static partial class ChartHelper
         var plotArea = new C.PlotArea(new C.Layout());
         uint catAxisId = 1;
         uint valAxisId = 2;
+        uint serAxisId = 3;
 
         OpenXmlCompositeElement? chartElement;
         bool needsAxes = true;
+        // 3D charts (bar3D/column3D/line3D/area3D) require a third axId on the
+        // chart element (CT_Bar3DChart / CT_Line3DChart / CT_Area3DChart) bound
+        // to a c:serAx in the plotArea. Without it, OpenXmlValidator rejects the
+        // chart and PowerPoint silently repairs the file with a degenerate
+        // render (single ribbon / no series progression).
+        bool needsSerAxis = false;
 
         var colors = ParseSeriesColors(properties);
 
@@ -64,7 +71,9 @@ internal static partial class ChartHelper
                 bar3dAuto.AppendChild(new C.GapWidth { Val = 150 });
                 bar3dAuto.AppendChild(new C.AxisId { Val = catAxisId });
                 bar3dAuto.AppendChild(new C.AxisId { Val = valAxisId });
+                bar3dAuto.AppendChild(new C.AxisId { Val = serAxisId });
                 chartElement = bar3dAuto;
+                needsSerAxis = true;
                 break;
             }
             case "bar":
@@ -92,7 +101,9 @@ internal static partial class ChartHelper
                 }
                 line3d.AppendChild(new C.AxisId { Val = catAxisId });
                 line3d.AppendChild(new C.AxisId { Val = valAxisId });
+                line3d.AppendChild(new C.AxisId { Val = serAxisId });
                 chartElement = line3d;
+                needsSerAxis = true;
                 break;
             }
             case "line":
@@ -116,7 +127,9 @@ internal static partial class ChartHelper
                 }
                 area3d.AppendChild(new C.AxisId { Val = catAxisId });
                 area3d.AppendChild(new C.AxisId { Val = valAxisId });
+                area3d.AppendChild(new C.AxisId { Val = serAxisId });
                 chartElement = area3d;
+                needsSerAxis = true;
                 break;
             }
             case "area":
@@ -255,6 +268,8 @@ internal static partial class ChartHelper
             {
                 plotArea.AppendChild(BuildCategoryAxis(catAxisId, valAxisId));
                 plotArea.AppendChild(BuildValueAxis(valAxisId, catAxisId, C.AxisPositionValues.Left));
+                if (needsSerAxis)
+                    plotArea.AppendChild(BuildSeriesAxis(serAxisId, valAxisId));
             }
         }
 
@@ -1376,6 +1391,24 @@ internal static partial class ChartHelper
             new C.CrossingAxis { Val = crossAxisId },
             new C.Crosses { Val = C.CrossesValues.AutoZero },
             new C.CrossBetween { Val = C.CrossBetweenValues.Between }
+        );
+    }
+
+    /// <summary>
+    /// Build a c:serAx (series axis) for 3D chart types. CT_Bar3DChart /
+    /// CT_Line3DChart / CT_Area3DChart require a third axId on the chart
+    /// element bound to a serAx in the plotArea — without it the chart fails
+    /// OpenXmlValidator and PowerPoint repairs the file with a degenerate
+    /// render (no series progression across the depth axis).
+    /// </summary>
+    internal static C.SeriesAxis BuildSeriesAxis(uint axisId, uint crossAxisId)
+    {
+        return new C.SeriesAxis(
+            new C.AxisId { Val = axisId },
+            new C.Scaling(new C.Orientation { Val = C.OrientationValues.MinMax }),
+            new C.Delete { Val = false },
+            new C.AxisPosition { Val = C.AxisPositionValues.Bottom },
+            new C.CrossingAxis { Val = crossAxisId }
         );
     }
 
