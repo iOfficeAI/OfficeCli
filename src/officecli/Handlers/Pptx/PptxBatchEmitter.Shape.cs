@@ -27,10 +27,16 @@ public static partial class PptxBatchEmitter
         // "shape" or "textbox" on Add, and the emitted shape carries its
         // distinguishing prop (isTitle=true / formula=...). For now use
         // "textbox" for plain text shapes (no geometry) and "shape" otherwise.
+        // CONSISTENCY(equation-emit-degrade): AddEquation throws when neither
+        // `formula` nor `text` is present. NodeBuilder.ShapeToNode emits
+        // Format["formula"] (LaTeX from OMath) when available; if it isn't
+        // (exotic OMath that ToLatex can't render), degrade to a plain textbox
+        // emit rather than crash replay.
+        bool isEquation = shapeNode.Type == "equation" && shapeProps.ContainsKey("formula");
         string emitType = shapeNode.Type switch
         {
             "title" => "shape",
-            "equation" => "equation",
+            "equation" => isEquation ? "equation" : (shapeProps.ContainsKey("geometry") ? "shape" : "textbox"),
             _ => shapeProps.ContainsKey("geometry") ? "shape" : "textbox",
         };
 
@@ -41,6 +47,12 @@ public static partial class PptxBatchEmitter
             Type = emitType,
             Props = shapeProps.Count > 0 ? shapeProps : null,
         });
+
+        // Equation shapes' text body is AlternateContent (a14:m + readable
+        // fallback run); the math content is fully captured by `formula`.
+        // Emitting paragraphs/runs here would inject the fallback string as
+        // user text — skip the body walk for equations entirely.
+        if (isEquation) return;
 
         EmitTextBody(ppt, fullShape, replayPath, items);
     }

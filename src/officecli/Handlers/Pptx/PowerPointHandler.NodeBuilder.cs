@@ -509,6 +509,30 @@ public partial class PowerPointHandler
         if (phTypeStr != null) node.Format["phType"] = phTypeStr;
         if (phElemForNode?.Index?.Value is uint phIdx) node.Format["phIndex"] = (int)phIdx;
 
+        // CONSISTENCY(equation-formula-readback): surface the OMath as a LaTeX
+        // string on Get so dump emitter can carry it as `formula=...` on
+        // `add equation` — AddEquation requires formula/text or it throws.
+        // Without this, equation shapes round-trip as `add equation` with no
+        // formula prop and replay fails.
+        if (isEquation)
+        {
+            var mathElements = FindShapeMathElements(shape);
+            if (mathElements.Count > 0)
+            {
+                try
+                {
+                    var latex = FormulaParser.ToLatex(mathElements[0]);
+                    if (!string.IsNullOrEmpty(latex))
+                        node.Format["formula"] = latex;
+                }
+                catch
+                {
+                    // ToLatex may fail on exotic OMath shapes; fall through —
+                    // emitter can still degrade gracefully.
+                }
+            }
+        }
+
         // Cross-handler `evaluated` protocol — surface unevaluated a:fld
         // descendants on the shape node so agents can find them via Get
         // without parsing view-issues messages. Emit `false` if any dynamic
