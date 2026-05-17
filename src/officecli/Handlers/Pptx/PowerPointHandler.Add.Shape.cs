@@ -603,9 +603,20 @@ public partial class PowerPointHandler
                       "lang", "lang.latin", "altLang", "altlang", "spc", "kern", "cap",
                       "kumimoji", "normalizeH", "normalizeh", "noProof", "noproof",
                       "dirty", "smtClean", "smtclean", "smtId", "smtid", "err" };
-                var effectProps = properties
-                    .Where(kv => effectKeys.Contains(kv.Key))
-                    .ToDictionary(kv => kv.Key, kv => kv.Value);
+                // CONSISTENCY(tracking-prop): explicit TryGetValue per known
+                // key instead of `.Where(...)` iteration. Foreach over the
+                // TrackingPropertyDictionary marks every entry as consumed
+                // (see Core/TrackingPropertyDictionary.cs), which would
+                // silently swallow user typos (xyzNeverExisted, anchor, …)
+                // and make Add asymmetric with Set on the unsupported_property
+                // contract. TryGetValue records only the keys we actually
+                // looked up, leaving genuine typos visible to CommandBuilder.
+                var effectProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var ek in effectKeys)
+                {
+                    if (properties.TryGetValue(ek, out var ev))
+                        effectProps[ek] = ev;
+                }
                 if (effectProps.Count > 0)
                     SetRunOrShapeProperties(effectProps, GetAllRuns(newShape), newShape, ownerPart);
 
