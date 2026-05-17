@@ -826,7 +826,16 @@ public partial class PowerPointHandler
                     srcB = (srcRect.Bottom?.Value ?? 0) / 100000.0;
                 }
                 var hasCrop = srcL != 0 || srcT != 0 || srcR != 0 || srcB != 0;
-                if (hasCrop)
+                // Degenerate crop: L+R >= 100% or T+B >= 100% means zero/negative
+                // visible area. PowerPoint renders nothing in this case; HTML
+                // preview previously averaged the background-image into a muddy
+                // block. Skip the picture draw entirely to match real PPT.
+                var degenerateCrop = hasCrop && (srcL + srcR >= 1.0 || srcT + srcB >= 1.0);
+                if (degenerateCrop)
+                {
+                    // Render nothing — matches PowerPoint's zero-area behavior.
+                }
+                else if (hasCrop)
                 {
                     var visibleW = Math.Max(1 - srcL - srcR, 0.0001);
                     var visibleH = Math.Max(1 - srcT - srcB, 0.0001);
