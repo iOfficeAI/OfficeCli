@@ -530,7 +530,26 @@ public partial class PowerPointHandler
         uint? phIdx = null;
         bool isTitleType = phTypeVal == PlaceholderValues.Title
             || phTypeVal == PlaceholderValues.CenteredTitle;
-        if (!isTitleType)
+        // Track whether the placeholder will bind to a layout slot. When it
+        // does not, PowerPoint renders nothing because we leave ShapeProperties
+        // empty (geometry pulled from layout). Below, we synthesize a fallback
+        // Transform2D for the unbound case so the shape is at least visible.
+        bool boundToLayout = false;
+        // Check layout for a matching slot regardless of phIdx source.
+        var layoutPartCheck = phSlidePart.SlideLayoutPart;
+        var titleLayoutSlot = isTitleType
+            ? layoutPartCheck?.SlideLayout?.CommonSlideData?.ShapeTree
+                ?.Elements<Shape>()
+                .Select(s => s.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
+                    ?.GetFirstChild<PlaceholderShape>())
+                .FirstOrDefault(p => p?.Type?.Value == PlaceholderValues.Title
+                    || p?.Type?.Value == PlaceholderValues.CenteredTitle)
+            : null;
+        if (isTitleType)
+        {
+            boundToLayout = titleLayoutSlot != null;
+        }
+        else
         {
             if ((properties.TryGetValue("phIndex", out var phIdxStr)
                     || properties.TryGetValue("phindex", out phIdxStr)
@@ -538,16 +557,22 @@ public partial class PowerPointHandler
                 && uint.TryParse(phIdxStr, out var parsedIdx))
             {
                 phIdx = parsedIdx;
+                // User-specified idx: bound only if layout has matching slot.
+                var slot = layoutPartCheck?.SlideLayout?.CommonSlideData?.ShapeTree
+                    ?.Elements<Shape>()
+                    .Select(s => s.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
+                        ?.GetFirstChild<PlaceholderShape>())
+                    .FirstOrDefault(p => p?.Index?.Value == parsedIdx);
+                boundToLayout = slot != null;
             }
             else
             {
-                var layoutPart = phSlidePart.SlideLayoutPart;
-                var layoutMatch = layoutPart?.SlideLayout?.CommonSlideData?.ShapeTree
+                var layoutMatch = layoutPartCheck?.SlideLayout?.CommonSlideData?.ShapeTree
                     ?.Elements<Shape>()
                     .Select(s => s.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
                         ?.GetFirstChild<PlaceholderShape>())
                     .FirstOrDefault(p => p?.Type?.Value == phTypeVal && p.Index?.HasValue == true);
-                if (layoutMatch != null) phIdx = layoutMatch.Index!.Value;
+                if (layoutMatch != null) { phIdx = layoutMatch.Index!.Value; boundToLayout = true; }
                 else
                 {
                     var usedIdx = phShapeTree.Elements<Shape>()
@@ -573,8 +598,38 @@ public partial class PowerPointHandler
             new NonVisualShapeDrawingProperties(),
             appNvPr
         );
-        // Leave ShapeProperties empty — PowerPoint pulls geometry from layout.
+        // Leave ShapeProperties empty when layout supplies geometry — but when
+        // the slide's layout has no matching <p:ph> slot (e.g. user added a
+        // body placeholder to a Blank-layout slide), PowerPoint and LibreOffice
+        // render NOTHING. Inject a sensible default rectangle so the shape is
+        // at least visible. Coordinates picked to roughly mirror the standard
+        // "Title and Content" layout slots (16:9 deck, EMU = 914400/inch).
         shape.ShapeProperties = new ShapeProperties();
+        if (!boundToLayout)
+        {
+            (long x, long y, long cx, long cy) geom = phTypeVal switch
+            {
+                _ when phTypeVal == PlaceholderValues.Title
+                    || phTypeVal == PlaceholderValues.CenteredTitle
+                        => (838200L, 365125L, 10515600L, 1325563L),
+                _ when phTypeVal == PlaceholderValues.SubTitle
+                        => (1371600L, 3886200L, 6400800L, 1752600L),
+                _ when phTypeVal == PlaceholderValues.DateAndTime
+                        => (838200L, 6356350L, 2895600L, 365125L),
+                _ when phTypeVal == PlaceholderValues.Footer
+                        => (3884613L, 6356350L, 4351338L, 365125L),
+                _ when phTypeVal == PlaceholderValues.SlideNumber
+                        => (8506463L, 6356350L, 2847338L, 365125L),
+                _ => (838200L, 1825625L, 10515600L, 4351338L), // body/header/picture/chart/...
+            };
+            shape.ShapeProperties.AppendChild(new Drawing.Transform2D(
+                new Drawing.Offset { X = geom.x, Y = geom.y },
+                new Drawing.Extents { Cx = geom.cx, Cy = geom.cy }
+            ));
+            shape.ShapeProperties.AppendChild(new Drawing.PresetGeometry(
+                new Drawing.AdjustValueList()
+            ) { Preset = Drawing.ShapeTypeValues.Rectangle });
+        }
 
         // Optional text prepopulation. Build a minimal TextBody so PowerPoint
         // still renders layout placeholder typography.
