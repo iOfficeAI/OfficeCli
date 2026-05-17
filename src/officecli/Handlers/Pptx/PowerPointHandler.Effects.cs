@@ -594,9 +594,19 @@ public partial class PowerPointHandler
     /// </summary>
     internal static string FormatBevel(Drawing.BevelType bevel)
     {
+        // OOXML default for both w and h is 76200 EMU = 6 pt. When the stored
+        // values match those defaults, emit the preset alone so round-trips of
+        // unsized bevel input (e.g. "circle") don't gain a "-6-6" tail. Schema
+        // documents this contract: "'preset' alone, or 'preset-widthPt-heightPt'
+        // when non-default sizing was written."
         var preset = bevel.Preset?.HasValue == true ? bevel.Preset.InnerText : "circle";
-        var w = bevel.Width?.HasValue == true ? $"{bevel.Width.Value / 12700.0:0.##}" : "6";
-        var h = bevel.Height?.HasValue == true ? $"{bevel.Height.Value / 12700.0:0.##}" : "6";
+        var hasW = bevel.Width?.HasValue == true;
+        var hasH = bevel.Height?.HasValue == true;
+        var wEmu = hasW ? bevel.Width!.Value : 76200L;
+        var hEmu = hasH ? bevel.Height!.Value : 76200L;
+        if (wEmu == 76200L && hEmu == 76200L) return preset;
+        var w = $"{wEmu / 12700.0:0.##}";
+        var h = $"{hEmu / 12700.0:0.##}";
         return $"{preset}-{w}-{h}";
     }
 }
