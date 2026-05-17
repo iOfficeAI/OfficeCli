@@ -16,7 +16,7 @@
       "/slide[N]/shape[M]/p[K]/r[L]/hyperlink"
     ]
   },
-  "note": "Aliases: link. Attached to a shape (shape-wide link) or to a run (inline link). Exactly one of 'url' or 'slide' is required.",
+  "note": "Aliases: link. Attached to a shape (shape-wide link) or to a run (inline link). Internal slide jumps use link=slide[N]; named actions use link=firstslide|lastslide|nextslide|previousslide|endshow.",
   "extends": "_shared/hyperlink",
   "properties": {
     "link": {
@@ -44,18 +44,6 @@
         "--prop link=https://example.com --prop tooltip=\"Open docs\""
       ],
       "readback": "tooltip text",
-      "enforcement": "report"
-    },
-    "slide": {
-      "type": "int",
-      "description": "internal target slide index (1-based).",
-      "add": true,
-      "set": true,
-      "get": true,
-      "examples": [
-        "--prop slide=3"
-      ],
-      "readback": "target slide index",
       "enforcement": "report"
     }
   }

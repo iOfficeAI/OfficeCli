@@ -34,7 +34,12 @@ public partial class PowerPointHandler
         if (string.IsNullOrEmpty(url) || url.Equals("none", StringComparison.OrdinalIgnoreCase))
             return null;
 
-        // Named slide-action shortcuts (no relationship required)
+        // Named slide-action shortcuts (no relationship required). 'endshow'
+        // is the PowerPoint action that terminates the slide show — emitted
+        // as ppaction://hlinkshowjump?jump=endshow same as the navigation
+        // jumps. 'prevslide' is intentionally absent: keep 'previousslide'
+        // as the only canonical form so input and Get output match (no
+        // silent normalization).
         var lower = url.Trim().ToLowerInvariant();
         switch (lower)
         {
@@ -44,8 +49,10 @@ public partial class PowerPointHandler
                 return new HyperlinkTarget { Action = "ppaction://hlinkshowjump?jump=lastslide" };
             case "nextslide":
                 return new HyperlinkTarget { Action = "ppaction://hlinkshowjump?jump=nextslide" };
-            case "previousslide" or "prevslide":
+            case "previousslide":
                 return new HyperlinkTarget { Action = "ppaction://hlinkshowjump?jump=previousslide" };
+            case "endshow":
+                return new HyperlinkTarget { Action = "ppaction://hlinkshowjump?jump=endshow" };
         }
 
         // Explicit slide[N] jump
@@ -85,7 +92,7 @@ public partial class PowerPointHandler
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
             throw new ArgumentException(
                 $"Invalid hyperlink URL '{url}'. Expected an absolute URI (e.g. 'https://example.com'), " +
-                $"'slide[N]', or a named action (firstslide/lastslide/nextslide/previousslide).");
+                $"'slide[N]', or a named action (firstslide/lastslide/nextslide/previousslide/endshow).");
         var extRel = slidePart.AddHyperlinkRelationship(uri, isExternal: true);
         return new HyperlinkTarget { Id = extRel.Id, IsExternal = true };
     }
@@ -246,7 +253,7 @@ public partial class PowerPointHandler
                 var jump = action[showJumpPrefix.Length..].ToLowerInvariant();
                 return jump switch
                 {
-                    "firstslide" or "lastslide" or "nextslide" or "previousslide" => jump,
+                    "firstslide" or "lastslide" or "nextslide" or "previousslide" or "endshow" => jump,
                     _ => action
                 };
             }
