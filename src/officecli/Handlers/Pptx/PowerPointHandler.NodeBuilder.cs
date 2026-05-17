@@ -1075,12 +1075,11 @@ public partial class PowerPointHandler
             var fLatin = run.RunProperties.GetFirstChild<Drawing.LatinFont>()?.Typeface?.Value;
             var fEa = run.RunProperties.GetFirstChild<Drawing.EastAsianFont>()?.Typeface?.Value;
             var fCs = run.RunProperties.GetFirstChild<Drawing.ComplexScriptFont>()?.Typeface?.Value;
-            // Bare `font` is the Latin slot alias only — see shape-level
-            // CONSISTENCY(font-bare-latin-only) note above.
-            if (fLatin != null) node.Format["font"] = fLatin;
-            // Emit canonical `font.latin` / `font.ea` whenever the slot is
-            // present so schema-declared `get:true` round-trips
-            // (CONSISTENCY(canonical-keys)). `font` kept as backward-compat alias.
+            // Schema: run-level `font` is write-only (get:false). Get
+            // canonicalizes the readback to per-script keys
+            // (font.latin / font.ea / font.cs). Emitting both bare `font`
+            // and `font.latin` violates the no-duplicate-alias rule in the
+            // root CLAUDE.md "Canonical DocumentNode.Format Rules".
             if (fLatin != null) node.Format["font.latin"] = fLatin;
             if (fEa != null && fEa != fLatin) node.Format["font.ea"] = fEa;
             if (fCs != null) node.Format["font.cs"] = fCs;
