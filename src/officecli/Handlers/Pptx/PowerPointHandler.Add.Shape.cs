@@ -522,13 +522,19 @@ public partial class PowerPointHandler
                     properties["lineDash"] = compoundLineDash;
                 }
 
-                // Default visibility outline: when caller specifies no fill AND no line,
+                // Default visibility outline: when caller picks a geometry via
+                // shape=/preset=/geometry= and specifies no fill AND no line,
                 // PowerPoint's "Insert Shape" UI gives a thin dark outline so the geometry
                 // is visible. Without it, presets like ellipse/rect render as invisible
                 // (no stroke + no fill) — confirmed in real PowerPoint and HTML/SVG previews.
-                // Apply only when nothing else has touched the outline / fill, and never to
-                // text-box / connector flavors which legitimately have no border by default.
-                if (newShape.ShapeProperties != null
+                // Skip when the caller did NOT pick a geometry (we default to rect for
+                // text-only shapes; those are textbox-flavored and should stay borderless,
+                // matching PowerPoint's Insert Text Box UI).
+                var callerPickedGeometry = properties.ContainsKey("preset")
+                    || properties.ContainsKey("geometry")
+                    || properties.ContainsKey("shape");
+                if (callerPickedGeometry
+                    && newShape.ShapeProperties != null
                     && newShape.ShapeProperties.GetFirstChild<Drawing.Outline>() == null
                     && newShape.ShapeProperties.GetFirstChild<Drawing.SolidFill>() == null
                     && newShape.ShapeProperties.GetFirstChild<Drawing.GradientFill>() == null
