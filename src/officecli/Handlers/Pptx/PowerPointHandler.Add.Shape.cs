@@ -587,6 +587,14 @@ public partial class PowerPointHandler
                       "baseline", "superscript", "subscript",
                       "textwarp", "wordart", "autofit",
                       "lineopacity", "line.opacity",
+                      // previously dropped silently — route through Set
+                      // so OOXML attributes actually get emitted.
+                      "linecap", "lineCap", "line.cap",
+                      "linejoin", "lineJoin", "line.join",
+                      "cmpd", "compoundline", "compoundLine", "line.compound",
+                      "linealign", "lineAlign", "line.align",
+                      "headend", "headEnd", "arrowstart", "arrowStart",
+                      "tailend", "tailEnd", "arrowend", "arrowEnd",
                       "image", "imagefill",
                       // CONSISTENCY(rpr-attr-fallback / R21-fuzzer-1+2): drawingML
                       // run-property attributes must reach SetRunOrShapeProperties

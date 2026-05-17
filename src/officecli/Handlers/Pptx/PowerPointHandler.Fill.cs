@@ -488,4 +488,26 @@ public partial class PowerPointHandler
             _ => throw new ArgumentException(
                 $"Invalid line end type: '{name}'. Valid values: triangle, arrow, stealth, diamond, oval, none.")
         };
+
+    // full prstDash enum (was clipped to 6 of 11 values; sysDot/sysDash/
+    // sysDashDot/sysDashDotDot/lgDashDotDot threw "Invalid lineDash"). Mirrors
+    // ST_PresetLineDashVal (DrawingML §20.1.10.49). Accepts canonical OOXML
+    // tokens plus longstanding 'longdash[dot]' aliases for backward compat.
+    internal static Drawing.PresetLineDashValues ParseLineDashValue(string value) =>
+        value.ToLowerInvariant() switch
+        {
+            "solid" => Drawing.PresetLineDashValues.Solid,
+            "dot" => Drawing.PresetLineDashValues.Dot,
+            "dash" => Drawing.PresetLineDashValues.Dash,
+            "dashdot" or "dash_dot" => Drawing.PresetLineDashValues.DashDot,
+            "lgdash" or "lg_dash" or "longdash" => Drawing.PresetLineDashValues.LargeDash,
+            "lgdashdot" or "lg_dash_dot" or "longdashdot" => Drawing.PresetLineDashValues.LargeDashDot,
+            "lgdashdotdot" or "lg_dash_dot_dot" or "longdashdotdot" => Drawing.PresetLineDashValues.LargeDashDotDot,
+            "sysdot" or "sys_dot" => Drawing.PresetLineDashValues.SystemDot,
+            "sysdash" or "sys_dash" => Drawing.PresetLineDashValues.SystemDash,
+            "sysdashdot" or "sys_dash_dot" => Drawing.PresetLineDashValues.SystemDashDot,
+            "sysdashdotdot" or "sys_dash_dot_dot" => Drawing.PresetLineDashValues.SystemDashDotDot,
+            _ => throw new ArgumentException(
+                $"Invalid 'lineDash' value: '{value}'. Valid values: solid, dot, dash, dashdot, lgDash, lgDashDot, lgDashDotDot, sysDot, sysDash, sysDashDot, sysDashDotDot.")
+        };
 }

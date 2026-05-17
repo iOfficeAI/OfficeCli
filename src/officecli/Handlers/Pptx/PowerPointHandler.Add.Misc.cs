@@ -194,21 +194,7 @@ public partial class PowerPointHandler
                     cxnOutline.Width = Core.EmuConverter.ParseLineWidth(lwVal);
                 if (properties.TryGetValue("lineDash", out var cxnDash) || properties.TryGetValue("linedash", out cxnDash))
                 {
-                    cxnOutline.AppendChild(new Drawing.PresetDash
-                    {
-                        Val = cxnDash.ToLowerInvariant() switch
-                        {
-                            "solid" => Drawing.PresetLineDashValues.Solid,
-                            "dot" => Drawing.PresetLineDashValues.Dot,
-                            "dash" => Drawing.PresetLineDashValues.Dash,
-                            "dashdot" => Drawing.PresetLineDashValues.DashDot,
-                            "longdash" => Drawing.PresetLineDashValues.LargeDash,
-                            "longdashdot" => Drawing.PresetLineDashValues.LargeDashDot,
-                            "sysdot" => Drawing.PresetLineDashValues.SystemDot,
-                            "sysdash" => Drawing.PresetLineDashValues.SystemDash,
-                            _ => Drawing.PresetLineDashValues.Solid
-                        }
-                    });
+                    cxnOutline.AppendChild(new Drawing.PresetDash { Val = ParseLineDashValue(cxnDash) });
                 }
                 // Arrow head/tail
                 if (properties.TryGetValue("headEnd", out var headVal) || properties.TryGetValue("headend", out headVal))

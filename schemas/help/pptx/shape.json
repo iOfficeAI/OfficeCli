@@ -352,21 +352,164 @@
         "solid",
         "dot",
         "dash",
-        "dashdot",
+        "dashDot",
+        "lgDash",
+        "lgDashDot",
+        "lgDashDotDot",
+        "sysDot",
+        "sysDash",
+        "sysDashDot",
+        "sysDashDotDot",
         "longdash",
-        "longdashdot",
-        "lgdash",
-        "lgdashdot"
+        "longdashdot"
       ],
       "add": true,
       "set": true,
       "get": true,
       "examples": [
         "--prop lineDash=dash",
-        "--prop lineDash=dashdot",
+        "--prop lineDash=dashDot",
+        "--prop lineDash=sysDash",
         "--prop line=FF0000:1.5:dash"
       ],
-      "readback": "preset dash token (solid | dot | dash | dashdot | longdash | longdashdot)",
+      "readback": "canonical OOXML prstDash token (solid | dot | dash | dashDot | lgDash | lgDashDot | lgDashDotDot | sysDot | sysDash | sysDashDot | sysDashDotDot). 'longdash'/'longdashdot' are accepted on input as aliases for lgDash/lgDashDot.",
+      "enforcement": "report"
+    },
+    "lineCap": {
+      "type": "enum",
+      "description": "line end cap style (drawingML <a:ln @cap>). Affects how the stroke terminates at endpoints (and dash gaps for dashed strokes).",
+      "aliases": [
+        "linecap",
+        "line.cap"
+      ],
+      "values": [
+        "round",
+        "flat",
+        "square"
+      ],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop lineCap=round"
+      ],
+      "readback": "round | flat | square",
+      "enforcement": "report"
+    },
+    "lineJoin": {
+      "type": "enum",
+      "description": "line join style at shape corners (drawingML <a:ln> child <a:round/> | <a:bevel/> | <a:miter/>).",
+      "aliases": [
+        "linejoin",
+        "line.join"
+      ],
+      "values": [
+        "round",
+        "bevel",
+        "miter"
+      ],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop lineJoin=miter"
+      ],
+      "readback": "round | bevel | miter",
+      "enforcement": "report"
+    },
+    "cmpd": {
+      "type": "enum",
+      "description": "compound line style (drawingML <a:ln @cmpd>) for double/triple/asymmetric strokes.",
+      "aliases": [
+        "compoundLine",
+        "compoundline",
+        "line.compound"
+      ],
+      "values": [
+        "sng",
+        "dbl",
+        "thickThin",
+        "thinThick",
+        "tri"
+      ],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop cmpd=dbl",
+        "--prop cmpd=thickThin"
+      ],
+      "readback": "canonical OOXML token (sng | dbl | thickThin | thinThick | tri)",
+      "enforcement": "report"
+    },
+    "lineAlign": {
+      "type": "enum",
+      "description": "stroke alignment relative to the path (drawingML <a:ln @algn>). 'ctr' centers the stroke on the path; 'in' insets it inside the shape boundary.",
+      "aliases": [
+        "linealign",
+        "line.align"
+      ],
+      "values": [
+        "ctr",
+        "in"
+      ],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop lineAlign=ctr"
+      ],
+      "readback": "ctr | in",
+      "enforcement": "report"
+    },
+    "headEnd": {
+      "type": "enum",
+      "description": "arrowhead at the line's start (drawingML <a:headEnd type=...>). Supported on any outline (shape or connector), not connector-only.",
+      "aliases": [
+        "headend",
+        "arrowStart",
+        "arrowstart"
+      ],
+      "values": [
+        "none",
+        "triangle",
+        "stealth",
+        "diamond",
+        "oval",
+        "arrow"
+      ],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop headEnd=triangle"
+      ],
+      "readback": "canonical OOXML token (none | triangle | stealth | diamond | oval | arrow)",
+      "enforcement": "report"
+    },
+    "tailEnd": {
+      "type": "enum",
+      "description": "arrowhead at the line's end (drawingML <a:tailEnd type=...>). Supported on any outline (shape or connector).",
+      "aliases": [
+        "tailend",
+        "arrowEnd",
+        "arrowend"
+      ],
+      "values": [
+        "none",
+        "triangle",
+        "stealth",
+        "diamond",
+        "oval",
+        "arrow"
+      ],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop tailEnd=arrow"
+      ],
+      "readback": "canonical OOXML token (none | triangle | stealth | diamond | oval | arrow)",
       "enforcement": "report"
     },
     "list": {

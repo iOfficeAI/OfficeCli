@@ -769,22 +769,59 @@ public partial class PowerPointHandler
             var dash = outline.GetFirstChild<Drawing.PresetDash>();
             if (dash?.Val?.HasValue == true)
             {
+                // emit the canonical OOXML token (lgDash/lgDashDot/lgDashDotDot/
+                // sysDot/sysDash/sysDashDot/sysDashDotDot) so the readback survives a
+                // round-trip through the input parser. Previously emitted 'longdash[dot]'
+                // aliases that aren't accepted by the (case-strict) PresetLineDashValues
+                // constructor — a future round-trip would throw.
                 var dashValue = dash.Val.InnerText ?? "";
                 node.Format["lineDash"] = dashValue switch
                 {
                     "solid" => "solid",
                     "dot" => "dot",
                     "dash" => "dash",
-                    "dashDot" => "dashdot",
-                    "lgDash" => "longdash",
-                    "lgDashDot" => "longdashdot",
-                    "sysDot" => "sysdot",
-                    "sysDash" => "sysdash",
-                    "sysDashDot" => "sysdashdot",
-                    "sysDashDotDot" => "sysdashdotdot",
-                    _ => dashValue.ToLowerInvariant()
+                    "dashDot" => "dashDot",
+                    "lgDash" => "lgDash",
+                    "lgDashDot" => "lgDashDot",
+                    "lgDashDotDot" => "lgDashDotDot",
+                    "sysDot" => "sysDot",
+                    "sysDash" => "sysDash",
+                    "sysDashDot" => "sysDashDot",
+                    "sysDashDotDot" => "sysDashDotDot",
+                    _ => dashValue
                 };
             }
+            // lineCap / lineJoin / cmpd / lineAlign readback. Previously
+            // these attributes were accepted on input but silently dropped; the
+            // bidirectional gap meant users couldn't see whether the value stuck.
+            if (outline.CapType?.HasValue == true)
+            {
+                var capRaw = outline.CapType.InnerText ?? "";
+                node.Format["lineCap"] = capRaw switch
+                {
+                    "rnd" => "round",
+                    "sq" => "square",
+                    "flat" => "flat",
+                    _ => capRaw
+                };
+            }
+            if (outline.CompoundLineType?.HasValue == true)
+                node.Format["cmpd"] = outline.CompoundLineType.InnerText ?? "";
+            if (outline.Alignment?.HasValue == true)
+                node.Format["lineAlign"] = outline.Alignment.InnerText ?? "";
+            if (outline.GetFirstChild<Drawing.Round>() != null)
+                node.Format["lineJoin"] = "round";
+            else if (outline.GetFirstChild<Drawing.LineJoinBevel>() != null)
+                node.Format["lineJoin"] = "bevel";
+            else if (outline.GetFirstChild<Drawing.Miter>() != null)
+                node.Format["lineJoin"] = "miter";
+            // head/tail arrowheads on shape outlines.
+            var shapeHeadEnd = outline.GetFirstChild<Drawing.HeadEnd>();
+            if (shapeHeadEnd?.Type?.HasValue == true)
+                node.Format["headEnd"] = shapeHeadEnd.Type.InnerText ?? "";
+            var shapeTailEnd = outline.GetFirstChild<Drawing.TailEnd>();
+            if (shapeTailEnd?.Type?.HasValue == true)
+                node.Format["tailEnd"] = shapeTailEnd.Type.InnerText ?? "";
             var lineColorEl = lineSolidFill?.GetFirstChild<Drawing.RgbColorModelHex>() as OpenXmlElement
                 ?? lineSolidFill?.GetFirstChild<Drawing.SchemeColor>();
             var lineAlpha = lineColorEl?.GetFirstChild<Drawing.Alpha>()?.Val?.Value;
@@ -1439,18 +1476,22 @@ public partial class PowerPointHandler
         var cxnDash = ln?.GetFirstChild<Drawing.PresetDash>();
         if (cxnDash?.Val?.HasValue == true)
         {
+            // emit canonical OOXML token (see shape readback).
             var dashValue = cxnDash.Val.InnerText ?? "";
             node.Format["lineDash"] = dashValue switch
             {
                 "solid" => "solid",
                 "dot" => "dot",
                 "dash" => "dash",
-                "dashDot" => "dashdot",
-                "lgDash" => "longdash",
-                "lgDashDot" => "longdashdot",
-                "sysDot" => "sysdot",
-                "sysDash" => "sysdash",
-                _ => dashValue.ToLowerInvariant()
+                "dashDot" => "dashDot",
+                "lgDash" => "lgDash",
+                "lgDashDot" => "lgDashDot",
+                "lgDashDotDot" => "lgDashDotDot",
+                "sysDot" => "sysDot",
+                "sysDash" => "sysDash",
+                "sysDashDot" => "sysDashDot",
+                "sysDashDotDot" => "sysDashDotDot",
+                _ => dashValue
             };
         }
         var solidFill = ln?.GetFirstChild<Drawing.SolidFill>();

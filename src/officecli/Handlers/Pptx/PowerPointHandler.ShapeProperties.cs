@@ -622,16 +622,7 @@ public partial class PowerPointHandler
                     if (lineDashPart != null)
                     {
                         outline.RemoveAllChildren<Drawing.PresetDash>();
-                        outline.AppendChild(new Drawing.PresetDash { Val = lineDashPart.ToLowerInvariant() switch
-                        {
-                            "solid" => Drawing.PresetLineDashValues.Solid,
-                            "dot" => Drawing.PresetLineDashValues.Dot,
-                            "dash" => Drawing.PresetLineDashValues.Dash,
-                            "dashdot" or "dash_dot" => Drawing.PresetLineDashValues.DashDot,
-                            "longdash" or "lgdash" or "lg_dash" => Drawing.PresetLineDashValues.LargeDash,
-                            "longdashdot" or "lgdashdot" or "lg_dash_dot" => Drawing.PresetLineDashValues.LargeDashDot,
-                            _ => throw new ArgumentException($"Invalid 'lineDash' value: '{lineDashPart}'. Valid values: solid, dot, dash, dashdot, longdash, longdashdot.")
-                        }});
+                        outline.AppendChild(new Drawing.PresetDash { Val = ParseLineDashValue(lineDashPart) });
                     }
                     break;
                 }
@@ -651,16 +642,110 @@ public partial class PowerPointHandler
                     if (spPr == null) { unsupported.Add(key); break; }
                     var outline = EnsureOutline(spPr);
                     outline.RemoveAllChildren<Drawing.PresetDash>();
-                    outline.AppendChild(new Drawing.PresetDash { Val = value.ToLowerInvariant() switch
+                    outline.AppendChild(new Drawing.PresetDash { Val = ParseLineDashValue(value) });
+                    break;
+                }
+
+                // lineCap → <a:ln cap="..."> attribute (was silently dropped).
+                case "linecap" or "line.cap":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    var outline = EnsureOutline(spPr);
+                    outline.CapType = value.ToLowerInvariant() switch
                     {
-                        "solid" => Drawing.PresetLineDashValues.Solid,
-                        "dot" => Drawing.PresetLineDashValues.Dot,
-                        "dash" => Drawing.PresetLineDashValues.Dash,
-                        "dashdot" or "dash_dot" => Drawing.PresetLineDashValues.DashDot,
-                        "longdash" or "lgdash" or "lg_dash" => Drawing.PresetLineDashValues.LargeDash,
-                        "longdashdot" or "lgdashdot" or "lg_dash_dot" => Drawing.PresetLineDashValues.LargeDashDot,
-                        _ => throw new ArgumentException($"Invalid 'lineDash' value: '{value}'. Valid values: solid, dot, dash, dashdot, longdash, longdashdot.")
-                    }});
+                        "round" or "rnd" => Drawing.LineCapValues.Round,
+                        "flat" => Drawing.LineCapValues.Flat,
+                        "square" or "sq" => Drawing.LineCapValues.Square,
+                        _ => throw new ArgumentException($"Invalid 'lineCap' value: '{value}'. Valid values: round, flat, square.")
+                    };
+                    break;
+                }
+                // lineJoin → child element <a:round/>|<a:bevel/>|<a:miter/> (was silently dropped).
+                case "linejoin" or "line.join":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    var outline = EnsureOutline(spPr);
+                    outline.RemoveAllChildren<Drawing.Round>();
+                    outline.RemoveAllChildren<Drawing.LineJoinBevel>();
+                    outline.RemoveAllChildren<Drawing.Miter>();
+                    OpenXmlElement joinEl = value.ToLowerInvariant() switch
+                    {
+                        "round" => new Drawing.Round(),
+                        "bevel" => new Drawing.LineJoinBevel(),
+                        "miter" => new Drawing.Miter(),
+                        _ => throw new ArgumentException($"Invalid 'lineJoin' value: '{value}'. Valid values: round, bevel, miter.")
+                    };
+                    // CT_LineProperties schema: ... → prstDash → (round|bevel|miter) → headEnd → tailEnd
+                    var headEnd = outline.GetFirstChild<Drawing.HeadEnd>();
+                    if (headEnd != null) outline.InsertBefore(joinEl, headEnd);
+                    else
+                    {
+                        var tailEnd = outline.GetFirstChild<Drawing.TailEnd>();
+                        if (tailEnd != null) outline.InsertBefore(joinEl, tailEnd);
+                        else outline.AppendChild(joinEl);
+                    }
+                    break;
+                }
+                // cmpd → <a:ln cmpd="..."> attribute (was silently dropped).
+                case "cmpd" or "compoundline" or "line.compound":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    var outline = EnsureOutline(spPr);
+                    outline.CompoundLineType = value switch
+                    {
+                        var s when s.Equals("sng", StringComparison.OrdinalIgnoreCase) || s.Equals("single", StringComparison.OrdinalIgnoreCase)
+                            => Drawing.CompoundLineValues.Single,
+                        var s when s.Equals("dbl", StringComparison.OrdinalIgnoreCase) || s.Equals("double", StringComparison.OrdinalIgnoreCase)
+                            => Drawing.CompoundLineValues.Double,
+                        var s when s.Equals("thickThin", StringComparison.OrdinalIgnoreCase)
+                            => Drawing.CompoundLineValues.ThickThin,
+                        var s when s.Equals("thinThick", StringComparison.OrdinalIgnoreCase)
+                            => Drawing.CompoundLineValues.ThinThick,
+                        var s when s.Equals("tri", StringComparison.OrdinalIgnoreCase) || s.Equals("triple", StringComparison.OrdinalIgnoreCase)
+                            => Drawing.CompoundLineValues.Triple,
+                        _ => throw new ArgumentException($"Invalid 'cmpd' value: '{value}'. Valid values: sng, dbl, thickThin, thinThick, tri.")
+                    };
+                    break;
+                }
+                // lineAlign → <a:ln algn="..."> attribute (was silently dropped).
+                case "linealign" or "line.align":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    var outline = EnsureOutline(spPr);
+                    outline.Alignment = value.ToLowerInvariant() switch
+                    {
+                        "ctr" or "center" => Drawing.PenAlignmentValues.Center,
+                        "in" or "inset" => Drawing.PenAlignmentValues.Insert,
+                        _ => throw new ArgumentException($"Invalid 'lineAlign' value: '{value}'. Valid values: ctr, in.")
+                    };
+                    break;
+                }
+                // head/tail end arrowheads on shape outlines (CT_LineProperties allows them
+                // on any outline, not just connectors). Previously dropped.
+                case "headend" or "arrowstart":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    var outline = EnsureOutline(spPr);
+                    outline.RemoveAllChildren<Drawing.HeadEnd>();
+                    var newHeadEnd = new Drawing.HeadEnd { Type = ParseLineEndType(value) };
+                    // CT_LineProperties: ... → headEnd → tailEnd
+                    var existingTailEnd = outline.GetFirstChild<Drawing.TailEnd>();
+                    if (existingTailEnd != null) outline.InsertBefore(newHeadEnd, existingTailEnd);
+                    else outline.AppendChild(newHeadEnd);
+                    break;
+                }
+                case "tailend" or "arrowend":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    var outline = EnsureOutline(spPr);
+                    outline.RemoveAllChildren<Drawing.TailEnd>();
+                    outline.AppendChild(new Drawing.TailEnd { Type = ParseLineEndType(value) });
                     break;
                 }
 

@@ -366,16 +366,7 @@ public partial class PowerPointHandler
                     if (lineDashPart != null)
                     {
                         outline.RemoveAllChildren<Drawing.PresetDash>();
-                        outline.AppendChild(new Drawing.PresetDash { Val = lineDashPart.ToLowerInvariant() switch
-                        {
-                            "solid" => Drawing.PresetLineDashValues.Solid,
-                            "dot" => Drawing.PresetLineDashValues.Dot,
-                            "dash" => Drawing.PresetLineDashValues.Dash,
-                            "dashdot" or "dash_dot" => Drawing.PresetLineDashValues.DashDot,
-                            "longdash" or "lgdash" or "lg_dash" => Drawing.PresetLineDashValues.LargeDash,
-                            "longdashdot" or "lgdashdot" or "lg_dash_dot" => Drawing.PresetLineDashValues.LargeDashDot,
-                            _ => throw new ArgumentException($"Invalid 'lineDash' value: '{lineDashPart}'. Valid values: solid, dot, dash, dashdot, longdash, longdashdot.")
-                        }});
+                        outline.AppendChild(new Drawing.PresetDash { Val = ParseLineDashValue(lineDashPart) });
                     }
                     var newFill = new Drawing.SolidFill(
                         new Drawing.RgbColorModelHex { Val = rgb });
@@ -410,16 +401,7 @@ public partial class PowerPointHandler
                     var spPr = cxn.ShapeProperties ?? (cxn.ShapeProperties = new ShapeProperties());
                     var outline = EnsureOutline(spPr);
                     outline.RemoveAllChildren<Drawing.PresetDash>();
-                    var newDash = new Drawing.PresetDash { Val = value.ToLowerInvariant() switch
-                    {
-                        "solid" => Drawing.PresetLineDashValues.Solid,
-                        "dot" => Drawing.PresetLineDashValues.Dot,
-                        "dash" => Drawing.PresetLineDashValues.Dash,
-                        "dashdot" or "dash_dot" => Drawing.PresetLineDashValues.DashDot,
-                        "longdash" or "lgdash" or "lg_dash" => Drawing.PresetLineDashValues.LargeDash,
-                        "longdashdot" or "lgdashdot" or "lg_dash_dot" => Drawing.PresetLineDashValues.LargeDashDot,
-                        _ => throw new ArgumentException($"Invalid 'lineDash' value: '{value}'. Valid values: solid, dot, dash, dashdot, longdash, longdashdot.")
-                    }};
+                    var newDash = new Drawing.PresetDash { Val = ParseLineDashValue(value) };
                     // CT_LineProperties schema: fill → prstDash → ... → headEnd → tailEnd
                     var headEnd = outline.GetFirstChild<Drawing.HeadEnd>();
                     if (headEnd != null)
