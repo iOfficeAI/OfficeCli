@@ -598,9 +598,13 @@ public partial class PowerPointHandler
             var custGeom = shape.ShapeProperties?.GetFirstChild<Drawing.CustomGeometry>();
             if (custGeom != null)
             {
-                // Reconstruct SVG-like path string from the custom geometry path list
-                var pathData = ReconstructCustomGeometryPath(custGeom);
-                node.Format["geometry"] = !string.IsNullOrEmpty(pathData) ? pathData : "custom";
+                node.Format["geometry"] = "custom";
+                // Raw OOXML preserves the full path-list (commands + adjust handles)
+                // that ReconstructCustomGeometryPath's SVG-ish abstraction loses.
+                // dump→batch needs byte-faithful replay, so emit the raw <a:custGeom>
+                // XML alongside the SVG hint. Add side picks whichever it can parse.
+                node.Format["customPath"] = ReconstructCustomGeometryPath(custGeom);
+                node.Format["customGeometryXml"] = custGeom.OuterXml;
             }
         }
 

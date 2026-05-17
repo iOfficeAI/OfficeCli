@@ -411,12 +411,35 @@ public partial class PowerPointHandler
                     }
                     newShape.ShapeProperties!.Transform2D = xfrm;
 
-                    var presetName = properties.TryGetValue("preset", out var pn) ? pn
-                        : properties.TryGetValue("geometry", out pn) ? pn
-                        : properties.GetValueOrDefault("shape", "rect");
-                    newShape.ShapeProperties.AppendChild(
-                        new Drawing.PresetGeometry(new Drawing.AdjustValueList()) { Preset = ParsePresetShape(presetName) }
-                    );
+                    // Custom geometry takes precedence — replay of dump-emitted
+                    // custom-shape paths comes through as customGeometryXml (raw
+                    // OOXML <a:custGeom>) which we splice in verbatim. Fallback
+                    // to preset name when no custom-geometry signal is present.
+                    if (properties.TryGetValue("customGeometryXml", out var custXml) && custXml.Length > 0)
+                    {
+                        // OuterXml round-trip: load the raw <a:custGeom> string,
+                        // pull its children as InnerXml. System.Xml.Linq tolerates
+                        // namespace declarations on the root and preserves them on
+                        // the children when re-serialized.
+                        var doc = System.Xml.Linq.XDocument.Parse(custXml);
+                        var custElem = new Drawing.CustomGeometry();
+                        custElem.InnerXml = string.Concat(doc.Root!.Nodes().Select(n => n.ToString(System.Xml.Linq.SaveOptions.DisableFormatting)));
+                        newShape.ShapeProperties.AppendChild(custElem);
+                    }
+                    else
+                    {
+                        var presetName = properties.TryGetValue("preset", out var pn) ? pn
+                            : properties.TryGetValue("geometry", out pn) ? pn
+                            : properties.GetValueOrDefault("shape", "rect");
+                        // "custom" is a Get-side marker for "this was custGeom but we
+                        // couldn't round-trip the path" — degrade to rect rather than
+                        // erroring out (we'd lose the shape entirely otherwise).
+                        if (presetName.Equals("custom", StringComparison.OrdinalIgnoreCase))
+                            presetName = "rect";
+                        newShape.ShapeProperties.AppendChild(
+                            new Drawing.PresetGeometry(new Drawing.AdjustValueList()) { Preset = ParsePresetShape(presetName) }
+                        );
+                    }
                 }
 
                 // Shape fill (after xfrm and prstGeom to maintain schema order)
