@@ -1209,7 +1209,7 @@ public partial class PowerPointHandler
     /// and uses Three.js to render it interactively in the browser.
     /// </summary>
     private static void RenderAlternateContent(StringBuilder sb, OpenXmlElement acElement,
-        SlidePart slidePart, Dictionary<string, string> themeColors)
+        SlidePart slidePart, Dictionary<string, string> themeColors, string? dataPath = null)
     {
         var isModel3D = acElement.Descendants().Any(d => d.LocalName == "model3d");
         var isZoom = acElement.Descendants().Any(d => d.LocalName == "sldZm");
@@ -1241,7 +1241,7 @@ public partial class PowerPointHandler
 
         if (isModel3D)
         {
-            RenderModel3D(sb, acElement, slidePart, leftPt, topPt, widthPt2, heightPt2);
+            RenderModel3D(sb, acElement, slidePart, leftPt, topPt, widthPt2, heightPt2, dataPath);
         }
         else
         {
@@ -1268,7 +1268,8 @@ public partial class PowerPointHandler
     /// Same GLB files across slides are deduplicated — embedded once, referenced by variable.
     /// </summary>
     private static void RenderModel3D(StringBuilder sb, OpenXmlElement acElement,
-        SlidePart slidePart, double leftPt, double topPt, double widthPt, double heightPt)
+        SlidePart slidePart, double leftPt, double topPt, double widthPt, double heightPt,
+        string? dataPath = null)
     {
         // Find the model3d element and get the GLB relationship
         var model3d = acElement.Descendants().FirstOrDefault(d => d.LocalName == "model3d");
@@ -1278,11 +1279,21 @@ public partial class PowerPointHandler
         var embedId = model3d.GetAttribute("embed", rNs).Value;
         if (string.IsNullOrEmpty(embedId)) return;
 
-        // Deduplicate: use content hash so identical GLBs across slides share one copy
+        // Deduplicate: use content hash so identical GLBs across slides share one copy.
+        // Also surface the GLB filename (relationship target) for the placeholder label.
         string glbVarName;
+        string? glbFileName = null;
         try
         {
             var part = slidePart.GetPartById(embedId);
+            try
+            {
+                var rel = slidePart.GetReferenceRelationship(embedId);
+                glbFileName = System.IO.Path.GetFileName(rel.Uri?.ToString() ?? "");
+            }
+            catch { }
+            if (string.IsNullOrEmpty(glbFileName))
+                glbFileName = System.IO.Path.GetFileName(part.Uri?.ToString() ?? "");
             using var stream = part.GetStream();
             using var ms = new MemoryStream();
             stream.CopyTo(ms);
@@ -1336,12 +1347,26 @@ public partial class PowerPointHandler
             }
         }
 
+        // Bordered placeholder underlay: visible until Three.js paints the canvas
+        // over it, and remains the only visible surface when Three.js / WebGL are
+        // unavailable and no mc:Fallback image was authored. Mirrors the OLE
+        // placeholder pattern — surface presence + a data-path for selection.
         var containerId = $"m3d_wrap_{canvasId}";
-        sb.AppendLine($"    <div id=\"{containerId}\" style=\"position:absolute;" +
+        var label = string.IsNullOrEmpty(glbFileName)
+            ? "3D Model"
+            : HtmlEncode($"3D Model: {glbFileName}");
+        var dpAttr = string.IsNullOrEmpty(dataPath) ? "" : $" data-path=\"{HtmlEncode(dataPath!)}\"";
+        sb.AppendLine($"    <div id=\"{containerId}\"{dpAttr} style=\"position:absolute;" +
             $"left:{leftPt:0.##}pt;top:{topPt:0.##}pt;" +
             $"width:{widthPt:0.##}pt;height:{heightPt:0.##}pt;" +
-            $"overflow:hidden;\">");
-        sb.AppendLine($"      <canvas id=\"{canvasId}\" style=\"width:100%;height:100%;\"></canvas>");
+            $"border:2px dashed rgba(108,117,125,0.6);border-radius:4px;" +
+            $"background:rgba(248,249,250,0.7);" +
+            $"overflow:hidden;box-sizing:border-box;\">");
+        sb.AppendLine($"      <div class=\"m3d-label\" style=\"position:absolute;inset:0;" +
+            $"display:flex;align-items:center;justify-content:center;" +
+            $"font:11pt sans-serif;color:#495057;text-align:center;padding:4px;" +
+            $"pointer-events:none;\">{label}</div>");
+        sb.AppendLine($"      <canvas id=\"{canvasId}\" style=\"position:relative;width:100%;height:100%;\"></canvas>");
         if (fallbackImgSrc != null)
             sb.AppendLine($"      <img class=\"m3d-fallback\" src=\"{fallbackImgSrc}\" style=\"width:100%;height:100%;object-fit:contain;display:none;\" />");
         sb.AppendLine("    </div>");

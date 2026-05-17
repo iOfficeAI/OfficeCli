@@ -538,7 +538,7 @@ public partial class PowerPointHandler
         // Per-element-type positional counters used to build the data-path of each
         // top-level element. We prefer @id= when the element has a cNvPr id (stable
         // across edits), and fall back to positional [N] otherwise.
-        int shapeIdx = 0, picIdx = 0, tableIdx = 0, chartIdx = 0, cxnIdx = 0, groupIdx = 0, oleIdx = 0;
+        int shapeIdx = 0, picIdx = 0, tableIdx = 0, chartIdx = 0, cxnIdx = 0, groupIdx = 0, oleIdx = 0, model3dIdx = 0;
         string PathFor(string typeName, OpenXmlElement el, int positional)
             => $"/slide[{slideNum}]/{BuildElementPathSegment(typeName, el, positional)}";
 
@@ -583,7 +583,15 @@ public partial class PowerPointHandler
                 default:
                     // mc:AlternateContent — render 3D models, zoom, etc.
                     if (element.LocalName == "AlternateContent")
-                        RenderAlternateContent(sb, element, slidePart, themeColors);
+                    {
+                        string? acDataPath = null;
+                        if (element.Descendants().Any(d => d.LocalName == "model3d"))
+                        {
+                            model3dIdx++;
+                            acDataPath = $"/slide[{slideNum}]/model3d[{model3dIdx}]";
+                        }
+                        RenderAlternateContent(sb, element, slidePart, themeColors, acDataPath);
+                    }
                     break;
             }
         }
