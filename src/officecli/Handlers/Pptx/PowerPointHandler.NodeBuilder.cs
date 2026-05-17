@@ -341,9 +341,14 @@ public partial class PowerPointHandler
                                     _ => rp.Underline.InnerText
                                 };
                             }
-                            if (rp.Strike?.HasValue == true && rp.Strike.Value != Drawing.TextStrikeValues.NoStrike)
+                            if (rp.Strike?.HasValue == true)
                             {
-                                cellNode.Format["strike"] = rp.Strike.Value == Drawing.TextStrikeValues.DoubleStrike ? "double" : "single";
+                                cellNode.Format["strike"] = rp.Strike.Value switch
+                                {
+                                    var v when v == Drawing.TextStrikeValues.DoubleStrike => "double",
+                                    var v when v == Drawing.TextStrikeValues.NoStrike => "none",
+                                    _ => "single",
+                                };
                             }
 
                             var cellRunColor = ReadColorFromFill(rp.GetFirstChild<Drawing.SolidFill>());
@@ -687,9 +692,17 @@ public partial class PowerPointHandler
                     _ => ulInner
                 };
             }
-            if (firstRun.RunProperties.Strike?.HasValue == true && firstRun.RunProperties.Strike.Value != Drawing.TextStrikeValues.NoStrike)
+            if (firstRun.RunProperties.Strike?.HasValue == true)
             {
-                node.Format["strike"] = firstRun.RunProperties.Strike.Value == Drawing.TextStrikeValues.DoubleStrike ? "double" : "single";
+                // Emit explicit "none" too, so a round-trip Add(strike=none) → Get
+                // returns the same key. PowerPoint writes <a:rPr strike="noStrike"/>
+                // verbatim; dropping it silently breaks batch (dump | apply) parity.
+                node.Format["strike"] = firstRun.RunProperties.Strike.Value switch
+                {
+                    var v when v == Drawing.TextStrikeValues.DoubleStrike => "double",
+                    var v when v == Drawing.TextStrikeValues.NoStrike => "none",
+                    _ => "single",
+                };
             }
 
             // Character spacing on first run
@@ -1099,9 +1112,15 @@ public partial class PowerPointHandler
                     _ => run.RunProperties.Underline.InnerText
                 };
             }
-            if (run.RunProperties.Strike?.HasValue == true && run.RunProperties.Strike.Value != Drawing.TextStrikeValues.NoStrike)
+            if (run.RunProperties.Strike?.HasValue == true)
             {
-                node.Format["strike"] = run.RunProperties.Strike.Value == Drawing.TextStrikeValues.DoubleStrike ? "double" : "single";
+                // Emit explicit "none" too — mirrors first-run reader above.
+                node.Format["strike"] = run.RunProperties.Strike.Value switch
+                {
+                    var v when v == Drawing.TextStrikeValues.DoubleStrike => "double",
+                    var v when v == Drawing.TextStrikeValues.NoStrike => "none",
+                    _ => "single",
+                };
             }
             if (run.RunProperties.Spacing?.HasValue == true)
                 node.Format["spacing"] = $"{run.RunProperties.Spacing.Value / 100.0:0.##}";

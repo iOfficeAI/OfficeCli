@@ -527,9 +527,14 @@ public partial class PowerPointHandler
                         _ => firstRun.RunProperties.Underline.InnerText
                     };
                 }
-                if (firstRun.RunProperties.Strike?.HasValue == true && firstRun.RunProperties.Strike.Value != Drawing.TextStrikeValues.NoStrike)
+                if (firstRun.RunProperties.Strike?.HasValue == true)
                 {
-                    cellNode.Format["strike"] = firstRun.RunProperties.Strike.Value == Drawing.TextStrikeValues.DoubleStrike ? "double" : "single";
+                    cellNode.Format["strike"] = firstRun.RunProperties.Strike.Value switch
+                    {
+                        var v when v == Drawing.TextStrikeValues.DoubleStrike => "double",
+                        var v when v == Drawing.TextStrikeValues.NoStrike => "none",
+                        _ => "single",
+                    };
                 }
                 var colorHex = firstRun.RunProperties.GetFirstChild<Drawing.SolidFill>()
                     ?.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
