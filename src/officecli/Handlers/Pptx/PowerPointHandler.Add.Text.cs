@@ -397,6 +397,14 @@ public partial class PowerPointHandler
                     rProps.Baseline = IsTruthy(rSub) ? -25000 : 0;
 
                 newRun.RunProperties = rProps;
+                // Hyperlink on the new run. Schema declares link.add=true with
+                // parent "shape|run" — without this branch the shape-level Add
+                // path accepts link= but `add ... --type run --prop link=...`
+                // reports UNSUPPORTED, forcing callers into a second Set call.
+                // Tooltip is paired with link (matches the AddShape / AddPicture
+                // / AddGroup pattern).
+                if (properties.TryGetValue("link", out var rLink))
+                    ApplyRunHyperlink(runSlidePart, newRun, rLink, properties.GetValueOrDefault("tooltip"));
                 // CONSISTENCY(escape-sequences): match shape-text path (\n and \t
                 // two-char escapes resolved). Run-add stays single-element, so
                 // tabs land as raw chars inside <a:t> rather than <a:tab/>;
