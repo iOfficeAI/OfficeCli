@@ -33,11 +33,18 @@ public partial class PowerPointHandler
             .Where(kv => !kv.Key.Equals("link", StringComparison.OrdinalIgnoreCase)
                       && !kv.Key.Equals("tooltip", StringComparison.OrdinalIgnoreCase))
             .ToDictionary(kv => kv.Key, kv => kv.Value);
-        var unsupported = SetRunOrShapeProperties(runOnlyProps, new List<Drawing.Run> { targetRun }, shape, slidePart, runContext: true);
+        var unsupported = SetRunOrShapeProperties(runOnlyProps, new List<Drawing.Run> { targetRun }, shape, slidePart, runContext: true, unsupportedContextHint: RunPropsHint);
         if (linkValRun != null) ApplyRunHyperlink(slidePart, targetRun, linkValRun, tooltipValRun);
         GetSlide(slidePart).Save();
         return unsupported;
     }
+
+    // Context labels used by SetRunOrShapeProperties so paragraph/run paths
+    // report paragraph-/run-valid props instead of the broader shape list.
+    private const string RunPropsHint =
+        "valid run props: text, bold, italic, underline, strike, color, fill, size, font, font.latin, font.ea, font.cs, link, tooltip, baseline, spacing, cap";
+    private const string ParagraphPropsHint =
+        "valid paragraph props: align, indent, level, marginLeft, marginRight, lineSpacing, spaceBefore, spaceAfter, link, tooltip — plus any run prop (applied to all runs in the paragraph)";
 
     private List<string> SetParagraphRunByPath(Match paraRunMatch, Dictionary<string, string> properties)
     {
@@ -64,7 +71,7 @@ public partial class PowerPointHandler
             .Where(kv => !kv.Key.Equals("link", StringComparison.OrdinalIgnoreCase)
                       && !kv.Key.Equals("tooltip", StringComparison.OrdinalIgnoreCase))
             .ToDictionary(kv => kv.Key, kv => kv.Value);
-        var unsupported = SetRunOrShapeProperties(runOnlyProps, new List<Drawing.Run> { targetRun }, shape, slidePart, runContext: true);
+        var unsupported = SetRunOrShapeProperties(runOnlyProps, new List<Drawing.Run> { targetRun }, shape, slidePart, runContext: true, unsupportedContextHint: RunPropsHint);
         if (linkVal != null) ApplyRunHyperlink(slidePart, targetRun, linkVal, tooltipVal);
         GetSlide(slidePart).Save();
         return unsupported;
@@ -91,7 +98,12 @@ public partial class PowerPointHandler
         {
             switch (key.ToLowerInvariant())
             {
-                case "align":
+                // Schema declares aliases: [alignment, halign] for paragraph.align.
+                // CONSISTENCY(canonical-keys): accept the documented aliases here so
+                // they don't drop through to SetRunOrShapeProperties (which would
+                // surface them as UNSUPPORTED, since shape's `align` is text body
+                // alignment with a different code path).
+                case "align" or "alignment" or "halign":
                 {
                     var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
                     pProps.Alignment = ParseTextAlignment(value);
@@ -163,7 +175,8 @@ public partial class PowerPointHandler
                 default:
                     // Apply run-level properties to all runs in this paragraph
                     var runUnsup = SetRunOrShapeProperties(
-                        new Dictionary<string, string> { { key, value } }, paraRuns, shape, slidePart, runContext: true);
+                        new Dictionary<string, string> { { key, value } }, paraRuns, shape, slidePart, runContext: true,
+                        unsupportedContextHint: ParagraphPropsHint);
                     unsupported.AddRange(runUnsup);
                     break;
             }

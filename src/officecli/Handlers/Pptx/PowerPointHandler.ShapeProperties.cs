@@ -110,7 +110,8 @@ public partial class PowerPointHandler
     // to shape regardless of context — fill, geometry, etc.).
     private static List<string> SetRunOrShapeProperties(
         Dictionary<string, string> properties, List<Drawing.Run> runs, Shape shape, OpenXmlPart? part = null,
-        bool runContext = false)
+        bool runContext = false,
+        string? unsupportedContextHint = null)
     {
         var unsupported = new List<string>();
 
@@ -1209,7 +1210,15 @@ public partial class PowerPointHandler
                     if (!GenericXmlQuery.SetGenericAttribute(shape, key, value))
                     {
                         if (unsupported.Count == 0)
-                            unsupported.Add($"{key} (valid shape props: text, bold, italic, underline, color, fill, size, font, gradient, line, opacity, align, valign, x, y, width, height, rotation, name, link, animation, formula, geometry, preset, shadow, glow, reflection, softEdge, pattern, flip, flipH, flipV)");
+                        {
+                            // Context-aware guidance: run/paragraph callers route
+                            // here via fallback but the prop list they accept is a
+                            // subset of shape's. Without the hint the error
+                            // misleadingly cites x/y/width/height/etc.
+                            var msg = unsupportedContextHint
+                                ?? "valid shape props: text, bold, italic, underline, color, fill, size, font, gradient, line, opacity, align, valign, x, y, width, height, rotation, name, link, animation, formula, geometry, preset, shadow, glow, reflection, softEdge, pattern, flip, flipH, flipV";
+                            unsupported.Add($"{key} ({msg})");
+                        }
                         else
                             unsupported.Add(key);
                     }
