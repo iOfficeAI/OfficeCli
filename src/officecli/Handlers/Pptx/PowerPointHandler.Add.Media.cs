@@ -113,7 +113,7 @@ public partial class PowerPointHandler
                 if (properties.TryGetValue("y", out var yStr) || properties.TryGetValue("top", out yStr))
                     yEmu = ParseEmu(yStr);
 
-                var imgShapeId = GenerateUniqueShapeId(imgShapeTree);
+                var imgShapeId = AcquireShapeId(imgShapeTree, properties);
                 var imgName = properties.GetValueOrDefault("name", $"Picture {imgShapeTree.Elements<Picture>().Count() + 1}");
                 // BUG-R5-02: data URIs / raw base64 blobs make Path.GetFileName
                 // return a meaningless tail (e.g. "png;base64,iVBOR..."). Use a
@@ -415,7 +415,7 @@ public partial class PowerPointHandler
                 // CONSISTENCY(positive-size): symmetric with Add.Shape negative-size guard.
                 if (chartCx < 0) throw new ArgumentException($"Negative width is not allowed: '{wv}'.");
                 if (chartCy < 0) throw new ArgumentException($"Negative height is not allowed: '{hv}'.");
-                var chartId = GenerateUniqueShapeId(chartShapeTree);
+                var chartId = AcquireShapeId(chartShapeTree, properties);
                 var chartName = properties.GetValueOrDefault("name", chartTitle ?? $"Chart {chartShapeTree.Elements<GraphicFrame>().Count(gf => gf.Descendants<DocumentFormat.OpenXml.Drawing.Charts.ChartReference>().Any() || IsExtendedChartFrame(gf)) + 1}");
 
                 // Extended chart types (cx:chart) — funnel, treemap, sunburst, boxWhisker, histogram
@@ -570,7 +570,7 @@ public partial class PowerPointHandler
                 long mX = properties.TryGetValue("x", out var mxv) ? ParseEmu(mxv) : (mediaSlideW - mCx) / 2;
                 long mY = properties.TryGetValue("y", out var myv) ? ParseEmu(myv) : (mediaSlideH - mCy) / 2;
 
-                var mediaId = GenerateUniqueShapeId(mediaShapeTree);
+                var mediaId = AcquireShapeId(mediaShapeTree, properties);
                 var mediaName = properties.GetValueOrDefault("name", isVideo ? "video" : "audio");
 
                 // 4. Build Picture element with proper video/audio structure
@@ -734,7 +734,7 @@ public partial class PowerPointHandler
         //    attributes get schema-checked; only the outer GraphicFrame
         //    wrapper uses hand-built OuterXml because GraphicData.Uri is
         //    a string attribute, not a type particle.
-        var oleShapeId = GenerateUniqueShapeId(oleShapeTree);
+        var oleShapeId = AcquireShapeId(oleShapeTree, properties);
         var oleName = properties.GetValueOrDefault("name", $"Object {oleShapeId}");
 
         var oleObj = new DocumentFormat.OpenXml.Presentation.OleObject

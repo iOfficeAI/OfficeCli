@@ -29,7 +29,7 @@ public partial class PowerPointHandler
                 var cxnShapeTree = GetSlide(cxnSlidePart).CommonSlideData?.ShapeTree
                     ?? throw new InvalidOperationException("Slide has no shape tree");
 
-                var cxnId = GenerateUniqueShapeId(cxnShapeTree);
+                var cxnId = AcquireShapeId(cxnShapeTree, properties);
                 var cxnName = properties.GetValueOrDefault("name", $"Connector {cxnShapeTree.Elements<ConnectionShape>().Count() + 1}");
 
                 // Position: explicit x/y/width/height OR derived from connected shapes.
@@ -303,7 +303,7 @@ public partial class PowerPointHandler
                 var grpShapeTree = GetSlide(grpSlidePart).CommonSlideData?.ShapeTree
                     ?? throw new InvalidOperationException("Slide has no shape tree");
 
-                var grpId = GenerateUniqueShapeId(grpShapeTree);
+                var grpId = AcquireShapeId(grpShapeTree, properties);
                 var grpName = properties.GetValueOrDefault("name", $"Group {grpShapeTree.Elements<GroupShape>().Count() + 1}");
 
                 // Parse shape paths to group: shapes="1,2,3" (shape indices)
@@ -515,7 +515,7 @@ public partial class PowerPointHandler
             ?? throw new ArgumentException(
                 $"Invalid placeholder type: '{phTypeStr}'. Valid: title, body, subtitle, date, footer, slidenum, header, picture, chart, table, diagram, media, obj, clipart.");
 
-        var phId = GenerateUniqueShapeId(phShapeTree);
+        var phId = AcquireShapeId(phShapeTree, properties);
         var phName = properties.GetValueOrDefault("name", $"{phTypeStr} Placeholder {phId}");
 
         // ECMA-376 §19.3.1.36: every non-title placeholder needs an @idx so the
@@ -792,7 +792,7 @@ public partial class PowerPointHandler
                 var transitionDur = properties.GetValueOrDefault("transitiondur", "1000");
 
                 // Generate shape IDs
-                var zmShapeId = GenerateUniqueShapeId(zmShapeTree);
+                var zmShapeId = AcquireShapeId(zmShapeTree, properties);
                 var zmName = properties.GetValueOrDefault("name", $"Slide Zoom {GetZoomElements(zmShapeTree).Count + 1}");
                 var zmGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
                 var zmCreationId = Guid.NewGuid().ToString("B").ToUpperInvariant();

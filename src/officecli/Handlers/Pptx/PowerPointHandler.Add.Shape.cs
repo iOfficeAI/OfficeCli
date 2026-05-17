@@ -63,7 +63,7 @@ public partial class PowerPointHandler
                 }
 
                 var text = properties.GetValueOrDefault("text", "");
-                var shapeId = GenerateUniqueShapeId(shapeTree);
+                var shapeId = AcquireShapeId(shapeTree, properties);
                 var shapeName = properties.GetValueOrDefault("name", $"TextBox {shapeTree.Elements<Shape>().Count() + 1}");
 
                 // Auto-add !! prefix if the slide (or the next slide) has a morph transition

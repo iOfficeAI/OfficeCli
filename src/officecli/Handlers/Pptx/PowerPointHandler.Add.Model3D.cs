@@ -69,7 +69,7 @@ public partial class PowerPointHandler
         if (properties.TryGetValue("x", out var xs) || properties.TryGetValue("left", out xs)) x = ParseEmu(xs);
         if (properties.TryGetValue("y", out var ys) || properties.TryGetValue("top", out ys)) y = ParseEmu(ys);
 
-        var shapeId = GenerateUniqueShapeId(shapeTree);
+        var shapeId = AcquireShapeId(shapeTree, properties);
         var shapeName = properties.GetValueOrDefault("name", $"3D Model {GetModel3DElements(shapeTree).Count + 1}");
 
         // Namespaces

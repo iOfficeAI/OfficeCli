@@ -98,7 +98,7 @@ public partial class PowerPointHandler
                 }
                 long colWidth = tblCx / cols;
 
-                var tblId = GenerateUniqueShapeId(tblShapeTree);
+                var tblId = AcquireShapeId(tblShapeTree, properties);
 
                 // Build GraphicFrame
                 var graphicFrame = new GraphicFrame();

@@ -559,6 +559,51 @@ public partial class PowerPointHandler
     }
 
     /// <summary>
+    /// Return true if <paramref name="id"/> is already claimed by any cNvPr in
+    /// the given shapeTree, or globally in <see cref="_usedShapeIds"/>.
+    /// </summary>
+    private bool ShapeIdInUse(ShapeTree shapeTree, uint id)
+    {
+        if (_usedShapeIds != null && _usedShapeIds.Contains(id))
+            return true;
+        if (shapeTree != null)
+        {
+            foreach (var nvPr in shapeTree.Descendants<NonVisualDrawingProperties>())
+            {
+                if (nvPr.Id?.HasValue == true && nvPr.Id.Value == id)
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// CONSISTENCY(dump-replay-id): honor a caller-supplied "id" property so
+    /// that dump→batch round-trip preserves @id=N references; mirrors docx
+    /// Add.Structure.cs:1118 for numbering ids. id=0 / non-numeric / missing
+    /// → auto-assign via <see cref="GenerateUniqueShapeId"/>. Collisions with
+    /// an in-use id throw rather than silently renumber.
+    /// </summary>
+    private uint AcquireShapeId(ShapeTree shapeTree, Dictionary<string, string> properties)
+    {
+        if (properties != null
+            && properties.TryGetValue("id", out var idStr)
+            && uint.TryParse(idStr, out var requestedId)
+            && requestedId > 0)
+        {
+            if (ShapeIdInUse(shapeTree, requestedId))
+                throw new ArgumentException(
+                    $"id {requestedId} already in use in this shapeTree. " +
+                    "Use a different id or omit to auto-assign.");
+            _usedShapeIds?.Add(requestedId);
+            if (requestedId >= _nextShapeId)
+                _nextShapeId = requestedId + 1;
+            return requestedId;
+        }
+        return GenerateUniqueShapeId(shapeTree);
+    }
+
+    /// <summary>
     /// Generate a unique deterministic cNvPr.Id across all slides.
     /// Uses global instance counter for reproducible, non-repeating IDs.
     /// </summary>
