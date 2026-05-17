@@ -16,7 +16,10 @@ public class ResidentServer : IDisposable
     private IDocumentHandler _handler;
     private readonly string _filePath;
     private readonly string _pipeName;
-    private readonly bool _editable;
+    // Mutable: PromoteToEditable() latches this to true on first write so
+    // subsequent reopen sites (view-screenshot, page-count, refresh) use
+    // the promoted mode rather than reverting to the ctor's editable=false.
+    private bool _editable;
     // Stderr captured during DocumentHandlerFactory.Open (i.e. while the
     // constructor was building _handler). At that point there's no
     // per-command Console.SetError scope, so warnings written by plugin
@@ -116,7 +119,15 @@ public class ResidentServer : IDisposable
 
     public string PipeName => _pipeName;
 
-    public ResidentServer(string filePath, bool editable = true)
+    // BUG-RESIDENT-EDITABLE-DEFAULT: ctor now defaults to editable=false so
+    // a resident that only ever serves read-only commands (view/get/query/
+    // raw/validate/dump) never writes the file back on shutdown. Mutation
+    // commands (set/add/remove/move/swap/refresh/raw-set/add-part/batch)
+    // promote the handler to editable=true on first use via
+    // PromoteToEditable(); the promotion is sticky for the resident's
+    // lifetime, matching the pre-existing reopen pattern used by
+    // view-screenshot/page-count/refresh.
+    public ResidentServer(string filePath, bool editable = false)
     {
         _filePath = Path.GetFullPath(filePath);
         _pipeName = GetPipeName(_filePath);
@@ -686,6 +697,25 @@ public class ResidentServer : IDisposable
         }).ToList();
     }
 
+    // BUG-RESIDENT-EDITABLE-DEFAULT: dispose+reopen the handler in writable
+    // mode the first time a mutation command runs. The naive Dispose +
+    // DocumentHandlerFactory.Open round-trip mirrors the existing reopen
+    // sites (view-screenshot, page-count, refresh). It runs inside the
+    // _commandLock-serialized dispatcher so no caller can hold a stale
+    // _handler reference. Once promoted, _editable stays true for the
+    // resident's lifetime — matches the previous "always-editable" cost
+    // model so a long mixed-mode session does not pay the reopen cost
+    // repeatedly. The final Dispose during shutdown still flushes the
+    // in-memory tree, which is now the correct behavior because the user
+    // has actually mutated the document.
+    private void PromoteToEditable()
+    {
+        if (_editable) return;
+        _handler.Dispose();
+        _handler = OfficeCli.Handlers.DocumentHandlerFactory.Open(_filePath, editable: true);
+        _editable = true;
+    }
+
     private void ExecuteCommand(ResidentRequest request)
     {
         var format = request.Json ? OutputFormat.Json : OutputFormat.Text;
@@ -702,11 +732,13 @@ public class ResidentServer : IDisposable
                 ExecuteQuery(request, format);
                 break;
             case "set":
+                PromoteToEditable();
                 ExecuteSet(request);
                 NotifyWatchSlideChanged(request.GetArg("path"));
                 break;
             case "add":
             {
+                PromoteToEditable();
                 var oldCount = GetPptSlideCount();
                 ExecuteAdd(request);
                 var parent = request.GetArg("parent");
@@ -718,6 +750,7 @@ public class ResidentServer : IDisposable
             }
             case "remove":
             {
+                PromoteToEditable();
                 var oldCount = GetPptSlideCount();
                 var path = request.GetArg("path");
                 ExecuteRemove(request);
@@ -728,14 +761,17 @@ public class ResidentServer : IDisposable
                 break;
             }
             case "move":
+                PromoteToEditable();
                 ExecuteMove(request);
                 NotifyWatchSlideChanged(request.GetArg("path"));
                 break;
             case "swap":
+                PromoteToEditable();
                 ExecuteSwap(request);
                 NotifyWatchFullRefresh();
                 break;
             case "refresh":
+                PromoteToEditable();
                 ExecuteRefresh(request);
                 NotifyWatchFullRefresh();
                 break;
@@ -743,10 +779,12 @@ public class ResidentServer : IDisposable
                 ExecuteRaw(request);
                 break;
             case "raw-set":
+                PromoteToEditable();
                 ExecuteRawSet(request);
                 NotifyWatchFullRefresh();
                 break;
             case "add-part":
+                PromoteToEditable();
                 ExecuteAddPart(request);
                 NotifyWatchFullRefresh();
                 break;
@@ -754,6 +792,7 @@ public class ResidentServer : IDisposable
                 ExecuteValidate();
                 break;
             case "batch":
+                PromoteToEditable();
                 ExecuteBatch(request);
                 break;
             case "dump":
