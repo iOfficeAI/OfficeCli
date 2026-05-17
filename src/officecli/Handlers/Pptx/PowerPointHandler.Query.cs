@@ -1214,6 +1214,11 @@ public partial class PowerPointHandler
                 masterNode.Format["layoutCount"] = mp.SlideLayoutParts?.Count() ?? 0;
                 if (mp.ThemePart?.Theme?.Name?.Value != null)
                     masterNode.Format["theme"] = mp.ThemePart.Theme.Name.Value;
+                // CONSISTENCY(slidemaster-emit): Get emits shapeCount; Query must
+                // surface the same canonical keys so both code paths agree.
+                var msShapeTree = mp.SlideMaster?.CommonSlideData?.ShapeTree;
+                masterNode.Format["shapeCount"] = (msShapeTree?.Elements<Shape>().Count() ?? 0)
+                    + (msShapeTree?.Elements<Picture>().Count() ?? 0);
                 results.Add(masterNode);
             }
             return results;
