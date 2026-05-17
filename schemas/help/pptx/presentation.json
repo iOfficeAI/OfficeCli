@@ -285,12 +285,13 @@
       "add": false,
       "set": true,
       "get": true,
-      "description": "PrintingProperties PrintWhat — what gets printed (slides, handouts, notes, outline).",
+      "description": "PrintingProperties PrintWhat — what gets printed. Set accepts shorthand (slides, handouts, notes, outline) and explicit OOXML tokens (handouts1, handouts2, handouts3, handouts4, handouts6, handouts9). Bare `handouts` is an alias for handouts1. Get returns the OOXML token (e.g. handouts1).",
       "examples": [
         "--prop print.what=handouts",
+        "--prop print.what=handouts4",
         "--prop print.what=notes"
       ],
-      "readback": "print-what enum inner text",
+      "readback": "print-what enum inner text (slides | handouts1..9 | notes | outline)",
       "enforcement": "report"
     },
     "print.scaleToFitPaper": {
