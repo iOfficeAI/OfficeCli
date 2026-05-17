@@ -51,7 +51,7 @@ public partial class PowerPointHandler
 
         TransitionSpeedValues? speed = null;
         string? durationMs = null;
-        string? direction = null;
+        var dirTokens = new List<string>();
 
         foreach (var part in parts.Skip(1))
         {
@@ -65,8 +65,14 @@ public partial class PowerPointHandler
             else if (p is "medium" or "med")
                 speed = TransitionSpeedValues.Medium;
             else
-                direction = p;
+                dirTokens.Add(p);
         }
+        // Re-join direction tokens with '-' so multi-token forms like
+        // "split-vertical-in" preserve both orientation and in/out for
+        // BuildSplitTransition's inner split-on-'-'/space parser.
+        // Single-token parsers (ParseSlideDir/ParseInOutDir/ParseOrientation)
+        // are unaffected — they only ever see one input token in canonical use.
+        string? direction = dirTokens.Count == 0 ? null : string.Join("-", dirTokens);
 
         var trans = new Transition();
         if (speed.HasValue) trans.Speed = speed.Value;
