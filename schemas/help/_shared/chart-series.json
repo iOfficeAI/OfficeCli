@@ -65,7 +65,7 @@
       "enforcement": "lenient"
     },
     "invertIfNeg": {
-      "type": "bool",
+      "type": "string",
       "add": false,
       "set": true,
       "get": true,
@@ -183,8 +183,8 @@
       "enforcement": "report"
     },
     "smooth": {
-      "type": "bool",
-      "description": "smooth line interpolation for line/scatter series.",
+      "type": "string",
+      "description": "smooth line interpolation for line/scatter series (true|false).",
       "appliesWhen": {
         "parent.chartType": [
           "line",

@@ -1165,11 +1165,11 @@
       ]
     },
     "showMarker": {
-      "type": "bool",
+      "type": "string",
       "add": false,
       "set": true,
       "get": true,
-      "description": "show markers on line/scatter series at chart level.",
+      "description": "show markers on line/scatter series at chart level (true|false).",
       "examples": [
         "--prop showMarker=true"
       ],
@@ -1207,7 +1207,7 @@
       ]
     },
     "smooth": {
-      "type": "bool",
+      "type": "string",
       "appliesWhen": {
         "chartType": [
           "line",
@@ -1217,7 +1217,7 @@
       "add": true,
       "set": true,
       "get": true,
-      "description": "smooth lines on line/scatter charts. Reported unsupported for other chart types.",
+      "description": "smooth lines on line/scatter charts (true|false). Reported unsupported for other chart types.",
       "examples": [
         "--prop smooth=true"
       ],
@@ -1282,11 +1282,11 @@
       "enforcement": "report"
     },
     "title.bold": {
-      "type": "bool",
+      "type": "string",
       "add": true,
       "set": true,
       "get": true,
-      "description": "title bold flag.",
+      "description": "title bold flag (true|false).",
       "readback": "true | false"
     },
     "title.color": {
@@ -1383,11 +1383,11 @@
       ]
     },
     "varyColors": {
-      "type": "bool",
+      "type": "string",
       "add": false,
       "set": true,
       "get": true,
-      "description": "vary colors by data point (single-series charts).",
+      "description": "vary colors by data point (true|false; single-series charts).",
       "examples": [
         "--prop varyColors=true"
       ],
