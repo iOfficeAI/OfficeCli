@@ -61,8 +61,8 @@
     },
     "marginLeft": {
       "type": "length",
-      "add": false,
-      "set": false,
+      "add": true,
+      "set": true,
       "get": true,
       "description": "left text margin (CT_TextParagraphProperties @marL).",
       "readback": "unit-qualified EMU length",
@@ -70,8 +70,8 @@
     },
     "marginRight": {
       "type": "length",
-      "add": false,
-      "set": false,
+      "add": true,
+      "set": true,
       "get": true,
       "description": "right text margin (CT_TextParagraphProperties @marR).",
       "readback": "unit-qualified EMU length",
