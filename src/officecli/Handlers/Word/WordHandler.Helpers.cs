@@ -1409,20 +1409,28 @@ public partial class WordHandler
             case "bold":
             case "font.bold":
                 props.RemoveAllChildren<Bold>();
-                if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Bold());
+                if (IsExplicitFalseAddOverride(value))
+                    InsertRunPropInSchemaOrder(props, new Bold { Val = OnOffValue.FromBoolean(false) });
+                else if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Bold());
                 return true;
             case "bold.cs" or "font.bold.cs" or "boldcs":
                 props.RemoveAllChildren<BoldComplexScript>();
-                if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new BoldComplexScript());
+                if (IsExplicitFalseAddOverride(value))
+                    InsertRunPropInSchemaOrder(props, new BoldComplexScript { Val = OnOffValue.FromBoolean(false) });
+                else if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new BoldComplexScript());
                 return true;
             case "italic":
             case "font.italic":
                 props.RemoveAllChildren<Italic>();
-                if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Italic());
+                if (IsExplicitFalseAddOverride(value))
+                    InsertRunPropInSchemaOrder(props, new Italic { Val = OnOffValue.FromBoolean(false) });
+                else if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Italic());
                 return true;
             case "italic.cs" or "font.italic.cs" or "italiccs":
                 props.RemoveAllChildren<ItalicComplexScript>();
-                if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new ItalicComplexScript());
+                if (IsExplicitFalseAddOverride(value))
+                    InsertRunPropInSchemaOrder(props, new ItalicComplexScript { Val = OnOffValue.FromBoolean(false) });
+                else if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new ItalicComplexScript());
                 return true;
             case "size.cs" or "font.size.cs" or "sizecs":
                 // Complex-script font size (<w:szCs/>, half-points). When set,
@@ -1477,31 +1485,45 @@ public partial class WordHandler
                 return true;
             case "strike" or "strikethrough" or "font.strike" or "font.strikethrough":
                 props.RemoveAllChildren<Strike>();
-                if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Strike());
+                if (IsExplicitFalseAddOverride(value))
+                    InsertRunPropInSchemaOrder(props, new Strike { Val = OnOffValue.FromBoolean(false) });
+                else if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Strike());
                 return true;
             case "dstrike":
                 props.RemoveAllChildren<DoubleStrike>();
-                if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new DoubleStrike());
+                if (IsExplicitFalseAddOverride(value))
+                    InsertRunPropInSchemaOrder(props, new DoubleStrike { Val = OnOffValue.FromBoolean(false) });
+                else if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new DoubleStrike());
                 return true;
             case "outline":
                 props.RemoveAllChildren<Outline>();
-                if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Outline());
+                if (IsExplicitFalseAddOverride(value))
+                    InsertRunPropInSchemaOrder(props, new Outline { Val = OnOffValue.FromBoolean(false) });
+                else if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Outline());
                 return true;
             case "shadow":
                 props.RemoveAllChildren<Shadow>();
-                if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Shadow());
+                if (IsExplicitFalseAddOverride(value))
+                    InsertRunPropInSchemaOrder(props, new Shadow { Val = OnOffValue.FromBoolean(false) });
+                else if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Shadow());
                 return true;
             case "emboss":
                 props.RemoveAllChildren<Emboss>();
-                if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Emboss());
+                if (IsExplicitFalseAddOverride(value))
+                    InsertRunPropInSchemaOrder(props, new Emboss { Val = OnOffValue.FromBoolean(false) });
+                else if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Emboss());
                 return true;
             case "imprint":
                 props.RemoveAllChildren<Imprint>();
-                if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Imprint());
+                if (IsExplicitFalseAddOverride(value))
+                    InsertRunPropInSchemaOrder(props, new Imprint { Val = OnOffValue.FromBoolean(false) });
+                else if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Imprint());
                 return true;
             case "noproof":
                 props.RemoveAllChildren<NoProof>();
-                if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new NoProof());
+                if (IsExplicitFalseAddOverride(value))
+                    InsertRunPropInSchemaOrder(props, new NoProof { Val = OnOffValue.FromBoolean(false) });
+                else if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new NoProof());
                 return true;
             case "rtl":
             case "direction" or "dir":
@@ -1556,15 +1578,21 @@ public partial class WordHandler
             case "caps":
             case "allcaps":
                 props.RemoveAllChildren<Caps>();
-                if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Caps());
+                if (IsExplicitFalseAddOverride(value))
+                    InsertRunPropInSchemaOrder(props, new Caps { Val = OnOffValue.FromBoolean(false) });
+                else if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Caps());
                 return true;
             case "smallcaps":
                 props.RemoveAllChildren<SmallCaps>();
-                if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new SmallCaps());
+                if (IsExplicitFalseAddOverride(value))
+                    InsertRunPropInSchemaOrder(props, new SmallCaps { Val = OnOffValue.FromBoolean(false) });
+                else if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new SmallCaps());
                 return true;
             case "vanish":
                 props.RemoveAllChildren<Vanish>();
-                if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Vanish());
+                if (IsExplicitFalseAddOverride(value))
+                    InsertRunPropInSchemaOrder(props, new Vanish { Val = OnOffValue.FromBoolean(false) });
+                else if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Vanish());
                 return true;
             case "bdr":
                 // BUG-R7-06: character border <w:bdr/> — round-trip captured

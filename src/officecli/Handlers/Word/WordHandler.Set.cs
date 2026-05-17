@@ -715,14 +715,20 @@ public partial class WordHandler
             // flips back to true (BUG-LT3).
             case "keepnext" or "keepwithnext":
                 if (IsTruthy(value)) pProps.KeepNext = new KeepNext();
+                else if (IsExplicitFalseAddOverride(value))
+                    pProps.KeepNext = new KeepNext { Val = OnOffValue.FromBoolean(false) };
                 else pProps.KeepNext = null;
                 return true;
             case "keeplines" or "keeptogether":
                 if (IsTruthy(value)) pProps.KeepLines = new KeepLines();
+                else if (IsExplicitFalseAddOverride(value))
+                    pProps.KeepLines = new KeepLines { Val = OnOffValue.FromBoolean(false) };
                 else pProps.KeepLines = null;
                 return true;
             case "pagebreakbefore":
                 if (IsTruthy(value)) pProps.PageBreakBefore = new PageBreakBefore();
+                else if (IsExplicitFalseAddOverride(value))
+                    pProps.PageBreakBefore = new PageBreakBefore { Val = OnOffValue.FromBoolean(false) };
                 else pProps.PageBreakBefore = null;
                 return true;
             // fuzz-2: 'break=newPage' is the natural paragraph-context spelling
@@ -745,6 +751,8 @@ public partial class WordHandler
                 return true;
             case "contextualspacing" or "contextualSpacing":
                 if (IsTruthy(value)) pProps.ContextualSpacing = new ContextualSpacing();
+                else if (IsExplicitFalseAddOverride(value))
+                    pProps.ContextualSpacing = new ContextualSpacing { Val = OnOffValue.FromBoolean(false) };
                 else pProps.ContextualSpacing = null;
                 return true;
             case "shading" or "shd":

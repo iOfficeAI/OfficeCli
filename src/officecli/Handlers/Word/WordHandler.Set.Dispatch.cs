@@ -1570,6 +1570,8 @@ public partial class WordHandler
                     // Replace, don't ??= — see BUG-LT3 in WordHandler.Set.cs.
                     if (IsTruthy(value))
                         pPrCs.ContextualSpacing = new ContextualSpacing();
+                    else if (IsExplicitFalseAddOverride(value))
+                        pPrCs.ContextualSpacing = new ContextualSpacing { Val = OnOffValue.FromBoolean(false) };
                     else
                         pPrCs.ContextualSpacing = null;
                     break;
@@ -1584,6 +1586,8 @@ public partial class WordHandler
                 {
                     var pPrKn = style.StyleParagraphProperties ?? EnsureStyleParagraphProperties(style);
                     if (IsTruthy(value)) pPrKn.KeepNext = new KeepNext();
+                    else if (IsExplicitFalseAddOverride(value))
+                        pPrKn.KeepNext = new KeepNext { Val = OnOffValue.FromBoolean(false) };
                     else pPrKn.KeepNext = null;
                     break;
                 }
@@ -1591,6 +1595,8 @@ public partial class WordHandler
                 {
                     var pPrKl = style.StyleParagraphProperties ?? EnsureStyleParagraphProperties(style);
                     if (IsTruthy(value)) pPrKl.KeepLines = new KeepLines();
+                    else if (IsExplicitFalseAddOverride(value))
+                        pPrKl.KeepLines = new KeepLines { Val = OnOffValue.FromBoolean(false) };
                     else pPrKl.KeepLines = null;
                     break;
                 }
@@ -1598,6 +1604,8 @@ public partial class WordHandler
                 {
                     var pPrPbb = style.StyleParagraphProperties ?? EnsureStyleParagraphProperties(style);
                     if (IsTruthy(value)) pPrPbb.PageBreakBefore = new PageBreakBefore();
+                    else if (IsExplicitFalseAddOverride(value))
+                        pPrPbb.PageBreakBefore = new PageBreakBefore { Val = OnOffValue.FromBoolean(false) };
                     else pPrPbb.PageBreakBefore = null;
                     break;
                 }
