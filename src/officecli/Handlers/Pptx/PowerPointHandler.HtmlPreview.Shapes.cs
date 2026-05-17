@@ -775,11 +775,49 @@ public partial class PowerPointHandler
                 styles.Add(borderCss);
         }
 
-        // Shadow
+        // Effects: brightness, contrast, glow, shadow, opacity all roll
+        // into one CSS `filter` property (drop-shadow / brightness /
+        // contrast) so they compose. Mirror the shape renderer above:
+        // shadowCss + glowCss merged into filter:..., reflection separate.
         var effectList = pic.ShapeProperties?.GetFirstChild<Drawing.EffectList>();
         var shadowCss = EffectListToShadowCss(effectList, themeColors);
+        var glowCss = EffectListToGlowCss(effectList, themeColors);
+
+        // brightness / contrast — Set.Media writes lumOff (brightness) and
+        // lumMod (contrast) under a:blip; the SDK stores them as
+        // OpenXmlUnknownElement on re-parse, so walk children by LocalName.
+        var picBlipForFx = pic.BlipFill?.GetFirstChild<Drawing.Blip>();
+        double? brightnessPct = null, contrastPct = null;
+        if (picBlipForFx != null)
+        {
+            foreach (var kid in picBlipForFx.ChildElements)
+            {
+                if (kid.NamespaceUri != "http://schemas.openxmlformats.org/drawingml/2006/main") continue;
+                var attr = kid.GetAttribute("val", "").Value;
+                if (string.IsNullOrEmpty(attr) || !int.TryParse(attr, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var iv)) continue;
+                if (kid.LocalName == "lumOff") brightnessPct = iv / 1000.0;
+                else if (kid.LocalName == "lumMod") contrastPct = (iv - 100000) / 1000.0;
+            }
+        }
+
+        var filterParts = new List<string>();
+        // CSS brightness(1) = no change; +N% brightness → brightness(1 + N/100).
+        if (brightnessPct.HasValue && Math.Abs(brightnessPct.Value) > 0.01)
+            filterParts.Add($"brightness({1 + brightnessPct.Value / 100.0:0.###})");
+        // CSS contrast(1) = no change; +N% contrast → contrast(1 + N/100).
+        if (contrastPct.HasValue && Math.Abs(contrastPct.Value) > 0.01)
+            filterParts.Add($"contrast({1 + contrastPct.Value / 100.0:0.###})");
         if (!string.IsNullOrEmpty(shadowCss))
-            styles.Add(shadowCss);
+            filterParts.Add(shadowCss.Replace("filter:", ""));
+        if (!string.IsNullOrEmpty(glowCss))
+            filterParts.Add(glowCss.Replace("filter:", ""));
+        if (filterParts.Count > 0)
+            styles.Add($"filter:{string.Join(" ", filterParts)}");
+
+        // Opacity — a:blip/a:alphaModFix amount is 0-100000 (1000 = 1%).
+        var picAlphaMod = picBlipForFx?.GetFirstChild<Drawing.AlphaModulationFixed>();
+        if (picAlphaMod?.Amount?.HasValue == true && picAlphaMod.Amount.Value < 100000)
+            styles.Add($"opacity:{picAlphaMod.Amount.Value / 100000.0:0.###}");
 
         // Reflection → CSS -webkit-box-reflect
         var reflectionCss = EffectListToReflectionCss(effectList);
