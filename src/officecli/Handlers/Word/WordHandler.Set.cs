@@ -807,7 +807,7 @@ public partial class WordHandler
                 spacingLine.Line = lsTwips.ToString();
                 spacingLine.LineRule = lsIsMultiplier ? LineSpacingRuleValues.Auto : LineSpacingRuleValues.Exact;
                 return true;
-            case "linerule":
+            case "linerule" or "linespacingrule":
                 // BUG-019: explicit override needed to distinguish AtLeast
                 // from Exact — both serialize as "Npt" via SpacingConverter.
                 var spacingRule = pProps.SpacingBetweenLines ?? (pProps.SpacingBetweenLines = new SpacingBetweenLines());

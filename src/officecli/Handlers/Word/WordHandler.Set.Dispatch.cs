@@ -1555,7 +1555,7 @@ public partial class WordHandler
                         : new DocumentFormat.OpenXml.EnumValue<LineSpacingRuleValues>(LineSpacingRuleValues.Exact);
                     break;
                 }
-                case "linerule" or "lineRule":
+                case "linerule" or "lineRule" or "linespacingrule" or "lineSpacingRule":
                 {
                     // BUG-019: explicit override needed — lineSpacing alone
                     // cannot distinguish AtLeast from Exact.
