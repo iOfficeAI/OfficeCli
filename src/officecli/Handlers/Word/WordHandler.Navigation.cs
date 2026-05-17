@@ -1411,6 +1411,17 @@ public partial class WordHandler
                     {
                         node.Format["lineRule"] = pProps.SpacingBetweenLines.LineRule.InnerText;
                     }
+                    // CONSISTENCY(ind-chars): mirror style-level Get (Query.cs)
+                    // for the chars-unit space-before/after slots so P1-7
+                    // round-trip works on paragraphs as well as styles.
+                    if (pProps.SpacingBetweenLines.BeforeLines?.Value != null)
+                    {
+                        node.Format["spaceBeforeLines"] = pProps.SpacingBetweenLines.BeforeLines.Value;
+                    }
+                    if (pProps.SpacingBetweenLines.AfterLines?.Value != null)
+                    {
+                        node.Format["spaceAfterLines"] = pProps.SpacingBetweenLines.AfterLines.Value;
+                    }
                 }
                 if (pProps.Indentation != null)
                 {

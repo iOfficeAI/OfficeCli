@@ -1178,7 +1178,7 @@ public partial class WordHandler
                     }
                     if (!GenericXmlQuery.TryCreateTypedChild(pProps, key, value))
                         unsupported.Add(unsupported.Count == 0
-                            ? $"{key} (valid paragraph props: text, style, alignment, bold, italic, font, size, color, spaceBefore, spaceAfter, lineSpacing, indent, liststyle, formula, direction, bidi)"
+                            ? $"{key} (valid paragraph props: text, style, alignment, bold, italic, font, size, color, spaceBefore, spaceAfter, spaceBeforeLines, spaceAfterLines, lineSpacing, indent, liststyle, formula, direction, bidi)"
                             : key);
                     break;
             }

@@ -127,6 +127,26 @@ public partial class WordHandler
     }
 
     /// <summary>
+    /// P1-7: detect the "Nlines" suffix on a spacing value and convert it to
+    /// hundredths of a line (the unit of `<w:spacing w:beforeLines/afterLines>`).
+    /// Returns false when the value lacks the "lines" suffix so the caller can
+    /// fall through to the points/twips path.
+    /// </summary>
+    internal static bool TryParseLinesSuffix(string value, out string hundredthsOfLine)
+    {
+        hundredthsOfLine = "";
+        var trimmed = (value ?? "").Trim();
+        if (!trimmed.EndsWith("lines", StringComparison.OrdinalIgnoreCase) &&
+            !trimmed.EndsWith("line", StringComparison.OrdinalIgnoreCase))
+            return false;
+        var num = trimmed.EndsWith("lines", StringComparison.OrdinalIgnoreCase) ? trimmed[..^5] : trimmed[..^4];
+        if (!double.TryParse(num.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var n) || double.IsNaN(n) || double.IsInfinity(n) || n < 0)
+            throw new ArgumentException($"Invalid lines value '{value}'. Expected a non-negative number with 'lines' suffix (e.g. '0.5lines', '1lines').");
+        hundredthsOfLine = ((int)Math.Round(n * 100)).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return true;
+    }
+
+    /// <summary>
     /// Parse a lineRule prop value (auto / exact / atLeast) into the OOXML
     /// enum. BUG-019 — needed to distinguish AtLeast from Exact since
     /// SpacingConverter.FormatWordLineSpacing serializes both as "Npt".

@@ -1698,6 +1698,26 @@ public partial class WordHandler
                     indHi.Hanging = SpacingConverter.ParseWordSpacing(value).ToString();
                     break;
                 }
+                // P1-7: line-based space-before/after on /styles. Symmetric with
+                // the chars indents above — the OOXML attr is unitless
+                // (hundredths of a line), Word picks lines over twips at
+                // render time when both are present.
+                case "spacebeforelines" or "spaceBeforeLines":
+                {
+                    var pPrSbl = style.StyleParagraphProperties ?? EnsureStyleParagraphProperties(style);
+                    var spSbl = pPrSbl.SpacingBetweenLines ?? (pPrSbl.SpacingBetweenLines = new SpacingBetweenLines());
+                    spSbl.BeforeLines = ParseHelpers.SafeParseInt(value, "spaceBeforeLines");
+                    spSbl.Before = null;
+                    break;
+                }
+                case "spaceafterlines" or "spaceAfterLines":
+                {
+                    var pPrSal = style.StyleParagraphProperties ?? EnsureStyleParagraphProperties(style);
+                    var spSal = pPrSal.SpacingBetweenLines ?? (pPrSal.SpacingBetweenLines = new SpacingBetweenLines());
+                    spSal.AfterLines = ParseHelpers.SafeParseInt(value, "spaceAfterLines");
+                    spSal.After = null;
+                    break;
+                }
                 // Per-script font split. Each w:rFonts attr is independent and
                 // unset attrs fall back through the style chain / docDefaults,
                 // so writing only the requested attr is correct — no need to
