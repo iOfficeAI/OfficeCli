@@ -614,14 +614,18 @@ public partial class PowerPointHandler
                     new Drawing.PresetGeometry(new Drawing.AdjustValueList()) { Preset = Drawing.ShapeTypeValues.Rectangle }
                 );
 
-                // p14:trim (optional start/end trim in milliseconds)
+                // p14:trim (optional start/end trim). Schema accepts both
+                // "hh:mm:ss.fff" timestamps and bare millisecond counts on
+                // input; normalize to ms-int on write — PowerPoint refuses
+                // to open a file whose p14:trim/@st is a timestamp literal
+                // (0x80070570 "file corrupted").
                 properties.TryGetValue("trimstart", out var trimStart);
                 properties.TryGetValue("trimend", out var trimEnd);
                 if (trimStart != null || trimEnd != null)
                 {
                     var trim = new DocumentFormat.OpenXml.Office2010.PowerPoint.MediaTrim();
-                    if (trimStart != null) trim.Start = trimStart;
-                    if (trimEnd != null) trim.End = trimEnd;
+                    if (trimStart != null) trim.Start = NormalizeMediaTimeMs(trimStart, "trimStart");
+                    if (trimEnd != null) trim.End = NormalizeMediaTimeMs(trimEnd, "trimEnd");
                     p14Media.MediaTrim = trim;
                 }
 
@@ -785,6 +789,68 @@ public partial class PowerPointHandler
         var oleFrames = oleShapeTree.Elements<GraphicFrame>()
             .Count(gf => gf.Descendants<DocumentFormat.OpenXml.Presentation.OleObject>().Any());
         return $"/slide[{oleSlideIdx}]/ole[{oleFrames}]";
+    }
+
+    // Normalize a media trim input into the millisecond-integer string that
+    // PowerPoint accepts for p14:trim/@st|@end. Accepted input forms:
+    //   - bare ms count  ("200", "200ms")
+    //   - seconds        ("0.2s", "1.5s")
+    //   - hh:mm:ss(.fff) ("00:00:00.200", "00:01:30")
+    // PowerPoint refuses to open a file whose @st is a hh:mm:ss literal
+    // (0x80070570). Schema docs the timestamp form so it has to be tolerated
+    // on input; the wire form is always ms-int.
+    internal static string NormalizeMediaTimeMs(string raw, string propName)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            throw new ArgumentException($"Invalid '{propName}' value: empty.");
+        var s = raw.Trim();
+
+        // hh:mm:ss(.fff) — at least one colon
+        if (s.IndexOf(':') >= 0)
+        {
+            var parts = s.Split(':');
+            if (parts.Length < 2 || parts.Length > 3)
+                throw new ArgumentException(
+                    $"Invalid '{propName}' value: '{raw}'. Expected ms (e.g. '200'), seconds ('0.2s'), or 'hh:mm:ss.fff'.");
+            double h = 0, m, sec;
+            try
+            {
+                if (parts.Length == 3)
+                {
+                    h = double.Parse(parts[0], System.Globalization.CultureInfo.InvariantCulture);
+                    m = double.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture);
+                    sec = double.Parse(parts[2], System.Globalization.CultureInfo.InvariantCulture);
+                }
+                else
+                {
+                    m = double.Parse(parts[0], System.Globalization.CultureInfo.InvariantCulture);
+                    sec = double.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture);
+                }
+            }
+            catch (FormatException)
+            {
+                throw new ArgumentException(
+                    $"Invalid '{propName}' value: '{raw}'. Expected ms (e.g. '200'), seconds ('0.2s'), or 'hh:mm:ss.fff'.");
+            }
+            var totalMs = (h * 3600 + m * 60 + sec) * 1000;
+            if (totalMs < 0)
+                throw new ArgumentException($"Invalid '{propName}' value: '{raw}'. Must be non-negative.");
+            return ((long)Math.Round(totalMs)).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        // suffix: ms / s
+        double scale = 1.0;
+        var body = s;
+        if (s.EndsWith("ms", StringComparison.OrdinalIgnoreCase))
+        { body = s[..^2].Trim(); scale = 1.0; }
+        else if (s.EndsWith("s", StringComparison.OrdinalIgnoreCase))
+        { body = s[..^1].Trim(); scale = 1000.0; }
+
+        if (!double.TryParse(body, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var n) || n < 0)
+            throw new ArgumentException(
+                $"Invalid '{propName}' value: '{raw}'. Expected ms (e.g. '200'), seconds ('0.2s'), or 'hh:mm:ss.fff'.");
+        return ((long)Math.Round(n * scale)).ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
 }

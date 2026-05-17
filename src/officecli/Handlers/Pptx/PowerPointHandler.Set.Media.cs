@@ -743,7 +743,10 @@ public partial class PowerPointHandler
                     if (p14Media != null)
                     {
                         var trim = p14Media.MediaTrim ?? (p14Media.MediaTrim = new DocumentFormat.OpenXml.Office2010.PowerPoint.MediaTrim());
-                        trim.Start = value;
+                        // CONSISTENCY(media-trim-normalize): mirror Add.Media —
+                        // PowerPoint rejects timestamp literals as @st, so we
+                        // always emit ms-int on the wire.
+                        trim.Start = NormalizeMediaTimeMs(value, "trimStart");
                     }
                     break;
                 }
@@ -754,7 +757,7 @@ public partial class PowerPointHandler
                     if (p14Media != null)
                     {
                         var trim = p14Media.MediaTrim ?? (p14Media.MediaTrim = new DocumentFormat.OpenXml.Office2010.PowerPoint.MediaTrim());
-                        trim.End = value;
+                        trim.End = NormalizeMediaTimeMs(value, "trimEnd");
                     }
                     break;
                 }
