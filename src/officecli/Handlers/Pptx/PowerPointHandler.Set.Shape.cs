@@ -54,11 +54,60 @@ public partial class PowerPointHandler
         var runIdx = int.Parse(paraRunMatch.Groups[4].Value);
 
         var (slidePart, shape) = ResolveShape(slideIdx, shapeIdx);
+        return SetParagraphRunOnShape(slidePart, shape, paraIdx, runIdx, properties);
+    }
+
+
+    // CONSISTENCY(placeholder-paragraph-path): /slide[N]/placeholder[X]/paragraph[K]
+    // shares the same paragraph/run setter as the /shape[M]/paragraph[K] form.
+    // ResolvePlaceholderShape materializes layout-inherited placeholders so
+    // the slide-level <p:sp> exists before we navigate into its txBody.
+    private List<string> SetPlaceholderParagraphByPath(Match phParaMatch, Dictionary<string, string> properties)
+    {
+        var slideIdx = int.Parse(phParaMatch.Groups[1].Value);
+        var phId = phParaMatch.Groups[2].Value;
+        var paraIdx = int.Parse(phParaMatch.Groups[3].Value);
+
+        var slideParts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > slideParts.Count)
+            throw new ArgumentException($"Slide {slideIdx} not found (total: {slideParts.Count})");
+        var slidePart = slideParts[slideIdx - 1];
+        var shape = ResolvePlaceholderShape(slidePart, phId);
+        return SetParagraphOnShape(slidePart, shape, paraIdx, properties);
+    }
+
+    private List<string> SetPlaceholderParagraphRunByPath(Match phParaRunMatch, Dictionary<string, string> properties)
+    {
+        var slideIdx = int.Parse(phParaRunMatch.Groups[1].Value);
+        var phId = phParaRunMatch.Groups[2].Value;
+        var paraIdx = int.Parse(phParaRunMatch.Groups[3].Value);
+        var runIdx = int.Parse(phParaRunMatch.Groups[4].Value);
+
+        var slideParts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > slideParts.Count)
+            throw new ArgumentException($"Slide {slideIdx} not found (total: {slideParts.Count})");
+        var slidePart = slideParts[slideIdx - 1];
+        var shape = ResolvePlaceholderShape(slidePart, phId);
+        return SetParagraphRunOnShape(slidePart, shape, paraIdx, runIdx, properties);
+    }
+
+
+    private List<string> SetParagraphByPath(Match paraMatch, Dictionary<string, string> properties)
+    {
+        var slideIdx = int.Parse(paraMatch.Groups[1].Value);
+        var shapeIdx = int.Parse(paraMatch.Groups[2].Value);
+        var paraIdx = int.Parse(paraMatch.Groups[3].Value);
+
+        var (slidePart, shape) = ResolveShape(slideIdx, shapeIdx);
+        return SetParagraphOnShape(slidePart, shape, paraIdx, properties);
+    }
+
+    private List<string> SetParagraphRunOnShape(SlidePart slidePart, Shape shape, int paraIdx, int runIdx, Dictionary<string, string> properties)
+    {
         var paragraphs = shape.TextBody?.Elements<Drawing.Paragraph>().ToList()
             ?? throw new ArgumentException("Shape has no text body");
         if (paraIdx < 1 || paraIdx > paragraphs.Count)
             throw new ArgumentException($"Paragraph {paraIdx} not found (shape has {paragraphs.Count} paragraphs)");
-
         var para = paragraphs[paraIdx - 1];
         var paraRuns = para.Elements<Drawing.Run>().ToList();
         if (runIdx < 1 || runIdx > paraRuns.Count)
@@ -77,14 +126,8 @@ public partial class PowerPointHandler
         return unsupported;
     }
 
-
-    private List<string> SetParagraphByPath(Match paraMatch, Dictionary<string, string> properties)
+    private List<string> SetParagraphOnShape(SlidePart slidePart, Shape shape, int paraIdx, Dictionary<string, string> properties)
     {
-        var slideIdx = int.Parse(paraMatch.Groups[1].Value);
-        var shapeIdx = int.Parse(paraMatch.Groups[2].Value);
-        var paraIdx = int.Parse(paraMatch.Groups[3].Value);
-
-        var (slidePart, shape) = ResolveShape(slideIdx, shapeIdx);
         var paragraphs = shape.TextBody?.Elements<Drawing.Paragraph>().ToList()
             ?? throw new ArgumentException("Shape has no text body");
         if (paraIdx < 1 || paraIdx > paragraphs.Count)
