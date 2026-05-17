@@ -45,6 +45,39 @@ internal static class OleHelper
     }
 
     /// <summary>
+    /// Map a ProgID to the document family it claims to host (word / excel /
+    /// powerpoint / package). Used to detect a mismatch between a freshly
+    /// supplied progId and the embedded part's actual MIME — flipping progId
+    /// to "Word.Document.12" while the embedded part is still a spreadsheet
+    /// produces an OOXML file Office cannot activate.
+    /// </summary>
+    public static string ProgIdFamily(string? progId)
+    {
+        if (string.IsNullOrEmpty(progId)) return "unknown";
+        var p = progId.ToLowerInvariant();
+        if (p.StartsWith("word.")) return "word";
+        if (p.StartsWith("excel.")) return "excel";
+        if (p.StartsWith("powerpoint.")) return "powerpoint";
+        if (p == "package" || p.StartsWith("package.")) return "package";
+        return "other";
+    }
+
+    /// <summary>
+    /// Map an embedded part's MIME content-type to the same family axis as
+    /// <see cref="ProgIdFamily"/> so the two can be compared.
+    /// </summary>
+    public static string ContentTypeFamily(string? contentType)
+    {
+        if (string.IsNullOrEmpty(contentType)) return "unknown";
+        var c = contentType.ToLowerInvariant();
+        if (c.Contains("wordprocessingml")) return "word";
+        if (c.Contains("spreadsheetml")) return "excel";
+        if (c.Contains("presentationml")) return "powerpoint";
+        if (c.Contains("oleobject") || c.Contains("package")) return "package";
+        return "other";
+    }
+
+    /// <summary>
     /// Classifier for the content-type axis: Office files get an
     /// <see cref="EmbeddedPackagePart"/> with the matching OOXML MIME,
     /// everything else gets a generic <see cref="EmbeddedObjectPart"/>.

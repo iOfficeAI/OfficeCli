@@ -632,9 +632,43 @@ public partial class PowerPointHandler
                     break;
                 }
                 case "progid":
+                {
                     OfficeCli.Core.OleHelper.ValidateProgId(value);
+                    // Reject a solo progId change that would leave the embedded
+                    // part's MIME inconsistent with the new ProgID label —
+                    // Office refuses to activate such embeds (progId says Word,
+                    // payload is still an xlsx package, etc.). Caller must
+                    // re-supply src= in the same set call to migrate the
+                    // payload too. Skip when src= is in this same dict — the
+                    // src case above already attached a fresh part.
+                    if (!properties.ContainsKey("src") && !properties.ContainsKey("path"))
+                    {
+                        var newFam = OfficeCli.Core.OleHelper.ProgIdFamily(value);
+                        string? oldContentType = null;
+                        if (oleEl.Id?.Value is string relId && !string.IsNullOrEmpty(relId))
+                        {
+                            try
+                            {
+                                var part = oleSlidePart.GetPartById(relId);
+                                oldContentType = part?.ContentType;
+                            }
+                            catch { /* missing part — skip the guard */ }
+                        }
+                        var oldFam = OfficeCli.Core.OleHelper.ContentTypeFamily(oldContentType);
+                        if (newFam != "unknown" && newFam != "other"
+                            && oldFam != "unknown" && oldFam != "other"
+                            && newFam != oldFam && oldFam != "package")
+                        {
+                            throw new ArgumentException(
+                                $"progId='{value}' ({newFam}) does not match the embedded payload " +
+                                $"(contentType={oldContentType}, family={oldFam}). " +
+                                $"Re-supply both keys in the same set call, e.g. " +
+                                $"--prop src=<new-{newFam}-file> --prop progId={value}.");
+                        }
+                    }
                     oleEl.ProgId = value;
                     break;
+                }
                 case "name":
                     oleEl.Name = value;
                     break;
