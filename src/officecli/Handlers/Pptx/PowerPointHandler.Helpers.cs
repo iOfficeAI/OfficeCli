@@ -585,11 +585,22 @@ public partial class PowerPointHandler
         if (acMorph != null)
         {
             foreach (var trans in acMorph.Descendants().Where(d => d.LocalName == "transition"))
-                trans.SetAttribute(new OpenXmlAttribute("", "advClick", null!, value ? "1" : "0"));
+            {
+                // Schema default for CT_SlideTransition @advClick is true. Strip the attribute
+                // when value matches default to avoid writing redundant XML on round-trip.
+                if (value)
+                    trans.RemoveAttribute("advClick", "");
+                else
+                    trans.SetAttribute(new OpenXmlAttribute("", "advClick", null!, "0"));
+            }
         }
         else
         {
-            FindOrCreateTransition(slide).AdvanceOnClick = value;
+            var trans = FindOrCreateTransition(slide);
+            if (value)
+                trans.AdvanceOnClick = null; // schema default = true; strip attribute
+            else
+                trans.AdvanceOnClick = false;
         }
     }
 
