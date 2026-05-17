@@ -138,28 +138,42 @@
     },
     "slideWidth": {
       "type": "string",
-      "description": "slide width from <p:sldSz/@cx>, formatted via FormatEmu.",
+      "aliases": ["width"],
+      "description": "slide width from <p:sldSz/@cx>, formatted via FormatEmu. Set accepts unit-qualified or raw EMU; setting width or height alone switches @type to 'custom'.",
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
+      "examples": [
+        "--prop slideWidth=30cm",
+        "--prop slideWidth=720pt"
+      ],
       "readback": "unit-qualified length string (e.g. '25.4cm', '720pt')",
       "enforcement": "report"
     },
     "slideHeight": {
       "type": "string",
-      "description": "slide height from <p:sldSz/@cy>, formatted via FormatEmu.",
+      "aliases": ["height"],
+      "description": "slide height from <p:sldSz/@cy>, formatted via FormatEmu. Set accepts unit-qualified or raw EMU; setting width or height alone switches @type to 'custom'.",
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
+      "examples": [
+        "--prop slideHeight=20cm",
+        "--prop slideHeight=540pt"
+      ],
       "readback": "unit-qualified length string (e.g. '19.05cm', '540pt')",
       "enforcement": "report"
     },
     "slideSize": {
       "type": "string",
-      "description": "slide size preset name derived from <p:sldSz/@type>.",
+      "description": "slide size preset name derived from <p:sldSz/@type>. Set accepts any preset name and rewrites @cx/@cy + @type accordingly.",
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
+      "examples": [
+        "--prop slideSize=widescreen",
+        "--prop slideSize=a4"
+      ],
       "readback": "preset name: widescreen | standard | 16:10 | a4 | a3 | letter | b4 | b5 | 35mm | overhead | banner | ledger | custom",
       "enforcement": "report"
     },
@@ -183,64 +197,91 @@
     },
     "compatMode": {
       "type": "bool",
+      "aliases": ["compatibilitymode"],
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
       "description": "presentation @compatMode flag — true when the file is in legacy-compatibility mode.",
+      "examples": [
+        "--prop compatMode=true"
+      ],
       "readback": "true when compat mode is on",
       "enforcement": "report"
     },
     "firstSlideNum": {
       "type": "number",
+      "aliases": ["firstslidenumber"],
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
       "description": "presentation @firstSlideNum — slide number of the first slide (default 1).",
+      "examples": [
+        "--prop firstSlideNum=10"
+      ],
       "readback": "integer",
       "enforcement": "report"
     },
     "print.colorMode": {
       "type": "string",
+      "aliases": ["printcolormode"],
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
-      "description": "PrintingProperties color mode (e.g. clr | gray | bw).",
-      "readback": "color mode token",
+      "description": "PrintingProperties color mode. Set accepts: color|clr, grayscale|gray, blackAndWhite|bw.",
+      "examples": [
+        "--prop print.colorMode=gray",
+        "--prop print.colorMode=color"
+      ],
+      "readback": "color mode token (clr | gray | bw)",
       "enforcement": "report"
     },
     "print.frameSlides": {
       "type": "bool",
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
       "description": "PrintingProperties FrameSlides flag — print a thin border around each slide.",
+      "examples": [
+        "--prop print.frameSlides=true"
+      ],
       "readback": "true when set",
       "enforcement": "report"
     },
     "print.hiddenSlides": {
       "type": "bool",
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
       "description": "PrintingProperties HiddenSlides flag — include hidden slides in printed output.",
+      "examples": [
+        "--prop print.hiddenSlides=true"
+      ],
       "readback": "true when set",
       "enforcement": "report"
     },
     "print.what": {
       "type": "string",
+      "aliases": ["printwhat"],
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
-      "description": "PrintingProperties PrintWhat — what gets printed (slides, handouts1/2/3/4/6/9, notes, outline).",
+      "description": "PrintingProperties PrintWhat — what gets printed (slides, handouts, notes, outline).",
+      "examples": [
+        "--prop print.what=handouts",
+        "--prop print.what=notes"
+      ],
       "readback": "print-what enum inner text",
       "enforcement": "report"
     },
     "print.scaleToFitPaper": {
       "type": "bool",
       "add": false,
-      "set": false,
+      "set": true,
       "get": true,
       "description": "PrintingProperties ScaleToFitPaper flag — scale slides to fill the paper page.",
+      "examples": [
+        "--prop print.scaleToFitPaper=true"
+      ],
       "readback": "true when set",
       "enforcement": "report"
     },
