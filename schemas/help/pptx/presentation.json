@@ -221,6 +221,26 @@
       "readback": "integer",
       "enforcement": "report"
     },
+    "rtl": {
+      "type": "bool",
+      "add": false,
+      "set": true,
+      "get": false,
+      "description": "Set-only input alias for presentation @rtl (right-to-left reading order). Get exposes the same OOXML attribute under the canonical key `direction` ('rtl' when true), matching docx convention. Asymmetric by design — set with `rtl=true|false`, read via `direction`.",
+      "examples": [
+        "--prop rtl=true"
+      ],
+      "enforcement": "report"
+    },
+    "direction": {
+      "type": "string",
+      "add": false,
+      "set": false,
+      "get": true,
+      "description": "Get-only canonical key for presentation reading direction. Emits 'rtl' when @rtl=true is set; absent otherwise. To set, use the input-only `rtl=true|false` key.",
+      "readback": "'rtl' when right-to-left; key absent for default left-to-right",
+      "enforcement": "report"
+    },
     "print.colorMode": {
       "type": "string",
       "aliases": ["printcolormode"],
