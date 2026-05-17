@@ -478,18 +478,36 @@ public partial class PowerPointHandler
             && shape.TextBody.Descendants().Any(e => e.LocalName == "oMath" || e.LocalName == "oMathPara"
                 || (e.LocalName == "m" && e.NamespaceUri == "http://schemas.microsoft.com/office/drawing/2010/main"));
 
+        // Read <p:ph> once: schema declares phType/phIndex as get:true with
+        // readback. Previously only IsTitle peeked at it for Type discrimination,
+        // so phType=body/subTitle/date/footer/slidenum/header/picture/chart/
+        // table/diagram/media/obj/clipArt all collapsed to Type="textbox" with
+        // no Format["phType"]. Now: non-title placeholders surface as
+        // Type="placeholder", and every placeholder (incl. title) emits
+        // Format["phType"] in the human-readable form ParsePlaceholderType
+        // accepts on input — so it round-trips through Add.
+        var phElemForNode = shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
+            ?.GetFirstChild<PlaceholderShape>();
+        var phTypeStr = phElemForNode != null ? FormatPlaceholderType(phElemForNode.Type?.Value) : null;
+        var isPlaceholder = phElemForNode != null;
+
         var shapePathSeg = BuildElementPathSegment("shape", shape, shapeIdx);
         var basePath = parentPathPrefix ?? $"/slide[{slideNum}]";
         var shapePath = $"{basePath}/{shapePathSeg}";
         var node = new DocumentNode
         {
             Path = shapePath,
-            Type = isTitle ? "title" : isEquation ? "equation" : "textbox",
+            Type = isTitle ? "title"
+                : isEquation ? "equation"
+                : isPlaceholder ? "placeholder"
+                : "textbox",
             Text = text,
             Preview = string.IsNullOrEmpty(text) ? name : (text.Length > 50 ? text[..50] + "..." : text)
         };
 
         node.Format["name"] = name;
+        if (phTypeStr != null) node.Format["phType"] = phTypeStr;
+        if (phElemForNode?.Index?.Value is uint phIdx) node.Format["phIndex"] = (int)phIdx;
 
         // Cross-handler `evaluated` protocol — surface unevaluated a:fld
         // descendants on the shape node so agents can find them via Get

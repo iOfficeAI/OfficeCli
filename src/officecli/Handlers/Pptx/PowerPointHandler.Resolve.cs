@@ -187,6 +187,32 @@ public partial class PowerPointHandler
         return parts.Count > 0 ? string.Join(", ", parts) : "(empty slide)";
     }
 
+    // Inverse of ParsePlaceholderType — picks the canonical human-readable
+    // alias so Get's Format["phType"] round-trips through Add's phType prop.
+    // Null/absent <p:ph type=…> defaults to "body" per ECMA-376 (§19.7.10
+    // says omitting the attr is equivalent to type="body"). The Title vs
+    // CenteredTitle distinction is preserved.
+    private static string? FormatPlaceholderType(PlaceholderValues? value)
+    {
+        if (value == null) return "body";
+        if (value.Value == PlaceholderValues.Title) return "title";
+        if (value.Value == PlaceholderValues.CenteredTitle) return "ctrTitle";
+        if (value.Value == PlaceholderValues.Body) return "body";
+        if (value.Value == PlaceholderValues.SubTitle) return "subtitle";
+        if (value.Value == PlaceholderValues.DateAndTime) return "date";
+        if (value.Value == PlaceholderValues.Footer) return "footer";
+        if (value.Value == PlaceholderValues.SlideNumber) return "slidenum";
+        if (value.Value == PlaceholderValues.Header) return "header";
+        if (value.Value == PlaceholderValues.Object) return "obj";
+        if (value.Value == PlaceholderValues.Chart) return "chart";
+        if (value.Value == PlaceholderValues.Table) return "table";
+        if (value.Value == PlaceholderValues.ClipArt) return "clipart";
+        if (value.Value == PlaceholderValues.Diagram) return "diagram";
+        if (value.Value == PlaceholderValues.Media) return "media";
+        if (value.Value == PlaceholderValues.Picture) return "picture";
+        return value.Value.ToString();
+    }
+
     private static PlaceholderValues? ParsePlaceholderType(string name)
     {
         return name.ToLowerInvariant() switch
