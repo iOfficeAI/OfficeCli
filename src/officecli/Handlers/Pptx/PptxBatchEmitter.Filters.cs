@@ -58,6 +58,16 @@ public static partial class PptxBatchEmitter
             };
             if (s.Length > 0) result[key] = s;
         }
+        // Get emits both fill=gradient (type marker) and gradient=<spec> (params).
+        // ApplyShapeFill would try parsing "gradient" as a color and reject; the
+        // spec via gradient= already drives the fill. Same logic for pattern.
+        if (result.TryGetValue("fill", out var fillVal))
+        {
+            if (fillVal.Equals("gradient", StringComparison.OrdinalIgnoreCase) && result.ContainsKey("gradient"))
+                result.Remove("fill");
+            else if (fillVal.Equals("pattern", StringComparison.OrdinalIgnoreCase) && result.ContainsKey("pattern"))
+                result.Remove("fill");
+        }
 
         return result;
     }

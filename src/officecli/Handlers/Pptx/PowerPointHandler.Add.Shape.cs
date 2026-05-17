@@ -387,13 +387,15 @@ public partial class PowerPointHandler
                     {
                         cxEmu = ParseEmu(wStr);
                         if (cxEmu < 0) throw new ArgumentException($"Negative width is not allowed: '{wStr}'.");
-                        if (cxEmu == 0) throw new ArgumentException($"Zero width is not allowed: '{wStr}'. PowerPoint hides 0×0 shapes; use a small positive value (e.g. '0.1cm') if a near-invisible shape is intended.");
+                        // Zero is legitimate (PowerPoint hides 0×0 shapes — used for invisible
+                        // decorative lines). Dump-replay must round-trip zero-sized shapes that
+                        // were authored that way; the prior strict reject broke real-world
+                        // round-trips.
                     }
                     if (properties.TryGetValue("height", out var hStr) || properties.TryGetValue("h", out hStr))
                     {
                         cyEmu = ParseEmu(hStr);
                         if (cyEmu < 0) throw new ArgumentException($"Negative height is not allowed: '{hStr}'.");
-                        if (cyEmu == 0) throw new ArgumentException($"Zero height is not allowed: '{hStr}'. PowerPoint hides 0×0 shapes; use a small positive value (e.g. '0.1cm') if a near-invisible shape is intended.");
                     }
 
                     var xfrm = new Drawing.Transform2D

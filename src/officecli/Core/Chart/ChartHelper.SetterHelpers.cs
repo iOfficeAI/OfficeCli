@@ -488,7 +488,10 @@ internal static partial class ChartHelper
 
             case "invertifneg" or "invertifnegative":
                 ser.RemoveAllChildren<C.InvertIfNegative>();
-                ser.AppendChild(new C.InvertIfNegative { Val = ParseHelpers.IsTruthy(value) });
+                // CT_BarSer/CT_AreaSer/CT_PieSer all require invertIfNegative
+                // immediately after spPr — append would drop it past dPt/dLbls
+                // and render as no-op (see InsertSeriesChildInOrder doc).
+                InsertSeriesChildInOrder(ser, new C.InvertIfNegative { Val = ParseHelpers.IsTruthy(value) });
                 return true;
 
             case "errbars" or "errorbars":
@@ -868,12 +871,20 @@ internal static partial class ChartHelper
 
     /// <summary>
     /// Insert a child into a chart series (CT_*Ser) at the correct schema position.
-    /// Common suffix order: ..., dLbls, trendline, errBars, cat/xVal, val/yVal, smooth, extLst
+    /// Schema order (CT_BarSer is the strictest; other Ser types are subsequences):
+    ///   idx, order, tx, spPr, invertIfNegative, pictureOptions, dPt, dLbls,
+    ///   trendline, errBars, cat, val, xVal, yVal, bubbleSize, bubble3D, shape,
+    ///   smooth, extLst
+    /// PowerPoint silently drops out-of-order children (e.g. invertIfNegative
+    /// appended after dLbls renders as if absent — negative bars stay un-inverted
+    /// and a stray frame leaks; validator emits "unexpected child element
+    /// 'invertIfNegative'").
     /// </summary>
     internal static void InsertSeriesChildInOrder(OpenXmlCompositeElement ser, OpenXmlElement child)
     {
         string[] insertBeforeNames = child.LocalName switch
         {
+            "invertIfNegative" => ["pictureOptions", "dPt", "dLbls", "trendline", "errBars", "cat", "val", "xVal", "yVal", "bubbleSize", "bubble3D", "shape", "smooth", "extLst"],
             "dLbls" => ["trendline", "errBars", "cat", "val", "xVal", "yVal", "bubbleSize", "bubble3D", "smooth", "extLst"],
             "trendline" => ["errBars", "cat", "val", "xVal", "yVal", "bubbleSize", "bubble3D", "smooth", "extLst"],
             "errBars" => ["cat", "val", "xVal", "yVal", "bubbleSize", "bubble3D", "smooth", "extLst"],

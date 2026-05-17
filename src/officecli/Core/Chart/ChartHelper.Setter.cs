@@ -1401,7 +1401,7 @@ internal static partial class ChartHelper
                     foreach (var ser in plotArea2.Descendants<OpenXmlCompositeElement>().Where(e => e.LocalName == "ser"))
                     {
                         ser.RemoveAllChildren<C.InvertIfNegative>();
-                        ser.AppendChild(new C.InvertIfNegative { Val = inv });
+                        InsertSeriesChildInOrder(ser, new C.InvertIfNegative { Val = inv });
                     }
                     break;
                 }

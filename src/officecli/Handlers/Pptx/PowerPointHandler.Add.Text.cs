@@ -170,14 +170,39 @@ public partial class PowerPointHandler
 
     private string AddParagraph(string parentPath, int? index, Dictionary<string, string> properties)
     {
-                // Add a paragraph to an existing shape: /slide[N]/shape[M]
+                // Add a paragraph to an existing shape or placeholder:
+                //   /slide[N]/shape[M] or /slide[N]/placeholder[X]
+                // CONSISTENCY(placeholder-paragraph-path): same dual-route the
+                // Set side ships at PowerPointHandler.Set.Shape.cs, so dump
+                // emit can target either form via positional ordinals.
                 var paraParentMatch = Regex.Match(parentPath, @"^/slide\[(\d+)\]/shape\[(\d+)\]$");
-                if (!paraParentMatch.Success)
-                    throw new ArgumentException("Paragraphs must be added to a shape: /slide[N]/shape[M]");
+                var paraPhMatch = paraParentMatch.Success ? null : Regex.Match(parentPath, @"^/slide\[(\d+)\]/placeholder\[(\w+)\]$");
+                if (!paraParentMatch.Success && (paraPhMatch == null || !paraPhMatch.Success))
+                    throw new ArgumentException("Paragraphs must be added to a shape or placeholder: /slide[N]/shape[M] or /slide[N]/placeholder[X]");
 
-                var paraSlideIdx = int.Parse(paraParentMatch.Groups[1].Value);
-                var paraShapeIdx = int.Parse(paraParentMatch.Groups[2].Value);
-                var (paraSlidePart, paraShape) = ResolveShape(paraSlideIdx, paraShapeIdx);
+                SlidePart paraSlidePart;
+                Shape paraShape;
+                int paraSlideIdx;
+                int paraShapeIdx;
+                if (paraParentMatch.Success)
+                {
+                    paraSlideIdx = int.Parse(paraParentMatch.Groups[1].Value);
+                    paraShapeIdx = int.Parse(paraParentMatch.Groups[2].Value);
+                    (paraSlidePart, paraShape) = ResolveShape(paraSlideIdx, paraShapeIdx);
+                }
+                else
+                {
+                    paraSlideIdx = int.Parse(paraPhMatch!.Groups[1].Value);
+                    var phToken = paraPhMatch.Groups[2].Value;
+                    var slideParts = GetSlideParts().ToList();
+                    if (paraSlideIdx < 1 || paraSlideIdx > slideParts.Count)
+                        throw new ArgumentException($"Slide {paraSlideIdx} not found (total: {slideParts.Count})");
+                    paraSlidePart = slideParts[paraSlideIdx - 1];
+                    paraShape = ResolvePlaceholderShape(paraSlidePart, phToken);
+                    // Synthetic index for return path — placeholder positional
+                    // lookup happens by Set's path resolver, this is informational.
+                    paraShapeIdx = 1;
+                }
 
                 var textBody = paraShape.TextBody
                     ?? throw new InvalidOperationException("Shape has no text body");
