@@ -22,6 +22,15 @@ public partial class PowerPointHandler
         // we count manually and emit the numeric glyph inline.
         var autoNumCounters = new Dictionary<string, int>();
         string? lastAutoKey = null;
+        // Resolve the theme font that runs in this textbody should inherit when
+        // they carry no explicit Latin typeface (or carry the theme reference
+        // "+mj-lt" / "+mn-lt"). Title placeholders inherit the major (heading)
+        // typeface; everything else inherits minor (body). GetTextDefaults emits
+        // only the body font at slide scope, so without this fallback title
+        // placeholders silently render in the body face in HTML preview while
+        // PowerPoint renders them in the heading face.
+        bool isTitle = IsTitlePlaceholder(placeholderShape);
+        string? themeFontFallback = ResolveThemeFontTypeface(placeholderPart, isTitle ? "major" : "minor");
         foreach (var para in textBody.Elements<Drawing.Paragraph>())
         {
             // Resolve per-paragraph font size based on paragraph level
@@ -206,7 +215,7 @@ public partial class PowerPointHandler
             {
                 foreach (var run in runs)
                 {
-                    RenderRun(sb, run, themeColors, defaultFontSizeHundredths, placeholderPart);
+                    RenderRun(sb, run, themeColors, defaultFontSizeHundredths, placeholderPart, themeFontFallback);
                 }
             }
 
@@ -219,7 +228,7 @@ public partial class PowerPointHandler
     }
 
     private static void RenderRun(StringBuilder sb, Drawing.Run run, Dictionary<string, string> themeColors,
-        int? defaultFontSizeHundredths = null, OpenXmlPart? part = null)
+        int? defaultFontSizeHundredths = null, OpenXmlPart? part = null, string? themeFontFallback = null)
     {
         var text = run.Text?.Text ?? "";
         if (string.IsNullOrEmpty(text)) return;
@@ -244,13 +253,21 @@ public partial class PowerPointHandler
             catch { }
         }
 
+        // Font. Theme references (typeface starts with "+") are resolved to
+        // their concrete major/minor face via the textbody-supplied fallback;
+        // runs with no <a:rPr> at all (common on auto-generated title text)
+        // also pick up the fallback so a /theme bodyFont / headingFont change
+        // is visible in HTML preview.
+        var runFont = rp?.GetFirstChild<Drawing.LatinFont>()?.Typeface?.Value
+            ?? rp?.GetFirstChild<Drawing.EastAsianFont>()?.Typeface?.Value;
+        string? resolvedRunFont = (runFont != null && !runFont.StartsWith("+", StringComparison.Ordinal))
+            ? runFont
+            : themeFontFallback;
+        if (!string.IsNullOrEmpty(resolvedRunFont))
+            styles.Add(CssFontFamilyWithFallback(resolvedRunFont));
+
         if (rp != null)
         {
-            // Font
-            var font = rp.GetFirstChild<Drawing.LatinFont>()?.Typeface?.Value
-                ?? rp.GetFirstChild<Drawing.EastAsianFont>()?.Typeface?.Value;
-            if (font != null && !font.StartsWith("+", StringComparison.Ordinal))
-                styles.Add(CssFontFamilyWithFallback(font));
 
             // Size — use explicit run size, fall back to placeholder default
             if (rp.FontSize?.HasValue == true)
@@ -462,6 +479,41 @@ public partial class PowerPointHandler
             n /= 26;
         }
         return sb.ToString();
+    }
+
+    // True when the shape is a title-class placeholder (title or centeredTitle).
+    // Title placeholders inherit the theme major (heading) face; everything else
+    // inherits minor (body). SubTitle uses the minor face in PowerPoint, so it
+    // is intentionally NOT included here.
+    private static bool IsTitlePlaceholder(Shape? shape)
+    {
+        var ph = shape?.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
+            ?.GetFirstChild<PlaceholderShape>();
+        if (ph?.Type?.HasValue != true) return false;
+        var t = ph.Type.Value;
+        return t == PlaceholderValues.Title || t == PlaceholderValues.CenteredTitle;
+    }
+
+    // Resolve the theme major/minor Latin typeface for the slide owning `part`.
+    // Returns null when no theme is reachable (e.g. orphan text body, or a part
+    // whose master->theme chain is incomplete). kind is "major" or "minor".
+    private static string? ResolveThemeFontTypeface(OpenXmlPart? part, string kind)
+    {
+        var theme = part switch
+        {
+            SlidePart sp => sp.SlideLayoutPart?.SlideMasterPart?.ThemePart?.Theme,
+            SlideLayoutPart lp => lp.SlideMasterPart?.ThemePart?.Theme,
+            SlideMasterPart mp => mp.ThemePart?.Theme,
+            _ => null,
+        };
+        var fontScheme = theme?.ThemeElements?.FontScheme;
+        var typeface = kind == "major"
+            ? fontScheme?.MajorFont?.GetFirstChild<Drawing.LatinFont>()?.Typeface?.Value
+            : fontScheme?.MinorFont?.GetFirstChild<Drawing.LatinFont>()?.Typeface?.Value;
+        if (string.IsNullOrEmpty(typeface)) return null;
+        // Theme entries are sometimes self-referential ("+mj-lt"); skip those.
+        if (typeface.StartsWith("+", StringComparison.Ordinal)) return null;
+        return typeface;
     }
 
     private static string ToRoman(int n)
