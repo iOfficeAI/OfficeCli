@@ -502,6 +502,13 @@ public partial class PowerPointHandler
         var sp3d = spPr.GetFirstChild<Drawing.Shape3DType>();
         if (sp3d != null) return sp3d;
 
+        // PowerPoint silently renders sp3d as flat 2D unless a scene3d
+        // sibling supplies camera + light rig. Auto-inject default scene3d
+        // (orthographicFront camera + threePt light rig) on first sp3d emit
+        // so users get visible 3D from bare bevel=/depth=/material= props
+        // without having to know about lighting=.
+        EnsureScene3D(spPr);
+
         sp3d = new Drawing.Shape3DType();
         // Schema order: scene3d → sp3d → extLst
         // Insert before extLst if it exists, otherwise append
