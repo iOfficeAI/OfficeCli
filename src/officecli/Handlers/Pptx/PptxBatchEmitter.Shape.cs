@@ -150,12 +150,20 @@ public static partial class PptxBatchEmitter
         foreach (var para in paragraphs)
         {
             pIdx++;
-            EmitParagraph(ppt, para, shapeParent, items);
+            // PPTX-SPECIFIC(shape-auto-empty-paragraph): AddShape / AddTextbox /
+            // AddPlaceholder seed the txBody with one empty <a:p>. If we emit
+            // every paragraph as `add`, replay produces an off-by-one empty
+            // paragraph[1] that accumulates across round-trips. So the first
+            // paragraph under a shape rewrites the seeded one via `set`, and
+            // subsequent paragraphs append via `add`. docx body has no
+            // equivalent auto-empty seed (AddSection initializes an empty body
+            // and AddParagraph appends), so WordBatchEmitter uses pure `add`.
+            EmitParagraph(ppt, para, shapeParent, items, firstParagraph: pIdx == 1);
         }
     }
 
     private static void EmitParagraph(PowerPointHandler ppt, DocumentNode paraNode, string shapeParent,
-                                      List<BatchItem> items)
+                                      List<BatchItem> items, bool firstParagraph)
     {
         var props = FilterEmittableProps(paraNode.Format);
         var runs = (paraNode.Children ?? new List<DocumentNode>())
@@ -176,6 +184,44 @@ public static partial class PptxBatchEmitter
             }
             if (!string.IsNullOrEmpty(runs[0].Text))
                 props["text"] = runs[0].Text!;
+            if (firstParagraph)
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "set",
+                    Path = $"{shapeParent}/paragraph[1]",
+                    Props = props.Count > 0 ? props : null,
+                });
+            }
+            else
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "add",
+                    Parent = shapeParent,
+                    Type = "paragraph",
+                    Props = props.Count > 0 ? props : null,
+                });
+            }
+            return;
+        }
+
+        // Multi-run path: emit the paragraph empty (or with paragraph-level
+        // props only) then a run per child. First paragraph rewrites the
+        // shape's auto-seeded empty <a:p> via `set`; later paragraphs append.
+        string paraParent;
+        if (firstParagraph)
+        {
+            items.Add(new BatchItem
+            {
+                Command = "set",
+                Path = $"{shapeParent}/paragraph[1]",
+                Props = props.Count > 0 ? props : null,
+            });
+            paraParent = $"{shapeParent}/paragraph[1]";
+        }
+        else
+        {
             items.Add(new BatchItem
             {
                 Command = "add",
@@ -183,24 +229,13 @@ public static partial class PptxBatchEmitter
                 Type = "paragraph",
                 Props = props.Count > 0 ? props : null,
             });
-            return;
+            // Target parent path for runs is the just-emitted paragraph.
+            // PowerPointHandler accepts /slide[N]/shape[M]/paragraph[last()] —
+            // CONSISTENCY(path-last): docx uses the same construct on
+            // /body/p[last()].
+            paraParent = $"{shapeParent}/paragraph[last()]";
         }
 
-        // Multi-run path: emit the paragraph empty (or with paragraph-level
-        // props only) then a run per child.
-        items.Add(new BatchItem
-        {
-            Command = "add",
-            Parent = shapeParent,
-            Type = "paragraph",
-            Props = props.Count > 0 ? props : null,
-        });
-
-        // Target parent path for runs is the just-emitted paragraph.
-        // PowerPointHandler accepts /slide[N]/shape[M]/paragraph[last()] —
-        // CONSISTENCY(path-last): docx uses the same construct on
-        // /body/p[last()].
-        var paraParent = $"{shapeParent}/paragraph[last()]";
         foreach (var run in runs)
         {
             EmitRun(run, paraParent, items);
