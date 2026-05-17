@@ -188,6 +188,23 @@
       "readback": "one of: none | normal | shape",
       "enforcement": "report"
     },
+    "valign": {
+      "type": "enum",
+      "values": ["top", "center", "middle", "bottom"],
+      "description": "text vertical anchoring inside the textbox (a:bodyPr anchor). 'middle' is an input alias for 'center' — Get always reads back 'center'.",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop valign=middle", "--prop valign=bottom"],
+      "readback": "one of: top | center | bottom",
+      "enforcement": "strict"
+    },
+    "margin": {
+      "type": "length",
+      "description": "text body insets (a:bodyPr lIns/tIns/rIns/bIns). Single value applies to all four sides; CSS-style 4-value form is 'lIns,tIns,rIns,bIns'. '0' / '0cm' is a valid round-trip and is preserved (not collapsed to default).",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop margin=0.25cm", "--prop margin=0.2cm,0.5cm,0.2cm,0.5cm", "--prop margin=0"],
+      "readback": "single length (e.g. \"0.25cm\") when all four sides match, otherwise comma-separated 4-tuple",
+      "enforcement": "strict"
+    },
     "id": {
       "type": "number",
       "description": "OOXML shape id; source of the @id in the stable path /shape[@id=ID].",
