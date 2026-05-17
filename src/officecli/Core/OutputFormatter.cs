@@ -107,6 +107,17 @@ internal static class WarningContext
 [JsonSerializable(typeof(long))]
 [JsonSerializable(typeof(short))]
 [JsonSerializable(typeof(uint))]
+// OOXML UInt16Value/ByteValue/UInt32Value/SByteValue/UInt64Value frequently
+// land in DocumentNode.Format[] as boxed primitives (e.g. chart hole/skip/
+// rotateX/style/firstSliceAngle). Without these JsonSerializable hooks the
+// source-gen polymorphic writer throws JsonTypeInfo missing-metadata when
+// `get --json` hits a node carrying any of them. See R43-6.
+[JsonSerializable(typeof(ushort))]
+[JsonSerializable(typeof(byte))]
+[JsonSerializable(typeof(sbyte))]
+[JsonSerializable(typeof(ulong))]
+[JsonSerializable(typeof(float))]
+[JsonSerializable(typeof(decimal))]
 [JsonSerializable(typeof(double))]
 [JsonSerializable(typeof(string))]
 internal partial class AppJsonContext : JsonSerializerContext;
