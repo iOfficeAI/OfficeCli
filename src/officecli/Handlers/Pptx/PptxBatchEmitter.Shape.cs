@@ -15,7 +15,7 @@ public static partial class PptxBatchEmitter
     // per-shape.
 
     private static void EmitShape(PowerPointHandler ppt, DocumentNode shapeNode, string parentSlidePath,
-                                  List<BatchItem> items, SlideEmitContext ctx)
+                                  string replayPath, List<BatchItem> items, SlideEmitContext ctx)
     {
         // depth=3 so paragraph -> run -> any inline runs all materialize. The
         // single-run collapse heuristic needs the run nodes present to read
@@ -42,11 +42,11 @@ public static partial class PptxBatchEmitter
             Props = shapeProps.Count > 0 ? shapeProps : null,
         });
 
-        EmitTextBody(ppt, fullShape, items);
+        EmitTextBody(ppt, fullShape, replayPath, items);
     }
 
     private static void EmitPlaceholder(PowerPointHandler ppt, DocumentNode phNode, string parentSlidePath,
-                                        List<BatchItem> items, SlideEmitContext ctx)
+                                        string replayPath, List<BatchItem> items, SlideEmitContext ctx)
     {
         var full = ppt.Get(phNode.Path, depth: 3);
         var props = FilterEmittableProps(full.Format);
@@ -59,7 +59,7 @@ public static partial class PptxBatchEmitter
             Props = props.Count > 0 ? props : null,
         });
 
-        EmitTextBody(ppt, full, items);
+        EmitTextBody(ppt, full, replayPath, items);
     }
 
     private static void EmitConnector(PowerPointHandler ppt, DocumentNode cxnNode, string parentSlidePath,
@@ -78,7 +78,7 @@ public static partial class PptxBatchEmitter
     }
 
     private static void EmitGroup(PowerPointHandler ppt, DocumentNode grpNode, string parentSlidePath,
-                                  List<BatchItem> items, SlideEmitContext ctx)
+                                  string replayPath, List<BatchItem> items, SlideEmitContext ctx)
     {
         var full = ppt.Get(grpNode.Path);
         var props = FilterEmittableProps(full.Format);
@@ -94,10 +94,9 @@ public static partial class PptxBatchEmitter
         if (full.Children == null) return;
 
         // Group children resolve through the same dispatch as slide-level
-        // children, except the parent path is the group's emitted path.
-        // CONSISTENCY(pptx-group-flatten): Get already produces honest paths
-        // like /slide[N]/group[K]/shape[L] so child paths just round-trip.
-        var groupParent = grpNode.Path;
+        // children. Replay parent for the group's children is the group's
+        // positional path; children get fresh ordinals within the group scope.
+        var ord = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var child in full.Children)
         {
             switch (child.Type)
@@ -106,21 +105,25 @@ public static partial class PptxBatchEmitter
                 case "title":
                 case "shape":
                 case "equation":
-                    EmitShape(ppt, child, groupParent, items, ctx);
+                    ord["shape"] = ord.GetValueOrDefault("shape", 0) + 1;
+                    EmitShape(ppt, child, replayPath, $"{replayPath}/shape[{ord["shape"]}]", items, ctx);
                     break;
                 case "connector":
-                    EmitConnector(ppt, child, groupParent, items, ctx);
+                    ord["connector"] = ord.GetValueOrDefault("connector", 0) + 1;
+                    EmitConnector(ppt, child, replayPath, items, ctx);
                     break;
                 case "group":
-                    EmitGroup(ppt, child, groupParent, items, ctx);
+                    ord["group"] = ord.GetValueOrDefault("group", 0) + 1;
+                    EmitGroup(ppt, child, replayPath, $"{replayPath}/group[{ord["group"]}]", items, ctx);
                     break;
                 case "placeholder":
-                    EmitPlaceholder(ppt, child, groupParent, items, ctx);
+                    ord["placeholder"] = ord.GetValueOrDefault("placeholder", 0) + 1;
+                    EmitPlaceholder(ppt, child, replayPath, $"{replayPath}/placeholder[{ord["placeholder"]}]", items, ctx);
                     break;
                 default:
                     ctx.Unsupported.Add(new UnsupportedWarning(
                         Element: child.Type ?? "unknown",
-                        SlidePath: groupParent,
+                        SlidePath: replayPath,
                         Reason: "group child type deferred to PR2 / unrecognized"));
                     break;
             }
@@ -132,19 +135,14 @@ public static partial class PptxBatchEmitter
     // paragraph (with text carried as the canonical "text" prop). Single-run
     // paragraphs collapse run props onto the paragraph itself, mirroring the
     // docx single-run optimization.
-    private static void EmitTextBody(PowerPointHandler ppt, DocumentNode shapeNode, List<BatchItem> items)
+    private static void EmitTextBody(PowerPointHandler ppt, DocumentNode shapeNode, string shapeParent, List<BatchItem> items)
     {
         if (shapeNode.Children == null) return;
         var paragraphs = shapeNode.Children.Where(c => c.Type == "paragraph" || c.Type == "p").ToList();
         if (paragraphs.Count == 0) return;
-
-        // The slide's just-emitted shape is the last child of its parent path.
-        // Use the path predicate that matches PowerPointHandler.Set's
-        // (ResolveLastPredicates) — `last()` works for shape ordinal lookup.
-        // shapeNode.Path is the source path; the replay parent path mirrors
-        // the same suffix segment, so reusing the source path as the parent
-        // is safe — Set's path resolver already accepts /slide[N]/shape[M].
-        var shapeParent = shapeNode.Path;
+        // shapeParent is the positional replay path (e.g. /slide[1]/shape[2]),
+        // computed by the caller from per-slide ordinal counters. Replaces
+        // the previous shapeNode.Path which carried @id= and broke replay.
 
         int pIdx = 0;
         foreach (var para in paragraphs)

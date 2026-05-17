@@ -143,6 +143,12 @@ public static partial class PptxBatchEmitter
         // Children: walk shape-tree level. Get already routed group/connector/
         // textbox/title/equation into typed nodes, so just iterate and dispatch.
         if (fullSlide.Children == null) return;
+        // CONSISTENCY(positional-emit): dump references its own added elements
+        // by positional `/slide[N]/shape[K]` (mirrors docx /body/p[K]) rather
+        // than cNvPr `@id=N`. Add accepts caller-supplied id but emit chooses
+        // not to use it — id collisions with layout-inherited placeholders
+        // would otherwise break replay (animations/video deck cascade).
+        var ord = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var child in fullSlide.Children)
         {
             // Placeholder dispatch first — overrides textbox/title type.
@@ -150,7 +156,8 @@ public static partial class PptxBatchEmitter
                 && child.Format.TryGetValue("id", out var cid) && cid != null
                 && placeholderById.TryGetValue(cid.ToString()!, out var phNode))
             {
-                EmitPlaceholder(ppt, phNode, slidePath, items, ctx);
+                ord["placeholder"] = ord.GetValueOrDefault("placeholder", 0) + 1;
+                EmitPlaceholder(ppt, phNode, slidePath, $"{slidePath}/placeholder[{ord["placeholder"]}]", items, ctx);
                 continue;
             }
             switch (child.Type)
@@ -159,24 +166,31 @@ public static partial class PptxBatchEmitter
                 case "title":
                 case "shape":
                 case "equation":
-                    EmitShape(ppt, child, slidePath, items, ctx);
+                    ord["shape"] = ord.GetValueOrDefault("shape", 0) + 1;
+                    EmitShape(ppt, child, slidePath, $"{slidePath}/shape[{ord["shape"]}]", items, ctx);
                     break;
                 case "placeholder":
-                    EmitPlaceholder(ppt, child, slidePath, items, ctx);
+                    ord["placeholder"] = ord.GetValueOrDefault("placeholder", 0) + 1;
+                    EmitPlaceholder(ppt, child, slidePath, $"{slidePath}/placeholder[{ord["placeholder"]}]", items, ctx);
                     break;
                 case "connector":
+                    ord["connector"] = ord.GetValueOrDefault("connector", 0) + 1;
                     EmitConnector(ppt, child, slidePath, items, ctx);
                     break;
                 case "group":
-                    EmitGroup(ppt, child, slidePath, items, ctx);
+                    ord["group"] = ord.GetValueOrDefault("group", 0) + 1;
+                    EmitGroup(ppt, child, slidePath, $"{slidePath}/group[{ord["group"]}]", items, ctx);
                     break;
                 case "table":
-                    EmitTable(ppt, child, slidePath, items, ctx);
+                    ord["table"] = ord.GetValueOrDefault("table", 0) + 1;
+                    EmitTable(ppt, child, slidePath, $"{slidePath}/table[{ord["table"]}]", items, ctx);
                     break;
                 case "picture":
+                    ord["picture"] = ord.GetValueOrDefault("picture", 0) + 1;
                     EmitPicture(ppt, child, slidePath, items, ctx);
                     break;
                 case "chart":
+                    ord["chart"] = ord.GetValueOrDefault("chart", 0) + 1;
                     EmitChart(ppt, child, slidePath, items, ctx);
                     break;
                 case "ole":

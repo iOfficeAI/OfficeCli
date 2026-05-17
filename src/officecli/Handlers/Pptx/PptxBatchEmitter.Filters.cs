@@ -16,6 +16,13 @@ public static partial class PptxBatchEmitter
     {
         // Internal relationship id — unstable across packages, see WordBatchEmitter.
         "relId",
+        // OOXML cNvPr id — auto-accumulated by GenerateUniqueShapeId on Add.
+        // Emitting the source id would force Add to honor it, which works for
+        // free-form shapes but collides on slides where the layout already
+        // contributes a placeholder at the same id slot (animations/video deck).
+        // Mirrors docx WordBatchEmitter.Filters.cs treating paraId as derived:
+        // emit uses positional /slide[N]/shape[K] for downstream addressing.
+        "id",
         // Cached display content for unevaluated fields. The `evaluated`
         // protocol surfaces this for diagnostic Get only; replay would
         // re-emit an a:fld with stale text.

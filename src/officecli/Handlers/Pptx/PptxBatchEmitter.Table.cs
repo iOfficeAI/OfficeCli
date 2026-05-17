@@ -15,8 +15,8 @@ public static partial class PptxBatchEmitter
     // method than the docx version.
 
     private static void EmitTable(PowerPointHandler ppt, DocumentNode tableNode,
-                                  string parentSlidePath, List<BatchItem> items,
-                                  SlideEmitContext ctx)
+                                  string parentSlidePath, string replayPath,
+                                  List<BatchItem> items, SlideEmitContext ctx)
     {
         // depth=2 so /slide/table/tr/tc cell nodes materialize with text.
         var fullTable = ppt.Get(tableNode.Path, depth: 2);
@@ -36,7 +36,7 @@ public static partial class PptxBatchEmitter
             Props = props.Count > 0 ? props : null,
         });
 
-        var tablePath = tableNode.Path;
+        var tablePath = replayPath;
         if (fullTable.Children == null) return;
         var rows = fullTable.Children.Where(c => c.Type == "tr").ToList();
 
