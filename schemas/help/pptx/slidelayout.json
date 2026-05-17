@@ -36,11 +36,11 @@
       "readback": "resolved background descriptor (hex, scheme name, gradient form, or `image`)",
       "enforcement": "report"
     },
-    "background.alpha":  { "type": "number", "add": false, "set": false, "get": true, "description": "layout background fill alpha as percent (0..100). Surfaces when the resolved fill carries an alpha channel.", "readback": "integer percent 0..100", "enforcement": "report" },
+    "background.alpha":  { "type": "number", "add": false, "set": true,  "get": true, "description": "layout background fill alpha as percent (0..100). Settable on an existing image background; surfaces on get when the resolved fill carries an alpha channel.", "readback": "integer percent 0..100", "enforcement": "report" },
     "background.crop":   { "type": "string", "add": false, "set": false, "get": true, "description": "layout background image crop quad in `l,t,r,b` percent units.", "readback": "comma-separated `l,t,r,b` quad", "enforcement": "report" },
-    "background.mode":   { "type": "string", "add": false, "set": false, "get": true, "description": "layout background image fill mode — `tile` or `center`. Absent for stretch (default).", "readback": "`tile` | `center`", "enforcement": "report" },
+    "background.mode":   { "type": "string", "add": false, "set": true,  "get": true, "description": "layout background image fill mode — `stretch` (default), `tile`, or `center`. Settable on an existing image background; emitted on get only when non-default.", "readback": "`tile` | `center`", "enforcement": "report" },
     "background.ref":    { "type": "number", "add": false, "set": false, "get": true, "description": "theme background reference index — bgRef/@idx when the layout inherits from the theme.", "readback": "integer theme bg ref id", "enforcement": "report" },
-    "background.scale":  { "type": "number", "add": false, "set": false, "get": true, "description": "tile-fill scale percent (sx, both axes). Surfaces with background.mode=tile.", "readback": "integer percent", "enforcement": "report" },
+    "background.scale":  { "type": "number", "add": false, "set": true,  "get": true, "description": "tile-fill scale percent (sx, both axes), 1..500. Settable on an existing image background with background.mode=tile; surfaces on get with background.mode=tile.", "readback": "integer percent", "enforcement": "report" },
     "direction": {
       "type": "string",
       "description": "default reading direction. Cascades `<a:pPr rtl=\"1\"/>` onto every placeholder paragraph in this layout, and stamps the owning master's txStyles Level1 default (since blank layouts have no placeholders for inheriting shapes to probe). Accepts `ltr`/`rtl` or boolean for the `rtl` alias.",
