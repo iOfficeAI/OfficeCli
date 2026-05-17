@@ -25,9 +25,12 @@ public static class DarkStyle2
 
         return new TableStyleDefinition
         {
+            // Tint values match PowerPoint's empirical rendering on the
+            // bare/dk1 variant (half-strength of the spec/LibreOffice
+            // reference). Verified by OfficeShot pixel sampling.
             WholeTbl = new TableStyleRegion
             {
-                Fill = new FillSpec(accentRef, Tint: 20000),
+                Fill = new FillSpec(accentRef, Tint: 10000),
                 TextColorRef = "dk1",
             },
             FirstRow = new TableStyleRegion
@@ -38,10 +41,10 @@ public static class DarkStyle2
             LastRow = new TableStyleRegion
             {
                 Top = darkLine,
-                Fill = new FillSpec(accentRef, Tint: 20000),
+                Fill = new FillSpec(accentRef, Tint: 10000),
             },
-            Band1H = new TableStyleRegion { Fill = new FillSpec(accentRef, Tint: 40000) },
-            Band1V = new TableStyleRegion { Fill = new FillSpec(accentRef, Tint: 40000) },
+            Band1H = new TableStyleRegion { Fill = new FillSpec(accentRef, Tint: 20000) },
+            Band1V = new TableStyleRegion { Fill = new FillSpec(accentRef, Tint: 20000) },
         };
     }
 }

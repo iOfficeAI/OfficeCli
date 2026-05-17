@@ -25,11 +25,14 @@ public static class DarkStyle1
             hasAccent ? new FillSpec(accentRef, Shade: amount)
                       : new FillSpec(accentRef, Tint: amount);
 
+        // Tint values match PowerPoint's empirical rendering (half-strength
+        // of LibreOffice's predefined-table-styles.cxx reference). Shade
+        // (accent-set variants) follow the same halving for consistency.
         return new TableStyleDefinition
         {
             WholeTbl = new TableStyleRegion
             {
-                Fill = accentFill(20000),
+                Fill = accentFill(10000),
                 TextColorRef = "dk1",
             },
             FirstRow = new TableStyleRegion
@@ -46,15 +49,15 @@ public static class DarkStyle1
             FirstCol = new TableStyleRegion
             {
                 Right = ltLine,
-                Fill = accentFill(60000),
+                Fill = accentFill(30000),
             },
             LastCol = new TableStyleRegion
             {
                 Left = ltLine,
-                Fill = accentFill(60000),
+                Fill = accentFill(30000),
             },
-            Band1H = new TableStyleRegion { Fill = accentFill(40000) },
-            Band1V = new TableStyleRegion { Fill = accentFill(40000) },
+            Band1H = new TableStyleRegion { Fill = accentFill(20000) },
+            Band1V = new TableStyleRegion { Fill = accentFill(20000) },
         };
     }
 }

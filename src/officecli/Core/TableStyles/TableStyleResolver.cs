@@ -173,9 +173,7 @@ public static class TableStyleResolver
     /// OOXML &lt;a:tint val="N"/&gt; — linear RGB blend toward white. Per
     /// ECMA-376 §20.1.2.3.30, "tint by N" yields N% of the base color
     /// combined with (100-N)% white: result = base*(N/100000) + 255*(1 - N/100000).
-    /// Smaller tint values produce a LIGHTER colour (more white). This is
-    /// distinct from HSL lumMod/lumOff and gives the very-light body fills
-    /// PowerPoint shows for medium2-style tables at tint=20000.
+    /// Smaller tint values produce a LIGHTER colour (more white).
     /// </summary>
     private static string BlendTowardWhite(string hex, int tintMilliPercent)
     {

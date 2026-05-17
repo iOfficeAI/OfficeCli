@@ -27,11 +27,16 @@ public static class MediumStyle2
         {
             // Whole table: full grid of white borders; body fill = accent
             // at 20% tint (lightened toward white); default text = dk1.
+            // Tint values match PowerPoint's empirical rendering of the
+            // bare/dk1 variant: wholeTbl ≈ #E7E7E7 (tint 10000), band1H ≈
+            // #CBCBCB (tint 20000). LibreOffice's predefined-table-styles.cxx
+            // documents these as tint 20000 / 40000 but PowerPoint's actual
+            // output is half-strength — verified by OfficeShot pixel sampling.
             WholeTbl = new TableStyleRegion
             {
                 Top = grout, Bottom = grout, Left = grout, Right = grout,
                 InsideH = grout, InsideV = grout,
-                Fill = new FillSpec(accentRef, Tint: 20000),
+                Fill = new FillSpec(accentRef, Tint: 10000),
                 TextColorRef = "dk1",
             },
             // Header row: full accent (no tint, the strong colour band);
@@ -61,11 +66,11 @@ public static class MediumStyle2
             // the wholeTbl baseline — accent at 40% tint.
             Band1H = new TableStyleRegion
             {
-                Fill = new FillSpec(accentRef, Tint: 40000),
+                Fill = new FillSpec(accentRef, Tint: 20000),
             },
             Band1V = new TableStyleRegion
             {
-                Fill = new FillSpec(accentRef, Tint: 40000),
+                Fill = new FillSpec(accentRef, Tint: 20000),
             },
         };
     }
