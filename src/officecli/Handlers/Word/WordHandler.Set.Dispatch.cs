@@ -1698,6 +1698,38 @@ public partial class WordHandler
                     indHi.Hanging = SpacingConverter.ParseWordSpacing(value).ToString();
                     break;
                 }
+                // P1-6: chars-based indents on /styles (CJK convention — Word
+                // recomputes the actual offset from font size). Mirror the
+                // twips-unit indent group above; the dump→batch round-trip
+                // needs these slots independently writable on the style.
+                case "firstlinechars" or "firstLineChars":
+                {
+                    var pPrFlc = style.StyleParagraphProperties ?? EnsureStyleParagraphProperties(style);
+                    var indFlc = pPrFlc.Indentation ?? (pPrFlc.Indentation = new Indentation());
+                    indFlc.FirstLineChars = ParseHelpers.SafeParseInt(value, "firstLineChars");
+                    break;
+                }
+                case "leftchars" or "leftChars" or "startchars" or "startCharacters":
+                {
+                    var pPrLc = style.StyleParagraphProperties ?? EnsureStyleParagraphProperties(style);
+                    var indLc = pPrLc.Indentation ?? (pPrLc.Indentation = new Indentation());
+                    indLc.LeftChars = ParseHelpers.SafeParseInt(value, "leftChars");
+                    break;
+                }
+                case "rightchars" or "rightChars" or "endchars" or "endCharacters":
+                {
+                    var pPrRc = style.StyleParagraphProperties ?? EnsureStyleParagraphProperties(style);
+                    var indRc = pPrRc.Indentation ?? (pPrRc.Indentation = new Indentation());
+                    indRc.RightChars = ParseHelpers.SafeParseInt(value, "rightChars");
+                    break;
+                }
+                case "hangingchars" or "hangingChars":
+                {
+                    var pPrHc = style.StyleParagraphProperties ?? EnsureStyleParagraphProperties(style);
+                    var indHc = pPrHc.Indentation ?? (pPrHc.Indentation = new Indentation());
+                    indHc.HangingChars = ParseHelpers.SafeParseInt(value, "hangingChars");
+                    break;
+                }
                 // P1-7: line-based space-before/after on /styles. Symmetric with
                 // the chars indents above — the OOXML attr is unitless
                 // (hundredths of a line), Word picks lines over twips at

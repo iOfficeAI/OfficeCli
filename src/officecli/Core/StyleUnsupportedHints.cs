@@ -19,12 +19,9 @@ internal static class StyleUnsupportedHints
 {
     private static readonly Dictionary<string, string> Hints = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["firstLineChars"] = "char-based indent is not supported on styles",
-        ["leftChars"]      = "char-based indent is not supported on styles",
-        ["rightChars"]     = "char-based indent is not supported on styles",
-        ["hangingChars"]   = "char-based indent is not supported on styles",
-        // firstLineIndent / leftIndent / rightIndent / hangingIndent are now
-        // wired in WordHandler.Set.Dispatch.cs SetStylePath (Round 3 BT-5).
+        // firstLineChars / leftChars / rightChars / hangingChars are now wired
+        // on /styles (P1-6) — symmetric with firstLineIndent / leftIndent /
+        // rightIndent / hangingIndent (BT-5).
         // spaceBeforeLines / spaceAfterLines are now wired on /styles (P1-7) —
         // also on paragraphs alongside the `spaceBefore=Nlines` suffix.
 
