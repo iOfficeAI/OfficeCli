@@ -209,14 +209,14 @@
     },
     "kern": {
       "type": "number",
-      "description": "minimum kerning size in 1/100 pt (drawingML rPr/@kern). Add/Set only — Get does not surface this back today.",
+      "description": "minimum kerning size in 1/100 pt (drawingML rPr/@kern). Get surfaces the raw integer via long-tail rPr attribute readback.",
       "add": true,
       "set": true,
-      "get": false,
+      "get": true,
       "examples": [
         "--prop kern=1200"
       ],
-      "readback": "n/a",
+      "readback": "integer",
       "enforcement": "report"
     },
     "autoFit": {
