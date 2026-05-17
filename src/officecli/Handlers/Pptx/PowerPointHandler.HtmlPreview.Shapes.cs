@@ -300,13 +300,22 @@ public partial class PowerPointHandler
                 && bodyPr.GetFirstChild<Drawing.ShapeAutoFit>() == null);
 
         // Add has-fill class to clip overflow when shape has a visible background.
-        // wrap=none takes priority: overflow must stay visible so text can extend
-        // past the shape's right edge as real PowerPoint renders it.
+        // wrap=none AND explicit noAutofit (<a:noAutofit/> child) both take
+        // priority: real PowerPoint lets text overflow past the shape edges
+        // in either mode (wrap=none = horizontal overflow past the right edge;
+        // explicit noAutofit = vertical overflow past the bottom edge for
+        // over-long body text). The earlier `noAutofit` local also fires when
+        // no autofit child is present at all (textbox default); we deliberately
+        // do NOT use that for the overflow decision, because doing so would
+        // turn off clipping on every plain filled shape and let stray text
+        // bleed across decorative buttons.
         var hasFillBg = shape.ShapeProperties?.GetFirstChild<Drawing.SolidFill>() != null
             || shape.ShapeProperties?.GetFirstChild<Drawing.GradientFill>() != null
             || shape.ShapeProperties?.GetFirstChild<Drawing.BlipFill>() != null;
-        var shapeClass = hasFillBg && !wrapNone ? "shape has-fill" : "shape";
-        if (wrapNone) styles.Add("overflow:visible");
+        var explicitNoAutofit = bodyPr?.GetFirstChild<Drawing.NoAutoFit>() != null;
+        var allowOverflow = wrapNone || explicitNoAutofit;
+        var shapeClass = hasFillBg && !allowOverflow ? "shape has-fill" : "shape";
+        if (allowOverflow) styles.Add("overflow:visible");
 
         // Open <a> wrapper for shape-level hyperlink (before the shape <div>)
         if (!string.IsNullOrEmpty(shapeHrefUrl))
