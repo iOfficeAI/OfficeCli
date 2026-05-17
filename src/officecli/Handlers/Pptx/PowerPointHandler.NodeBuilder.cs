@@ -706,11 +706,15 @@ public partial class PowerPointHandler
             if (runGradFill != null)
                 node.Format["textFill"] = ReadGradientString(runGradFill);
 
-            // Hyperlink on first run
+            // Hyperlink on first run (link + tooltip — tooltip mirrors how
+            // picture / group already round-trip, see below + line ~1262).
             if (part != null)
             {
-                var linkUrl = ReadRunHyperlinkUrl(firstRun, part);
+                var firstHl = firstRun.RunProperties.GetFirstChild<Drawing.HyperlinkOnClick>();
+                var linkUrl = ReadHyperlinkOnClickUrl(firstHl, part);
                 if (linkUrl != null) node.Format["link"] = linkUrl;
+                var firstTip = firstHl?.Tooltip?.Value;
+                if (!string.IsNullOrEmpty(firstTip)) node.Format["tooltip"] = firstTip!;
             }
 
             // CONSISTENCY(rpr-attr-fallback / R21-fuzzer-1+2): surface long-tail
@@ -721,21 +725,20 @@ public partial class PowerPointHandler
             FillUnknownRunProps(firstRun.RunProperties, node);
         }
 
-        // Shape-level hyperlink (on NonVisualDrawingProperties)
+        // Shape-level hyperlink (on NonVisualDrawingProperties). Route through
+        // the shared ReadHyperlinkOnClickUrl helper so named-action targets
+        // (firstslide/lastslide/nextslide/previousslide) and internal slide
+        // jumps (slide[N]) round-trip — the previous inline reader only saw
+        // external HyperlinkRelationship URIs.
         if (part != null && !node.Format.ContainsKey("link"))
         {
             var nvDp = shape.NonVisualShapeProperties?.NonVisualDrawingProperties;
             var hlClick = nvDp?.GetFirstChild<Drawing.HyperlinkOnClick>();
-            var hlId = hlClick?.Id?.Value;
-            if (hlId != null)
-            {
-                try
-                {
-                    var rel = part.HyperlinkRelationships.FirstOrDefault(r => r.Id == hlId);
-                    if (rel?.Uri != null) node.Format["link"] = rel.Uri.ToString();
-                }
-                catch { }
-            }
+            var shapeLinkUrl = ReadHyperlinkOnClickUrl(hlClick, part);
+            if (shapeLinkUrl != null) node.Format["link"] = shapeLinkUrl;
+            var shapeTip = hlClick?.Tooltip?.Value;
+            if (!string.IsNullOrEmpty(shapeTip) && !node.Format.ContainsKey("tooltip"))
+                node.Format["tooltip"] = shapeTip!;
         }
 
         // Line/border
@@ -1109,11 +1112,14 @@ public partial class PowerPointHandler
             if (runFillColor != null) node.Format["color"] = runFillColor;
             var runGrad = run.RunProperties.GetFirstChild<Drawing.GradientFill>();
             if (runGrad != null) node.Format["textFill"] = ReadGradientString(runGrad);
-            // Hyperlink
+            // Hyperlink (link + tooltip — round-trips Add/Set 'tooltip=…').
             if (part != null)
             {
-                var linkUrl = ReadRunHyperlinkUrl(run, part);
+                var runHl = run.RunProperties.GetFirstChild<Drawing.HyperlinkOnClick>();
+                var linkUrl = ReadHyperlinkOnClickUrl(runHl, part);
                 if (linkUrl != null) node.Format["link"] = linkUrl;
+                var runTip = runHl?.Tooltip?.Value;
+                if (!string.IsNullOrEmpty(runTip)) node.Format["tooltip"] = runTip!;
             }
 
             // Long-tail OOXML fallback. drawingML rPr carries most properties
