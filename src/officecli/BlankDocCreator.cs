@@ -454,7 +454,7 @@ public static class BlankDocCreator
                     ),
                     new DocumentFormat.OpenXml.Presentation.GroupShapeProperties(),
                     CreateLayoutPlaceholder(2, "Title", PlaceholderValues.CenteredTitle, 685800, 2130425, 7772400, 1470025),
-                    CreateLayoutPlaceholder(3, "Subtitle", PlaceholderValues.SubTitle, 1371600, 3886200, 6400800, 1752600)
+                    CreateLayoutPlaceholder(3, "Subtitle", PlaceholderValues.SubTitle, 1371600, 3886200, 6400800, 1752600, idx: 1)
                 )
             ) { Name = "Title Slide" }
         ) { Type = DocumentFormat.OpenXml.Presentation.SlideLayoutValues.Title };
@@ -473,7 +473,7 @@ public static class BlankDocCreator
                     ),
                     new DocumentFormat.OpenXml.Presentation.GroupShapeProperties(),
                     CreateLayoutPlaceholder(2, "Title", PlaceholderValues.Title, 838200, 365125, 10515600, 1325563),
-                    CreateLayoutPlaceholder(3, "Content", PlaceholderValues.Body, 838200, 1825625, 10515600, 4351338)
+                    CreateLayoutPlaceholder(3, "Content", PlaceholderValues.Body, 838200, 1825625, 10515600, 4351338, idx: 1)
                 )
             ) { Name = "Title and Content" }
         ) { Type = DocumentFormat.OpenXml.Presentation.SlideLayoutValues.ObjectText };
@@ -492,8 +492,8 @@ public static class BlankDocCreator
                     ),
                     new DocumentFormat.OpenXml.Presentation.GroupShapeProperties(),
                     CreateLayoutPlaceholder(2, "Title", PlaceholderValues.Title, 838200, 365125, 10515600, 1325563),
-                    CreateLayoutPlaceholder(3, "Content Left", PlaceholderValues.Body, 838200, 1825625, 5181600, 4351338),
-                    CreateLayoutPlaceholder(4, "Content Right", PlaceholderValues.Body, 6172200, 1825625, 5181600, 4351338)
+                    CreateLayoutPlaceholder(3, "Content Left", PlaceholderValues.Body, 838200, 1825625, 5181600, 4351338, idx: 1),
+                    CreateLayoutPlaceholder(4, "Content Right", PlaceholderValues.Body, 6172200, 1825625, 5181600, 4351338, idx: 2)
                 )
             ) { Name = "Two Content" }
         ) { Type = DocumentFormat.OpenXml.Presentation.SlideLayoutValues.TwoColumnText };
@@ -568,13 +568,19 @@ public static class BlankDocCreator
     }
 
     private static Shape CreateLayoutPlaceholder(uint id, string name, PlaceholderValues phType,
-        long x, long y, long cx, long cy)
+        long x, long y, long cx, long cy, uint? idx = null)
     {
         var shape = new Shape();
+        // OOXML convention (PowerPoint templates): Title/CenteredTitle placeholders
+        // omit @idx (defaults to 0); SubTitle / Body / Footer / Date / SlideNumber
+        // slots carry an explicit @idx so slide-side <p:ph idx="N"/> can bind back to
+        // the matching layout placeholder during inheritance resolution.
+        var placeholder = new PlaceholderShape { Type = phType };
+        if (idx.HasValue) placeholder.Index = idx.Value;
         shape.NonVisualShapeProperties = new NonVisualShapeProperties(
             new NonVisualDrawingProperties { Id = id, Name = name },
             new NonVisualShapeDrawingProperties(new DocumentFormat.OpenXml.Drawing.ShapeLocks { NoGrouping = true }),
-            new ApplicationNonVisualDrawingProperties(new PlaceholderShape { Type = phType })
+            new ApplicationNonVisualDrawingProperties(placeholder)
         );
         shape.ShapeProperties = new ShapeProperties(
             new DocumentFormat.OpenXml.Drawing.Transform2D(
