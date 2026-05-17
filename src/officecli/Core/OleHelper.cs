@@ -394,7 +394,7 @@ internal static class OleHelper
     {
         "src", "path", "progId", "progid",
         "width", "height", "x", "y",
-        "icon", "display", "name",
+        "icon", "preview", "display", "name",
         "anchor",
     };
 
@@ -455,13 +455,20 @@ internal static class OleHelper
 
     /// <summary>
     /// Create the icon preview <see cref="ImagePart"/> on the given host
-    /// part — either from the user-supplied <c>icon</c> property or the
+    /// part — either from the user-supplied <c>icon</c> / <c>preview</c>
+    /// property (synonyms — both name the embedded blip thumbnail) or the
     /// default 1×1 placeholder PNG. Returns the relationship id.
     /// </summary>
     public static (ImagePart Part, string RelId) CreateIconPart(OpenXmlPart host, Dictionary<string, string> properties)
     {
         ImagePart iconPart;
-        if (properties.TryGetValue("icon", out var iconPath) && !string.IsNullOrWhiteSpace(iconPath))
+        // CONSISTENCY(ole-preview-alias): `preview` mirrors `icon` to honour the
+        // schemas/help/_shared/ole.json declaration (preview { add: true }).
+        // Both point at the same OOXML element — the inner p:pic blip — so we
+        // accept either spelling rather than maintain two code paths.
+        if ((properties.TryGetValue("icon", out var iconPath)
+                || properties.TryGetValue("preview", out iconPath))
+            && !string.IsNullOrWhiteSpace(iconPath))
         {
             var (iconStream, iconType) = ImageSource.Resolve(iconPath);
             using var _ = iconStream;
