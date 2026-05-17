@@ -300,7 +300,7 @@ public partial class PowerPointHandler
             {
                 var allSegments = GenericXmlQuery.ParsePathSegments(path);
                 if (allSegments.Count == 0 || !allSegments[0].Name.Equals("slide", StringComparison.OrdinalIgnoreCase) || !allSegments[0].Index.HasValue)
-                    throw new ArgumentException($"Path must start with /slide[N]: {path}");
+                    throw new ArgumentException($"Path must start with /slide[N], /slidemaster[N], or /slidelayout[N]: {path}");
 
                 var fbSlideIdx = allSegments[0].Index!.Value;
                 var fbSlideParts = GetSlideParts().ToList();
