@@ -1,0 +1,224 @@
+// Copyright 2025 OfficeCLI (officecli.ai)
+// SPDX-License-Identifier: Apache-2.0
+
+using OfficeCli.Core;
+
+namespace OfficeCli.Handlers;
+
+public static partial class PptxBatchEmitter
+{
+    // CONSISTENCY(emit-shape-mirror): mirrors WordBatchEmitter.Paragraph.cs
+    // logic shape — get the node, filter props, decide collapsed-single-run
+    // vs multi-run, emit the parent then iterate children. PowerPoint
+    // shapes can carry many paragraphs (a slide text body is a list of
+    // <a:p> elements), so the collapse heuristic is per-paragraph, not
+    // per-shape.
+
+    private static void EmitShape(PowerPointHandler ppt, DocumentNode shapeNode, string parentSlidePath,
+                                  List<BatchItem> items, SlideEmitContext ctx)
+    {
+        // depth=3 so paragraph -> run -> any inline runs all materialize. The
+        // single-run collapse heuristic needs the run nodes present to read
+        // their text / char-prop bag.
+        var fullShape = ppt.Get(shapeNode.Path, depth: 3);
+        var shapeProps = FilterEmittableProps(fullShape.Format);
+
+        // Emit type matches Add dispatch: "title" / "equation" both reduce to
+        // "shape" or "textbox" on Add, and the emitted shape carries its
+        // distinguishing prop (isTitle=true / formula=...). For now use
+        // "textbox" for plain text shapes (no geometry) and "shape" otherwise.
+        string emitType = shapeNode.Type switch
+        {
+            "title" => "shape",
+            "equation" => "equation",
+            _ => shapeProps.ContainsKey("geometry") ? "shape" : "textbox",
+        };
+
+        items.Add(new BatchItem
+        {
+            Command = "add",
+            Parent = parentSlidePath,
+            Type = emitType,
+            Props = shapeProps.Count > 0 ? shapeProps : null,
+        });
+
+        EmitTextBody(ppt, fullShape, items);
+    }
+
+    private static void EmitPlaceholder(PowerPointHandler ppt, DocumentNode phNode, string parentSlidePath,
+                                        List<BatchItem> items, SlideEmitContext ctx)
+    {
+        var full = ppt.Get(phNode.Path, depth: 3);
+        var props = FilterEmittableProps(full.Format);
+
+        items.Add(new BatchItem
+        {
+            Command = "add",
+            Parent = parentSlidePath,
+            Type = "placeholder",
+            Props = props.Count > 0 ? props : null,
+        });
+
+        EmitTextBody(ppt, full, items);
+    }
+
+    private static void EmitConnector(PowerPointHandler ppt, DocumentNode cxnNode, string parentSlidePath,
+                                      List<BatchItem> items, SlideEmitContext ctx)
+    {
+        var full = ppt.Get(cxnNode.Path);
+        var props = FilterEmittableProps(full.Format);
+
+        items.Add(new BatchItem
+        {
+            Command = "add",
+            Parent = parentSlidePath,
+            Type = "connector",
+            Props = props.Count > 0 ? props : null,
+        });
+    }
+
+    private static void EmitGroup(PowerPointHandler ppt, DocumentNode grpNode, string parentSlidePath,
+                                  List<BatchItem> items, SlideEmitContext ctx)
+    {
+        var full = ppt.Get(grpNode.Path);
+        var props = FilterEmittableProps(full.Format);
+
+        items.Add(new BatchItem
+        {
+            Command = "add",
+            Parent = parentSlidePath,
+            Type = "group",
+            Props = props.Count > 0 ? props : null,
+        });
+
+        if (full.Children == null) return;
+
+        // Group children resolve through the same dispatch as slide-level
+        // children, except the parent path is the group's emitted path.
+        // CONSISTENCY(pptx-group-flatten): Get already produces honest paths
+        // like /slide[N]/group[K]/shape[L] so child paths just round-trip.
+        var groupParent = grpNode.Path;
+        foreach (var child in full.Children)
+        {
+            switch (child.Type)
+            {
+                case "textbox":
+                case "title":
+                case "shape":
+                case "equation":
+                    EmitShape(ppt, child, groupParent, items, ctx);
+                    break;
+                case "connector":
+                    EmitConnector(ppt, child, groupParent, items, ctx);
+                    break;
+                case "group":
+                    EmitGroup(ppt, child, groupParent, items, ctx);
+                    break;
+                case "placeholder":
+                    EmitPlaceholder(ppt, child, groupParent, items, ctx);
+                    break;
+                default:
+                    ctx.Unsupported.Add(new UnsupportedWarning(
+                        Element: child.Type ?? "unknown",
+                        SlidePath: groupParent,
+                        Reason: "group child type deferred to PR2 / unrecognized"));
+                    break;
+            }
+        }
+    }
+
+    // Walk an emitted shape's text body. Each paragraph becomes an `add
+    // paragraph` entry under the shape; runs become `add run` children of the
+    // paragraph (with text carried as the canonical "text" prop). Single-run
+    // paragraphs collapse run props onto the paragraph itself, mirroring the
+    // docx single-run optimization.
+    private static void EmitTextBody(PowerPointHandler ppt, DocumentNode shapeNode, List<BatchItem> items)
+    {
+        if (shapeNode.Children == null) return;
+        var paragraphs = shapeNode.Children.Where(c => c.Type == "paragraph" || c.Type == "p").ToList();
+        if (paragraphs.Count == 0) return;
+
+        // The slide's just-emitted shape is the last child of its parent path.
+        // Use the path predicate that matches PowerPointHandler.Set's
+        // (ResolveLastPredicates) — `last()` works for shape ordinal lookup.
+        // shapeNode.Path is the source path; the replay parent path mirrors
+        // the same suffix segment, so reusing the source path as the parent
+        // is safe — Set's path resolver already accepts /slide[N]/shape[M].
+        var shapeParent = shapeNode.Path;
+
+        int pIdx = 0;
+        foreach (var para in paragraphs)
+        {
+            pIdx++;
+            EmitParagraph(ppt, para, shapeParent, items);
+        }
+    }
+
+    private static void EmitParagraph(PowerPointHandler ppt, DocumentNode paraNode, string shapeParent,
+                                      List<BatchItem> items)
+    {
+        var props = FilterEmittableProps(paraNode.Format);
+        var runs = (paraNode.Children ?? new List<DocumentNode>())
+            .Where(c => c.Type == "run" || c.Type == "r").ToList();
+
+        // CONSISTENCY(single-run-collapse): mirrors WordBatchEmitter.Paragraph
+        // collapseSingleRun — fold a lone run's text + char props onto the
+        // paragraph add so simple cases stay one BatchItem.
+        bool collapseSingleRun = runs.Count == 1
+            && (paraNode.Children?.Count ?? 0) == 1;
+
+        if (collapseSingleRun)
+        {
+            var runProps = FilterEmittableProps(runs[0].Format);
+            foreach (var (k, v) in runProps)
+            {
+                if (!props.ContainsKey(k)) props[k] = v;
+            }
+            if (!string.IsNullOrEmpty(runs[0].Text))
+                props["text"] = runs[0].Text!;
+            items.Add(new BatchItem
+            {
+                Command = "add",
+                Parent = shapeParent,
+                Type = "paragraph",
+                Props = props.Count > 0 ? props : null,
+            });
+            return;
+        }
+
+        // Multi-run path: emit the paragraph empty (or with paragraph-level
+        // props only) then a run per child.
+        items.Add(new BatchItem
+        {
+            Command = "add",
+            Parent = shapeParent,
+            Type = "paragraph",
+            Props = props.Count > 0 ? props : null,
+        });
+
+        // Target parent path for runs is the just-emitted paragraph.
+        // PowerPointHandler accepts /slide[N]/shape[M]/paragraph[last()] —
+        // CONSISTENCY(path-last): docx uses the same construct on
+        // /body/p[last()].
+        var paraParent = $"{shapeParent}/paragraph[last()]";
+        foreach (var run in runs)
+        {
+            EmitRun(run, paraParent, items);
+        }
+    }
+
+    private static void EmitRun(DocumentNode runNode, string paraParent, List<BatchItem> items)
+    {
+        var props = FilterEmittableProps(runNode.Format);
+        if (!string.IsNullOrEmpty(runNode.Text))
+            props["text"] = runNode.Text!;
+
+        items.Add(new BatchItem
+        {
+            Command = "add",
+            Parent = paraParent,
+            Type = "run",
+            Props = props.Count > 0 ? props : null,
+        });
+    }
+}
