@@ -134,12 +134,11 @@ public static class TableStyleRegistry
             .ToDictionary(g => g.Key, g => g.First().Key);
 
     /// <summary>
-    /// Historical CLI short names ("medium2", "light1", ...) → canonical
-    /// GUID. These mappings are the names officecli has shipped since v1.0
-    /// and users rely on them — they are NOT a clean 1:1 with the family
-    /// names in <see cref="ByGuid"/> (for example CLI "medium1" points at
-    /// the "Medium-Style-2 no-accent" GUID, visually similar but labelled
-    /// differently in the family classification). Keep this table aligned
+    /// CLI short names ("medium2", "light1", ...) → canonical GUID.
+    /// Each short name maps to the *no-accent* (neutral / dk1) variant of
+    /// the matching family. To pick an accent variant, use the compound
+    /// form "<family>-accent<N>" (e.g. "dark2-accent1", "medium3-accent4");
+    /// see <see cref="Resolve"/> for the parser. Keep this table aligned
     /// with <c>_tableStyleNameToGuid</c> in
     /// <c>PowerPointHandler.Helpers.cs</c> (the input alias map).
     /// Round-tripping via GuidToShortName preserves the CLI name.
@@ -147,21 +146,22 @@ public static class TableStyleRegistry
     public static readonly IReadOnlyDictionary<string, string> ByShortName =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
-        ["medium1"] = "{073A0DAA-6AF3-43AB-8588-CEC1D06C72B9}",
-        ["medium2"] = "{F5AB1C69-6EDB-4FF4-983F-18BD219EF322}",
-        ["medium3"] = "{3B4B98B0-60AC-42C2-AFA5-B58CD77FA1E5}",
+        ["medium1"] = "{793D81CF-94F2-401A-BA57-92F5A7B2D0C5}",
+        ["medium2"] = "{073A0DAA-6AF3-43AB-8588-CEC1D06C72B9}",
+        ["medium3"] = "{8EC20E35-A176-4012-BC5E-935CFFF8708E}",
         ["medium4"] = "{D7AC3CCA-C797-4891-BE02-D94E43425B78}",
         ["light1"]  = "{9D7B26C5-4107-4FEC-AEDC-1716B250A1EF}",
-        ["light2"]  = "{ED083AE6-46FA-4A59-8FB0-9F97EB10719F}",
-        ["light3"]  = "{C083E6E3-FA7D-4D7B-A595-EF9225AFEA82}",
+        ["light2"]  = "{7E9639D4-E3E2-4D34-9284-5A2195B3D0D7}",
+        ["light3"]  = "{616DA210-FB5B-4158-B5E0-FEB733F419BA}",
         ["dark1"]   = "{E8034E78-7F5D-4C2E-B375-FC64B27BC917}",
-        ["dark2"]   = "{125E5076-3810-47DD-B79F-674D7AD40C01}",
+        ["dark2"]   = "{5202B0CA-FC54-4496-8BCA-5EF66A818D29}",
         ["none"]    = "{2D5ABB26-0587-4C30-8999-92F81FD0307C}",
     };
 
     /// <summary>
-    /// Resolve any input (GUID, short name like "medium2", or family name)
-    /// to its (family, accent) pair. Returns null if unknown.
+    /// Resolve any input (GUID, short name "medium2", compound "dark2-accent1",
+    /// or family name "Dark-Style-2") to its (family, accent) pair. Returns
+    /// null if unknown.
     /// </summary>
     public static (string Family, string Accent)? Resolve(string? styleIdOrName)
     {
@@ -170,19 +170,31 @@ public static class TableStyleRegistry
         if (ByGuid.TryGetValue(key, out var pair)) return pair;
         if (ByShortName.TryGetValue(key, out var guid) && ByGuid.TryGetValue(guid, out pair))
             return pair;
+        if (TryParseCompound(key, out var family, out var accent)
+            && ByFamilyAccent.TryGetValue((family, accent), out _))
+            return (family, accent);
         return null;
     }
 
-    /// <summary>Short-name lookup: short name → canonical GUID, or null.</summary>
-    public static string? ShortNameToGuid(string shortName) =>
-        ByShortName.TryGetValue(shortName?.Trim() ?? "", out var g) ? g : null;
+    /// <summary>
+    /// Resolve short name, GUID, or compound "<short>-accent<N>" to canonical
+    /// GUID. Returns null when nothing matches.
+    /// </summary>
+    public static string? ShortNameToGuid(string? shortName)
+    {
+        if (string.IsNullOrWhiteSpace(shortName)) return null;
+        var key = shortName.Trim();
+        if (ByShortName.TryGetValue(key, out var g)) return g;
+        if (TryParseCompound(key, out var family, out var accent)
+            && ByFamilyAccent.TryGetValue((family, accent), out var guid))
+            return guid;
+        return null;
+    }
 
     /// <summary>
-    /// Reverse of <see cref="ByShortName"/>: GUID → CLI short name when one
-    /// exists for this GUID, else null. Used by NodeBuilder to display the
-    /// canonical short form on `get` output for the 10 styles the CLI
-    /// exposes by name; arbitrary GUIDs (other accent variants, custom
-    /// styles) round-trip through the GUID itself.
+    /// Reverse of <see cref="ByShortName"/>: GUID → CLI short name (e.g.
+    /// "dark2" for the no-accent variant, "dark2-accent1" for the Accent1
+    /// variant). Returns null for GUIDs outside the 74-entry catalogue.
     /// </summary>
     public static string? GuidToShortName(string guid)
     {
@@ -190,6 +202,30 @@ public static class TableStyleRegistry
         foreach (var kv in ByShortName)
             if (string.Equals(kv.Value, guid, StringComparison.OrdinalIgnoreCase))
                 return kv.Key;
+        if (!ByGuid.TryGetValue(guid, out var pair)) return null;
+        if (string.IsNullOrEmpty(pair.Accent)) return null;
+        foreach (var kv in ByShortName)
+        {
+            if (!ByGuid.TryGetValue(kv.Value, out var basePair)) continue;
+            if (basePair.Family == pair.Family && string.IsNullOrEmpty(basePair.Accent))
+                return $"{kv.Key}-{pair.Accent.ToLowerInvariant()}";
+        }
         return null;
+    }
+
+    private static bool TryParseCompound(string input, out string family, out string accent)
+    {
+        family = ""; accent = "";
+        var dash = input.LastIndexOf('-');
+        if (dash <= 0 || dash >= input.Length - 1) return false;
+        var head = input[..dash];
+        var tail = input[(dash + 1)..];
+        if (!tail.StartsWith("accent", StringComparison.OrdinalIgnoreCase)) return false;
+        if (!int.TryParse(tail.AsSpan(6), out var n) || n < 1 || n > 6) return false;
+        if (!ByShortName.TryGetValue(head, out var baseGuid)) return false;
+        if (!ByGuid.TryGetValue(baseGuid, out var basePair)) return false;
+        family = basePair.Family;
+        accent = "Accent" + n;
+        return true;
     }
 }
