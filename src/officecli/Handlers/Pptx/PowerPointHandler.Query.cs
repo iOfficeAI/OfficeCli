@@ -668,6 +668,123 @@ public partial class PowerPointHandler
                 return GenericXmlQuery.ElementToNode(logicalResolved.Value.element, path, depth);
         }
 
+        // Try arbitrary-depth group descent: /slide[N]/group[M](/group[L])*/<leaf>[K]
+        // CONSISTENCY(group-inner-shape): Get must traverse nested groups the
+        // same way Query already does. Without this branch, paths like
+        // /slide[1]/group[1]/group[1] or /slide[1]/group[1]/group[2]/shape[3]
+        // fall through to the generic XML fallback, which mis-detects
+        // GroupShape (LocalName="grpSp") and emits "Element not found".
+        // Leaf may be a nested group itself or any non-group inner type (shape,
+        // picture, table, chart, connector). Leaf-of-type-group returns the
+        // group node; other leaves delegate to the matching ToNode builder so
+        // the returned DocumentNode carries the full Format payload.
+        var nestedGroupMatch = Regex.Match(path,
+            @"^/slide\[(\d+)\]/group\[(\d+)\]((?:/group\[\d+\])*)(?:/(shape|picture|pic|table|chart|connector|connection)\[(\d+)\])?$");
+        if (nestedGroupMatch.Success && (nestedGroupMatch.Groups[3].Length > 0 || nestedGroupMatch.Groups[4].Success))
+        {
+            var ngSlideIdx = int.Parse(nestedGroupMatch.Groups[1].Value);
+            var ngRootGrpIdx = int.Parse(nestedGroupMatch.Groups[2].Value);
+            var ngSlideParts = GetSlideParts().ToList();
+            if (ngSlideIdx < 1 || ngSlideIdx > ngSlideParts.Count)
+                throw new ArgumentException($"Slide {ngSlideIdx} not found (total: {ngSlideParts.Count})");
+            var ngSlidePart = ngSlideParts[ngSlideIdx - 1];
+            var ngShapeTree = GetSlide(ngSlidePart).CommonSlideData?.ShapeTree
+                ?? throw new ArgumentException("Slide has no shape tree");
+            var ngRootGroups = ngShapeTree.Elements<GroupShape>().ToList();
+            if (ngRootGrpIdx < 1 || ngRootGrpIdx > ngRootGroups.Count)
+                throw new ArgumentException($"Group {ngRootGrpIdx} not found (total: {ngRootGroups.Count})");
+            GroupShape ngCurrent = ngRootGroups[ngRootGrpIdx - 1];
+            var ngPathPrefix = $"/slide[{ngSlideIdx}]/{BuildElementPathSegment("group", ngCurrent, ngRootGrpIdx)}";
+            // Walk nested /group[L] segments
+            foreach (Match seg in Regex.Matches(nestedGroupMatch.Groups[3].Value, @"/group\[(\d+)\]"))
+            {
+                var subIdx = int.Parse(seg.Groups[1].Value);
+                var subs = ngCurrent.Elements<GroupShape>().ToList();
+                if (subIdx < 1 || subIdx > subs.Count)
+                    throw new ArgumentException($"Nested group {subIdx} not found at {ngPathPrefix} (total: {subs.Count})");
+                ngCurrent = subs[subIdx - 1];
+                ngPathPrefix = $"{ngPathPrefix}/{BuildElementPathSegment("group", ngCurrent, subIdx)}";
+            }
+            // No leaf -> return the (possibly nested) group itself via the
+            // shared NodeBuilder so children/Format stay in sync with the
+            // top-level group branch.
+            if (!nestedGroupMatch.Groups[4].Success)
+            {
+                var ngGrpName = ngCurrent.NonVisualGroupShapeProperties?.NonVisualDrawingProperties?.Name?.Value ?? "Group";
+                var ngGrpNode = new DocumentNode
+                {
+                    Path = ngPathPrefix,
+                    Type = "group",
+                    Preview = ngGrpName,
+                    ChildCount = ngCurrent.Elements<Shape>().Count() + ngCurrent.Elements<Picture>().Count()
+                        + ngCurrent.Elements<GraphicFrame>().Count() + ngCurrent.Elements<ConnectionShape>().Count()
+                        + ngCurrent.Elements<GroupShape>().Count()
+                };
+                ngGrpNode.Format["name"] = ngGrpName;
+                var ngXfrm = ngCurrent.GroupShapeProperties?.TransformGroup;
+                if (ngXfrm?.Offset?.X != null) ngGrpNode.Format["x"] = FormatEmu(ngXfrm.Offset.X.Value);
+                if (ngXfrm?.Offset?.Y != null) ngGrpNode.Format["y"] = FormatEmu(ngXfrm.Offset.Y.Value);
+                if (ngXfrm?.Extents?.Cx != null) ngGrpNode.Format["width"] = FormatEmu(ngXfrm.Extents.Cx.Value);
+                if (ngXfrm?.Extents?.Cy != null) ngGrpNode.Format["height"] = FormatEmu(ngXfrm.Extents.Cy.Value);
+                if (ngXfrm?.Rotation != null && ngXfrm.Rotation.Value != 0)
+                    ngGrpNode.Format["rotation"] = $"{ngXfrm.Rotation.Value / 60000.0:0.##}";
+                if (depth > 0)
+                    BuildChildNodesIntoContainer(
+                        ngGrpNode.Children, ngCurrent, ngSlidePart, ngSlideIdx, depth - 1,
+                        ngPathPrefix, isSlideRoot: false);
+                return ngGrpNode;
+            }
+            // Leaf is a non-group inner type
+            var ngLeafType = nestedGroupMatch.Groups[4].Value.ToLowerInvariant();
+            var ngLeafIdx = int.Parse(nestedGroupMatch.Groups[5].Value);
+            switch (ngLeafType)
+            {
+                case "shape":
+                {
+                    var inner = ngCurrent.Elements<Shape>().ToList();
+                    if (ngLeafIdx < 1 || ngLeafIdx > inner.Count)
+                        throw new ArgumentException($"Shape {ngLeafIdx} not found in group {ngPathPrefix} (total: {inner.Count})");
+                    var node = ShapeToNode(inner[ngLeafIdx - 1], ngSlideIdx, ngLeafIdx, depth, ngSlidePart);
+                    node.Path = $"{ngPathPrefix}/{BuildElementPathSegment("shape", inner[ngLeafIdx - 1], ngLeafIdx)}";
+                    return node;
+                }
+                case "picture":
+                case "pic":
+                {
+                    var inner = ngCurrent.Elements<Picture>().ToList();
+                    if (ngLeafIdx < 1 || ngLeafIdx > inner.Count)
+                        throw new ArgumentException($"Picture {ngLeafIdx} not found in group {ngPathPrefix} (total: {inner.Count})");
+                    var node = PictureToNode(inner[ngLeafIdx - 1], ngSlideIdx, ngLeafIdx, ngSlidePart);
+                    node.Path = $"{ngPathPrefix}/{BuildElementPathSegment("picture", inner[ngLeafIdx - 1], ngLeafIdx)}";
+                    return node;
+                }
+                case "connector":
+                case "connection":
+                {
+                    var inner = ngCurrent.Elements<ConnectionShape>().ToList();
+                    if (ngLeafIdx < 1 || ngLeafIdx > inner.Count)
+                        throw new ArgumentException($"Connector {ngLeafIdx} not found in group {ngPathPrefix} (total: {inner.Count})");
+                    return ConnectorToNode(inner[ngLeafIdx - 1], ngSlideIdx, ngLeafIdx, ngPathPrefix);
+                }
+                case "table":
+                {
+                    var inner = ngCurrent.Elements<GraphicFrame>()
+                        .Where(gf => gf.Descendants<Drawing.Table>().Any()).ToList();
+                    if (ngLeafIdx < 1 || ngLeafIdx > inner.Count)
+                        throw new ArgumentException($"Table {ngLeafIdx} not found in group {ngPathPrefix} (total: {inner.Count})");
+                    return TableToNode(inner[ngLeafIdx - 1], ngSlideIdx, ngLeafIdx, depth, ngPathPrefix);
+                }
+                case "chart":
+                {
+                    var inner = ngCurrent.Elements<GraphicFrame>()
+                        .Where(gf => gf.Descendants<C.ChartReference>().Any() || IsExtendedChartFrame(gf)).ToList();
+                    if (ngLeafIdx < 1 || ngLeafIdx > inner.Count)
+                        throw new ArgumentException($"Chart {ngLeafIdx} not found in group {ngPathPrefix} (total: {inner.Count})");
+                    return ChartToNode(inner[ngLeafIdx - 1], ngSlidePart, ngSlideIdx, ngLeafIdx, depth, ngPathPrefix);
+                }
+            }
+        }
+
         // Try group inner shape path: /slide[N]/group[M]/shape[K]
         // CONSISTENCY(group-inner-shape): Set supports this; Get must too.
         // Previously fell through to the generic XML fallback, which mis-detected
@@ -875,25 +992,14 @@ public partial class PowerPointHandler
             if (grpFillColor != null) grpNode.Format["fill"] = grpFillColor;
             else if (grp.GroupShapeProperties?.GetFirstChild<Drawing.NoFill>() != null) grpNode.Format["fill"] = "none";
             else if (grp.GroupShapeProperties?.GetFirstChild<Drawing.GradientFill>() != null) grpNode.Format["fill"] = "gradient";
-            // Bug 5/7 fix: populate Children list for group members
+            // CONSISTENCY(pptx-group-flatten): delegate to the shared walker so
+            // group children include nested groups / tables / charts /
+            // connectors — not just shapes and pictures.
             if (depth > 0)
             {
-                int memberShapeIdx = 0;
-                foreach (var memberShape in grp.Elements<Shape>())
-                {
-                    memberShapeIdx++;
-                    var memberNode = ShapeToNode(memberShape, slideIdx, memberShapeIdx, depth - 1, targetSlidePart);
-                    memberNode.Path = $"{grpPath}/{BuildElementPathSegment("shape", memberShape, memberShapeIdx)}";
-                    grpNode.Children.Add(memberNode);
-                }
-                int memberPicIdx = 0;
-                foreach (var memberPic in grp.Elements<Picture>())
-                {
-                    memberPicIdx++;
-                    var picNode = PictureToNode(memberPic, slideIdx, memberPicIdx, targetSlidePart);
-                    picNode.Path = $"{grpPath}/{BuildElementPathSegment("picture", memberPic, memberPicIdx)}";
-                    grpNode.Children.Add(picNode);
-                }
+                BuildChildNodesIntoContainer(
+                    grpNode.Children, grp, targetSlidePart, slideIdx, depth - 1,
+                    grpPath, isSlideRoot: false);
             }
             return grpNode;
         }
