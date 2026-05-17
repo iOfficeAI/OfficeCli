@@ -110,7 +110,16 @@ public partial class PowerPointHandler : IDocumentHandler
                 ?? throw new InvalidOperationException("Corrupt file: notes slide data missing");
         }
 
-        throw new ArgumentException($"Unknown part: {partPath}. Available: /presentation, /theme, /slide[N], /slideMaster[N], /slideLayout[N], /noteSlide[N]");
+        // CONSISTENCY(raw-rawset-symmetry): /notesMaster surfaces the
+        // presentation-level NotesMasterPart's XML so PptxBatchEmitter can
+        // raw-set it on replay (mirrors theme/master/layout treatment).
+        if (partPath == "/notesMaster")
+        {
+            return presentationPart.NotesMasterPart?.NotesMaster?.OuterXml
+                ?? throw new ArgumentException("No notes master part");
+        }
+
+        throw new ArgumentException($"Unknown part: {partPath}. Available: /presentation, /theme, /slide[N], /slideMaster[N], /slideLayout[N], /noteSlide[N], /notesMaster");
     }
 
     public void RawSet(string partPath, string xpath, string action, string? xml)
@@ -180,9 +189,14 @@ public partial class PowerPointHandler : IDocumentHandler
             rootElement = notesPart.NotesSlide
                 ?? throw new InvalidOperationException("Corrupt file: notes slide data missing");
         }
+        else if (partPath == "/notesMaster")
+        {
+            rootElement = presentationPart.NotesMasterPart?.NotesMaster
+                ?? throw new ArgumentException("No notes master part");
+        }
         else
         {
-            throw new ArgumentException($"Unknown part: {partPath}. Available: /presentation, /theme, /slide[N], /slideMaster[N], /slideLayout[N], /noteSlide[N]");
+            throw new ArgumentException($"Unknown part: {partPath}. Available: /presentation, /theme, /slide[N], /slideMaster[N], /slideLayout[N], /noteSlide[N], /notesMaster");
         }
 
         var affected = RawXmlHelper.Execute(rootElement, xpath, action, xml);
@@ -242,6 +256,70 @@ public partial class PowerPointHandler : IDocumentHandler
     public List<ValidationError> Validate() => RawXmlHelper.ValidateDocument(_doc);
 
     public void Dispose() => _doc.Dispose();
+
+    // Internal accessors used by PptxBatchEmitter (resource enumeration).
+    // Keep the PresentationPart itself private; expose only the counts and
+    // a binary getter that the emitter needs.
+    internal int SlideMasterCount =>
+        _doc.PresentationPart?.SlideMasterParts.Count() ?? 0;
+    internal int SlideLayoutCount =>
+        _doc.PresentationPart?.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).Count() ?? 0;
+    internal bool HasNotesMaster =>
+        _doc.PresentationPart?.NotesMasterPart != null;
+    internal bool SlideHasNotes(int slideIdx)
+    {
+        var parts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > parts.Count) return false;
+        return parts[slideIdx - 1].NotesSlidePart != null;
+    }
+
+    // Resolve a /slide[N]/picture[M] path's image bytes for base64-inline emit.
+    // Mirrors WordHandler.GetImageBinary's contract: returns null if the path
+    // does not resolve to a Picture with an embedded ImagePart.
+    public (byte[] Bytes, string ContentType)? GetImageBinary(string picturePath)
+    {
+        // Accept both `picture[N]` positional and `picture[@id=N]` cNvPr-id
+        // segment forms (BuildElementPathSegment emits @id= when the shape
+        // carries a cNvPr id, which Pictures always do).
+        var m = Regex.Match(picturePath,
+            @"^/slide\[(\d+)\]/(?:.+/)?picture\[(?:@id=)?(\d+)\]$");
+        if (!m.Success) return null;
+        var slideIdx = int.Parse(m.Groups[1].Value);
+        var idOrIdx = int.Parse(m.Groups[2].Value);
+        var byId = picturePath.Contains("@id=", StringComparison.Ordinal);
+        var parts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > parts.Count) return null;
+        var slidePart = parts[slideIdx - 1];
+        var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree;
+        if (shapeTree == null) return null;
+        var pictures = shapeTree.Descendants<Picture>().ToList();
+        Picture? pic = null;
+        if (byId)
+        {
+            pic = pictures.FirstOrDefault(p =>
+            {
+                var pid = p.NonVisualPictureProperties?.NonVisualDrawingProperties?.Id?.Value;
+                return pid.HasValue && pid.Value == (uint)idOrIdx;
+            });
+        }
+        else
+        {
+            if (idOrIdx >= 1 && idOrIdx <= pictures.Count) pic = pictures[idOrIdx - 1];
+        }
+        if (pic == null) return null;
+        var blip = pic.BlipFill?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Blip>();
+        var embedId = blip?.Embed?.Value;
+        if (string.IsNullOrEmpty(embedId)) return null;
+        try
+        {
+            var part = slidePart.GetPartById(embedId);
+            using var src = part.GetStream();
+            using var ms = new MemoryStream();
+            src.CopyTo(ms);
+            return (ms.ToArray(), part.ContentType);
+        }
+        catch { return null; }
+    }
 
     // ==================== Private Helpers ====================
 

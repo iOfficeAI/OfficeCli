@@ -45,6 +45,17 @@ public static partial class PptxBatchEmitter
         var items = new List<BatchItem>();
         var ctx = new SlideEmitContext(new List<UnsupportedWarning>());
 
+        // Resource parts FIRST — theme, notesMaster, masters, layouts.
+        // Order matters: replay's raw-set must overwrite the blank deck's
+        // seeded baseline before slide content is added so per-slide
+        // layout refs (sld@layout="rId4") resolve against the source's
+        // layout set, not blank's. Mirrors docx's
+        // settings → theme → numbering → styles → body ordering.
+        EmitThemeRaw(ppt, items);
+        EmitNotesMasterRaw(ppt, items);
+        EmitMasterRaw(ppt, items);
+        EmitLayoutRaw(ppt, items);
+
         // CONSISTENCY(slide-order): always iterate via the handler's
         // GetSlideParts() (sldIdLst-driven). Walking SlideParts off the
         // package returns parts in zip URI order — `slide12.xml` sorts
@@ -160,21 +171,28 @@ public static partial class PptxBatchEmitter
                     EmitGroup(ppt, child, slidePath, items, ctx);
                     break;
                 case "table":
+                    EmitTable(ppt, child, slidePath, items, ctx);
+                    break;
                 case "picture":
+                    EmitPicture(ppt, child, slidePath, items, ctx);
+                    break;
                 case "chart":
+                    EmitChart(ppt, child, slidePath, items, ctx);
+                    break;
                 case "ole":
                 case "video":
                 case "audio":
                 case "3dmodel":
                 case "model3d":
                 case "zoom":
-                    // PR2 scope — emit unsupported marker so the caller knows
-                    // these were seen but not transcribed yet. Not an animation
-                    // / SmartArt warning per se but conveys the same gap.
+                    // PR3+ scope. ProbeUnsupportedOnSlide already records the
+                    // OLE/video/audio/3D markers via raw-XML sniff; this branch
+                    // catches the children that surfaced via the typed Get
+                    // tree (when NodeBuilder learns to tag them).
                     ctx.Unsupported.Add(new UnsupportedWarning(
                         Element: child.Type ?? "unknown",
                         SlidePath: slidePath,
-                        Reason: "deferred to PR2"));
+                        Reason: "deferred to later PR"));
                     break;
                 default:
                     ctx.Unsupported.Add(new UnsupportedWarning(
