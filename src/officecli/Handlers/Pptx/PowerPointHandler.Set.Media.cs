@@ -257,18 +257,34 @@ public partial class PowerPointHandler
                         || bcVal < -100 || bcVal > 100)
                         throw new ArgumentException($"Invalid '{key}' value: '{value}'. Expected number in [-100, 100].");
 
-                    var existingLumMod = blipBC.Elements<Drawing.LuminanceModulation>().FirstOrDefault();
-                    var existingLumOff = blipBC.Elements<Drawing.LuminanceOffset>().FirstOrDefault();
-                    int curLumModPct = existingLumMod?.Val?.Value is int vm ? vm : 100000;
-                    int curLumOffPct = existingLumOff?.Val?.Value is int vo ? vo : 0;
+                    // Read existing values from BOTH strongly-typed and
+                    // OpenXmlUnknownElement forms — the SDK re-parses these
+                    // children as unknown (a:lumMod is not strong-typed on
+                    // Drawing.Blip), so a one-shot Remove of the strong type
+                    // leaves the unknown copy behind and yields duplicate
+                    // lumMod/lumOff after a second Set.
+                    int curLumModPct = 100000;
+                    int curLumOffPct = 0;
+                    var staleLum = new List<OpenXmlElement>();
+                    foreach (var kid in blipBC.ChildElements)
+                    {
+                        if (kid.NamespaceUri != "http://schemas.openxmlformats.org/drawingml/2006/main") continue;
+                        if (kid.LocalName != "lumMod" && kid.LocalName != "lumOff") continue;
+                        var valAttr = kid.GetAttribute("val", "").Value;
+                        if (int.TryParse(valAttr, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var iv))
+                        {
+                            if (kid.LocalName == "lumMod") curLumModPct = iv;
+                            else curLumOffPct = iv;
+                        }
+                        staleLum.Add(kid);
+                    }
+                    foreach (var s in staleLum) s.Remove();
 
                     if (key.Equals("brightness", StringComparison.OrdinalIgnoreCase))
                         curLumOffPct = (int)(bcVal * 1000);
                     else
                         curLumModPct = 100000 + (int)(bcVal * 1000);
 
-                    existingLumMod?.Remove();
-                    existingLumOff?.Remove();
                     blipBC.AppendChild(new Drawing.LuminanceModulation { Val = curLumModPct });
                     blipBC.AppendChild(new Drawing.LuminanceOffset { Val = curLumOffPct });
                     break;

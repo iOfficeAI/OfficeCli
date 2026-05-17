@@ -1348,6 +1348,60 @@ public partial class PowerPointHandler
             if (!string.IsNullOrEmpty(picTip)) node.Format["tooltip"] = picTip!;
         }
 
+        // Brightness / contrast — stored on the same blip as
+        // a:lumOff (brightness) and a:lumMod (contrast). Mirrors the
+        // write side in Set.Media.cs (`case "brightness" or "contrast"`).
+        // Note: the SDK's Blip class doesn't strong-type lumMod/lumOff as
+        // direct children (they're effect children per the a:CT_Blip
+        // schema but live in a content-group the SDK marks "unknown" once
+        // round-tripped). Read via LocalName/attribute so we tolerate both
+        // the strongly-typed append we do in Set.Media and the unknown
+        // element form we see on re-parse.
+        if (picBlip != null)
+        {
+            int? lumModVal = null, lumOffVal = null;
+            foreach (var kid in picBlip.ChildElements)
+            {
+                if (kid.NamespaceUri != "http://schemas.openxmlformats.org/drawingml/2006/main") continue;
+                var valAttr = kid.GetAttribute("val", "").Value;
+                if (string.IsNullOrEmpty(valAttr) || !int.TryParse(valAttr, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var iv)) continue;
+                if (kid.LocalName == "lumMod") lumModVal = iv;
+                else if (kid.LocalName == "lumOff") lumOffVal = iv;
+            }
+            if (lumOffVal.HasValue && lumOffVal.Value != 0)
+                node.Format["brightness"] = $"{lumOffVal.Value / 1000.0:0.##}";
+            if (lumModVal.HasValue && lumModVal.Value != 100000)
+                node.Format["contrast"] = $"{(lumModVal.Value - 100000) / 1000.0:0.##}";
+        }
+
+        // Shadow / glow — Set.Media writes these into spPr/effectLst via
+        // shared ApplyShadow/ApplyGlow. Mirror the shape-level reader so
+        // picture round-trips match shapes.
+        var picEffectList = pic.ShapeProperties?.GetFirstChild<Drawing.EffectList>();
+        if (picEffectList != null)
+        {
+            var picOuterShadow = picEffectList.GetFirstChild<Drawing.OuterShadow>();
+            if (picOuterShadow != null)
+            {
+                var shadowColor = ReadColorFromElement(picOuterShadow) ?? "000000";
+                var blurPt = picOuterShadow.BlurRadius?.HasValue == true ? $"{picOuterShadow.BlurRadius.Value / 12700.0:0.##}" : "4";
+                var angleDeg = picOuterShadow.Direction?.HasValue == true ? $"{picOuterShadow.Direction.Value / 60000.0:0.##}" : "45";
+                var distPt = picOuterShadow.Distance?.HasValue == true ? $"{picOuterShadow.Distance.Value / 12700.0:0.##}" : "3";
+                var alphaEl = picOuterShadow.Descendants<Drawing.Alpha>().FirstOrDefault();
+                var opacity = alphaEl?.Val?.HasValue == true ? $"{alphaEl.Val.Value / 1000.0:0.##}" : "40";
+                node.Format["shadow"] = $"{shadowColor}-{blurPt}-{angleDeg}-{distPt}-{opacity}";
+            }
+            var picGlow = picEffectList.GetFirstChild<Drawing.Glow>();
+            if (picGlow != null)
+            {
+                var glowColor = ReadColorFromElement(picGlow) ?? "000000";
+                var radiusPt = picGlow.Radius?.HasValue == true ? $"{picGlow.Radius.Value / 12700.0:0.##}" : "8";
+                var glowAlpha = picGlow.Descendants<Drawing.Alpha>().FirstOrDefault();
+                var glowOpacity = glowAlpha?.Val?.HasValue == true ? $"{glowAlpha.Val.Value / 1000.0:0.##}" : "75";
+                node.Format["glow"] = $"{glowColor}-{radiusPt}-{glowOpacity}";
+            }
+        }
+
         // Crop
         var srcRect = pic.BlipFill?.GetFirstChild<Drawing.SourceRectangle>();
         if (srcRect != null)
