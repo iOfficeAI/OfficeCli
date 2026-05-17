@@ -388,11 +388,30 @@ public partial class PowerPointHandler
                     throw new ArgumentException("Chart requires data. Use: data=\"Series1:1,2,3;Series2:4,5,6\" " +
                         "or series1=\"Revenue:100,200,300\"");
 
-                // Position
+                // Position. Accept `anchor=x,y` (2-arg, position only — size
+                // falls back to defaults) or `anchor=x,y,w,h` (full rect).
+                // Schema documents both 2- and 4-arg forms; explicit
+                // `x=`/`y=`/`width=`/`height=` props still override anchor
+                // for that axis (matches OLE/picture/shape add convention).
                 long chartX = properties.TryGetValue("x", out var xv) ? ParseEmu(xv) : 838200;     // ~2.3cm
                 long chartY = properties.TryGetValue("y", out var yv) ? ParseEmu(yv) : 1825625;     // ~5cm
                 long chartCx = properties.TryGetValue("width", out var wv) ? ParseEmu(wv) : 8229600; // ~22.9cm
                 long chartCy = properties.TryGetValue("height", out var hv) ? ParseEmu(hv) : 4572000; // ~12.7cm
+                if (properties.TryGetValue("anchor", out var chartAnchorRaw) && !string.IsNullOrWhiteSpace(chartAnchorRaw))
+                {
+                    var anchorParts = chartAnchorRaw.Split(',', StringSplitOptions.TrimEntries);
+                    if (anchorParts.Length != 2 && anchorParts.Length != 4)
+                        throw new ArgumentException(
+                            $"Invalid anchor: '{chartAnchorRaw}'. Expected 'x,y' (e.g. '2cm,3cm') or 'x,y,w,h' (e.g. '2cm,3cm,18cm,10cm'). " +
+                            "Cell-range form (e.g. 'D2:J18') is xlsx-only.");
+                    if (!properties.ContainsKey("x")) chartX = ParseEmu(anchorParts[0]);
+                    if (!properties.ContainsKey("y")) chartY = ParseEmu(anchorParts[1]);
+                    if (anchorParts.Length == 4)
+                    {
+                        if (!properties.ContainsKey("width")) chartCx = ParseEmu(anchorParts[2]);
+                        if (!properties.ContainsKey("height")) chartCy = ParseEmu(anchorParts[3]);
+                    }
+                }
                 // CONSISTENCY(positive-size): symmetric with Add.Shape negative-size guard.
                 if (chartCx < 0) throw new ArgumentException($"Negative width is not allowed: '{wv}'.");
                 if (chartCy < 0) throw new ArgumentException($"Negative height is not allowed: '{hv}'.");
