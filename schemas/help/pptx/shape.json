@@ -549,7 +549,7 @@
       "add": true,
       "set": true,
       "get": true,
-      "description": "3-D preset material (sp3d.prstMaterial). OOXML values: clear, dkEdge, flat, legacyMatte, legacyMetal, legacyPlastic, legacyWireframe, matte, metal, plastic, powder, softEdge, softmetal, translucentPowder, warmMatte.",
+      "description": "3-D preset material (sp3d.prstMaterial). Accepted tokens (case-insensitive): clear, darkEdge (alias dkEdge), flat, matte, metal, plastic, powder, softEdge, softMetal, translucentPowder, warmMatte, wireframe (alias wire).",
       "examples": [
         "--prop material=metal",
         "--prop material=plastic"
