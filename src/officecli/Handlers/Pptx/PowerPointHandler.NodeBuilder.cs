@@ -1295,6 +1295,12 @@ public partial class PowerPointHandler
 
             if (mediaNode.Volume?.HasValue == true)
                 node.Format["volume"] = (int)(mediaNode.Volume.Value / 1000.0);
+            // Loop-until-Stopped: cMediaNode's cTn has
+            // repeatCount="indefinite" when looped.
+            var loopCTn = mediaNode.CommonTimeNode;
+            if (loopCTn?.RepeatCount?.Value is string rc
+                && rc.Equals("indefinite", StringComparison.OrdinalIgnoreCase))
+                node.Format["loop"] = true;
             break;
         }
 

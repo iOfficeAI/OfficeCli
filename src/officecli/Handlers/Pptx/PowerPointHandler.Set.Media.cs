@@ -692,7 +692,7 @@ public partial class PowerPointHandler
                     if (mediaNode != null) mediaNode.Volume = vol;
                     break;
                 }
-                case "autoplay":
+                case "autoplay" or "autostart":
                 {
                     if (shapeId == null) { unsupported.Add(key); break; }
                     var autoplayOn = IsTruthy(value);
@@ -799,9 +799,25 @@ public partial class PowerPointHandler
                     catch { /* leave orphan */ }
                     break;
                 }
+                case "loop":
+                {
+                    if (shapeId == null) { unsupported.Add(key); break; }
+                    var loopOn = IsTruthy(value);
+                    // Loop-until-Stopped lives on the player's cTn as
+                    // repeatCount="indefinite" (cMediaNode wrapper). Add/Set
+                    // share the same emitter helper.
+                    var mediaNode = FindMediaTimingNode(slidePart, shapeId.Value);
+                    var cTn = mediaNode?.CommonTimeNode;
+                    if (cTn != null)
+                    {
+                        if (loopOn) cTn.RepeatCount = "indefinite";
+                        else cTn.RepeatCount = null;
+                    }
+                    break;
+                }
                 default:
                     if (unsupported.Count == 0)
-                        unsupported.Add($"{key} (valid media props: volume, autoplay, trimstart, trimend, x, y, width, height, poster)");
+                        unsupported.Add($"{key} (valid media props: volume, autoplay, autostart, loop, trimstart, trimend, x, y, width, height, poster)");
                     else
                         unsupported.Add(key);
                     break;

@@ -70,9 +70,17 @@
     },
     "autoPlay": {
       "type": "bool",
-      "aliases": ["autoplay"],
+      "aliases": ["autoplay", "autoStart", "autostart"],
       "add": true, "set": true, "get": true,
       "examples": ["--prop autoPlay=true"],
+      "readback": "true/false",
+      "enforcement": "report"
+    },
+    "loop": {
+      "type": "bool",
+      "description": "loop until stopped (repeats the clip indefinitely during playback).",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop loop=true"],
       "readback": "true/false",
       "enforcement": "report"
     },

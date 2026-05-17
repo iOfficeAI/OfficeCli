@@ -642,10 +642,22 @@ public partial class PowerPointHandler
                     if (volDbl > 0 && volDbl <= 1.0) volDbl *= 100;
                     vol = (int)(volDbl * 1000); // 0-100 → 0-100000
                 }
-                var autoPlay = properties.GetValueOrDefault("autoplay", "false")
-                    .Equals("true", StringComparison.OrdinalIgnoreCase);
+                // CONSISTENCY(media-autoplay-aliases): autoStart is the
+                // PowerPoint UI label and matches the OOXML verb naming;
+                // autoplay is the existing canonical. Accept both on add
+                // — Set already needs the same alias surface.
+                string? apRaw = null;
+                if (properties.TryGetValue("autoplay", out var apV)) apRaw = apV;
+                else if (properties.TryGetValue("autostart", out apV)) apRaw = apV;
+                var autoPlay = apRaw != null
+                    && apRaw.Equals("true", StringComparison.OrdinalIgnoreCase);
 
-                AddMediaTimingNode(mediaSlide, mediaId, isVideo, vol, autoPlay);
+                // loop: PowerPoint stores "Loop until Stopped" as
+                // repeatCount="indefinite" on the player's cTn (inside the
+                // CommonMediaNode). Default false.
+                var loop = properties.TryGetValue("loop", out var loopV) && IsTruthy(loopV);
+
+                AddMediaTimingNode(mediaSlide, mediaId, isVideo, vol, autoPlay, loop);
 
                 mediaSlide.Save();
 

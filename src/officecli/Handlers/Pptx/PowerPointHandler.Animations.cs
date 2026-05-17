@@ -1746,7 +1746,7 @@ public partial class PowerPointHandler
     /// 1. p:video/p:audio — media player node (in root childTnLst)
     /// 2. p:cmd cmd="playFrom(0)" — playback trigger (in main sequence, for autoplay)
     /// </summary>
-    private static void AddMediaTimingNode(Slide slide, uint shapeId, bool isVideo, int volume, bool autoPlay)
+    private static void AddMediaTimingNode(Slide slide, uint shapeId, bool isVideo, int volume, bool autoPlay, bool loop = false)
     {
         EnsureTimingTree(slide, out var mainSeqCTn, out _);
         var timing = slide.GetFirstChild<Timing>()!;
@@ -1802,6 +1802,7 @@ public partial class PowerPointHandler
             Fill = TimeNodeFillValues.Hold,
             Display = false
         };
+        if (loop) mediaCTn.RepeatCount = "indefinite";
         mediaCTn.StartConditionList = new StartConditionList(
             new Condition { Delay = "indefinite" }
         );
