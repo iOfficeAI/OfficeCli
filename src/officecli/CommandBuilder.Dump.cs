@@ -12,11 +12,12 @@ static partial class CommandBuilder
 {
     private static Command BuildDumpCommand(Option<bool> jsonOption)
     {
-        var dumpFileArg = new Argument<FileInfo>("file") { Description = "Office document path (.docx)" };
+        var dumpFileArg = new Argument<FileInfo>("file") { Description = "Office document path (.docx or .pptx)" };
         var dumpPathArg = new Argument<string>("path")
         {
             Description = "DOM path of the subtree to dump. Defaults to '/' (whole document) when omitted. "
-                        + "Supported subtree paths: /body, /body/p[N], /body/tbl[N], /theme, /settings, /numbering, /styles. "
+                        + "Supported docx subtree paths: /body, /body/p[N], /body/tbl[N], /theme, /settings, /numbering, /styles. "
+                        + "Supported pptx subtree paths: /, /slide[N]. "
                         + "Subtree dumps do NOT include resources at sibling paths (styles/numbering/theme); replay target must already define referenced styles/numIds.",
             DefaultValueFactory = _ => "/"
         };
@@ -46,12 +47,12 @@ static partial class CommandBuilder
                     { Code = "invalid_format", ValidValues = ["batch"] };
 
             var ext = Path.GetExtension(file.FullName).ToLowerInvariant();
-            if (ext != ".docx")
-                throw new CliException($"dump currently supports .docx only (got {ext})")
+            if (ext != ".docx" && ext != ".pptx")
+                throw new CliException($"dump currently supports .docx and .pptx (got {ext})")
                     { Code = "unsupported_format" };
 
             // BUG-DUMP-R6-01: route through the resident if one holds the file.
-            // Without this, dump opens its own WordHandler and collides with
+            // Without this, dump opens its own handler and collides with
             // the resident's lock ("file being used by another process").
             // Mirrors the TryResident calls in `get`/`query`/`set`.
             if (TryResident(file.FullName, req =>
@@ -63,8 +64,36 @@ static partial class CommandBuilder
                 if (!string.IsNullOrEmpty(outPath)) req.Args["out"] = outPath!;
             }, json) is {} rc) return rc;
 
-            using var word = new WordHandler(file.FullName, editable: false);
-            var items = WordBatchEmitter.EmitWord(word, path);
+            // CONSISTENCY(dump-format-dispatch): mirrors docx vs pptx branch
+            List<BatchItem> items;
+            List<CliWarning>? dumpWarnings = null;
+            if (ext == ".docx")
+            {
+                using var word = new WordHandler(file.FullName, editable: false);
+                items = WordBatchEmitter.EmitWord(word, path);
+            }
+            else // .pptx
+            {
+                using var ppt = new PowerPointHandler(file.FullName, editable: false);
+                var (pItems, pWarnings) = PptxBatchEmitter.EmitPptx(ppt, path);
+                items = pItems;
+                if (pWarnings.Count > 0)
+                {
+                    dumpWarnings = new List<CliWarning>(pWarnings.Count);
+                    foreach (var w in pWarnings)
+                    {
+                        dumpWarnings.Add(new CliWarning
+                        {
+                            Message = $"skipped {w.Element} on {w.SlidePath}: {w.Reason}",
+                            Code = "unsupported_element"
+                        });
+                        // Human-visible stderr line; resident's BuildWarnings
+                        // also picks this up so resident-routed callers see
+                        // an equivalent envelope.warnings entry.
+                        Console.Error.WriteLine($"warning: skipped {w.Element} on {w.SlidePath}");
+                    }
+                }
+            }
 
             // Compact JSON (single line) is the canonical batch wire form:
             // `batch run` consumes it directly and AI tooling pipes it through
@@ -101,7 +130,7 @@ static partial class CommandBuilder
                         ["outputFile"] = outPath,
                         ["itemCount"] = items.Count
                     };
-                    Console.WriteLine(OutputFormatter.WrapEnvelope(meta.ToJsonString()));
+                    Console.WriteLine(OutputFormatter.WrapEnvelope(meta.ToJsonString(), dumpWarnings));
                 }
                 else
                     Console.WriteLine(outPath);
@@ -109,7 +138,7 @@ static partial class CommandBuilder
             else
             {
                 if (json)
-                    Console.WriteLine(OutputFormatter.WrapEnvelope(output));
+                    Console.WriteLine(OutputFormatter.WrapEnvelope(output, dumpWarnings));
                 else
                     Console.WriteLine(output);
             }

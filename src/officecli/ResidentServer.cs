@@ -677,6 +677,10 @@ public class ResidentServer : IDisposable
             var warning = new CliWarning { Message = line.Trim() };
             if (line.Contains("UNSUPPORTED")) warning.Code = "unsupported_property";
             else if (line.Contains("VALIDATION")) warning.Code = "validation_error";
+            // CONSISTENCY(dump-warning-code): mirror the
+            // unsupported_element code emitted by CommandBuilder.Dump.cs so
+            // resident-routed and direct dump callers see the same envelope.
+            else if (line.StartsWith("warning: skipped ", StringComparison.Ordinal)) warning.Code = "unsupported_element";
             else warning.Code = "warning";
             return warning;
         }).ToList();
@@ -1255,11 +1259,28 @@ public class ResidentServer : IDisposable
             throw new CliException($"Unsupported --format: {dumpFormat}. Valid: batch")
                 { Code = "invalid_format", ValidValues = ["batch"] };
 
-        if (_handler is not WordHandler word)
-            throw new CliException("dump currently supports .docx only")
+        // CONSISTENCY(dump-format-dispatch): mirrors docx vs pptx branch
+        List<BatchItem> items;
+        if (_handler is WordHandler word)
+        {
+            items = WordBatchEmitter.EmitWord(word, path);
+        }
+        else if (_handler is OfficeCli.Handlers.PowerPointHandler ppt)
+        {
+            var (pItems, pWarnings) = OfficeCli.Handlers.PptxBatchEmitter.EmitPptx(ppt, path);
+            items = pItems;
+            // Surface unsupported-element warnings via stderr so the
+            // envelope-builder in HandleClient picks them up as
+            // envelope.warnings (matches non-resident dispatch in
+            // CommandBuilder.Dump.cs).
+            foreach (var w in pWarnings)
+                Console.Error.WriteLine($"warning: skipped {w.Element} on {w.SlidePath}");
+        }
+        else
+        {
+            throw new CliException("dump currently supports .docx and .pptx only")
                 { Code = "unsupported_format" };
-
-        var items = WordBatchEmitter.EmitWord(word, path);
+        }
         var output = System.Text.Json.JsonSerializer.Serialize(items, BatchJsonContext.Default.ListBatchItem);
 
         if (outPath == "-") outPath = null;
