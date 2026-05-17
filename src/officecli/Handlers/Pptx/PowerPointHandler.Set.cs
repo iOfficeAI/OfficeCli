@@ -169,9 +169,22 @@ public partial class PowerPointHandler
                 return SetMasterOrLayoutBackgroundByPath(masterBgMatch, layoutBgMatch, properties);
         }
 
-        // Try slideMaster/slideLayout shape editing: /slideMaster[N]/shape[M] or /slideLayout[N]/shape[M]
-        var masterShapeMatch = Regex.Match(path, @"^/(slideMaster|slideLayout)\[(\d+)\](?:/(\w+)\[(\d+)\])?$");
+        // CONSISTENCY(master-layout-shape-edit): slideMaster/slideLayout shape editing.
+        // Accepts three parent forms (case-insensitive — NormalizePptxPathSegmentCasing
+        // already lowercased the LocalName, so the previous case-sensitive regex
+        // dropped every call and surfaced the misleading "Path must start with /slide[N]"
+        // generic-fallback error):
+        //   /slidemaster[N]/shape[K]
+        //   /slidelayout[N]/shape[K]                        — flat top-level layout numbering
+        //   /slidemaster[N]/slidelayout[L]/shape[K]         — nested form
+        var masterShapeMatch = Regex.Match(path,
+            @"^/(slidemaster|slidelayout)\[(\d+)\](?:/(\w+)\[(\d+)\])?$",
+            RegexOptions.IgnoreCase);
         if (masterShapeMatch.Success) return SetMasterShapeByPath(masterShapeMatch, properties);
+        var nestedMasterShapeMatch = Regex.Match(path,
+            @"^/slidemaster\[(\d+)\]/slidelayout\[(\d+)\](?:/(\w+)\[(\d+)\])?$",
+            RegexOptions.IgnoreCase);
+        if (nestedMasterShapeMatch.Success) return SetNestedMasterLayoutShapeByPath(nestedMasterShapeMatch, properties);
 
         // Try notes path: /slide[N]/notes
         var notesSetMatch = Regex.Match(path, @"^/slide\[(\d+)\]/notes$");

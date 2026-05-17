@@ -93,6 +93,82 @@ public partial class PowerPointHandler
     }
 
     /// <summary>
+    /// CONSISTENCY(master-layout-shape-edit): resolve a master/layout parent path
+    /// to its <see cref="ShapeTree"/> + owning part + root element. Accepts all
+    /// three canonical forms:
+    ///   /slidemaster[N]
+    ///   /slidelayout[N]                      — top-level (flat) layout numbering
+    ///   /slidemaster[N]/slidelayout[L]       — nested form
+    /// Returns null when the path is not a master/layout parent — callers fall
+    /// back to slide-scoped logic. Path matching is case-insensitive, matching
+    /// the rest of the pptx handler.
+    /// </summary>
+    internal (ShapeTree shapeTree, OpenXmlPart part, OpenXmlPartRootElement root, string canonicalPrefix)?
+        TryResolveMasterOrLayoutShapeParent(string parentPath)
+    {
+        var presentationPart = _doc.PresentationPart;
+        if (presentationPart == null) return null;
+
+        // Form 1: /slidemaster[N]/slidelayout[L]
+        var nested = Regex.Match(parentPath,
+            @"^/slidemaster\[(\d+)\]/slidelayout\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (nested.Success)
+        {
+            var mIdx = int.Parse(nested.Groups[1].Value);
+            var lIdx = int.Parse(nested.Groups[2].Value);
+            var masters = presentationPart.SlideMasterParts.ToList();
+            if (mIdx < 1 || mIdx > masters.Count)
+                throw new ArgumentException($"Slide master {mIdx} not found (total: {masters.Count})");
+            var layouts = masters[mIdx - 1].SlideLayoutParts.ToList();
+            if (lIdx < 1 || lIdx > layouts.Count)
+                throw new ArgumentException($"Slide layout {lIdx} not found under master {mIdx} (total: {layouts.Count})");
+            var lp = layouts[lIdx - 1];
+            var root = lp.SlideLayout
+                ?? throw new InvalidOperationException("Corrupt slide layout");
+            var tree = root.CommonSlideData?.ShapeTree
+                ?? throw new InvalidOperationException("Slide layout has no shape tree");
+            return (tree, lp, root, $"/slidemaster[{mIdx}]/slidelayout[{lIdx}]");
+        }
+
+        // Form 2: /slidemaster[N]
+        var masterOnly = Regex.Match(parentPath,
+            @"^/slidemaster\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (masterOnly.Success)
+        {
+            var mIdx = int.Parse(masterOnly.Groups[1].Value);
+            var masters = presentationPart.SlideMasterParts.ToList();
+            if (mIdx < 1 || mIdx > masters.Count)
+                throw new ArgumentException($"Slide master {mIdx} not found (total: {masters.Count})");
+            var mp = masters[mIdx - 1];
+            var root = mp.SlideMaster
+                ?? throw new InvalidOperationException("Corrupt slide master");
+            var tree = root.CommonSlideData?.ShapeTree
+                ?? throw new InvalidOperationException("Slide master has no shape tree");
+            return (tree, mp, root, $"/slidemaster[{mIdx}]");
+        }
+
+        // Form 3: /slidelayout[N] — flat top-level layout numbering
+        var layoutOnly = Regex.Match(parentPath,
+            @"^/slidelayout\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (layoutOnly.Success)
+        {
+            var lIdx = int.Parse(layoutOnly.Groups[1].Value);
+            var allLayouts = presentationPart.SlideMasterParts
+                .SelectMany(m => m.SlideLayoutParts).ToList();
+            if (lIdx < 1 || lIdx > allLayouts.Count)
+                throw new ArgumentException($"Slide layout {lIdx} not found (total: {allLayouts.Count})");
+            var lp = allLayouts[lIdx - 1];
+            var root = lp.SlideLayout
+                ?? throw new InvalidOperationException("Corrupt slide layout");
+            var tree = root.CommonSlideData?.ShapeTree
+                ?? throw new InvalidOperationException("Slide layout has no shape tree");
+            return (tree, lp, root, $"/slidelayout[{lIdx}]");
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Resolve InsertPosition (After/Before anchor path) to a 0-based int? index for PPT.
     /// Anchor path can be full (/slide[1]/shape[@id=X]) or short (shape[@id=X]).
     /// </summary>

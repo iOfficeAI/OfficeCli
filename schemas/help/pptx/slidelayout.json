@@ -5,16 +5,21 @@
   "parent": "slidemaster",
   "container": true,
   "operations": {
-    "add": false,
-    "set": false,
+    "add": true,
+    "set": true,
     "get": true,
     "query": true,
     "remove": false
   },
   "paths": {
-    "positional": ["/slidemaster[N]/slidelayout[M]", "/slidelayout[M]"]
+    "positional": [
+      "/slidemaster[N]/slidelayout[M]",
+      "/slidelayout[M]",
+      "/slidemaster[N]/slidelayout[M]/shape[K]",
+      "/slidelayout[M]/shape[K]"
+    ]
   },
-  "note": "Slide layout definition. Referenced by slides via the 'layout' property. Read-only here; mutate by editing the template file. Access via path /slidelayout[N]; 'help pptx slidelayout' is the canonical lookup — 'layout' is not accepted as an element alias.",
+  "note": "Slide layout definition. Referenced by slides via the 'layout' property. The layout part itself is read-only (created by templates), but its shape tree accepts add/set via /slidelayout[N]/shape[K] (or the nested /slidemaster[N]/slidelayout[M]/shape[K] form) — same property surface as slide shapes. A layout shape appears on every slide that uses that layout. Access via path /slidelayout[N]; 'help pptx slidelayout' is the canonical lookup — 'layout' is not accepted as an element alias.",
   "properties": {
     "name": {
       "type": "string",
@@ -30,5 +35,8 @@
       "readback": "SlideLayoutValues.InnerText",
       "enforcement": "report"
     }
-  }
+  },
+  "children": [
+    { "element": "shape", "pathSegment": "shape", "cardinality": "0..n" }
+  ]
 }

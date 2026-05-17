@@ -5,16 +5,16 @@
   "parent": "presentation",
   "container": true,
   "operations": {
-    "add": false,
-    "set": false,
+    "add": true,
+    "set": true,
     "get": true,
     "query": true,
     "remove": false
   },
   "paths": {
-    "positional": ["/slidemaster[N]"]
+    "positional": ["/slidemaster[N]", "/slidemaster[N]/shape[K]"]
   },
-  "note": "Slide master definition. Children: slideLayout references. Currently read-only — masters are created by templates, not user Add. Access via path /slidemaster[N]; 'help pptx slidemaster' is the canonical lookup — 'master' is not accepted as an element alias.",
+  "note": "Slide master definition. Children: slideLayout references + master-level shapes (logo, watermark, default text frames) that appear on every slide. The master part itself is read-only (created by templates), but its shape tree accepts add/set via /slidemaster[N]/shape[K] — same property surface as slide shapes (text, fill, line, geometry, position, font). Access via path /slidemaster[N]; 'help pptx slidemaster' is the canonical lookup — 'master' is not accepted as an element alias.",
   "properties": {
     "name": {
       "type": "string",
@@ -46,6 +46,7 @@
     }
   },
   "children": [
-    { "element": "slidelayout", "pathSegment": "slidelayout", "cardinality": "1..n" }
+    { "element": "slidelayout", "pathSegment": "slidelayout", "cardinality": "1..n" },
+    { "element": "shape", "pathSegment": "shape", "cardinality": "0..n" }
   ]
 }

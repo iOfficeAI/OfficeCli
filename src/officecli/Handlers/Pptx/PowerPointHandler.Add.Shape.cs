@@ -3,6 +3,7 @@
 
 using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Presentation;
 using OfficeCli.Core;
 using Drawing = DocumentFormat.OpenXml.Drawing;
@@ -13,25 +14,63 @@ public partial class PowerPointHandler
 {
     private string AddShape(string parentPath, int? index, Dictionary<string, string> properties)
     {
-                var slideMatch = Regex.Match(parentPath, @"^/slide\[(\d+)\]$");
-                if (!slideMatch.Success)
-                    throw new ArgumentException($"Shapes must be added to a slide: /slide[N]");
+                // CONSISTENCY(master-layout-shape-edit): a shape parent may be a
+                // slide (/slide[N]) or a master/layout part. Master/layout shapes
+                // power branding workflows (logo on every slide, watermarks).
+                // Resolve once here; downstream code branches on slidePart != null
+                // for the few slide-only features (morph rename, animation,
+                // hyperlink relationship). Path forms accepted:
+                //   /slide[N]
+                //   /slidemaster[N]
+                //   /slidelayout[N]
+                //   /slidemaster[N]/slidelayout[L]
+                SlidePart? slidePart = null;
+                List<SlidePart>? slideParts = null;
+                int slideIdx = 0;
+                ShapeTree shapeTree;
+                OpenXmlPart ownerPart;
+                OpenXmlPartRootElement ownerRoot;
+                string returnPathPrefix;
 
-                var slideIdx = int.Parse(slideMatch.Groups[1].Value);
-                var slideParts = GetSlideParts().ToList();
-                if (slideIdx < 1 || slideIdx > slideParts.Count)
-                    throw new ArgumentException($"Slide {slideIdx} not found (total: {slideParts.Count})");
+                var masterOrLayout = TryResolveMasterOrLayoutShapeParent(parentPath);
+                if (masterOrLayout is not null)
+                {
+                    var ml = masterOrLayout.Value;
+                    shapeTree = ml.shapeTree;
+                    ownerPart = ml.part;
+                    ownerRoot = ml.root;
+                    returnPathPrefix = ml.canonicalPrefix;
+                }
+                else
+                {
+                    var slideMatch = Regex.Match(parentPath, @"^/slide\[(\d+)\]$");
+                    if (!slideMatch.Success)
+                        throw new ArgumentException(
+                            $"Shapes must be added to a slide, master, or layout: /slide[N], /slidemaster[N], /slidelayout[N], or /slidemaster[N]/slidelayout[L]");
 
-                var slidePart = slideParts[slideIdx - 1];
-                var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree
-                    ?? throw new InvalidOperationException("Slide has no shape tree");
+                    slideIdx = int.Parse(slideMatch.Groups[1].Value);
+                    slideParts = GetSlideParts().ToList();
+                    if (slideIdx < 1 || slideIdx > slideParts.Count)
+                        throw new ArgumentException($"Slide {slideIdx} not found (total: {slideParts.Count})");
+
+                    slidePart = slideParts[slideIdx - 1];
+                    var slide = GetSlide(slidePart);
+                    shapeTree = slide.CommonSlideData?.ShapeTree
+                        ?? throw new InvalidOperationException("Slide has no shape tree");
+                    ownerPart = slidePart;
+                    ownerRoot = slide;
+                    returnPathPrefix = $"/slide[{slideIdx}]";
+                }
 
                 var text = properties.GetValueOrDefault("text", "");
                 var shapeId = GenerateUniqueShapeId(shapeTree);
                 var shapeName = properties.GetValueOrDefault("name", $"TextBox {shapeTree.Elements<Shape>().Count() + 1}");
 
                 // Auto-add !! prefix if the slide (or the next slide) has a morph transition
-                if (!shapeName.StartsWith("!!") && !shapeName.StartsWith("TextBox ") && !shapeName.StartsWith("Content ") && shapeName != "")
+                // (slide-only — master/layout shapes are not part of slide-to-slide
+                // morph continuity).
+                if (slidePart != null && slideParts != null
+                    && !shapeName.StartsWith("!!") && !shapeName.StartsWith("TextBox ") && !shapeName.StartsWith("Content ") && shapeName != "")
                 {
                     if (SlideHasMorphContext(slidePart, slideParts))
                         shapeName = "!!" + shapeName;
@@ -510,9 +549,15 @@ public partial class PowerPointHandler
 
                 InsertAtPosition(shapeTree, newShape, index);
 
-                // Hyperlink on shape
+                // Hyperlink on shape — slide-only. ApplyShapeHyperlink uses
+                // SlidePart.AddHyperlinkRelationship; master/layout owner parts
+                // would need a parallel relationship API. Out of scope for the
+                // initial master/layout shape support.
                 if (properties.TryGetValue("link", out var linkVal))
                 {
+                    if (slidePart == null)
+                        throw new ArgumentException(
+                            "'link' is not yet supported on master/layout shapes — set it on slide-level shapes instead.");
                     var tooltipVal = properties.GetValueOrDefault("tooltip");
                     ApplyShapeHyperlink(slidePart, newShape, linkVal, tooltipVal);
                 }
@@ -541,15 +586,20 @@ public partial class PowerPointHandler
                     .Where(kv => effectKeys.Contains(kv.Key))
                     .ToDictionary(kv => kv.Key, kv => kv.Value);
                 if (effectProps.Count > 0)
-                    SetRunOrShapeProperties(effectProps, GetAllRuns(newShape), newShape, slidePart);
+                    SetRunOrShapeProperties(effectProps, GetAllRuns(newShape), newShape, ownerPart);
 
-                // Animation
+                // Animation — slide-only (timing lives on <p:sld>/timing).
                 if (properties.TryGetValue("animation", out var animVal) ||
                     properties.TryGetValue("animate", out animVal))
+                {
+                    if (slidePart == null)
+                        throw new ArgumentException(
+                            "'animation' is not supported on master/layout shapes — slide timing trees live on /slide[N].");
                     ApplyShapeAnimation(slidePart, newShape, animVal);
+                }
 
-                GetSlide(slidePart).Save();
-                return $"/slide[{slideIdx}]/{BuildElementPathSegment("shape", newShape, shapeTree.Elements<Shape>().Count())}";
+                ownerRoot.Save();
+                return $"{returnPathPrefix}/{BuildElementPathSegment("shape", newShape, shapeTree.Elements<Shape>().Count())}";
     }
 
 
