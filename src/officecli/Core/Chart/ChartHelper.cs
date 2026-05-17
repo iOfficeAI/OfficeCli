@@ -44,6 +44,8 @@ internal static partial class ChartHelper
             "column" or "col" => "column",
             "line" => "line",
             "pie" => "pie",
+            "pieofpie" => "pieofpie",
+            "barofpie" => "barofpie",
             "doughnut" or "donut" => "doughnut",
             "area" => "area",
             "scatter" or "xy" => "scatter",

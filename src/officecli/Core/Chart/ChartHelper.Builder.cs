@@ -155,6 +155,13 @@ internal static partial class ChartHelper
                 chartElement = BuildPieChart(categories, seriesData, colors);
                 needsAxes = false;
                 break;
+            case "pieofpie":
+            case "barofpie":
+                chartElement = BuildOfPieChart(
+                    kind == "barofpie" ? C.OfPieValues.Bar : C.OfPieValues.Pie,
+                    categories, seriesData, colors);
+                needsAxes = false;
+                break;
             case "doughnut":
                 chartElement = BuildDoughnutChart(categories, seriesData, colors);
                 needsAxes = false;
@@ -683,6 +690,36 @@ internal static partial class ChartHelper
             pieChart.AppendChild(series);
         }
         return pieChart;
+    }
+
+    /// <summary>
+    /// Build a c:ofPieChart (pieOfPie / barOfPie) — splits the trailing
+    /// data points of a single pie series into a secondary pie/bar so the
+    /// small-value slices remain readable. CT_OfPieChart requires an
+    /// ofPieType ("pie" or "bar") plus exactly one c:ser; the SecondPiePoints
+    /// knob defaults to 3 (matching Excel's default split).
+    /// </summary>
+    internal static C.OfPieChart BuildOfPieChart(
+        C.OfPieValues ofPieType,
+        string[]? categories, List<(string name, double[] values)> seriesData,
+        string[]? colors = null)
+    {
+        var ofPieChart = new C.OfPieChart(
+            new C.OfPieType { Val = ofPieType },
+            new C.VaryColors { Val = true }
+        );
+        if (seriesData.Count > 0)
+        {
+            var series = BuildPieSeries(0, seriesData[0].name,
+                categories, seriesData[0].values);
+            ApplyDataPointColors(series, seriesData[0].values.Length, colors);
+            ofPieChart.AppendChild(series);
+        }
+        // Default split = 3 trailing points (Excel's default). Document syntax:
+        // user can later set via secondPieSize / splitPos in a future round.
+        ofPieChart.AppendChild(new C.SecondPieSize { Val = 75 });
+        ofPieChart.AppendChild(new C.SeriesLines());
+        return ofPieChart;
     }
 
     internal static C.DoughnutChart BuildDoughnutChart(

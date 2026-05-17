@@ -596,6 +596,7 @@ internal static partial class ChartHelper
         var chartTypeCount = plotArea.ChildElements
             .Count(e => (e is C.BarChart or C.LineChart or C.PieChart or C.AreaChart or C.Area3DChart
                 or C.ScatterChart or C.DoughnutChart or C.Bar3DChart or C.Line3DChart or C.Pie3DChart
+                or C.OfPieChart
                 or C.BubbleChart or C.RadarChart or C.StockChart)
                 && !(e is C.LineChart lc && IsReferenceLineOnlyChart(lc)));
         if (chartTypeCount > 1) return "combo";
@@ -617,6 +618,12 @@ internal static partial class ChartHelper
         }
         if (plotArea.GetFirstChild<C.LineChart>() != null) return "line";
         if (plotArea.GetFirstChild<C.PieChart>() != null) return "pie";
+        if (plotArea.GetFirstChild<C.OfPieChart>() is C.OfPieChart ofPie)
+        {
+            // CT_OfPieChart distinguishes via c:ofPieType (pie | bar).
+            var ofPieType = ofPie.GetFirstChild<C.OfPieType>()?.Val?.Value;
+            return ofPieType == C.OfPieValues.Bar ? "barOfPie" : "pieOfPie";
+        }
         if (plotArea.GetFirstChild<C.DoughnutChart>() != null) return "doughnut";
         if (plotArea.GetFirstChild<C.AreaChart>() is C.AreaChart area)
         {
