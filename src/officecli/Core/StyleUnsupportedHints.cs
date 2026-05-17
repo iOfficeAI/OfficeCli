@@ -24,13 +24,10 @@ internal static class StyleUnsupportedHints
         // rightIndent / hangingIndent (BT-5).
         // spaceBeforeLines / spaceAfterLines are now wired on /styles (P1-7) —
         // also on paragraphs alongside the `spaceBefore=Nlines` suffix.
-
-        ["shading"]       = "style-level shading is not supported; set fill at paragraph or run level",
-        ["shading.fill"]  = "style-level shading is not supported; set fill at paragraph or run level",
-        ["shading.color"] = "style-level shading is not supported; set fill at paragraph or run level",
-        ["shading.val"]   = "style-level shading is not supported; set fill at paragraph or run level",
-
-        ["underline.color"] = "underline color is not supported; only 'underline=<single|double|...>' is",
+        // shading.* / underline.color now flow through TypedAttributeFallback
+        // (via the shading→shd and underline→u aliases) on /styles, paragraph,
+        // run, and cell paths — entries removed once verified to write
+        // schema-valid <w:shd>/<w:u> XML.
 
         ["tabs"] = "tabs on styles are not supported",
     };
