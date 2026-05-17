@@ -345,6 +345,26 @@ public partial class PowerPointHandler
             return ZoomToNode(zoomElements[zmIdx - 1], sIdx, zmIdx);
         }
 
+        // Try model3d path: /slide[N]/model3d[M]
+        // model3d sits inside mc:AlternateContent, so the generic spTree
+        // ChildElements fallback can't find it. Mirror the zoom branch.
+        var m3dGetMatch = Regex.Match(path, @"^/slide\[(\d+)\]/model3d\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (m3dGetMatch.Success)
+        {
+            var sIdx = int.Parse(m3dGetMatch.Groups[1].Value);
+            var mIdx = int.Parse(m3dGetMatch.Groups[2].Value);
+            var m3dSlideParts = GetSlideParts().ToList();
+            if (sIdx < 1 || sIdx > m3dSlideParts.Count)
+                throw new ArgumentException($"Slide {sIdx} not found (total: {m3dSlideParts.Count})");
+            var m3dSlidePart = m3dSlideParts[sIdx - 1];
+            var m3dShapeTree = GetSlide(m3dSlidePart).CommonSlideData?.ShapeTree
+                ?? throw new ArgumentException($"Slide {sIdx} has no shapes");
+            var m3dElements = GetModel3DElements(m3dShapeTree);
+            if (mIdx < 1 || mIdx > m3dElements.Count)
+                throw new ArgumentException($"3D model {mIdx} not found at /slide[{sIdx}] (available: {m3dElements.Count}).");
+            return Model3DToNode(m3dElements[mIdx - 1], sIdx, mIdx);
+        }
+
         // Try animation path: /slide[N]/shape[M]/animation[A]
         var animPathMatch = Regex.Match(path, @"^/slide\[(\d+)\]/shape\[(\d+)\]/animation\[(\d+)\]$");
         if (animPathMatch.Success)
