@@ -24,8 +24,29 @@
     "name": {
       "type": "string",
       "description": "layout display name (e.g. 'Title Slide').",
-      "add": false, "set": false, "get": true,
+      "add": false, "set": true, "get": true,
       "readback": "layout name string",
+      "enforcement": "report"
+    },
+    "background": {
+      "type": "color",
+      "description": "layout background — propagates to every slide bound to this layout unless the slide overrides. Accepts hex color (#FF6600), bare hex (FF6600), theme color (accent1/dark1/...), gradient (`C1-C2[-angle]`), image (`image:/path`), or `none` to clear (re-inherits from the owning master).",
+      "add": false, "set": true, "get": true,
+      "examples": ["--prop background=FF6600", "--prop background=accent1", "--prop background=FF0000-0000FF-90", "--prop background=image:/path/to/bg.png", "--prop background=none"],
+      "readback": "resolved background descriptor (hex, scheme name, gradient form, or `image`)",
+      "enforcement": "report"
+    },
+    "background.alpha":  { "type": "number", "add": false, "set": false, "get": true, "description": "layout background fill alpha as percent (0..100). Surfaces when the resolved fill carries an alpha channel.", "readback": "integer percent 0..100", "enforcement": "report" },
+    "background.crop":   { "type": "string", "add": false, "set": false, "get": true, "description": "layout background image crop quad in `l,t,r,b` percent units.", "readback": "comma-separated `l,t,r,b` quad", "enforcement": "report" },
+    "background.mode":   { "type": "string", "add": false, "set": false, "get": true, "description": "layout background image fill mode — `tile` or `center`. Absent for stretch (default).", "readback": "`tile` | `center`", "enforcement": "report" },
+    "background.ref":    { "type": "number", "add": false, "set": false, "get": true, "description": "theme background reference index — bgRef/@idx when the layout inherits from the theme.", "readback": "integer theme bg ref id", "enforcement": "report" },
+    "background.scale":  { "type": "number", "add": false, "set": false, "get": true, "description": "tile-fill scale percent (sx, both axes). Surfaces with background.mode=tile.", "readback": "integer percent", "enforcement": "report" },
+    "direction": {
+      "type": "string",
+      "description": "default reading direction. Cascades `<a:pPr rtl=\"1\"/>` onto every placeholder paragraph in this layout, and stamps the owning master's txStyles Level1 default (since blank layouts have no placeholders for inheriting shapes to probe). Accepts `ltr`/`rtl` or boolean for the `rtl` alias.",
+      "add": false, "set": true, "get": false,
+      "aliases": ["dir", "rtl"],
+      "examples": ["--prop direction=rtl"],
       "enforcement": "report"
     },
     "type": {
