@@ -285,10 +285,17 @@ public partial class PowerPointHandler
                     // handled in tandem with "link"; standalone tooltip change is not supported here
                     break;
                 default:
-                    if (unsupported.Count == 0)
-                        unsupported.Add($"{key} (valid picture props: path, src, x, y, width, height, rotation, opacity, name, crop, cropleft, croptop, cropright, cropbottom, shadow, glow, brightness, contrast, link, tooltip)");
-                    else
-                        unsupported.Add(key);
+                    // Reflection fallback against pic.spPr (drawing shape props)
+                    // catches attributes the manual cases don't enumerate
+                    // (e.g. prst, flipH, flipV). Mirrors Set.Shape.cs:298.
+                    var picSpPr = pic.ShapeProperties ?? (pic.ShapeProperties = new ShapeProperties());
+                    if (!GenericXmlQuery.SetGenericAttribute(picSpPr, key, value))
+                    {
+                        if (unsupported.Count == 0)
+                            unsupported.Add($"{key} (valid picture props: path, src, x, y, width, height, rotation, opacity, name, crop, cropleft, croptop, cropright, cropbottom, shadow, glow, brightness, contrast, link, tooltip)");
+                        else
+                            unsupported.Add(key);
+                    }
                     break;
             }
         }
@@ -640,7 +647,14 @@ public partial class PowerPointHandler
                     break;
                 }
                 default:
-                    oleUnsupported.Add(key);
+                    // Reflection fallback against the OleObject element
+                    // catches attributes the manual cases don't enumerate
+                    // (e.g. imgW, imgH, followColorScheme). Mirrors
+                    // Set.Shape.cs:298.
+                    if (!GenericXmlQuery.SetGenericAttribute(oleEl, key, value))
+                    {
+                        oleUnsupported.Add(key);
+                    }
                     break;
             }
         }
